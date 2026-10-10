@@ -2,44 +2,68 @@
 title: Navigation
 ---
 
-Recast for navmesh generation, Detour for pathfinding. The engine
-owns one `NavigationSystem` at `engine.nav`.
+Layer 2. Recast builds navmeshes, Detour queries them, and Crowd
+steers many agents across them. Navigation takes plain triangles and
+knows nothing about meshes or nodes; the application owns its
+`NavMesh` and crowds.
 
-## Pipeline
+## Building
 
-1. **Gather geometry.** Either bake from the scene graph
-   (`mjolnir.setup_navmesh` with tag filters) or feed an explicit
-   `NavigationGeometry{vertices, indices, area_types}` via
-   `NavGeometryBuilder`.
-2. **Voxelize → contours → polygons.** Recast voxelizes the input
-   into a heightfield, erodes by agent radius, traces contours,
-   triangulates, and produces a polygon mesh.
-3. **Bind query context.** A Detour query object is attached so
-   `find_path` / `find_nearest_point` work against the engine.
+1. **Gather triangles.** `append_triangles(&builder, positions,
+   indices, offset, is_obstacle)` adds a triangle mesh to a
+   `NavGeometryBuilder`; obstacle triangles are carved out. Or fill a
+   `NavigationGeometry{vertices, indices, area_types}` directly.
+2. **Build.** `build(&nav, geometry_view(&builder), config)` runs
+   Recast (voxelize, erode by agent radius, trace contours,
+   triangulate into polygons), then creates the Detour mesh and its
+   query. It replaces any previous build and returns `false` on
+   failure.
+3. **Clean up.** `builder_destroy` frees the builder once the mesh is
+   built; `destroy` frees the mesh.
+
+`debug_triangles(&nav)` returns the built polygons as positions +
+indices for drawing.
 
 ## Quality knobs
 
-`NavMeshConfig.quality ∈ {LOW, MEDIUM, HIGH, ULTRA}` selects the
+`NavMeshConfig` is agent-centric: height, radius, max climb, max
+slope and a `quality ∈ {LOW, MEDIUM, HIGH, ULTRA}` that selects the
 voxel cell size and contour simplification thresholds. Lower quality
-= faster bake + coarser mesh; useful for big open areas. Higher
-quality = small intricate spaces. `MEDIUM` is the recommended
-default. For full control, hand a `recast.Config` to `build_navmesh`
-directly.
+means a faster bake and a coarser mesh, fine for big open areas;
+higher quality suits small intricate spaces. `DEFAULT_NAVMESH_CONFIG`
+uses `MEDIUM`.
 
-## Area costs
+## Queries
 
-`area_types[i] = 0` is walkable; nonzero indexes
-`NavMesh.area_costs[]` to weight terrain (sand slower than asphalt,
-swamp slower than dirt) without making it impassable. Path search
-follows the cost-weighted shortest path.
+- `find_path(&nav, start, end)` returns straight-line waypoints, with
+  both ends snapped to the mesh within `extents`. The caller deletes
+  the path.
+- `nearest_point(&nav, pos, extents)` projects an off-mesh position
+  onto the navmesh. Combine it with a cursor raycast to turn a click
+  into a valid goal.
 
-## Pathfinding
+## Crowd
 
-`find_path` returns `[][3]f32` (an empty slice if no path).
-`find_nearest_point` projects an off-mesh position onto the navmesh —
-the usual idiom is to combine it with a mouse-pick raycast to convert
-a click into a valid goal before pathing.
+`navigation/crowd` moves agents along the navmesh with path
+corridors, obstacle avoidance and separation:
 
-Walking the path is the caller's job: the engine does not own agent
-movement. See the navigation example for the canonical lerp-toward-
-next-waypoint loop.
+```odin
+c, _ := crowd.create_crowd(max_agents, max_agent_radius, &nav.detour_mesh)
+defer crowd.destroy_crowd(c)
+id := crowd.crowd_add_agent(c, spawn_pos, &params)
+crowd.crowd_move_to(c, id, goal)
+// every tick
+crowd.crowd_update(c, dt)
+pos := crowd.crowd_get_agent(c, id).npos
+```
+
+`Crowd_Agent_Params` sets radius, height, speed, acceleration and
+which behaviours run (`Update_Flags`). Copying agent positions onto
+nodes is application glue. Walking a single `find_path` result
+without a crowd is also the caller's job.
+
+## Submodules
+
+`navigation/recast`, `navigation/detour` and `navigation/crowd` are
+usable directly for anything `build` does not cover (tiled meshes,
+custom filters, area costs).

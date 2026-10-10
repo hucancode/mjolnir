@@ -25,7 +25,7 @@ To use Mjolnir, run `make shader` to compile shaders to SPIR-V and copy the
 - Billboards, sprites
 - Splines, tweens
 - Rigid-body physics (tunneling-safe for fast bodies)
-- Recast + Detour navigation
+- Recast + Detour navigation, crowd steering
 - 2D UI: widgets, layout, events, fontstash text
 - Render to texture
 - Post-process: tonemap, bloom, blur, fog, outline, DoF, crosshatch
@@ -69,7 +69,8 @@ odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 ## Read more
 
 - [`architecture`](architecture.html) — layer design, frame phases,
-  staging contract, bindless + GPU-driven model
+  world/render boundary, staging, bindless + GPU-driven model
+- [`glue`](glue.html) — wiring modules together in user code
 - [`examples`](examples.html) — runnable examples with notes
 
 ## Module intros
@@ -78,10 +79,11 @@ odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 |---|---|---|
 | 1 | `containers` | [containers](containers.html) |
 | 1 | `geometry`   | [geometry](geometry.html) |
-| 1 | `gpu`        | [gpu](gpu.html) |
-| 1 | `animation`  | [animation](animation.html) |
+| 1 | `draw2d`     | 2D vertex + draw command types shared by `ui` and `render` |
+| 2 | `platform`   | [platform](platform.html) |
 | 2 | `world`      | [world](world.html) |
-| 2 | `render`     | [render](render.html) |
+| 2 | `render`     | [render](render.html) (incl. `render/gpu`, `render/bindless`, `render/mesh`) |
+| 2 | `animation`  | [animation](animation.html) |
 | 2 | `physics`    | [physics](physics.html) |
 | 2 | `navigation` | [navigation](navigation.html) |
 | 2 | `ui`         | [ui](ui.html) |

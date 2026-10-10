@@ -2,76 +2,83 @@
 title: Engine
 ---
 
-Layer 3. Owns the window, GPU context, swapchain, frames-in-flight,
-and the main loop. Wires `world`, `render`, `physics`, `navigation`,
-and `ui` into a single `Engine` value without ever leaking their
-internals back through.
+Layer 3. The `mjolnir` package owns the default `platform`, `world`,
+`render` and `ui`, runs the main loop, and hosts the few helpers that
+span two or more layer-2 modules. Everything here is built on public
+layer-2 APIs, so any of it can be rewritten in user code.
+
+```odin
+Engine :: struct {
+  platform: platform.Platform,
+  world:    world.World,
+  render:   render.Manager, // owns the Vulkan context, swapchain and frame
+  ui:       ui.System,
+  // user callbacks, timing, debug UI flags, user_data
+}
+```
 
 ## Entry point
 
 `mjolnir.run_app(RunConfig)` allocates the engine, installs a logger,
-runs the loop, tears down on exit. The config takes user callbacks
-(`setup`, `update`, `pre_render`, `post_render`, input handlers) plus a
-`user_data: rawptr` for app state — that way user code avoids
-file-scope globals.
+runs the loop and tears down on exit. The config takes user callbacks
+(`setup`, `update`, `sync`, `pre_render`, `post_render`, input
+handlers) plus a `user_data: rawptr` for app state.
 
 For a hand-rolled lifecycle, call `init` → loop → `shutdown` yourself.
-Useful if you need to intersperse render-pass recording with your own
-GPU work.
 
 ## Frame timeline
 
 ```
-poll input → update_proc → world stages → throttle to RENDER_FPS
-           → sync_staging_to_gpu → pre_render
-           → record_frame (cull → shadow → geom → light → ...)
-           → submit + present → post_render
+update:  input → main camera controller → update → world.update → sync → render.update
+render:  poll events → throttle to RENDER_FPS → ui stage → pre_render
+         → render.frame → post_render
 ```
 
-See [architecture](architecture.html) for the full sequence diagram
-and the staging-pipeline contract.
+`sync` is where the application moves world and animation results
+into render — see [glue](glue.html).
 
-## Public API surface
+## Input
 
-User code imports `mjolnir` for engine lifecycle and the small set of
-cross-package composites listed below, plus whichever sub-packages it
-actually needs (`world`, `physics`, `navigation`, `geometry`, `gpu`,
-`animation`, `render`, `render/post_process`, `ui`). Sub-package procs
-take their own data pointer (`^World`, `^physics.World`,
-`^NavigationSystem`), not `^Engine` — e.g. `world.spawn(&engine.world,
-...)`, `physics.raycast_trigger(&engine.physics, ...)`,
-`nav.find_path(&engine.nav, ...)`.
+`platform.Input` holds the per-tick snapshot; query it directly with
+`platform.input_key_down(&engine.platform.input, .W)` and friends.
+Once per tick the engine dispatches edges to the `key_press`,
+`mouse_press`, `mouse_move` and `mouse_scroll` callbacks, withholding
+what the debug UI captures: a mouse button pressed over the debug UI
+belongs to it until released (`UICapture`), and keys are withheld
+while it has keyboard focus. Platform events also feed the debug
+UI's microui context as they arrive.
 
-Composites that genuinely cross sub-package boundaries live in
-`mjolnir/engine.odin`:
+## Inter-module helpers
 
 | Proc | Crosses |
 |---|---|
-| `spawn_static` / `spawn_dynamic` / `spawn_trigger` | world + physics |
-| `viewport_to_world_ray` / `cursor_world_ray` | window DPI + main camera + world raycast |
-| `build_navmesh` | NavMeshConfig translation + `nav.init` |
+| `spawn`, `spawn_mesh`, `spawn_primitive_mesh`, `spawn_ground`, `spawn_sprite`, `spawn_emitter`, `spawn_forcefield` | world node + render attachment |
+| `spawn_static` / `spawn_dynamic` / `spawn_trigger`, `collider_visual_scale` | world + render + physics (body `user` = node) |
+| `load_gltf` | world nodes + render meshes / materials / textures + animation rigs |
+| `viewport_to_world_ray` / `cursor_world_ray` | platform DPI + cursor, render main camera |
+| `debug_skeleton` | animation pose → render debug lines |
 
-Engine-scope helpers that need `^Engine` directly (texture loading,
-glTF, camera attachments, navmesh bake, run loop wiring) live in
-`mjolnir/engine.odin`.
+`load_gltf` returns a `GltfScene{roots, rigs, skinned}`. It creates
+one render mesh per glTF mesh and one `animation.Rig` per skin with
+every animation as a clip; `skinned` pairs each skinned node with its
+rig. The caller creates the animators and frees the scene with
+`gltf_scene_destroy`.
+
+Single-module work goes straight to that module: `world.translate`,
+`render.create_material`, `physics.raycast`, `nav.find_path`, …
 
 ## Threading
 
 - `update` runs on the main thread by default; with
   `-define:USE_PARALLEL_UPDATE=true` it moves to a dedicated thread.
-- All world mutations from any thread go through a mutexed staging
-  queue (`world.staging`).
-- `sync_staging_to_gpu` always runs on the main thread, holding the
-  staging mutex once per frame, and drains the queue.
-- GPU submission uses the classic fence + semaphore double-buffer
-  pattern provided by `gpu.Swapchain`.
+- World and animators are touched only from the update thread.
+- Render's `stage_*` / `attach` calls are mutex-guarded, so the update
+  thread can call them while the render thread runs `render.frame`.
 
 ## Allocation ownership
 
-Engine owns: window, GPU context, swapchain, render manager, world,
-UI, navigation, staging buffers, textures created via the
-`create_texture`. All freed in `shutdown`.
+Engine owns: platform, world, render, UI. All freed in `shutdown`.
 
-User owns: the `^Engine` itself (you `new` it), callback function
-pointers, and any `[dynamic]NodeHandle` slices returned by
-`load_gltf`.
+User owns: the `^Engine` when not using `run_app`, animators, physics
+worlds and bodies, navmeshes and crowds, and the `GltfScene` returned
+by `load_gltf`.
