@@ -3,6 +3,7 @@ package render
 import cont "../containers"
 import "core:log"
 import "core:strings"
+import "core:math/linalg"
 import fs "vendor:fontstash"
 
 HorizontalAlign :: enum {
@@ -18,7 +19,7 @@ VerticalAlign :: enum {
 }
 
 create_text2d :: proc(
-  sys: ^System,
+  sys: ^UISystem,
   position: [2]f32,
   text: string,
   font_size: f32,
@@ -65,6 +66,7 @@ text_layout :: proc(text: ^Text2D, font_ctx: ^fs.FontContext) {
   if font_ctx == nil do return
 
   clear(&text.glyphs)
+  text.local_min, text.local_max = {}, {}
 
   if len(text.text) == 0 do return
 
@@ -110,7 +112,6 @@ text_layout :: proc(text: ^Text2D, font_ctx: ^fs.FontContext) {
 
   // Iterate through glyphs
   quad: fs.Quad
-  glyph_index := 0
   for fs.TextIterNext(font_ctx, &iter, &quad) {
     // Store the fontstash quad directly
     glyph := GlyphQuad {
@@ -120,7 +121,8 @@ text_layout :: proc(text: ^Text2D, font_ctx: ^fs.FontContext) {
       uv1 = {quad.s1, quad.t1},
     }
     append(&text.glyphs, glyph)
-    glyph_index += 1
+    text.local_min = linalg.min(text.local_min, glyph.p0)
+    text.local_max = linalg.max(text.local_max, glyph.p1)
   }
   log.debugf(
     "Text layout complete: '%s' -> %d glyphs, size: %.1fx%.1f, offset: %.1f,%.1f",
@@ -133,8 +135,8 @@ text_layout :: proc(text: ^Text2D, font_ctx: ^fs.FontContext) {
   )
 }
 
-set_text :: proc(sys: ^System, handle: Text2DHandle, new_text: string) {
-  text_widget := get_text2d(sys, handle)
+set_text :: proc(sys: ^UISystem, handle: Text2DHandle, new_text: string) {
+  text_widget := get_as(sys, handle, Text2D)
   if text_widget == nil do return
 
   delete(text_widget.text)

@@ -1,46 +1,39 @@
 package render
 
-import "bindless"
 import "../input"
 import "gpu"
-import cont "../containers"
-import "core:fmt"
 import "core:math"
 import "core:sync"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-// Submit this frame's 2D overlay. The commands must stay valid until the
-// frame is recorded; a non-empty atlas is copied and uploaded on flush.
+// Submit the 2D overlay for the next frame only; call it every frame the UI
+// should show. The commands must stay valid until that frame is recorded; a
+// non-empty atlas is copied and uploaded on flush.
 stage_ui :: proc(self: ^Manager, list: DrawList) {
-  self.internal.ui.commands = list.commands
+  ui := &self.internal.ui
+  ui.commands = list.commands
   if len(list.atlas) == 0 do return
   sync.mutex_lock(&self.internal.staging.mutex)
   defer sync.mutex_unlock(&self.internal.staging.mutex)
-  if len(self.internal.ui_atlas_pixels) != len(list.atlas) {
-    delete(self.internal.ui_atlas_pixels)
-    self.internal.ui_atlas_pixels = make([]u8, len(list.atlas))
+  if len(ui.atlas_pixels) != len(list.atlas) {
+    delete(ui.atlas_pixels)
+    ui.atlas_pixels = make([]u8, len(list.atlas))
   }
-  copy(self.internal.ui_atlas_pixels, list.atlas)
-  self.internal.ui_atlas_extent = list.atlas_size
-  self.internal.ui_atlas_dirty = true
+  copy(ui.atlas_pixels, list.atlas)
+  ui.atlas_extent = list.atlas_size
+  ui.atlas_dirty = true
 }
 
 // Upload the staged atlas when it changed, or when the GPU copy is gone
 // (first frame, after setup).
 @(private)
 flush_ui_atlas :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
-  if len(self.internal.ui_atlas_pixels) == 0 do return .SUCCESS
-  if !self.internal.ui_atlas_dirty && self.internal.ui.font_atlas != {} do return .SUCCESS
-  self.internal.ui_atlas_dirty = false
-  return overlay_upload_font_atlas(
-    &self.internal.ui,
-    gctx,
-    &self.texture_manager,
-    self.internal.ui_atlas_pixels,
-    self.internal.ui_atlas_extent[0],
-    self.internal.ui_atlas_extent[1],
-  )
+  ui := &self.internal.ui
+  if len(ui.atlas_pixels) == 0 do return .SUCCESS
+  if !ui.atlas_dirty && ui.font_atlas != {} do return .SUCCESS
+  ui.atlas_dirty = false
+  return overlay_upload_font_atlas(ui, gctx, &self.texture_manager)
 }
 
 // The microui debug context for this frame. Build widgets on the render
@@ -127,40 +120,4 @@ mu_key :: proc(key: input.Key) -> (mu.Key, bool) {
   case .V:                            return .V, true
   }
   return .SHIFT, false
-}
-
-Stats :: struct {
-  textures:          int,
-  meshes:            int,
-  materials:         int,
-  nodes:             u32, // render slots in use
-  // Main camera draws; zero without a main camera.
-  opaque_draw_count: u32,
-}
-
-// Resource counts and main camera visibility for the frame being recorded.
-stats :: proc(self: ^Manager) -> (ret: Stats) {
-  ret.textures = cont.count(self.texture_manager.images_2d)
-  ret.meshes = cont.count(self.meshes)
-  ret.materials = cont.count(self.materials)
-  ret.nodes = self.node_count
-  if cam, ok := main_camera(self); ok {
-    ret.opaque_draw_count = cam.draws.count[self.frame_index].mapped[bindless.DrawPipeline.OPAQUE]
-  }
-  return
-}
-
-// Engine stats window in the debug UI.
-@(private)
-stats_panel :: proc(self: ^Manager) {
-  ctx := debug_ui(self)
-  s := stats(self)
-  // mu.window is scoped: widgets must stay inside the if-block.
-  if mu.window(ctx, "Engine", {40, 40, 200, 200}, {}) {
-    mu.label(ctx, fmt.tprintf("Textures %d", s.textures))
-    mu.label(ctx, fmt.tprintf("Materials %d", s.materials))
-    mu.label(ctx, fmt.tprintf("Meshes %d", s.meshes))
-    mu.label(ctx, fmt.tprintf("Render slots %d", s.nodes))
-    mu.label(ctx, fmt.tprintf("Draw count: %d draws", s.opaque_draw_count))
-  }
 }

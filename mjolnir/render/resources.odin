@@ -1,10 +1,9 @@
 package render
 
-import "bindless"
 import cont "../containers"
+import "core:sync"
+import "gpu"
 import "mesh"
-import "debug_line"
-import "particles"
 import vk "vendor:vulkan"
 
 // CPU-side mesh. flush uploads cpu_geometry into the mesh manager and
@@ -13,7 +12,7 @@ import vk "vendor:vulkan"
 Mesh :: struct {
   cpu_geometry:            Maybe(mesh.Geometry),
   auto_purge_cpu_geometry: bool,
-  allocations:             bindless.MeshAllocations,
+  allocations:             MeshAllocations,
 }
 
 Material :: struct {
@@ -23,18 +22,14 @@ Material :: struct {
   roughness_value:    f32,
   emissive_value:     f32,
   type:               MaterialType,
-  albedo:             bindless.Texture2DHandle,
-  metallic_roughness: bindless.Texture2DHandle,
-  normal:             bindless.Texture2DHandle,
-  emissive:           bindless.Texture2DHandle,
-}
-
-@(private)
-Sprite :: struct {
-  texture:       bindless.Texture2DHandle,
-  frame_columns: u32, // Number of columns in sprite sheet
-  frame_rows:    u32, // Number of rows in sprite sheet
-  frame_index:   u32, // Cell shown, row-major
+  albedo:             Texture2DHandle,
+  metallic_roughness: Texture2DHandle,
+  normal:             Texture2DHandle,
+  emissive:           Texture2DHandle,
+  // .SPRITE: sheet size in cells and the cell shown, row-major
+  frame_columns:      u32,
+  frame_rows:         u32,
+  frame_index:        u32,
 }
 
 Emitter :: struct {
@@ -49,13 +44,12 @@ Emitter :: struct {
   size_end:          f32,
   weight:            f32,
   weight_spread:     f32,
-  // Fractional carryover of emissions; advanced each tick by update. Lives on
-  // CPU so per-frame restaging does not clobber sub-particle progress when
-  // emission_rate * delta_time < 1.
+  // Fractional carryover of emissions, advanced each tick by update.
   time_accumulator:  f32,
+  // Whole particles accumulated by update and not yet handed to a frame.
   pending_emit:      u32,
   enabled:           b32,
-  texture_handle:    bindless.Texture2DHandle,
+  texture_handle:    Texture2DHandle,
   // Transform slot the particles spawn from. Set by attach.
   slot:              u32,
 }
@@ -73,7 +67,6 @@ ForceField :: struct {
 init_resource_pools :: proc(self: ^Manager) {
   cont.init(&self.meshes, MAX_MESHES, RETIRE_GRACE)
   cont.init(&self.materials, MAX_MATERIALS, RETIRE_GRACE)
-  cont.init(&self.sprites, MAX_SPRITES, RETIRE_GRACE)
   cont.init(&self.emitters, MAX_EMITTERS, RETIRE_GRACE)
   cont.init(&self.forcefields, MAX_FORCE_FIELDS, RETIRE_GRACE)
   init_builtin_materials(self)
@@ -87,18 +80,21 @@ destroy_resource_pools :: proc(self: ^Manager) {
   cont.flush(&self.materials, nil, nil)
   cont.destroy(&self.meshes, mesh_release_memory)
   cont.destroy(&self.materials, proc(_: ^Material) {})
-  cont.destroy(&self.sprites, proc(_: ^Sprite) {})
   cont.destroy(&self.emitters, proc(_: ^Emitter) {})
   cont.destroy(&self.forcefields, proc(_: ^ForceField) {})
 }
 
+// Advance deferred destruction by one frame: pool slots, textures and loose
+// GPU buffers freed RETIRE_GRACE frames ago are reclaimed. The only place
+// retirement advances; frame calls it once, after waiting on its fence.
 @(private)
 tick_resource_pools :: proc(self: ^Manager) {
+  gpu.deferred_tick(&self.gctx)
+  texture_manager_tick(&self.texture_manager, &self.gctx)
   cont.tick(&self.meshes, self, mesh_retire)
   cont.tick(&self.materials, nil, nil)
   cont.tick(&self.emitters, nil, nil)
   cont.tick(&self.forcefields, nil, nil)
-  cont.tick(&self.sprites, nil, nil)
 }
 
 // Pointers to a material, emitter or force field. Write changes back with the
@@ -119,7 +115,7 @@ forcefield :: proc(r: ^Manager, h: ForceFieldHandle) -> (^ForceField, bool) #opt
 set_material :: proc(r: ^Manager, h: MaterialHandle, value: Material) -> bool {
   m := cont.get(r.materials, h) or_return
   m^ = value
-  stage(r, &r.internal.staging.materials, h.index)
+  stage_frames(r, &r.internal.staging.materials, h.index)
   return true
 }
 
@@ -132,7 +128,6 @@ set_emitter :: proc(r: ^Manager, h: EmitterHandle, value: Emitter) -> bool {
   v.pending_emit = em.pending_emit
   v.slot = em.slot
   em^ = v
-  stage(r, &r.internal.staging.emitters, h.index)
   return true
 }
 
@@ -142,7 +137,7 @@ set_forcefield :: proc(r: ^Manager, h: ForceFieldHandle, value: ForceField) -> b
   v := value
   v.slot = ff.slot
   ff^ = v
-  stage(r, &r.internal.staging.forcefields, h.index)
+  stage_frames(r, &r.internal.staging.forcefields, h.index)
   return true
 }
 
@@ -188,14 +183,13 @@ mesh_release_memory :: proc(self: ^Mesh) {
 @(private)
 mesh_retire :: proc(item: ^Mesh, user: rawptr) {
   if self := (^Manager)(user); self != nil {
-    bindless.free_mesh(&self.mesh_manager, item.allocations)
+    free_mesh(&self.mesh_manager, item.allocations)
   }
   mesh_release_memory(item)
 }
 
 // ---------- textures ----------
 
-Texture2DHandle :: bindless.Texture2DHandle
 
 // Load an image file (png, jpg, hdr, ...) into a bindless 2D texture.
 create_texture_from_path :: proc(
@@ -207,7 +201,7 @@ create_texture_from_path :: proc(
   handle: Texture2DHandle,
   ret: vk.Result,
 ) {
-  return bindless.create_texture_2d_from_path(&self.gctx, &self.texture_manager, path, format, generate_mips)
+  return create_texture_2d_from_path(&self.gctx, &self.texture_manager, path, format, generate_mips)
 }
 
 // Decode an encoded image (png, jpg, ...) held in memory into a bindless 2D texture.
@@ -220,27 +214,33 @@ create_texture_from_data :: proc(
   handle: Texture2DHandle,
   ret: vk.Result,
 ) {
-  return bindless.create_texture_2d_from_data(&self.gctx, &self.texture_manager, data, format, generate_mips)
+  return create_texture_2d_from_data(&self.gctx, &self.texture_manager, data, format, generate_mips)
 }
 
+// Free a texture loaded with create_texture_from_*. Its GPU image is released
+// once no frame in flight samples it; teardown frees every texture.
 destroy_texture :: proc(self: ^Manager, handle: Texture2DHandle) {
-  bindless.free_texture_2d(&self.texture_manager, &self.gctx, handle)
+  free_texture_2d(&self.texture_manager, &self.gctx, handle)
 }
 
 // ---------- materials ----------
 
+// Materials are app-lifetime but textures are level-lifetime: destroy a
+// material that samples textures before teardown.
 create_material :: proc(
   self: ^Manager,
   features: ShaderFeatureSet = {},
   type: MaterialType = .PBR,
-  albedo_handle: bindless.Texture2DHandle = {},
-  metallic_roughness_handle: bindless.Texture2DHandle = {},
-  normal_handle: bindless.Texture2DHandle = {},
-  emissive_handle: bindless.Texture2DHandle = {},
+  albedo_handle: Texture2DHandle = {},
+  metallic_roughness_handle: Texture2DHandle = {},
+  normal_handle: Texture2DHandle = {},
+  emissive_handle: Texture2DHandle = {},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
   base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  frame_columns: u32 = 1,
+  frame_rows: u32 = 1,
 ) -> (
   handle: MaterialHandle,
   ok: bool,
@@ -258,8 +258,10 @@ create_material :: proc(
     roughness_value    = roughness_value,
     emissive_value     = emissive_value,
     base_color_factor  = base_color_factor,
+    frame_columns      = max(frame_columns, 1),
+    frame_rows         = max(frame_rows, 1),
   }
-  stage(self, &self.internal.staging.materials, handle.index)
+  stage_frames(self, &self.internal.staging.materials, handle.index)
   return handle, true
 }
 
@@ -295,9 +297,38 @@ material_transparent :: proc(
   return create_material(self, type = .TRANSPARENT, base_color_factor = base_color)
 }
 
+// Sprite-sheet material of `frame_columns` x `frame_rows` cells, tinted by
+// `tint`. Attach it with the builtin QUAD_XY mesh; it always faces the camera.
+material_sprite :: proc(
+  self: ^Manager,
+  texture: Texture2DHandle,
+  frame_columns: u32 = 1,
+  frame_rows: u32 = 1,
+  tint: [4]f32 = {1, 1, 1, 1},
+) -> (MaterialHandle, bool) #optional_ok {
+  return create_material(
+    self,
+    {.ALBEDO_TEXTURE},
+    type = .SPRITE,
+    albedo_handle = texture,
+    base_color_factor = tint,
+    frame_columns = frame_columns,
+    frame_rows = frame_rows,
+  )
+}
+
+// Show cell `frame` (row-major, wrapped to the sheet size) of a sprite
+// material. Animate by calling this as time advances.
+set_sprite_frame :: proc(self: ^Manager, handle: MaterialHandle, frame: u32) -> bool {
+  m := cont.get(self.materials, handle) or_return
+  m.frame_index = frame % (m.frame_columns * m.frame_rows)
+  stage_frames(self, &self.internal.staging.materials, handle.index)
+  return true
+}
+
 destroy_material :: proc(self: ^Manager, handle: MaterialHandle) -> bool {
   cont.free_deferred(&self.materials, handle) or_return
-  stage(self, &self.internal.staging.materials, handle.index)
+  stage_frames(self, &self.internal.staging.materials, handle.index)
   return true
 }
 
@@ -345,48 +376,11 @@ init_builtin_meshes :: proc(self: ^Manager) {
   self.builtin_meshes[.CYLINDER] = create_mesh(self, mesh.make_cylinder(), true)
 }
 
-// ---------- sprites ----------
-
-create_sprite :: proc(
-  self: ^Manager,
-  texture: bindless.Texture2DHandle,
-  frame_columns: u32 = 1,
-  frame_rows: u32 = 1,
-) -> (
-  handle: SpriteHandle,
-  ok: bool,
-) #optional_ok {
-  s: ^Sprite
-  handle, s = cont.alloc(&self.sprites, SpriteHandle) or_return
-  s^ = {
-    texture       = texture,
-    frame_columns = frame_columns,
-    frame_rows    = frame_rows,
-  }
-  stage(self, &self.internal.staging.sprites, handle.index)
-  return handle, true
-}
-
-destroy_sprite :: proc(self: ^Manager, handle: SpriteHandle) {
-  if cont.free_deferred(&self.sprites, handle) {
-    stage(self, &self.internal.staging.sprites, handle.index)
-  }
-}
-
-// Show cell `frame` (row-major, wrapped to the sheet size) of the sprite
-// sheet. Animate by calling this as time advances.
-set_sprite_frame :: proc(self: ^Manager, handle: SpriteHandle, frame: u32) -> bool {
-  s := cont.get(self.sprites, handle) or_return
-  s.frame_index = frame % max(s.frame_columns * s.frame_rows, 1)
-  stage(self, &self.internal.staging.sprites, handle.index)
-  return true
-}
-
 // ---------- emitters ----------
 
 create_emitter :: proc(
   self: ^Manager,
-  texture_handle: bindless.Texture2DHandle = {},
+  texture_handle: Texture2DHandle = {},
   emission_rate: f32 = 50.0,
   initial_velocity: [3]f32 = {0, 1, 0},
   velocity_spread: f32 = 0.5,
@@ -418,14 +412,11 @@ create_emitter :: proc(
     texture_handle    = texture_handle,
     enabled           = true,
   }
-  stage(self, &self.internal.staging.emitters, handle.index)
   return handle, true
 }
 
 destroy_emitter :: proc(self: ^Manager, handle: EmitterHandle) -> bool {
-  cont.free_deferred(&self.emitters, handle) or_return
-  stage(self, &self.internal.staging.emitters, handle.index)
-  return true
+  return cont.free_deferred(&self.emitters, handle)
 }
 
 // ---------- force fields ----------
@@ -446,39 +437,35 @@ create_forcefield :: proc(
     area_of_effect   = area_of_effect,
     enabled          = true,
   }
-  stage(self, &self.internal.staging.forcefields, handle.index)
+  stage_frames(self, &self.internal.staging.forcefields, handle.index)
   return handle, true
 }
 
 destroy_forcefield :: proc(self: ^Manager, handle: ForceFieldHandle) -> bool {
   cont.free_deferred(&self.forcefields, handle) or_return
-  stage(self, &self.internal.staging.forcefields, handle.index)
+  stage_frames(self, &self.internal.staging.forcefields, handle.index)
   return true
 }
 
-// Advance the render clock (debug line lifetimes) and emitter accumulators,
-// and stage every emitter. Call once per update tick; `flush` uploads the
-// results.
+// Advance the render clock (debug line lifetimes), the particle simulation
+// time and emitter accumulators. Call once per update tick; the next frame
+// emits and simulates everything accumulated since the previous one.
 update :: proc(self: ^Manager, delta_time: f32) {
-  debug_line.advance(&self.internal.debug_line_renderer, delta_time)
+  debug_line_advance(&self.internal.debug_line_renderer, delta_time)
   if delta_time <= 0 do return
+  sync.mutex_lock(&self.internal.staging.mutex)
+  defer sync.mutex_unlock(&self.internal.staging.mutex)
+  self.internal.staging.particle_time += delta_time
   it := cont.iterator(&self.emitters)
-  for em, handle in cont.next(&it, EmitterHandle) {
+  for em in cont.next(&it, EmitterHandle) {
     if !bool(em.enabled) {
       em.time_accumulator = 0
       em.pending_emit = 0
-    } else {
-      em.time_accumulator += em.emission_rate * delta_time
-      emit := u32(em.time_accumulator)
-      em.time_accumulator -= f32(emit)
-      em.pending_emit = emit
+      continue
     }
-    stage(self, &self.internal.staging.emitters, handle.index)
+    em.time_accumulator += em.emission_rate * delta_time
+    emit := u32(em.time_accumulator)
+    em.time_accumulator -= f32(emit)
+    em.pending_emit += emit
   }
-  particles.set_params(
-    &self.internal.particles,
-    u32(min(len(self.emitters.entries), MAX_EMITTERS)),
-    u32(min(len(self.forcefields.entries), MAX_FORCE_FIELDS)),
-    delta_time,
-  )
 }

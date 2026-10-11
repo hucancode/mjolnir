@@ -40,7 +40,7 @@ and releases those that expired; `flush` releases all of them.
 ## SlabAllocator
 
 Range allocator over a single flat buffer, partitioned into a handful of
-size classes. Used by render's mesh arena (`render/bindless` `MeshManager`) to sub-allocate vertex / index /
+size classes. Used by render's mesh arena (`MeshManager` in `render`) to sub-allocate vertex / index /
 skinning ranges out of a couple of giant GPU buffers — keeps allocation
 O(1), avoids per-mesh `vk.Buffer` objects, and gives GPU draw indirect a
 stable base offset.

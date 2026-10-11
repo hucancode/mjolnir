@@ -15,7 +15,7 @@ App :: struct {
   renderer: render.Manager,
   camera:   render.CameraController,
   input:    input.State,
-  gui:      render.System,
+  gui:      render.UISystem,
 }
 
 button: render.Quad2DHandle
@@ -92,31 +92,31 @@ main :: proc() {
   button_label, button_label_ok := render.create_text2d(&app.gui, position = {100, 100}, text = "Click me!", font_size = 20, color = {255, 255, 255, 255}, z_order = 2, bounds = {200, 50}, h_align = .Center, v_align = .Middle)
   log.infof("Button label created: handle=%v, ok=%v", button_label, button_label_ok)
 
-  if btn := render.get_quad2d(&app.gui, button); btn != nil {
+  if btn := render.get_as(&app.gui, button, render.Quad2D); btn != nil {
     handlers := render.EventHandlers{
       on_mouse_down = proc(event: render.MouseEvent) {
         log.info("Button clicked!")
         app := cast(^App)event.user_data
         if app == nil do return
-        if q := render.get_quad2d(&app.gui, render.Quad2DHandle(event.widget)); q != nil do q.color = {100, 255, 100, 255}
+        if q := render.get_as(&app.gui, event.widget, render.Quad2D); q != nil do q.color = {100, 255, 100, 255}
       },
       on_mouse_up = proc(event: render.MouseEvent) {
         log.info("Button released!")
         app := cast(^App)event.user_data
         if app == nil do return
-        if q := render.get_quad2d(&app.gui, render.Quad2DHandle(event.widget)); q != nil do q.color = {255, 150, 100, 255}
+        if q := render.get_as(&app.gui, event.widget, render.Quad2D); q != nil do q.color = {255, 150, 100, 255}
       },
       on_hover_in = proc(event: render.MouseEvent) {
         log.info("Button hovered")
         app := cast(^App)event.user_data
         if app == nil do return
-        if q := render.get_quad2d(&app.gui, render.Quad2DHandle(event.widget)); q != nil do q.color = {255, 150, 100, 255}
+        if q := render.get_as(&app.gui, event.widget, render.Quad2D); q != nil do q.color = {255, 150, 100, 255}
       },
       on_hover_out = proc(event: render.MouseEvent) {
         log.info("Button unhovered")
         app := cast(^App)event.user_data
         if app == nil do return
-        if q := render.get_quad2d(&app.gui, render.Quad2DHandle(event.widget)); q != nil do q.color = {255, 100, 100, 255}
+        if q := render.get_as(&app.gui, event.widget, render.Quad2D); q != nil do q.color = {255, 100, 100, 255}
       },
     }
     btn.event_handlers = handlers

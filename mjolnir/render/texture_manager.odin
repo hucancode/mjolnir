@@ -1,7 +1,7 @@
-package bindless
+package render
 
-import cont "../../containers"
-import "../gpu"
+import cont "../containers"
+import "gpu"
 import "core:c"
 import "core:log"
 import "core:strings"
@@ -41,7 +41,7 @@ texture_manager_init :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) -> vk
     {.SAMPLED_IMAGE, MAX_CUBE_TEXTURES, {.FRAGMENT}},
   ) or_return
   for &sampler, type in self.samplers {
-    linear := type == .LINEAR_CLAMP || type == .LINEAR_REPEAT
+    linear := type == .LINEAR_CLAMP || type == .LINEAR_REPEAT || type == .SHADOW_COMPARE
     repeat := type == .NEAREST_REPEAT || type == .LINEAR_REPEAT
     filter: vk.Filter = .LINEAR if linear else .NEAREST
     address: vk.SamplerAddressMode = .REPEAT if repeat else .CLAMP_TO_EDGE
@@ -54,6 +54,11 @@ texture_manager_init :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) -> vk
       addressModeW = address,
       mipmapMode   = .LINEAR,
       maxLod       = 1000,
+    }
+    if type == .SHADOW_COMPARE {
+      // lit where the reference depth is at or in front of the stored one
+      info.compareEnable = true
+      info.compareOp = .LESS_OR_EQUAL
     }
     vk.CreateSampler(gctx.device, &info, nil, &sampler) or_return
   }
@@ -152,6 +157,8 @@ allocate_texture_2d_with_data :: proc(
   format: vk.Format,
   usage: vk.ImageUsageFlags,
   generate_mips: bool = false,
+  // channel remapping applied when sampling; identity by default
+  swizzle: vk.ComponentMapping = {},
 ) -> (
   handle: Texture2DHandle,
   ret: vk.Result,
@@ -166,6 +173,15 @@ allocate_texture_2d_with_data :: proc(
     data_size,
     mips,
   ) or_return
+  if swizzle != {} {
+    vk.DestroyImageView(gctx.device, img.view, nil)
+    img.view, ret = gpu.image_create_view(gctx.device, &img, .D2, mip_count = mips, components = swizzle)
+    if ret != .SUCCESS {
+      img.view = 0
+      gpu.image_destroy(gctx.device, &img)
+      return
+    }
+  }
   gpu_handle, slot, ok := cont.alloc(&tm.images_2d, Texture2DHandle)
   if !ok {
     gpu.image_destroy(gctx.device, &img)
@@ -284,7 +300,6 @@ create_texture_2d_from_path :: proc(
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips: bool = false,
   usage: vk.ImageUsageFlags = {.SAMPLED},
-  is_hdr: bool = false,
 ) -> (
   handle: Texture2DHandle,
   ret: vk.Result,
@@ -294,7 +309,8 @@ create_texture_2d_from_path :: proc(
   width, height, channels: c.int
   pixel_data: rawptr
   data_size: vk.DeviceSize
-  if is_hdr {
+  // a float format decodes the file as linear HDR
+  if format == .R32G32B32A32_SFLOAT {
     pixels := stbi.loadf(path_cstr, &width, &height, &channels, 4)
     if pixels == nil {
       log.errorf(

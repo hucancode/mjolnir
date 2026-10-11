@@ -13,6 +13,7 @@ struct Camera {
     float far;
     vec4 position;
     vec4 frustum_planes[6];
+    mat4 inv_view_projection;
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {

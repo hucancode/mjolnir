@@ -41,7 +41,6 @@ odin build "$test_dir" -out:"bin/$binary_name" \
     -debug \
     -define:USE_PARALLEL_UPDATE=false \
     -define:ENABLE_VALIDATION_LAYERS=true \
-    -define:REQUIRE_GEOMETRY_SHADER=false \
     -define:RENDER_FPS=5 \
     -define:FRAME_LIMIT="$frame_limit"
 

@@ -16,6 +16,9 @@ Mesh2D :: struct {
   vertices:      []Vertex2D,
   indices:       []u32,
   texture:       u32, // bindless texture index, or NO_TEXTURE
+  // vertex bounds relative to the widget, set at creation; used for hit tests
+  local_min:     [2]f32,
+  local_max:     [2]f32,
 }
 
 Quad2D :: struct {
@@ -42,6 +45,10 @@ Text2D :: struct {
   v_align:     VerticalAlign,
   text_width:  f32, // Actual width of the laid out text
   text_height: f32, // Actual height of the laid out text
+  // glyph bounds relative to the widget (origin included), set by
+  // text_layout; used for hit tests
+  local_min:   [2]f32,
+  local_max:   [2]f32,
 }
 
 Box :: struct {

@@ -5,21 +5,24 @@ import "core:log"
 import "core:slice"
 import fs "vendor:fontstash"
 
-System :: struct {
+UISystem :: struct {
   widget_pool:  cont.Pool(Widget),
   font_context: ^fs.FontContext,
+  // atlas size the text glyph uvs were laid out against
+  atlas_size:   [2]int,
   staging:      [dynamic]RenderCommand,
   hovered:      Maybe(UIWidgetHandle), // interactive widget under the cursor
   captured:     Maybe(UIWidgetHandle), // pressed widget, kept until all buttons release
   focused:      Maybe(UIWidgetHandle), // receives key and text events
 }
 
-// Glyph sizes rasterized at init so the first atlas upload covers typical text.
-DEFAULT_PREWARM_SIZES :: []f32{12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96}
+// Glyph sizes rasterized at init so the first atlas upload covers typical
+// text without growing the atlas; other sizes rasterize on first use.
+DEFAULT_PREWARM_SIZES :: []f32{14, 16, 20, 24}
 
 // font_data is a TTF/OTF file in memory; it is copied.
 ui_init :: proc(
-  self: ^System,
+  self: ^UISystem,
   font_data: []u8,
   max_widgets: u32 = 4096,
   prewarm_sizes: []f32 = DEFAULT_PREWARM_SIZES,
@@ -48,7 +51,7 @@ ui_init :: proc(
   return true
 }
 
-ui_shutdown :: proc(self: ^System) {
+ui_shutdown :: proc(self: ^UISystem) {
   cont.destroy(&self.widget_pool, cleanup_widget)
   delete(self.staging)
   if self.font_context != nil {
@@ -62,7 +65,7 @@ ui_shutdown :: proc(self: ^System) {
 // rasterized since the previous call.
 @(private = "file")
 take_font_atlas :: proc(
-  self: ^System,
+  self: ^UISystem,
 ) -> (
   pixels: []u8,
   width, height: u32,
@@ -99,54 +102,23 @@ Quad2DHandle :: distinct UIWidgetHandle
 Text2DHandle :: distinct UIWidgetHandle
 BoxHandle :: distinct UIWidgetHandle
 
-get_widget :: proc(sys: ^System, handle: UIWidgetHandle) -> ^Widget {
+get_widget :: proc(sys: ^UISystem, handle: UIWidgetHandle) -> ^Widget {
   widget, ok := cont.get(sys.widget_pool, handle)
   if !ok do return nil
   return widget
 }
 
-get_mesh2d :: proc(sys: ^System, handle: Mesh2DHandle) -> ^Mesh2D {
+// The widget behind `handle` as a T (Quad2D, Text2D, Mesh2D or Box); nil when
+// the handle is stale or the widget is another kind.
+get_as :: proc(sys: ^UISystem, handle: $H, $T: typeid) -> ^T {
   widget := get_widget(sys, UIWidgetHandle(handle))
   if widget == nil do return nil
-  #partial switch &w in widget {
-  case Mesh2D:
-    return &w
-  }
-  return nil
-}
-
-get_quad2d :: proc(sys: ^System, handle: Quad2DHandle) -> ^Quad2D {
-  widget := get_widget(sys, UIWidgetHandle(handle))
-  if widget == nil do return nil
-  #partial switch &w in widget {
-  case Quad2D:
-    return &w
-  }
-  return nil
-}
-
-get_text2d :: proc(sys: ^System, handle: Text2DHandle) -> ^Text2D {
-  widget := get_widget(sys, UIWidgetHandle(handle))
-  if widget == nil do return nil
-  #partial switch &w in widget {
-  case Text2D:
-    return &w
-  }
-  return nil
-}
-
-get_box :: proc(sys: ^System, handle: BoxHandle) -> ^Box {
-  widget := get_widget(sys, UIWidgetHandle(handle))
-  if widget == nil do return nil
-  #partial switch &w in widget {
-  case Box:
-    return &w
-  }
-  return nil
+  w, ok := &widget.(T)
+  return w if ok else nil
 }
 
 // Destroy a widget and, for a Box, its children.
-destroy_widget :: proc(sys: ^System, handle: UIWidgetHandle) {
+destroy_widget :: proc(sys: ^UISystem, handle: UIWidgetHandle) {
   widget := get_widget(sys, handle)
   if widget == nil do return
   if box, is_box := widget.(Box); is_box {
@@ -158,7 +130,8 @@ destroy_widget :: proc(sys: ^System, handle: UIWidgetHandle) {
 
 // This frame's draw commands plus the font atlas when it changed. Hand it to
 // the 2D renderer; the commands stay valid until the next call.
-draw_list :: proc(sys: ^System) -> DrawList {
+draw_list :: proc(sys: ^UISystem) -> DrawList {
+  relayout_on_atlas_growth(sys)
   list := DrawList{commands = build_commands(sys)}
   if pixels, w, h, changed := take_font_atlas(sys); changed {
     list.atlas = pixels
@@ -167,10 +140,24 @@ draw_list :: proc(sys: ^System) -> DrawList {
   return list
 }
 
+// Growing the atlas rescales every glyph uv; lay all text out again against
+// the new size.
+@(private = "file")
+relayout_on_atlas_growth :: proc(sys: ^UISystem) {
+  if sys.font_context == nil do return
+  size := [2]int{sys.font_context.width, sys.font_context.height}
+  if size == sys.atlas_size do return
+  sys.atlas_size = size
+  it := cont.iterator(&sys.widget_pool)
+  for widget in cont.next(&it, UIWidgetHandle) {
+    if text, ok := &widget.(Text2D); ok do text_layout(text, sys.font_context)
+  }
+}
+
 // Lay out all widgets and return this frame's draw commands. The slice is
 // valid until the next call; glyph data lives in the temp allocator.
 @(private)
-build_commands :: proc(sys: ^System) -> []RenderCommand {
+build_commands :: proc(sys: ^UISystem) -> []RenderCommand {
   compute_layout_all(sys)
   clear(&sys.staging)
 

@@ -8,7 +8,7 @@ layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
 layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
 layout(constant_id = 4) const uint SAMPLER_NEAREST_REPEAT = 2u;
 layout(constant_id = 5) const uint SAMPLER_LINEAR_REPEAT = 3u;
-layout(constant_id = 6) const uint LIGHT_TYPE = 0u;
+layout(constant_id = 7) const uint LIGHT_TYPE = 0u;
 
 const uint LIGHT_POINT = 0u;
 const uint LIGHT_SPOT = 1u;
@@ -24,6 +24,7 @@ struct Camera {
     float far;
     vec4 position;
     vec4 frustum_planes[6];
+    mat4 inv_view_projection;
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
@@ -40,7 +41,7 @@ layout(push_constant) uniform PushConstant {
     float radius;
     float angle_outer;
     uint  shadow_and_camera_indices;
-    uint  position_and_normal_indices;
+    uint  depth_and_normal_indices;
     uint  albedo_and_metallic_indices;
 };
 

@@ -46,7 +46,7 @@ layout(set = 1, binding = 1) buffer ParticleCursor {
     uint cursor;
 };
 
-layout(set = 1, binding = 2) uniform ParamsBuffer {
+layout(push_constant) uniform Params {
     uint emitter_count;
     uint forcefield_count;
     float delta_time;
@@ -105,7 +105,7 @@ void main() {
     if (node_index >= nodes.length()) {
         return;
     }
-    // emit_count is computed CPU-side each frame (see render.update)
+    // emit_count is accumulated CPU-side and handed to one frame (see flush_particles)
     // so per-frame restages don't clobber the fractional accumulator.
     uint emit_count = emitters[emitter_idx].emit_count;
     for (uint i = 0; i < emit_count; ++i) {

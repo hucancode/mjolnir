@@ -2,9 +2,10 @@ package render
 
 import cont "../containers"
 import "core:log"
+import "core:math/linalg"
 
 create_mesh2d :: proc(
-  sys: ^System,
+  sys: ^UISystem,
   position: [2]f32,
   vertices: []Vertex2D,
   indices: []u32,
@@ -36,12 +37,20 @@ create_mesh2d :: proc(
     indices        = indices_copy,
     texture        = texture,
   }
+  if len(vertices) > 0 {
+    m := &widget.(Mesh2D)
+    m.local_min, m.local_max = vertices[0].pos, vertices[0].pos
+    for v in vertices {
+      m.local_min = linalg.min(m.local_min, v.pos)
+      m.local_max = linalg.max(m.local_max, v.pos)
+    }
+  }
 
   return Mesh2DHandle(handle), true
 }
 
 create_quad2d :: proc(
-  sys: ^System,
+  sys: ^UISystem,
   position: [2]f32,
   size: [2]f32,
   texture: u32 = NO_TEXTURE,

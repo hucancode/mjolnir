@@ -9,7 +9,8 @@ layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
 layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
 layout(constant_id = 4) const uint SAMPLER_NEAREST_REPEAT = 2u;
 layout(constant_id = 5) const uint SAMPLER_LINEAR_REPEAT = 3u;
-layout(constant_id = 6) const uint LIGHT_TYPE = 0u;
+layout(constant_id = 6) const uint SAMPLER_SHADOW_COMPARE = 4u;
+layout(constant_id = 7) const uint LIGHT_TYPE = 0u;
 
 const uint LIGHT_POINT = 0u;
 const uint LIGHT_SPOT = 1u;
@@ -26,6 +27,7 @@ struct Camera {
     float far;
     vec4 position;
     vec4 frustum_planes[6];
+    mat4 inv_view_projection;
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
@@ -45,9 +47,16 @@ layout(push_constant) uniform PushConstant {
     float radius;
     float angle_outer;
     uint  shadow_and_camera_indices;
-    uint  position_and_normal_indices;
+    uint  depth_and_normal_indices;
     uint  albedo_and_metallic_indices;
 };
+
+// World position of the G-buffer texel at framebuffer uv, rebuilt from its
+// depth. The G-buffer pass flips the viewport, so ndc.y runs against uv.y.
+vec3 worldPosition(Camera camera, vec2 uv, float depth) {
+    vec4 p = camera.inv_view_projection * vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
+    return p.xyz / p.w;
+}
 
 // Direction from the fragment towards the light.
 vec3 lightDirection(vec3 fragPos) {
@@ -55,17 +64,31 @@ vec3 lightDirection(vec3 fragPos) {
     return normalize(position - fragPos);
 }
 
-// Cube map storing linear depth from the light.
+// tan(acos(c)) for c in [0, 1].
+float tanFromCos(float c) {
+    return sqrt(max(1.0 - c * c, 0.0)) / max(c, 1e-4);
+}
+
+// Light reaching a fragment: 1 when lit, SHADOW_FLOOR when fully occluded.
+const float SHADOW_FLOOR = 0.1;
+
+// Cube map of perspective depth, every face projected with
+// shadow_view_projection. The bias is applied to the distance z along the
+// face's major axis, which the projection maps to depth d = B / z - A; the
+// compare sampler then filters the depth test over 2x2 texels.
 float pointShadow(vec3 fragPos, vec3 n, uint shadow_idx) {
     if (shadow_idx >= MAX_CUBE_TEXTURES) return 1.0;
     vec3 lightToFrag = fragPos - position;
     vec3 coord = normalize(lightToFrag);
-    float linearDepth = length(lightToFrag);
-    float shadowDepth = texture(samplerCube(cube_textures[shadow_idx], samplers[SAMPLER_LINEAR_CLAMP]), coord).r;
-    float currentDepth = clamp((linearDepth - 0.1) / (radius - 0.1), 0.0, 1.0);
-    float cosTheta = clamp(dot(n, -lightToFrag), 0.0, 1.0);
-    float bias = clamp(0.0005 * tan(acos(cosTheta)), 0.001, 0.01);
-    return (currentDepth > shadowDepth + bias) ? 0.1 : 1.0;
+    vec3 axis = abs(lightToFrag);
+    float currentZ = max(axis.x, max(axis.y, axis.z));
+    float A = shadow_view_projection[2][2];
+    float B = shadow_view_projection[3][2];
+    float cosTheta = clamp(dot(n, -coord), 0.0, 1.0);
+    float bias = clamp(0.0005 * tanFromCos(cosTheta), 0.001, 0.01) * radius;
+    float refDepth = B / max(currentZ - bias, 1e-4) - A;
+    float lit = texture(samplerCubeShadow(cube_textures[shadow_idx], samplers[SAMPLER_SHADOW_COMPARE]), vec4(coord, refDepth));
+    return mix(SHADOW_FLOOR, 1.0, lit);
 }
 
 // 2D map projected with shadow_view_projection.
@@ -80,11 +103,12 @@ float projectedShadow(vec3 fragPos, vec3 n, uint shadow_idx) {
         return 1.0;
     }
     shadowCoord.z = clamp(shadowCoord.z, 0.0, 1.0);
-    float shadowDepth = texture(sampler2D(textures[shadow_idx], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
     float cosTheta = clamp(dot(n, lightDirection(fragPos)), 0.0, 1.0);
     float slope = LIGHT_TYPE == LIGHT_DIRECTIONAL ? 0.005 : 0.0005;
-    float bias = clamp(slope * tan(acos(cosTheta)), 0.001, 0.01);
-    return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
+    float bias = clamp(slope * tanFromCos(cosTheta), 0.001, 0.01);
+    // the compare sampler filters the depth test over 2x2 texels
+    float lit = texture(sampler2DShadow(textures[shadow_idx], samplers[SAMPLER_SHADOW_COMPARE]), vec3(shadowCoord.xy, shadowCoord.z - bias));
+    return mix(SHADOW_FLOOR, 1.0, lit);
 }
 
 float calculateShadow(vec3 fragPos, vec3 n, uint shadow_idx) {
@@ -138,8 +162,8 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
 void main() {
     uint shadow_map_idx = shadow_and_camera_indices & 0xFFFFu;
     uint scene_camera_idx = shadow_and_camera_indices >> 16u;
-    uint position_texture_index = position_and_normal_indices & 0xFFFFu;
-    uint normal_texture_index = position_and_normal_indices >> 16u;
+    uint depth_texture_index = depth_and_normal_indices & 0xFFFFu;
+    uint normal_texture_index = depth_and_normal_indices >> 16u;
     uint albedo_texture_index = albedo_and_metallic_indices & 0xFFFFu;
     uint metallic_texture_index = albedo_and_metallic_indices >> 16u;
 
@@ -151,7 +175,8 @@ void main() {
     Camera camera = camera_buffer.cameras[scene_camera_idx];
     vec2 uv = gl_FragCoord.xy / camera.viewport_extent;
 
-    vec3 fragPos = texture(sampler2D(textures[position_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz;
+    float depth = texelFetch(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), ivec2(gl_FragCoord.xy), 0).r;
+    vec3 fragPos = worldPosition(camera, uv, depth);
     vec3 normal = normalize(texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz * 2.0 - 1.0);
     vec3 albedo = texture(sampler2D(textures[albedo_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rgb;
     vec2 mr = texture(sampler2D(textures[metallic_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rg;

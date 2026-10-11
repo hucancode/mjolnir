@@ -228,6 +228,13 @@ swapchain_recreate :: proc(
   return .SUCCESS
 }
 
+// Block until the GPU has finished the last submission that used this
+// frame-in-flight slot, so its per-frame buffers may be rewritten.
+wait_frame :: proc(device: vk.Device, self: ^Swapchain, frame_index: u32) -> vk.Result {
+  return vk.WaitForFences(device, 1, &self.in_flight_fences[frame_index], true, math.max(u64))
+}
+
+// Acquire the next swapchain image. Call after wait_frame.
 acquire_next_image :: proc(
   device: vk.Device,
   self: ^Swapchain,
@@ -235,15 +242,6 @@ acquire_next_image :: proc(
 ) -> (
   result: vk.Result,
 ) {
-  // Wait for this frame's work to complete
-  vk.WaitForFences(
-    device,
-    1,
-    &self.in_flight_fences[frame_index],
-    true,
-    math.max(u64),
-  ) or_return
-  // Acquire next swapchain image
   vk.AcquireNextImageKHR(
     device,
     self.handle,
@@ -265,25 +263,21 @@ submit_queue_and_present :: proc(
   compute_command_buffer: ^vk.CommandBuffer,
   frame_index: u32,
 ) -> vk.Result {
-  wait_infos: [dynamic]vk.SemaphoreSubmitInfo
-  defer delete(wait_infos)
-  append(
-    &wait_infos,
-    vk.SemaphoreSubmitInfo {
+  wait_infos := [2]vk.SemaphoreSubmitInfo {
+    {
       sType = .SEMAPHORE_SUBMIT_INFO,
       semaphore = self.image_available_semaphores[frame_index],
       stageMask = {.COLOR_ATTACHMENT_OUTPUT},
     },
-  )
+    {
+      sType = .SEMAPHORE_SUBMIT_INFO,
+      semaphore = self.compute_finished_semaphores[frame_index],
+      stageMask = {.VERTEX_INPUT, .COMPUTE_SHADER},
+    },
+  }
+  wait_count: u32 = 1
   if has_async_compute(gctx) {
-    append(
-      &wait_infos,
-      vk.SemaphoreSubmitInfo {
-        sType = .SEMAPHORE_SUBMIT_INFO,
-        semaphore = self.compute_finished_semaphores[frame_index],
-        stageMask = {.VERTEX_INPUT, .COMPUTE_SHADER},
-      },
-    )
+    wait_count = 2
     compute_cmd_info := vk.CommandBufferSubmitInfo {
       sType         = .COMMAND_BUFFER_SUBMIT_INFO,
       commandBuffer = compute_command_buffer^,
@@ -313,8 +307,8 @@ submit_queue_and_present :: proc(
   }
   graphics_submit := vk.SubmitInfo2 {
     sType                    = .SUBMIT_INFO_2,
-    waitSemaphoreInfoCount   = u32(len(wait_infos)),
-    pWaitSemaphoreInfos      = raw_data(wait_infos),
+    waitSemaphoreInfoCount   = wait_count,
+    pWaitSemaphoreInfos      = &wait_infos[0],
     commandBufferInfoCount   = 1,
     pCommandBufferInfos      = &gfx_cmd_info,
     signalSemaphoreInfoCount = 1,

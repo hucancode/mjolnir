@@ -16,14 +16,14 @@ layout(set = 0, binding = 1) uniform sampler samplers[];
 layout(set = 0, binding = 2) uniform textureCube textures_cube[];
 
 layout(push_constant) uniform PostProcessPushConstant {
-    uint position_texture_index;
+    float camera_near;
+    float camera_far;
     uint normal_texture_index;
-    uint albedo_texture_index;
-    uint metallic_texture_index;
-    uint emissive_texture_index;
     uint depth_texture_index;
     uint input_image_index;
-    uint _pad;
+    uint _pad0;
+    uint _pad1;
+    uint _pad2;
     float hatch_offset_y;
     float lum_threshold_01;
     float lum_threshold_02;

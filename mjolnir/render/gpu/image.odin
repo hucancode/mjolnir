@@ -6,11 +6,13 @@ import "core:mem"
 import vk "vendor:vulkan"
 
 // A device-local, optimal-tiling 2D or cube image with a view over every mip
-// and layer.
+// and layer. A cube image used as an attachment also gets one 2D view per
+// face (+X, -X, +Y, -Y, +Z, -Z) to render into.
 Image :: struct {
   image:      vk.Image,
   memory:     vk.DeviceMemory,
   view:       vk.ImageView,
+  face_views: [6]vk.ImageView,
   extent:     vk.Extent2D,
   format:     vk.Format,
   mip_levels: u32,
@@ -80,6 +82,11 @@ image_create :: proc(
     mip_count = mip_levels,
     layer_count = layers,
   ) or_return
+  if cube && usage & {.COLOR_ATTACHMENT, .DEPTH_STENCIL_ATTACHMENT} != {} {
+    for &face_view, face in img.face_views {
+      face_view = image_create_view(gctx.device, &img, .D2, base_layer = u32(face)) or_return
+    }
+  }
   log.debugf(
     "Created image %v %dx%d (mips=%d, layers=%d) 0x%x",
     format,
@@ -158,6 +165,7 @@ image_create_view :: proc(
   mip_count: u32 = 1,
   base_layer: u32 = 0,
   layer_count: u32 = 1,
+  components: vk.ComponentMapping = {},
 ) -> (
   view: vk.ImageView,
   ret: vk.Result,
@@ -167,6 +175,7 @@ image_create_view :: proc(
     image = img.image,
     viewType = view_type,
     format = img.format,
+    components = components,
     subresourceRange = {
       aspectMask = infer_aspect_mask(img.format),
       baseMipLevel = base_mip,
@@ -180,6 +189,7 @@ image_create_view :: proc(
 }
 
 image_destroy :: proc(device: vk.Device, img: ^Image) {
+  for face_view in img.face_views do vk.DestroyImageView(device, face_view, nil)
   vk.DestroyImageView(device, img.view, nil)
   vk.DestroyImage(device, img.image, nil)
   vk.FreeMemory(device, img.memory, nil)

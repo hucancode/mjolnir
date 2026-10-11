@@ -1,19 +1,9 @@
 package render
 
-import "bindless"
 import "core:log"
 import "core:strings"
 import cont "../containers"
 import "gpu"
-import "ambient"
-import "debug_line"
-import "direct_light"
-import "forward"
-import "geometry"
-import "occlusion_culling"
-import "particles"
-import "post_process"
-import "shadow"
 import vk "vendor:vulkan"
 
 @(private)
@@ -23,57 +13,42 @@ init_subsystems :: proc(
   swapchain_format: vk.Format,
   dpi_scale: f32,
 ) -> vk.Result {
-  shadow_include := transmute(u32)NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
-  shadow_exclude := transmute(u32)NodeFlagSet{
-    .MATERIAL_TRANSPARENT,
-    .MATERIAL_WIREFRAME,
-    .MATERIAL_RANDOM_COLOR,
-  }
-  occlusion_culling.init(&self.internal.visibility, gctx, MAX_NODES_IN_SCENE) or_return
-  shadow.init(
-    &self.internal.shadow,
-    gctx,
-    scene_bindings(self, 0),
-    MAX_NODES_IN_SCENE,
-    SHADOW_MAP_SIZE,
-    shadow_include,
-    shadow_exclude,
-  ) or_return
-  ambient.init(
+  occlusion_init(&self.internal.visibility, gctx, MAX_NODES_IN_SCENE) or_return
+  shadow_init(self) or_return
+  ambient_init(
     &self.ambient,
     gctx,
     self.internal.camera_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
-  direct_light.init(
+  direct_light_init(
     &self.internal.direct_light,
     gctx,
     self.internal.camera_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
-  geometry.init(&self.internal.geometry, gctx, scene_bindings(self, 0)) or_return
-  particles.init(
+  gbuffer_init(self) or_return
+  particles_init(
     &self.internal.particles,
     gctx,
     self.internal.emitter_buffer.set_layout,
-    self.internal.emitter_buffer.descriptor_set,
     self.internal.forcefield_buffer.set_layout,
-    self.internal.forcefield_buffer.descriptor_set,
     self.internal.node_data_buffer.set_layout,
     self.internal.camera_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
-  forward.init(&self.internal.forward, gctx, scene_bindings(self, 0)) or_return
-  post_process.init(
+  forward_init(self) or_return
+  post_process_init(
     &self.post_process,
     gctx,
     swapchain_format,
     self.texture_manager.set_layout,
   ) or_return
-  debug_line.init(
+  debug_line_init(
     &self.internal.debug_line_renderer,
     gctx,
     self.internal.camera_buffer.set_layout,
+    swapchain_format,
   ) or_return
   overlay_init(
     &self.internal.ui,
@@ -144,14 +119,15 @@ init_vulkan :: proc(
   init_resource_pools(self)
   gpu.allocate_command_buffer(gctx, self.internal.command_buffers[:]) or_return
   if gpu.has_async_compute(gctx) {
-    gpu.allocate_compute_command_buffer(
+    gpu.allocate_command_buffer(
       gctx,
       self.internal.compute_command_buffers[:],
+      gctx.compute_command_pool,
     ) or_return
   }
-  bindless.mesh_manager_init(&self.mesh_manager, gctx) or_return
+  mesh_manager_init(&self.mesh_manager, gctx) or_return
   init_scene_buffers(self, gctx) or_return
-  bindless.texture_manager_init(&self.texture_manager, gctx) or_return
+  texture_manager_init(&self.texture_manager, gctx) or_return
   init_subsystems(self, gctx, swapchain_format, dpi_scale) or_return
   return .SUCCESS
 }
@@ -173,15 +149,9 @@ setup_level :: proc(self: ^Manager) -> (ret: vk.Result) {
   swapchain_extent := self.swapchain.extent
   self.internal.level_ready = true
   defer if ret != .SUCCESS do teardown(self)
-  bindless.texture_manager_setup(&self.texture_manager)
-  ambient.setup(&self.ambient, gctx, &self.texture_manager) or_return
-  particles.reset(&self.internal.particles)
-  post_process.setup(
-    &self.post_process,
-    gctx,
-    &self.texture_manager,
-    swapchain_extent,
-  ) or_return
+  texture_manager_setup(&self.texture_manager)
+  ambient_setup(&self.ambient, gctx, &self.texture_manager) or_return
+  particles_reset(&self.internal.particles)
   overlay_setup(&self.internal.ui, gctx, &self.texture_manager) or_return
   if _, ok := main_camera(self); !ok {
     cam, created := create_camera(
@@ -211,9 +181,9 @@ teardown :: proc(self: ^Manager) {
   // texture_manager_teardown destroys the shadow textures
   for &sm in self.internal.shadow_maps do sm.textures = {}
   overlay_teardown(&self.internal.ui, gctx)
-  post_process.teardown(&self.post_process, gctx, &self.texture_manager)
-  ambient.teardown(&self.ambient, gctx, &self.texture_manager)
-  bindless.texture_manager_teardown(&self.texture_manager, gctx)
+  post_process_teardown(&self.post_process, gctx, &self.texture_manager)
+  ambient_teardown(&self.ambient, gctx, &self.texture_manager)
+  texture_manager_teardown(&self.texture_manager, gctx)
   // the GPU is idle: destroy what teardown queued for deferred destruction
   gpu.deferred_flush(gctx)
 }
@@ -222,7 +192,7 @@ teardown :: proc(self: ^Manager) {
 // and precompute image-based lighting from it. Level-lifetime: call after
 // setup; teardown frees it. Without one, IBL and the skybox are black.
 load_environment_map :: proc(self: ^Manager, path: string) -> bool {
-  res := ambient.load_environment(&self.ambient, &self.gctx, &self.texture_manager, path)
+  res := ambient_load_environment(&self.ambient, &self.gctx, &self.texture_manager, path)
   if res != .SUCCESS do log.warnf("Failed to load environment map %s: %v", path, res)
   return res == .SUCCESS
 }
@@ -231,22 +201,22 @@ load_environment_map :: proc(self: ^Manager, path: string) -> bool {
 // bloom run as two separable passes (horizontal then vertical); their
 // `direction` is set here. A grayscale effect with zero weights uses
 // Rec. 601 luma weights.
-add_effect :: proc(self: ^Manager, effect: post_process.PostprocessEffect) {
+add_effect :: proc(self: ^Manager, effect: PostprocessEffect) {
   stack := &self.post_process.effect_stack
   #partial switch e in effect {
-  case post_process.BlurEffect:
+  case BlurEffect:
     pass := e
     pass.direction = 0
     append(stack, pass)
     pass.direction = 1
     append(stack, pass)
-  case post_process.BloomEffect:
+  case BloomEffect:
     pass := e
     pass.direction = 0
     append(stack, pass)
     pass.direction = 1
     append(stack, pass)
-  case post_process.GrayscaleEffect:
+  case GrayscaleEffect:
     g := e
     if g.weights == {} do g.weights = {0.299, 0.587, 0.114}
     append(stack, g)
@@ -260,23 +230,23 @@ shutdown :: proc(self: ^Manager) {
   teardown(self)
   gctx := &self.gctx
   vk.DeviceWaitIdle(gctx.device)
-  gpu.free_command_buffer(gctx, ..self.internal.command_buffers[:])
+  gpu.free_command_buffer(gctx, self.internal.command_buffers[:])
   if gpu.has_async_compute(gctx) {
-    gpu.free_compute_command_buffer(gctx, self.internal.compute_command_buffers[:])
+    gpu.free_command_buffer(gctx, self.internal.compute_command_buffers[:], gctx.compute_command_pool)
   }
   overlay_shutdown(&self.internal.ui, gctx)
-  debug_line.shutdown(&self.internal.debug_line_renderer, gctx)
-  post_process.shutdown(&self.post_process, gctx)
-  particles.shutdown(&self.internal.particles, gctx)
-  forward.shutdown(&self.internal.forward, gctx)
-  ambient.shutdown(&self.ambient, gctx)
-  direct_light.shutdown(&self.internal.direct_light, gctx)
-  shadow.shutdown(&self.internal.shadow, gctx)
-  geometry.shutdown(&self.internal.geometry, gctx)
-  occlusion_culling.shutdown(&self.internal.visibility, gctx)
-  bindless.texture_manager_shutdown(&self.texture_manager, gctx)
+  debug_line_shutdown(&self.internal.debug_line_renderer, gctx)
+  post_process_shutdown(&self.post_process, gctx)
+  particles_shutdown(&self.internal.particles, gctx)
+  forward_shutdown(&self.internal.forward, gctx)
+  ambient_shutdown(&self.ambient, gctx)
+  direct_light_shutdown(&self.internal.direct_light, gctx)
+  shadow_shutdown(&self.internal.shadow, gctx)
+  gbuffer_shutdown(&self.internal.geometry, gctx)
+  occlusion_shutdown(&self.internal.visibility, gctx)
+  texture_manager_shutdown(&self.texture_manager, gctx)
   destroy_scene_buffers(self, gctx)
-  bindless.mesh_manager_shutdown(&self.mesh_manager, gctx)
+  mesh_manager_shutdown(&self.mesh_manager, gctx)
   cont.destroy(&self.cameras, proc(_: ^Camera) {})
   destroy_light_state(self, gctx)
   destroy_resource_pools(self)
@@ -284,7 +254,6 @@ shutdown :: proc(self: ^Manager) {
   for _, p in self.internal.bones do delete(p.matrices)
   delete(self.internal.bones)
   delete(self.instances)
-  delete(self.internal.ui_atlas_pixels)
   gpu.swapchain_destroy(&self.swapchain, gctx.device)
   gpu.shutdown(gctx)
 }
@@ -298,12 +267,8 @@ recreate_swapchain :: proc(self: ^Manager, framebuffer_size: [2]u32, dpi_scale: 
   gpu.swapchain_recreate(gctx, &self.swapchain, framebuffer_size) or_return
   extent := self.swapchain.extent
   resize_swapchain_cameras(self, old_extent, extent) or_return
-  post_process.recreate_images(
-    gctx,
-    &self.post_process,
-    &self.texture_manager,
-    extent,
-  ) or_return
+  // re-created at the new extent by the next frame
+  post_process_release_images(&self.post_process, gctx, &self.texture_manager)
   self.internal.ui.dpi_scale = dpi_scale
   return .SUCCESS
 }

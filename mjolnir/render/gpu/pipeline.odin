@@ -1,6 +1,5 @@
 package gpu
 
-import "core:slice"
 import vk "vendor:vulkan"
 
 READ_WRITE_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
@@ -34,7 +33,7 @@ BLEND_OVERRIDE := vk.PipelineColorBlendAttachmentState {
   colorWriteMask = {.R, .G, .B, .A},
 }
 
-BLEND_ADDITIVE := vk.PipelineColorBlendAttachmentState {
+BLEND_ALPHA := vk.PipelineColorBlendAttachmentState {
   blendEnable         = true,
   srcColorBlendFactor = .SRC_ALPHA,
   dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
@@ -45,7 +44,7 @@ BLEND_ADDITIVE := vk.PipelineColorBlendAttachmentState {
   colorWriteMask      = {.R, .G, .B, .A},
 }
 
-BLEND_OVERFLOW := vk.PipelineColorBlendAttachmentState {
+BLEND_ADDITIVE := vk.PipelineColorBlendAttachmentState {
   blendEnable         = true,
   srcColorBlendFactor = .ONE,
   dstColorBlendFactor = .ONE,
@@ -60,13 +59,14 @@ HDR_COLOR_FORMAT :: vk.Format.R16G16B16A16_SFLOAT
 
 // Everything that varies between the engine's graphics pipelines, as the raw
 // Vulkan values create_graphics_pipeline writes into GraphicsPipelineCreateInfo.
-// Shader stages use entry point "main"; `geom` and `frag` are optional (0).
+// Shader stages are SPIR-V code with entry point "main"; `frag` is optional
+// (empty).
 // `raster` and `depth` need no sType. `depth` applies only when
 // `depth_format` is set; `blend` holds one entry per color format. Empty
 // `dynamic_states` means viewport + scissor. Pipelines target dynamic
 // rendering with one sample per pixel.
 GraphicsPipelineDesc :: struct {
-  vert, geom, frag:  vk.ShaderModule,
+  vert, frag:        []u8,
   specialization:    ^vk.SpecializationInfo,
   vertex_bindings:   []vk.VertexInputBindingDescription,
   vertex_attributes: []vk.VertexInputAttributeDescription,
@@ -88,16 +88,17 @@ create_graphics_pipeline :: proc(
   ret: vk.Result,
 ) {
   desc := desc
-  stages: [3]vk.PipelineShaderStageCreateInfo
+  stages: [2]vk.PipelineShaderStageCreateInfo
   stage_count: u32
-  modules := [3]vk.ShaderModule{desc.vert, desc.geom, desc.frag}
-  stage_flags := [3]vk.ShaderStageFlags{{.VERTEX}, {.GEOMETRY}, {.FRAGMENT}}
-  for module, i in modules {
-    if module == 0 do continue
+  defer for s in stages[:stage_count] do vk.DestroyShaderModule(gctx.device, s.module, nil)
+  codes := [2][]u8{desc.vert, desc.frag}
+  stage_flags := [2]vk.ShaderStageFlags{{.VERTEX}, {.FRAGMENT}}
+  for code, i in codes {
+    if len(code) == 0 do continue
     stages[stage_count] = {
       sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage               = stage_flags[i],
-      module              = module,
+      module              = create_shader_module(gctx.device, code) or_return,
       pName               = "main",
       pSpecializationInfo = desc.specialization,
     }
@@ -204,57 +205,33 @@ free_descriptor_sets :: proc(gctx: ^GPUContext, sets: ..vk.DescriptorSet) {
   }
 }
 
+// Allocate primary command buffers from `pool` (default: the graphics pool).
 allocate_command_buffer :: proc(
   gctx: ^GPUContext,
   out_commands: []vk.CommandBuffer,
-  level: vk.CommandBufferLevel = .PRIMARY,
+  pool: vk.CommandPool = 0,
 ) -> vk.Result {
   return vk.AllocateCommandBuffers(
     gctx.device,
     &vk.CommandBufferAllocateInfo {
       sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = gctx.command_pool,
-      level = level,
+      commandPool = pool if pool != 0 else gctx.command_pool,
+      level = .PRIMARY,
       commandBufferCount = u32(len(out_commands)),
     },
     raw_data(out_commands),
   )
 }
 
-allocate_compute_command_buffer :: proc(
-  gctx: ^GPUContext,
-  out_commands: []vk.CommandBuffer,
-  level: vk.CommandBufferLevel = .PRIMARY,
-) -> vk.Result {
-  vk.AllocateCommandBuffers(
-    gctx.device,
-    &{
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = gctx.compute_command_pool,
-      level = level,
-      commandBufferCount = u32(len(out_commands)),
-    },
-    raw_data(out_commands),
-  ) or_return
-  return .SUCCESS
-}
-
-free_command_buffer :: proc(gctx: ^GPUContext, commands: ..vk.CommandBuffer) {
-  vk.FreeCommandBuffers(
-    gctx.device,
-    gctx.command_pool,
-    u32(len(commands)),
-    raw_data(commands),
-  )
-}
-
-free_compute_command_buffer :: proc(
+// Return command buffers to `pool` (default: the graphics pool).
+free_command_buffer :: proc(
   gctx: ^GPUContext,
   commands: []vk.CommandBuffer,
+  pool: vk.CommandPool = 0,
 ) {
   vk.FreeCommandBuffers(
     gctx.device,
-    gctx.compute_command_pool,
+    pool if pool != 0 else gctx.command_pool,
     u32(len(commands)),
     raw_data(commands),
   )
@@ -541,28 +518,31 @@ buffer_barrier :: proc(
   vk.CmdPipelineBarrier2(command_buffer, &dep)
 }
 
+// Compute pipeline from SPIR-V `code` with entry point "main".
 create_compute_pipeline :: proc(
   gctx: ^GPUContext,
-  shader: vk.ShaderModule,
+  code: []u8,
   layout: vk.PipelineLayout,
-  entry_point: cstring = "main",
+  specialization: ^vk.SpecializationInfo = nil,
 ) -> (
   pipeline: vk.Pipeline,
   ret: vk.Result,
 ) {
+  module := create_shader_module(gctx.device, code) or_return
+  defer vk.DestroyShaderModule(gctx.device, module, nil)
   info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
     stage = {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.COMPUTE},
-      module = shader,
-      pName = entry_point,
+      module = module,
+      pName = "main",
+      pSpecializationInfo = specialization,
     },
     layout = layout,
   }
   vk.CreateComputePipelines(gctx.device, 0, 1, &info, nil, &pipeline) or_return
-  ret = .SUCCESS
-  return
+  return pipeline, .SUCCESS
 }
 
 bind_vertex_index_buffers :: proc(

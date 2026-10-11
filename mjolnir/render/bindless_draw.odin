@@ -1,6 +1,6 @@
-package bindless
+package render
 
-import "../gpu"
+import "gpu"
 import vk "vendor:vulkan"
 
 // Draw pipelines participate in indirect-draw culling; a camera's DrawBuffers
@@ -49,5 +49,28 @@ draw_buffers_destroy :: proc(self: ^DrawBuffers, gctx: ^gpu.GPUContext) {
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
     gpu.defer_destroy_mutable_buffer(gctx, &self.count[frame])
     gpu.defer_destroy_mutable_buffer(gctx, &self.commands[frame])
+  }
+}
+
+// Make a draw list written by a cull compute pass readable as indirect args.
+@(private)
+indirect_barrier :: proc(
+  cmd: vk.CommandBuffer,
+  commands: ^gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  count: ^gpu.MutableBuffer(u32),
+) {
+  for b in ([2]struct {
+      buffer: vk.Buffer,
+      size:   int,
+    }{{commands.buffer, commands.bytes_count}, {count.buffer, count.bytes_count}}) {
+    gpu.buffer_barrier(
+      cmd,
+      b.buffer,
+      vk.DeviceSize(b.size),
+      {.SHADER_WRITE},
+      {.INDIRECT_COMMAND_READ},
+      {.COMPUTE_SHADER},
+      {.DRAW_INDIRECT},
+    )
   }
 }

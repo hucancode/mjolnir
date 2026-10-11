@@ -101,7 +101,6 @@ record_one() {
 
     if ! odin build "$example_dir" -out:"$bin" \
             -define:USE_PARALLEL_UPDATE=false \
-            -define:REQUIRE_GEOMETRY_SHADER=false \
             -define:RENDER_FPS="$fps" \
             -define:FRAME_LIMIT="$frame_limit" \
             > "$build_log" 2>&1; then

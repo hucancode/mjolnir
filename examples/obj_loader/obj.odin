@@ -1,4 +1,4 @@
-package mesh
+package main
 
 import "core:log"
 import "core:os"

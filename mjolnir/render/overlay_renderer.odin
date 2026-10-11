@@ -5,7 +5,6 @@
 //   the window DPI.
 package render
 
-import "bindless"
 import "gpu"
 import "core:log"
 import "core:math/linalg"
@@ -13,11 +12,69 @@ import "core:slice"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
+// ---------- draw2d commands: what a 2D producer (the retained UI) hands in ----------
+
+// texture_id value meaning "untextured"; the renderer substitutes a white texture.
+NO_TEXTURE :: max(u32)
+
+DrawQuadCommand :: struct {
+  position:   [2]f32,
+  size:       [2]f32,
+  color:      [4]u8,
+  texture_id: u32,
+  z_order:    i32,
+}
+
+DrawTextGlyph :: struct {
+  p0:    [2]f32,
+  p1:    [2]f32,
+  uv0:   [2]f32,
+  uv1:   [2]f32,
+  color: [4]u8,
+}
+
+// Glyph uvs index the producer's font atlas, which the renderer owns on the GPU.
+DrawTextCommand :: struct {
+  position: [2]f32,
+  glyphs:   []DrawTextGlyph,
+  z_order:  i32,
+}
+
+Vertex2D :: struct {
+  pos:        [2]f32,
+  uv:         [2]f32,
+  color:      [4]u8,
+  texture_id: u32,
+}
+
+DrawMeshCommand :: struct {
+  position:   [2]f32,
+  vertices:   []Vertex2D,
+  indices:    []u32,
+  texture_id: u32,
+  z_order:    i32,
+}
+
+RenderCommand :: union {
+  DrawQuadCommand,
+  DrawTextCommand,
+  DrawMeshCommand,
+}
+
+// One frame of 2D output. `atlas` holds the producer's R8 font atlas
+// (`atlas_size` texels) only on frames where it changed; otherwise it is empty.
+DrawList :: struct {
+  commands:   []RenderCommand,
+  atlas:      []u8,
+  atlas_size: [2]u32,
+}
+
+// ---------- renderer ----------
+
 @(private)
 UI_MAX_VERTICES :: 65536
 @(private)
 UI_MAX_INDICES :: 98304
-
 
 VERTEX2D_BINDING_DESCRIPTION := vk.VertexInputBindingDescription {
   binding   = 0,
@@ -45,13 +102,17 @@ OverlayRenderer :: struct {
   batches:         [dynamic]DrawBatch,
   // Staged draw2d commands, owned by the caller until the frame is recorded.
   commands:        []RenderCommand,
-  white_texture:   bindless.Texture2DHandle, // drawn for NO_TEXTURE
-  font_atlas:      bindless.Texture2DHandle, // sampled by text commands
+  white_texture:   Texture2DHandle, // drawn for NO_TEXTURE
+  font_atlas:      Texture2DHandle, // sampled by text commands
+  // CPU copy of the font atlas, uploaded by flush when dirty
+  atlas_pixels:    []u8,
+  atlas_extent:    [2]u32,
+  atlas_dirty:     bool,
   debug_ctx:       mu.Context,
   debug_open:      bool, // mu.begin ran this frame; frame closes it
   // Mouse buttons pressed over the debug UI, owned by it through release.
   debug_buttons:   bit_set[0 ..< 32],
-  debug_atlas:     bindless.Texture2DHandle, // microui's builtin atlas
+  debug_atlas:     Texture2DHandle, // microui's builtin atlas
   dpi_scale:       f32,
 }
 
@@ -93,11 +154,11 @@ overlay_init :: proc(
 overlay_setup :: proc(
   self: ^OverlayRenderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^bindless.TextureManager,
+  texture_manager: ^TextureManager,
 ) -> vk.Result {
   log.info("Setting up UI renderer buffers...")
   white_pixel := [4]u8{255, 255, 255, 255}
-  self.white_texture = bindless.allocate_texture_2d_with_data(
+  self.white_texture = allocate_texture_2d_with_data(
     texture_manager,
     gctx,
     raw_data(white_pixel[:]),
@@ -146,47 +207,43 @@ overlay_teardown :: proc(self: ^OverlayRenderer, gctx: ^gpu.GPUContext) {
 overlay_upload_font_atlas :: proc(
   self: ^OverlayRenderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^bindless.TextureManager,
-  pixels: []u8,
-  width, height: u32,
+  texture_manager: ^TextureManager,
 ) -> vk.Result {
   if self.font_atlas != {} {
-    bindless.free_texture_2d(texture_manager, gctx, self.font_atlas)
+    free_texture_2d(texture_manager, gctx, self.font_atlas)
     self.font_atlas = {}
   }
   self.font_atlas = allocate_alpha_texture(
     texture_manager,
     gctx,
-    pixels,
-    width,
-    height,
+    self.atlas_pixels,
+    self.atlas_extent[0],
+    self.atlas_extent[1],
   ) or_return
   return .SUCCESS
 }
 
-// Upload R8 coverage as white RGBA8 with alpha = coverage, so the shader
-// multiplies every texture sample with the vertex color.
+// Upload R8 coverage that samples as white with alpha = coverage, so the
+// shader multiplies every texture sample with the vertex color.
 @(private)
 allocate_alpha_texture :: proc(
-  texture_manager: ^bindless.TextureManager,
+  texture_manager: ^TextureManager,
   gctx: ^gpu.GPUContext,
   pixels: []u8,
   width, height: u32,
 ) -> (
-  bindless.Texture2DHandle,
+  Texture2DHandle,
   vk.Result,
 ) {
-  rgba := make([][4]u8, len(pixels))
-  defer delete(rgba)
-  for a, i in pixels do rgba[i] = {255, 255, 255, a}
-  return bindless.allocate_texture_2d_with_data(
+  return allocate_texture_2d_with_data(
     texture_manager,
     gctx,
-    raw_data(rgba),
-    vk.DeviceSize(len(rgba) * size_of([4]u8)),
+    raw_data(pixels),
+    vk.DeviceSize(len(pixels)),
     vk.Extent2D{width, height},
-    .R8G8B8A8_UNORM,
+    .R8_UNORM,
     {.SAMPLED},
+    swizzle = {r = .ONE, g = .ONE, b = .ONE, a = .R},
   )
 }
 
@@ -198,19 +255,15 @@ create_pipeline :: proc(
 ) -> vk.Result {
   vert_code := #load("shader/ui/vert.spv")
   frag_code := #load("shader/ui/frag.spv")
-  vert_module := gpu.create_shader_module(gctx.device, vert_code) or_return
-  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-  frag_module := gpu.create_shader_module(gctx.device, frag_code) or_return
-  defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   bindings := [?]vk.VertexInputBindingDescription{VERTEX2D_BINDING_DESCRIPTION}
   color_formats := [?]vk.Format{format}
-  blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ADDITIVE}
+  blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ALPHA}
   self.pipeline = gpu.create_graphics_pipeline(
     gctx,
     {
-      vert = vert_module,
-      frag = frag_module,
-      specialization = &bindless.SHADER_SPEC_CONSTANTS,
+      vert = vert_code,
+      frag = frag_code,
+      specialization = &SHADER_SPEC_CONSTANTS,
       vertex_bindings = bindings[:],
       vertex_attributes = VERTEX2D_ATTRIBUTE_DESCRIPTIONS[:],
       topology = .TRIANGLE_LIST,
@@ -228,6 +281,7 @@ overlay_shutdown :: proc(self: ^OverlayRenderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   delete(self.batches)
+  delete(self.atlas_pixels)
 }
 
 // Record the overlay into `color_view` inside its own rendering scope. Draws
@@ -235,7 +289,7 @@ overlay_shutdown :: proc(self: ^OverlayRenderer, gctx: ^gpu.GPUContext) {
 // when `draw_debug` is set.
 overlay_record :: proc(
   self: ^OverlayRenderer,
-  texture_manager: ^bindless.TextureManager,
+  texture_manager: ^TextureManager,
   command_buffer: vk.CommandBuffer,
   color_view: vk.ImageView,
   extent: vk.Extent2D,

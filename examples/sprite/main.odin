@@ -24,7 +24,7 @@ App :: struct {
   input:    input.State,
 }
 
-sprites: [Mode]render.SpriteHandle
+sprites: [Mode]render.MaterialHandle
 elapsed: f32
 
 main :: proc() {
@@ -61,17 +61,11 @@ setup :: proc(app: ^App) {
 
   xs := [Mode]f32{.LOOP = -3.0, .PINGPONG = 0.0, .ONCE = 3.0}
   for x, mode in xs {
-    mat := render.create_material(&app.renderer, features = {.ALBEDO_TEXTURE}, type = .TRANSPARENT, albedo_handle = tex) or_continue
-    sprite := render.create_sprite(&app.renderer, tex, 6, 17) or_continue
-    node, ok := world.spawn(&app.scene, {x, 1.5, 0})
-    if !ok {
-      render.destroy_sprite(&app.renderer, sprite)
-      continue
-    }
-    render.attach(&app.renderer, node.index, render.SpriteAttachment {
-      sprite_handle = sprite,
-      mesh_handle   = app.renderer.builtin_meshes[.QUAD_XY],
-      material      = mat,
+    sprite := render.material_sprite(&app.renderer, tex, 6, 17) or_continue
+    node := world.spawn(&app.scene, {x, 1.5, 0}) or_continue
+    render.attach(&app.renderer, node.index, render.MeshAttachment {
+      handle   = app.renderer.builtin_meshes[.QUAD_XY],
+      material = sprite,
     })
     sprites[mode] = sprite
     world.scale(&app.scene, node, 2.5)

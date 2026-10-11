@@ -47,7 +47,7 @@ App :: struct {
   renderer: render.Manager,
   camera:   render.CameraController,
   input:    input.State,
-  gui:      render.System,
+  gui:      render.UISystem,
 }
 
 main :: proc() {

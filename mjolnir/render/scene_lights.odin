@@ -1,70 +1,116 @@
 package render
 
-import "bindless"
 import "gpu"
 import "core:log"
+import ba "core:container/bit_array"
 import "core:slice"
-import "direct_light"
-import "shadow"
 import vk "vendor:vulkan"
 
-// Shadow resources of one slot. Each frame the first MAX_SHADOW_MAPS shadow
-// casters, in slot order, take slots 0, 1, ... Draw buffers and descriptor
-// sets are created on first use and live until shutdown. Textures are
-// level-lifetime: a cube map for a point light, a 2D map otherwise,
-// reallocated when the slot changes to a light of the other kind.
+// Shadow resources of one shadow map. A shadow-casting light keeps the map it
+// was given for as long as it casts; new casters, in slot order, take a free
+// map of their kind first, so maps rarely change kind. Draw buffers and
+// descriptor sets are created on first use and live until shutdown. Textures
+// are level-lifetime: a cube map for a point light, a 2D map otherwise,
+// reallocated when the map goes to a light of the other kind.
 @(private)
 ShadowMap :: struct {
+  // light slot + 1 of the light using this map; 0 when free
+  owner:           u32,
   cube:            bool,
   textures:        [gpu.FRAMES_IN_FLIGHT]Handle,
-  draws:           bindless.DrawBuffers,
+  draws:           DrawBuffers,
   descriptor_sets: [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
 // One light as the shadow depth and lighting passes consume it this frame.
 @(private)
 FrameLight :: struct {
-  type:       direct_light.LightType,
-  params:     direct_light.Light,
+  type:       LightType,
+  params:     DirectLight,
   shadow_map: ^ShadowMap, // nil when the light casts no shadow
-  info:       shadow.ShadowFrameInfo,
+  info:       ShadowFrameInfo,
 }
 
 @(private)
 destroy_light_state :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   for &sm in self.internal.shadow_maps {
-    bindless.draw_buffers_destroy(&sm.draws, gctx)
+    draw_buffers_destroy(&sm.draws, gctx)
     gpu.free_descriptor_sets(gctx, ..sm.descriptor_sets[:])
   }
-  delete(self.internal.light_slots)
   delete(self.internal.frame_lights)
 }
 
-// Rebuild frame_lights from the light slots: lights sorted by slot and
-// truncated to MAX_LIGHTS, with shadow matrices derived once so both passes
-// see the same lights in the same order. Caller holds the staging mutex.
+// A shadow-casting light this frame.
+@(private = "file")
+Caster :: struct {
+  light: int, // index into frame_lights
+  owner: u32, // light slot + 1, as in ShadowMap.owner
+}
+
+// Rebuild frame_lights from the light slots: lights in slot order, truncated
+// to MAX_LIGHTS, with shadow matrices derived once so both passes see the same
+// lights in the same order. Caller holds the staging mutex.
 @(private)
 collect_lights :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  slots := make([dynamic]u32, 0, len(self.internal.light_slots), context.temp_allocator)
-  for slot in self.internal.light_slots do append(&slots, slot)
-  slice.sort(slots[:])
   clear(&self.internal.frame_lights)
-  shadow_count := 0
-  for slot in slots {
+  casters: [MAX_LIGHTS]Caster
+  caster_count := 0
+  it := ba.make_iterator(&self.internal.staging.lights)
+  for slot in ba.iterate_by_set(&it) {
     if len(self.internal.frame_lights) == MAX_LIGHTS do break
     inst := &self.instances[slot]
     fl, cast_shadow := frame_light(inst.attachment, inst.world_matrix) or_continue
-    if cast_shadow && shadow_count < MAX_SHADOW_MAPS {
-      sm := &self.internal.shadow_maps[shadow_count]
-      if res := ensure_shadow_map(self, gctx, sm, fl.type == .POINT); res == .SUCCESS {
-        fl.shadow_map = sm
-        shadow_count += 1
-      } else {
-        log.warnf("Failed to allocate a shadow map for light %d: %v", slot, res)
-      }
+    if cast_shadow {
+      casters[caster_count] = {len(self.internal.frame_lights), u32(slot) + 1}
+      caster_count += 1
     }
     append(&self.internal.frame_lights, fl)
   }
+  maps := &self.internal.shadow_maps
+  claimed: [MAX_SHADOW_MAPS]bool
+  // Casters keep the map they had; the rest wait for a free one.
+  waiting: [MAX_LIGHTS]Caster
+  waiting_count := 0
+  for c in casters[:caster_count] {
+    found := false
+    for &sm, m in maps do if sm.owner == c.owner {
+      claimed[m] = true
+      found = true
+      give_shadow_map(self, gctx, m, c)
+      break
+    }
+    if !found {
+      waiting[waiting_count] = c
+      waiting_count += 1
+    }
+  }
+  for &sm, m in maps do if !claimed[m] do sm.owner = 0
+  // A free map of the caster's kind avoids reallocating its textures.
+  for c in waiting[:waiting_count] {
+    cube := self.internal.frame_lights[c.light].type == .POINT
+    best := -1
+    for sm, m in maps {
+      if claimed[m] do continue
+      if best < 0 || (sm.cube == cube && maps[best].cube != cube) do best = m
+    }
+    if best < 0 do break
+    claimed[best] = true
+    maps[best].owner = c.owner
+    give_shadow_map(self, gctx, best, c)
+  }
+}
+
+// Point a caster's frame light at shadow map `m`, giving the map the
+// caster's kind.
+@(private = "file")
+give_shadow_map :: proc(self: ^Manager, gctx: ^gpu.GPUContext, m: int, c: Caster) {
+  fl := &self.internal.frame_lights[c.light]
+  sm := &self.internal.shadow_maps[m]
+  if res := ensure_shadow_map(self, gctx, sm, fl.type == .POINT); res != .SUCCESS {
+    log.warnf("Failed to allocate a shadow map for light %d: %v", c.owner - 1, res)
+    return
+  }
+  fl.shadow_map = sm
 }
 
 // The light at a slot placed at `world_matrix`. ok=false when the attachment
@@ -79,13 +125,13 @@ frame_light :: proc(
   ok: bool,
 ) {
   position := world_matrix[3].xyz
-  direction := shadow.safe_normalize(world_matrix[2].xyz, {0, -1, 0})
+  direction := shadow_safe_normalize(world_matrix[2].xyz, {0, -1, 0})
   #partial switch att in a {
   case PointLightAttachment:
     if att.disabled do return
     fl.type = .POINT
     fl.params = {color = att.color, position = position, radius = att.radius}
-    projection, near, far := shadow.projection_point(att.radius)
+    projection, near, far := shadow_projection_point(att.radius)
     fl.info = {{}, projection, near, far}
     cast_shadow = att.cast_shadow
   case SpotLightAttachment:
@@ -99,7 +145,7 @@ frame_light :: proc(
       angle_inner = att.angle_inner,
       angle_outer = att.angle_outer,
     }
-    view, projection, near, far := shadow.matrices_spot(
+    view, projection, near, far := shadow_matrices_spot(
       position,
       direction,
       att.radius,
@@ -111,7 +157,7 @@ frame_light :: proc(
     if att.disabled do return
     fl.type = .DIRECTIONAL
     fl.params = {color = att.color, direction = direction}
-    view, projection, near, far := shadow.matrices_directional(
+    view, projection, near, far := shadow_matrices_directional(
       position,
       direction,
       att.radius,
@@ -137,16 +183,16 @@ ensure_shadow_map :: proc(
 ) {
   if sm.descriptor_sets[0] == 0 {
     defer if ret != .SUCCESS {
-      bindless.draw_buffers_destroy(&sm.draws, gctx)
+      draw_buffers_destroy(&sm.draws, gctx)
       gpu.free_descriptor_sets(gctx, ..sm.descriptor_sets[:])
       sm.descriptor_sets = {}
     }
-    bindless.draw_buffers_init(&sm.draws, gctx, MAX_NODES_IN_SCENE) or_return
+    draw_buffers_init(&sm.draws, gctx, MAX_NODES_IN_SCENE) or_return
     for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-      sm.descriptor_sets[frame] = shadow.create_per_light_descriptor(
+      sm.descriptor_sets[frame] = shadow_create_per_light_descriptor(
         &self.internal.shadow,
         gctx,
-        gpu.buffer_info(&self.internal.node_data_buffer.buffer),
+        gpu.buffer_info(&self.internal.node_data_buffer.buffers[frame]),
         gpu.buffer_info(&self.internal.mesh_data_buffer.buffer),
         gpu.buffer_info(&sm.draws.count[frame]),
         gpu.buffer_info(&sm.draws.commands[frame]),
@@ -157,9 +203,9 @@ ensure_shadow_map :: proc(
   for &texture in sm.textures {
     if texture == {} do continue
     if sm.cube {
-      bindless.free_texture_cube(&self.texture_manager, gctx, texture)
+      free_texture_cube(&self.texture_manager, gctx, texture)
     } else {
-      bindless.free_texture_2d(&self.texture_manager, gctx, texture)
+      free_texture_2d(&self.texture_manager, gctx, texture)
     }
     texture = {}
   }
@@ -167,7 +213,7 @@ ensure_shadow_map :: proc(
   for &texture in sm.textures {
     if cube {
       texture = Handle(
-        bindless.allocate_texture_cube(
+        allocate_texture_cube(
           &self.texture_manager,
           gctx,
           SHADOW_MAP_SIZE,
@@ -177,7 +223,7 @@ ensure_shadow_map :: proc(
       )
     } else {
       texture = Handle(
-        bindless.allocate_texture_2d(
+        allocate_texture_2d(
           &self.texture_manager,
           gctx,
           vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},

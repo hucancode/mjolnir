@@ -14,6 +14,7 @@ struct Camera {
     float far;
     vec4 position;
     vec4 frustum_planes[6];
+    mat4 inv_view_projection;
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
@@ -97,7 +98,7 @@ void main() {
             skin.weights.w * bones[indices.w];
         modelPosition = skinMatrix * vec4(inPosition, 1.0);
         modelNormal = mat3(skinMatrix) * inNormal;
-        modelTangent = skinMatrix * inTangent;
+        modelTangent = vec4(mat3(skinMatrix) * inTangent.xyz, inTangent.w);
     } else {
         modelPosition = vec4(inPosition, 1.0);
         modelNormal = inNormal;
@@ -105,7 +106,7 @@ void main() {
     }
     vec4 worldPosition = world * modelPosition;
     outNormal = normalize(mat3(world) * modelNormal);
-    outTangent = normalize(world * modelTangent);
+    outTangent = vec4(normalize(mat3(world) * modelTangent.xyz), modelTangent.w);
     outUV = inUV;
     outColor = inColor;
     outPosition = worldPosition.xyz;

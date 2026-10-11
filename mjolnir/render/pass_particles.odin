@@ -1,17 +1,16 @@
-package particles
+#+private
+package render
 
-import "../bindless"
-import "../gpu"
+import "gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
-SHADER_PARTICLE_VERT := #load("../shader/particle/vert.spv")
-SHADER_PARTICLE_FRAG := #load("../shader/particle/frag.spv")
+SHADER_PARTICLE_VERT := #load("shader/particle/vert.spv")
+SHADER_PARTICLE_FRAG := #load("shader/particle/frag.spv")
 
-@(private)
-create_render_pipeline :: proc(
+particles_create_render_pipeline :: proc(
 	gctx: ^gpu.GPUContext,
-	self: ^Renderer,
+	self: ^ParticlesRenderer,
 	camera_set_layout: vk.DescriptorSetLayout,
 	textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
@@ -24,18 +23,14 @@ create_render_pipeline :: proc(
 		textures_set_layout,
 		self.descriptor_set_layout,
 	) or_return
-	vert_module := gpu.create_shader_module(gctx.device, SHADER_PARTICLE_VERT) or_return
-	defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-	frag_module := gpu.create_shader_module(gctx.device, SHADER_PARTICLE_FRAG) or_return
-	defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
 	color_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
-	blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ADDITIVE}
+	blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ALPHA}
 	self.render_pipeline = gpu.create_graphics_pipeline(
 		gctx,
 		{
-			vert = vert_module,
-			frag = frag_module,
-			specialization = &bindless.SHADER_SPEC_CONSTANTS,
+			vert = SHADER_PARTICLE_VERT,
+			frag = SHADER_PARTICLE_FRAG,
+			specialization = &SHADER_SPEC_CONSTANTS,
 			topology = .POINT_LIST,
 			raster = gpu.DOUBLE_SIDED_RASTERIZER,
 			depth = gpu.READ_ONLY_DEPTH_STATE,
@@ -48,36 +43,26 @@ create_render_pipeline :: proc(
 	return .SUCCESS
 }
 
-// record draws particles into the camera's color/depth attachments. Owns its
+// particles_record draws particles into the camera's color/depth attachments. Owns its
 // own begin_rendering / end_rendering scope.
-record :: proc(
-	self: ^Renderer,
-	command_buffer: vk.CommandBuffer,
-	camera_index: u32,
-	color_handle: bindless.Texture2DHandle,
-	depth_handle: bindless.Texture2DHandle,
-	texture_manager: ^bindless.TextureManager,
-	cameras_descriptor_set: vk.DescriptorSet,
-	textures_descriptor_set: vk.DescriptorSet,
-) {
-	color_texture := bindless.get_texture_2d(texture_manager, color_handle)
-	if color_texture == nil {
-		log.error("Particle renderer missing color attachment")
-		return
-	}
-	depth_texture := bindless.get_texture_2d(texture_manager, depth_handle)
-	if depth_texture == nil {
-		log.error("Particle renderer missing depth attachment")
+particles_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Camera) {
+	self := &r.internal.particles
+	command_buffer := r.internal.command_buffers[frame_index]
+	color_texture := camera_image(r, cam, .FINAL_IMAGE, frame_index)
+	depth_texture := camera_image(r, cam, .DEPTH, frame_index)
+	if color_texture == nil || depth_texture == nil {
+		log.error("Particle renderer missing camera attachments")
 		return
 	}
 	// Without async compute the simulation shares this queue: it wrote the
-	// particles drawn here at the end of the previous frame.
+	// particles drawn here at the end of the previous frame. The lighting pass
+	// wrote the color image just before.
 	gpu.memory_barrier(
 		command_buffer,
-		{.SHADER_WRITE},
-		{.SHADER_READ},
-		{.COMPUTE_SHADER},
-		{.VERTEX_SHADER},
+		{.SHADER_WRITE, .COLOR_ATTACHMENT_WRITE},
+		{.SHADER_READ, .COLOR_ATTACHMENT_READ, .COLOR_ATTACHMENT_WRITE},
+		{.COMPUTE_SHADER, .COLOR_ATTACHMENT_OUTPUT},
+		{.VERTEX_SHADER, .COLOR_ATTACHMENT_OUTPUT},
 	)
 	gpu.begin_rendering(
 		command_buffer,
@@ -95,11 +80,11 @@ record :: proc(
 		.GRAPHICS,
 		self.render_pipeline,
 		self.render_pipeline_layout,
-		cameras_descriptor_set,
-		textures_descriptor_set,
+		r.internal.camera_buffer.descriptor_sets[frame_index],
+		r.texture_manager.descriptor_set,
 		self.descriptor_set,
 	)
-	camera_idx := camera_index
+	camera_idx := cam_index
 	vk.CmdPushConstants(
 		command_buffer,
 		self.render_pipeline_layout,

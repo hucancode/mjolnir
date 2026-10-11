@@ -57,7 +57,6 @@ odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 | `UPDATE_FPS` | `RENDER_FPS` | Target update cadence. |
 | `USE_PARALLEL_UPDATE` | false | Run `update` on a dedicated thread. |
 | `FRAME_LIMIT` | 0 | Cap total frames (0 = unlimited). |
-| `REQUIRE_GEOMETRY_SHADER` | false | Required for cubemap point-light shadows. |
 
 ## Debugging tips
 

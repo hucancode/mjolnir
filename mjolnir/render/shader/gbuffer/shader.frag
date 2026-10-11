@@ -23,6 +23,10 @@ struct MaterialData {
     float emissive_value;
     uint features;
     vec4 base_color_factor;
+    uint frame_columns;
+    uint frame_rows;
+    uint frame_index;
+    uint _pad0;
 };
 
 // textures and samplers set = 1
@@ -57,11 +61,10 @@ layout(location = 3) in vec2 uv;
 layout(location = 4) in vec4 tangent;
 layout(location = 5) flat in uint node_index;
 
-layout(location = 0) out vec4 outPosition;
-layout(location = 1) out vec4 outNormal;
-layout(location = 2) out vec4 outAlbedo;
-layout(location = 3) out vec4 outMetallicRoughness;
-layout(location = 4) out vec4 outEmissive;
+layout(location = 0) out vec4 outNormal;
+layout(location = 1) out vec4 outAlbedo;
+layout(location = 2) out vec4 outMetallicRoughness;
+layout(location = 3) out vec4 outEmissive;
 
 void main() {
     NodeData node = nodes[node_index];
@@ -71,7 +74,6 @@ void main() {
     bool has_mr = (material.features & FEATURE_METALLIC_ROUGHNESS_TEXTURE) != 0u;
     bool has_emissive = (material.features & FEATURE_EMISSIVE_TEXTURE) != 0u;
 
-    outPosition = vec4(position, 1.0);
     vec3 N = normalize(normal);
     if (has_normal) {
         vec2 n_xy = texture(
@@ -93,7 +95,7 @@ void main() {
         albedo = texture(
             sampler2D(textures[nonuniformEXT(material.albedo_index)], samplers[SAMPLER_LINEAR_REPEAT]),
             uv
-        );
+        ) * material.base_color_factor;
     } else {
         albedo = color * material.base_color_factor;
     }
@@ -109,8 +111,8 @@ void main() {
             ),
             uv
         );
-        metallic = mr.b;
-        roughness = mr.g;
+        metallic = mr.b * material.metallic_value;
+        roughness = mr.g * material.roughness_value;
     } else {
         metallic = material.metallic_value;
         roughness = material.roughness_value;
@@ -122,7 +124,7 @@ void main() {
         emissive = texture(
             sampler2D(textures[nonuniformEXT(material.emissive_index)], samplers[SAMPLER_LINEAR_REPEAT]),
             uv
-        ).rgb;
+        ).rgb * material.emissive_value;
     } else {
         emissive = vec3(material.emissive_value);
     }

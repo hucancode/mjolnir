@@ -16,29 +16,23 @@ layout(set = 0, binding = 1) uniform sampler samplers[];
 layout(set = 0, binding = 2) uniform textureCube textures_cube[];
 
 layout(push_constant) uniform PostProcessPushConstant {
-    uint position_texture_index;
+    float camera_near;
+    float camera_far;
     uint normal_texture_index;
-    uint albedo_texture_index;
-    uint metallic_texture_index;
-    uint emissive_texture_index;
     uint depth_texture_index;
     uint input_image_index;
-    uint _pad;
+    uint _pad0;
+    uint _pad1;
+    uint _pad2;
     vec3 fog_color;
     float fog_density;
     float fog_start;
     float fog_end;
 };
 
-// Camera parameters - these should match camera setup
-// TODO: move those to uniform buffer
-const float near_plane = 0.1;
-const float far_plane = 50.0;
-
+// Distance along the view axis from a [0, 1] perspective depth value.
 float linearize_depth(float depth) {
-    // Converts depth from [0,1] to [near, far]
-    float z = depth * 2.0 - 1.0;
-    return (2.0 * near_plane * far_plane) / (far_plane + near_plane - z * (far_plane - near_plane));
+    return camera_near * camera_far / (camera_far - depth * (camera_far - camera_near));
 }
 
 float compute_fog_factor(float distance) {

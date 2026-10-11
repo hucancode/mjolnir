@@ -1,13 +1,11 @@
 package render
 
-import "bindless"
-import cont "../containers"
 import geom "../geometry"
+import cont "../containers"
 import "gpu"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "occlusion_culling"
 import vk "vendor:vulkan"
 
 // ---------- pose + projection (CPU) ----------
@@ -28,13 +26,13 @@ camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
     return geom.make_perspective_matrix(
       proj.fov,
       proj.aspect_ratio,
-      proj.near,
-      proj.far,
+      camera.near,
+      camera.far,
     )
   case OrthographicProjection:
     hw := proj.width / 2
     hh := proj.height / 2
-    return geom.make_ortho_matrix(-hw, hw, -hh, hh, proj.near, proj.far)
+    return geom.make_ortho_matrix(-hw, hw, -hh, hh, camera.near, camera.far)
   }
   return linalg.MATRIX4F32_IDENTITY
 }
@@ -52,17 +50,6 @@ camera_right :: proc(self: ^Camera) -> [3]f32 {
 @(private)
 camera_up :: proc(self: ^Camera) -> [3]f32 {
   return geom.qy(self.rotation)
-}
-
-@(private)
-camera_get_near_far :: proc(self: ^Camera) -> (near: f32, far: f32) {
-  switch proj in self.projection {
-  case PerspectiveProjection:
-    return proj.near, proj.far
-  case OrthographicProjection:
-    return proj.near, proj.far
-  }
-  return 0.1, 50.0
 }
 
 // `up` is the desired world-up reference. Pass {0,0,0} (default) to auto-pick
@@ -108,9 +95,9 @@ camera_set_perspective :: proc(
   self.projection = PerspectiveProjection {
     fov          = fov,
     aspect_ratio = f32(self.extent[0]) / f32(max(self.extent[1], 1)),
-    near         = near,
-    far          = far,
   }
+  self.near = near
+  self.far = far
 }
 
 camera_set_orthographic :: proc(
@@ -122,9 +109,9 @@ camera_set_orthographic :: proc(
   self.projection = OrthographicProjection {
     width  = width,
     height = height,
-    near   = near,
-    far    = far,
   }
+  self.near = near
+  self.far = far
 }
 
 // World-space ray through a viewport pixel (framebuffer pixels, origin top-left).
@@ -212,7 +199,7 @@ camera_attachment :: proc(
   attachment_type: AttachmentType,
   frame_index: Maybe(u32) = nil,
 ) -> (
-  texture: bindless.Texture2DHandle,
+  texture: Texture2DHandle,
   ok: bool,
 ) #optional_ok {
   cam := cont.get(self.cameras, handle) or_return
@@ -269,14 +256,13 @@ create_targets :: proc(
     format: vk.Format,
   }
   gbuffer := [?]Target {
-    {.POSITION, .R32G32B32A32_SFLOAT},
     {.NORMAL, .R8G8B8A8_UNORM},
     {.ALBEDO, .R8G8B8A8_UNORM},
     {.METALLIC_ROUGHNESS, .R8G8B8A8_UNORM},
-    {.EMISSIVE, .R8G8B8A8_UNORM},
+    {.EMISSIVE, .R16G16B16A16_SFLOAT},
   }
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    camera.attachments[.FINAL_IMAGE][frame] = bindless.allocate_texture_2d(
+    camera.attachments[.FINAL_IMAGE][frame] = allocate_texture_2d(
       texture_manager,
       gctx,
       extent,
@@ -284,7 +270,7 @@ create_targets :: proc(
       {.COLOR_ATTACHMENT, .SAMPLED},
     ) or_return
     for t in gbuffer {
-      camera.attachments[t.type][frame] = bindless.allocate_texture_2d(
+      camera.attachments[t.type][frame] = allocate_texture_2d(
         texture_manager,
         gctx,
         extent,
@@ -292,37 +278,37 @@ create_targets :: proc(
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
     }
-    camera.attachments[.DEPTH][frame] = bindless.allocate_texture_2d(
+    camera.attachments[.DEPTH][frame] = allocate_texture_2d(
       texture_manager,
       gctx,
       extent,
       .D32_SFLOAT,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
-    // Move fresh depth image out of UNDEFINED so first-frame sampling is valid
-    if depth := bindless.get_texture_2d(
-      texture_manager,
-      camera.attachments[.DEPTH][frame],
-    ); depth != nil {
-      cmd_buf := gpu.begin_single_time_command(gctx) or_return
-      gpu.image_discard_barrier(
-        cmd_buf,
-        depth.image,
-        {.DEPTH_STENCIL_ATTACHMENT_READ},
-        {.EARLY_FRAGMENT_TESTS},
-        {.DEPTH},
-      )
-      gpu.end_single_time_command(gctx, &cmd_buf) or_return
-    }
   }
-  bindless.draw_buffers_init(
+  // Move the fresh depth images out of UNDEFINED so first-frame sampling is
+  // valid.
+  cmd_buf := gpu.begin_single_time_command(gctx) or_return
+  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
+    depth := get_texture_2d(texture_manager, camera.attachments[.DEPTH][frame])
+    if depth == nil do continue
+    gpu.image_discard_barrier(
+      cmd_buf,
+      depth.image,
+      {.DEPTH_STENCIL_ATTACHMENT_READ},
+      {.EARLY_FRAGMENT_TESTS},
+      {.DEPTH},
+    )
+  }
+  gpu.end_single_time_command(gctx, &cmd_buf) or_return
+  draw_buffers_init(
     &camera.draws,
     gctx,
     MAX_NODES_IN_SCENE,
-    len(bindless.DrawPipeline),
+    len(DrawPipeline),
   ) or_return
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    occlusion_culling.setup_pyramid(
+    occlusion_setup_pyramid(
       gctx,
       &camera.depth_pyramid[frame],
       texture_manager,
@@ -343,19 +329,19 @@ destroy_targets :: proc(
     for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
       handle := camera.attachments[attachment_type][frame]
       if handle.index == 0 do continue
-      bindless.free_texture_2d(&self.texture_manager, gctx, handle)
+      free_texture_2d(&self.texture_manager, gctx, handle)
     }
   }
   camera.attachments = {}
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    occlusion_culling.destroy_pyramid(
+    occlusion_destroy_pyramid(
       gctx,
       &camera.depth_pyramid[frame],
       &self.texture_manager,
     )
   }
   camera.depth_pyramid = {}
-  bindless.draw_buffers_destroy(&camera.draws, gctx)
+  draw_buffers_destroy(&camera.draws, gctx)
   camera.draws = {}
   gpu.free_descriptor_sets(gctx, ..camera.descriptor_set[:])
   for &sets in camera.depth_reduce_descriptor_sets {
@@ -381,20 +367,25 @@ allocate_descriptors :: proc(
     prev_frame_index := (frame_index + gpu.FRAMES_IN_FLIGHT - 1) % gpu.FRAMES_IN_FLIGHT
     pyramid := &camera.depth_pyramid[frame_index]
     prev_pyramid := &camera.depth_pyramid[prev_frame_index]
-    prev_depth := bindless.get_texture_2d(
+    prev_depth := get_texture_2d(
       texture_manager,
       camera.attachments[.DEPTH][prev_frame_index],
     )
-    pyramid_image := bindless.get_texture_2d(texture_manager, pyramid.texture)
-    prev_pyramid_image := bindless.get_texture_2d(texture_manager, prev_pyramid.texture)
-    writes: [occlusion_culling.BINDING_COUNT]struct {
+    pyramid_image := get_texture_2d(texture_manager, pyramid.texture)
+    prev_pyramid_image := get_texture_2d(texture_manager, prev_pyramid.texture)
+    writes: [BINDING_COUNT]struct {
       type: vk.DescriptorType,
       info: union {
         vk.DescriptorBufferInfo,
         vk.DescriptorImageInfo,
       },
     }
-    writes[0] = {.STORAGE_BUFFER, gpu.buffer_info(&node_data_buffer.buffer)}
+    // set[k] is bound while recording frame k-1, which flushed node data
+    // into the previous frame's copy
+    writes[0] = {
+      .STORAGE_BUFFER,
+      gpu.buffer_info(&node_data_buffer.buffers[prev_frame_index]),
+    }
     writes[1] = {.STORAGE_BUFFER, gpu.buffer_info(&mesh_data_buffer.buffer)}
     writes[2] = {
       .STORAGE_BUFFER,

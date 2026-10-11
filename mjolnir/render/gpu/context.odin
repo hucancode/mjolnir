@@ -61,8 +61,6 @@ FoundQueueFamilyIndices :: struct {
   compute_family:  u32,
 }
 
-REQUIRE_GEOMETRY_SHADER :: #config(REQUIRE_GEOMETRY_SHADER, ODIN_OS != .Darwin)
-
 GPUContext :: struct {
   instance:             vk.Instance,
   device:               vk.Device,
@@ -80,6 +78,7 @@ GPUContext :: struct {
   compute_command_pool: vk.CommandPool,
   device_properties:    vk.PhysicalDeviceProperties,
   trash:                DeferredTrash, // loose vk resources awaiting deferred destruction
+  uploads:              [dynamic]PendingCopy, // buffer copies for the next frame
 }
 
 // Compute work is recorded and submitted separately only when the device has
@@ -276,17 +275,9 @@ score_physical_device :: proc(
   res: vk.Result,
 ) {
   props: vk.PhysicalDeviceProperties
-  features: vk.PhysicalDeviceFeatures
   vk.GetPhysicalDeviceProperties(device, &props)
-  vk.GetPhysicalDeviceFeatures(device, &features)
   device_name_cstring := cstring(&props.deviceName[0])
   log.infof("Scoring device %s", device_name_cstring)
-  when REQUIRE_GEOMETRY_SHADER {
-    if !features.geometryShader {
-      log.infof("Device %s: no geometry shader.", device_name_cstring)
-      return 0, .SUCCESS
-    }
-  }
   ext_count: u32
   vk.EnumerateDeviceExtensionProperties(device, nil, &ext_count, nil) or_return
   available_extensions := make(
@@ -487,7 +478,6 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   basic_features := vk.PhysicalDeviceFeatures {
     multiDrawIndirect         = true, // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
     drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
-    geometryShader            = REQUIRE_GEOMETRY_SHADER,
     fillModeNonSolid          = true, // Required for VK_POLYGON_MODE_LINE wireframe rendering
     wideLines                 = true, // Required for lineWidth > 1.0
   }

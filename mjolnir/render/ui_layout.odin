@@ -3,7 +3,7 @@ package render
 
 import cont "../containers"
 
-compute_layout :: proc(sys: ^System, root: UIWidgetHandle) {
+compute_layout :: proc(sys: ^UISystem, root: UIWidgetHandle) {
   widget := get_widget(sys, root)
   if widget == nil do return
 
@@ -33,7 +33,7 @@ compute_layout :: proc(sys: ^System, root: UIWidgetHandle) {
 }
 
 // Lay out every root widget (one without a parent) and its subtree.
-compute_layout_all :: proc(sys: ^System) {
+compute_layout_all :: proc(sys: ^UISystem) {
   it := cont.iterator(&sys.widget_pool)
   for widget, handle in cont.next(&it, UIWidgetHandle) {
     if _, has_parent := get_widget_base(widget).parent.?; !has_parent {

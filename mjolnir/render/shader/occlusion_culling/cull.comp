@@ -21,6 +21,7 @@ struct Camera {
     float far;
     vec4 position;
     vec4 frustum_planes[6];
+    mat4 inv_view_projection;
 };
 
 struct NodeData {
@@ -172,7 +173,7 @@ void main() {
     if (node_id >= params.node_count) return;
 
     NodeData node = nodes[node_id];
-    if (node.mesh_id == INVALID_ID) {
+    if (node.mesh_id == INVALID_ID || (node.flags & NODE_FLAG_VISIBLE) == 0u) {
         return;
     }
 

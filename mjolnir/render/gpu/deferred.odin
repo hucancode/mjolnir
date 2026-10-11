@@ -8,9 +8,9 @@ import vk "vendor:vulkan"
 // the raw handles with a ready frame; deferred_tick() destroys them once enough
 // frames have been presented that no in-flight frame can reference them.
 //
-// Pool-managed images (texture_manager) handle their own deferral via the pool's
-// retirement grace. This queue is for loose resources with no owning pool — e.g.
-// the per-frame shadow draw buffers freed when a light despawns.
+// Pool-managed resources (textures, meshes) defer through their pool's
+// retirement grace instead. This queue is for loose resources with no owning
+// pool, e.g. a camera's or shadow slot's draw buffers.
 
 @(private)
 TrashItem :: struct {
@@ -24,7 +24,7 @@ DeferredTrash :: struct {
   frame: u64,
 }
 
-@(private = "file")
+@(private)
 enqueue :: proc(gctx: ^GPUContext, buffer: vk.Buffer, memory: vk.DeviceMemory) {
   append(&gctx.trash.items, TrashItem{gctx.trash.frame + FRAMES_IN_FLIGHT, buffer, memory})
 }
@@ -68,6 +68,7 @@ deferred_tick :: proc(gctx: ^GPUContext) {
 // deferred_flush destroys every queued resource now, ignoring grace. Use only
 // after vkDeviceWaitIdle (teardown/shutdown), where no frame is in flight.
 deferred_flush :: proc(gctx: ^GPUContext) {
+  discard_uploads(gctx)
   for item in gctx.trash.items {
     destroy_item(gctx.device, item)
   }
@@ -78,4 +79,6 @@ deferred_flush :: proc(gctx: ^GPUContext) {
 deferred_destroy :: proc(gctx: ^GPUContext) {
   delete(gctx.trash.items)
   gctx.trash = {}
+  delete(gctx.uploads)
+  gctx.uploads = nil
 }

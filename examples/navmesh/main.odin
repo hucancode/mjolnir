@@ -22,9 +22,6 @@ path_completed: bool
 
 ground_handle: world.NodeHandle
 obstacle_handles: [dynamic]world.NodeHandle
-obj_mesh_handle: render.MeshHandle
-obj_node_handle: world.NodeHandle
-use_procedural: bool = true
 
 nav_builder: bake.NavGeometryBuilder
 navmesh_node_handle: world.NodeHandle
@@ -84,8 +81,7 @@ demo_setup :: proc(app: ^App) {
   bake.builder_destroy(&nav_builder)
   render.main_camera_look_at(&app.renderer, {35, 25, 35}, {0, 0, 0})
 
-  if use_procedural do create_demo_scene(app)
-  else              do create_obj_visualization_mesh(app, "assets/nav_test.obj")
+  create_demo_scene(app)
 
   setup_navigation_mesh(app)
   agent_pos = {-20, 0, -20}
@@ -126,18 +122,6 @@ create_agent :: proc(app: ^App) {
   mat := render.material_pbr(&app.renderer, metallic = 0.3, roughness = 0.6, emissive = 0.3)
   agent_handle = spawn_mesh(app, mh, mat, agent_pos + {0, 1, 0})
   world.node(&app.scene, agent_handle).name = "agent"
-}
-
-create_obj_visualization_mesh :: proc(app: ^App, obj_file: string) {
-  obj, ok := mesh.load_obj(obj_file, 1.0)
-  if !ok { log.error("Failed to load OBJ file as geometry"); return }
-  defer mesh.obj_mesh_destroy(&obj)
-  bake.append_triangles(&nav_builder, obj.positions, obj.indices)
-  obj_mesh_handle = render.create_mesh(&app.renderer, mesh.from_triangles(obj.positions, obj.indices))
-  mat := render.material_pbr(&app.renderer, metallic = 0.1, roughness = 0.8, emissive = 0.02)
-  obj_node_handle = spawn_mesh(app, obj_mesh_handle, mat)
-  world.tag(&app.scene, obj_node_handle, TAG_ENVIRONMENT)
-  world.node(&app.scene, obj_node_handle).name = "obj_mesh"
 }
 
 setup_navigation_mesh :: proc(app: ^App) {

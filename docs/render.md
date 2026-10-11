@@ -3,7 +3,7 @@ title: Render
 ---
 
 Layer 2. GPU-driven, bindless, deferred-shading renderer, and the
-owner of every look: meshes, materials, textures, sprites, emitters,
+owner of every look: meshes, materials, textures, emitters,
 force fields, lights and cameras. It is the only module that uses
 Vulkan. User code picks material types, light kinds and a
 post-process stack; the pipeline itself is fixed.
@@ -49,7 +49,10 @@ render.shutdown(&r)
   `skybox_intensity` show or hide the skybox and set its blur and
   brightness. `setup` resets them to their defaults.
 - `update(&r, dt)` advances render's own clock once per update tick:
-  emitter accumulators and debug line lifetimes.
+  particle time, emitter accumulators and debug line lifetimes. The
+  next frame emits and simulates everything accumulated since the
+  previous one, so particles keep their speed whatever the update and
+  render rates.
 - `frame` closes the debug UI, uploads staged changes, acquires a
   swapchain image (recreating the swapchain when the framebuffer size
   changed), records every pass, submits, presents and retires
@@ -59,7 +62,7 @@ render.shutdown(&r)
 ## Transform slots
 
 Render draws *instances*. An instance lives at a `u32` transform slot
-and holds one `Attachment` (mesh, sprite, light, emitter or force
+and holds one `Attachment` (mesh, light, emitter or force
 field). Render does not know where slots come from; by convention
 slot = world node index.
 
@@ -88,26 +91,31 @@ if l, ok := render.attachment(&r, slot, render.PointLightAttachment); ok {
 - **Meshes.** `render/mesh` defines the vertex format (`Vertex`,
   `SkinningData`, `Geometry`), primitive builders (`make_cube`,
   `make_sphere`, `make_capsule`, …) and `from_triangles` for plain
-  position + index data. `load_obj(path, scale)` reads the positions
-  and fan-triangulated faces of an OBJ file into an
-  `ObjMesh{positions, indices}` (free with `obj_mesh_destroy`).
+  position + index data.
   `render.create_mesh(&r, geometry)` uploads one into the mesh arena.
   `r.builtin_meshes[.CUBE]` is a builtin primitive and
   `r.builtin_materials[.RED]` a builtin solid color;
   `primitive(&r, shape, color)` pairs them into a `MeshAttachment`.
 - **Textures.** `create_texture_from_path` / `create_texture_from_data`
   return a bindless `Texture2DHandle`; `destroy_texture` releases it.
+  Textures live for one level: `teardown` destroys them all.
 - **Materials.** `create_material` and the `material_pbr`,
-  `material_wireframe`, `material_transparent` shorthands.
+  `material_wireframe`, `material_transparent` shorthands. Materials
+  outlive `teardown`, so destroy a material that samples a texture
+  before the level ends; a texture handle from an earlier level points
+  at whatever the new level allocates in its place.
   `material(&r, h)` returns a `^Material`; edit it and write it back
   with `set_material(&r, h, m^)` to stage the upload.
-- **Sprites.** `create_sprite(&r, texture, columns, rows)` makes a
-  sprite sheet; `set_sprite_frame(&r, h, frame)` shows one cell.
+- **Sprites.** `material_sprite(&r, texture, columns, rows, tint)`
+  makes a sprite-sheet material; attach it as a `MeshAttachment` with
+  `r.builtin_meshes[.QUAD_XY]` and it faces the camera.
+  `set_sprite_frame(&r, material, frame)` shows one cell.
   Animate it by setting the frame as time advances.
 - **Emitters, force fields.** `create_emitter` / `create_forcefield`.
   `emitter(&r, h)` / `forcefield(&r, h)` return a pointer; write
-  changes back with `set_emitter` / `set_forcefield`, which stage the
-  upload and keep the emission progress and the attached slot.
+  changes back with `set_emitter` / `set_forcefield`, which keep the
+  emission progress and the attached slot. Emitters are uploaded
+  every frame; force field changes are staged.
 - **Lights** have no resource; a light is an attachment
   (`point_light_attachment`, `directional_light_attachment`,
   `spot_light_attachment`).
@@ -119,9 +127,12 @@ and the main camera's opaque draw count.
 
 Every mutation marks an entry dirty in a mutex-guarded staging set.
 `render.frame` uploads dirty entries once per frame on the render
-thread. Bone palettes live in per-frame buffers and are re-uploaded
-until every frame in flight has them; everything else is written once.
-Freed meshes, materials, sprites, emitters and force fields hold their
+thread. Everything the CPU can change while a frame is in flight
+(node transforms, bone palettes, materials, emitters, force fields,
+cameras) lives in one buffer per frame in flight; a dirty entry is
+re-uploaded until every frame's copy has it. Mesh descriptions are
+written once: an index is only reused after its grace period.
+Freed meshes, materials, emitters and force fields hold their
 slot (and a mesh its GPU memory) for `FRAMES_IN_FLIGHT + 1` frames
 before reuse.
 
@@ -143,21 +154,25 @@ before reuse.
   - The bindless mechanism: `create_descriptor_array_layout` makes
     `PARTIALLY_BOUND` descriptor arrays, and
     `write_descriptor_array_element` fills one slot.
-- **`render/bindless`** defines render's arrays on top of that
-  mechanism: the 2D texture, cube texture and sampler arrays
-  (`TextureManager`), the mesh arena (`MeshManager`: shared vertex,
-  index and skinning buffers sub-allocated by the containers slab
-  allocator), the scene descriptor set, and the indirect draw lists
-  (`DrawPipeline`, `DrawBuffers`) that culling writes and draws consume.
 - **`render/mesh`** is the mesh format described above. It is plain
   data with no Vulkan, so tools and tests can build geometry without
   a device.
-- One subpackage per pass: `geometry`, `ambient`, `direct_light`,
-  `shadow`, `forward`, `particles` (simulation compute + draw),
-  `occlusion_culling` (depth pyramid + cull), `debug_line`,
-  `post_process`, `ui`.
 - **`render/gltf`** loads the render part of a glTF file (meshes,
   materials, textures).
+
+Everything else is private to `package render`:
+
+- `bindless_*.odin` define render's arrays on top of the `gpu`
+  mechanism: the 2D texture, cube texture and sampler arrays
+  (`TextureManager`), the mesh arena (`MeshManager`: shared vertex,
+  index and skinning buffers sub-allocated by the containers slab
+  allocator), the scene descriptor sets, and the indirect draw lists
+  (`DrawPipeline`, `DrawBuffers`) that culling writes and draws consume.
+- `pass_*.odin` hold one pass each: `gbuffer`, `ambient`,
+  `direct_light`, `shadow`, `forward`, `particles` (draw) and
+  `particles_compute` (simulation), `occlusion_culling` (depth pyramid
+  + cull), `debug_line`, `post_process`. A pass's record proc takes the
+  `Manager` and reads the scene buffers from it.
 
 Design choices in `render/gpu`:
 
@@ -183,8 +198,9 @@ indirect draw commands the next graphics pass consumes.
 ## Why deferred + light volumes
 
 Forward shading scales as `pixels × lights`. The deferred pass writes
-a G-buffer (position, normal, albedo, metallic-roughness, emissive,
-depth) once per visible fragment, then runs one fullscreen ambient
+a G-buffer (normal, albedo, metallic-roughness, emissive, depth) once
+per visible fragment; the lighting passes rebuild world position from
+depth and the camera's inverse view-projection. It then runs one fullscreen ambient
 pass (IBL + BRDF LUT) plus a per-light volume pass for each direct
 light. The IBL environment map comes from `load_environment_map`.
 A light's volume (sphere for point, cone for spot, fullscreen
@@ -195,17 +211,19 @@ only fragments actually reached by that light get shaded.
 
 - **2D shadow maps** for directional + spot lights. One compute pass
   per light clips draws against the light frustum; one depth-only
-  graphics pass writes a 512² R32_SFLOAT slice.
-- **Cubemap shadow maps** for point lights. The same compute pass
-  clips against the box around the light's range; one
-  geometry-shader-amplified draw
-  writes all six faces. Requires
-  `-define:REQUIRE_GEOMETRY_SHADER=true` at build time.
+  graphics pass writes a 512² D32_SFLOAT map.
+- **Cubemap shadow maps** for point lights. Each of the six faces is
+  its own 90° view: the compute pass clips draws against the face
+  frustum and a depth-only pass writes that face.
 
-Each frame the first `MAX_SHADOW_MAPS` shadow casters, in slot order,
-take the fixed shadow slots. A slot's draw buffers are created on first
-use and kept until shutdown; its textures switch between cube and 2D
-when it changes to a light of the other kind.
+Lighting samples both kinds through a depth-compare sampler, which
+filters the shadow test over 2×2 texels.
+
+There are `MAX_SHADOW_MAPS` fixed shadow slots. A shadow caster keeps
+its slot while it casts; new casters, in slot order, take a free slot
+of their kind first. A slot's draw buffers are created on first use
+and kept until shutdown; its textures switch between cube and 2D when
+it goes to a light of the other kind.
 
 ## Cameras
 
@@ -251,15 +269,15 @@ line primitives. A line lasts `life` seconds of render's clock
 
 ## Post-process
 
-`render.add_effect(&r, effect)` appends one `post_process` effect value
+`render.add_effect(&r, effect)` appends one effect value
 (`ToneMapEffect`, `BloomEffect`, `BlurEffect`, `FogEffect`,
 `OutlineEffect`, `DoFEffect`, `CrossHatchEffect`, `GrayscaleEffect`)
 and `clear(&r.post_process.effect_stack)` empties the stack:
 
 ```odin
 clear(&r.post_process.effect_stack)
-render.add_effect(&r, post_process.BloomEffect{threshold = 1, intensity = 2, blur_radius = 32})
-render.add_effect(&r, post_process.ToneMapEffect{exposure = 1, gamma = 2.2})
+render.add_effect(&r, render.BloomEffect{threshold = 1, intensity = 2, blur_radius = 32})
+render.add_effect(&r, render.ToneMapEffect{exposure = 1, gamma = 2.2})
 ```
 
 Effects run in insertion order inside the `POST_PROCESS` pass of every

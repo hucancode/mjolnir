@@ -63,7 +63,7 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   elapsed += dt
   t := elapsed
-  white := render.debug_color(.WHITE)
+  white := render.DEBUG_WHITE
 
   render.debug_axes(&app.renderer, {0, 0, 0}, scale = 2)
 
@@ -72,19 +72,19 @@ update :: proc(app: ^App, dt: f32) {
   render.debug_segment(&app.renderer, {8, 0, -8}, {8, 6, -8}, white)
   render.debug_segment(&app.renderer, {-8, 6, -8}, {8, 6, -8}, white)
 
-  render.debug_aabb(&app.renderer, {-7, -1, -1}, {-5, 1, 1}, render.debug_color(.GREEN))
+  render.debug_aabb(&app.renderer, {-7, -1, -1}, {-5, 1, 1}, render.DEBUG_GREEN)
 
   rot := linalg.quaternion_angle_axis_f32(t, {0, 1, 0})
-  render.debug_cube(&app.renderer, {-2, 1, 0}, rotation = rot, size = {1.5, 1.5, 1.5}, color = render.debug_color(.MAGENTA))
+  render.debug_cube(&app.renderer, {-2, 1, 0}, rotation = rot, size = {1.5, 1.5, 1.5}, color = render.DEBUG_MAGENTA)
 
   r := 1.0 + 0.3 * math.sin(t * 2)
-  render.debug_sphere(&app.renderer, {2, 1, 0}, radius = r, color = render.debug_color(.CYAN))
+  render.debug_sphere(&app.renderer, {2, 1, 0}, radius = r, color = render.DEBUG_CYAN)
 
-  render.debug_circle(&app.renderer, {6, 0.01, 0}, normal = {0, 1, 0}, radius = 1.5, color = render.debug_color(.YELLOW))
-  render.debug_circle(&app.renderer, {6, 2, 0}, normal = linalg.normalize([3]f32{1, 1, 0}), radius = 1.0, color = render.debug_color(.ORANGE))
+  render.debug_circle(&app.renderer, {6, 0.01, 0}, normal = {0, 1, 0}, radius = 1.5, color = render.DEBUG_YELLOW)
+  render.debug_circle(&app.renderer, {6, 2, 0}, normal = linalg.normalize([3]f32{1, 1, 0}), radius = 1.0, color = render.DEBUG_ORANGE)
 
   target := [3]f32{4 * math.cos(t), 3, 4 * math.sin(t)}
-  render.debug_arrow(&app.renderer, {0, 3, 0}, target, render.debug_color(.RED))
+  render.debug_arrow(&app.renderer, {0, 3, 0}, target, render.DEBUG_RED)
   render.debug_point(&app.renderer, target, size = 0.3, color = white)
 
   trail_period :: 0.25
@@ -94,7 +94,7 @@ update :: proc(app: ^App, dt: f32) {
     if last > elapsed - dt && last <= elapsed {
       angle := last * 1.5
       pos := [3]f32{5 * math.cos(angle), 0.5, 5 * math.sin(angle)}
-      render.debug_sphere(&app.renderer, pos, 0.25, render.debug_color(.GREEN), life = 3.0)
+      render.debug_sphere(&app.renderer, pos, 0.25, render.DEBUG_GREEN, life = 3.0)
     }
   }
 
@@ -108,10 +108,10 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  render.debug_sphere(&app.renderer, {0, 5, 0}, 0.4, render.debug_color(.CYAN))
+  render.debug_sphere(&app.renderer, {0, 5, 0}, 0.4, render.DEBUG_CYAN)
   ok := render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
   // Drawn after the frame is recorded; these segments appear next frame.
-  render.debug_sphere(&app.renderer, {0, 6, 0}, 0.4, render.debug_color(.MAGENTA))
-  render.debug_arrow(&app.renderer, {0, 5, 0}, {0, 6, 0}, render.debug_color(.WHITE))
+  render.debug_sphere(&app.renderer, {0, 6, 0}, 0.4, render.DEBUG_MAGENTA)
+  render.debug_arrow(&app.renderer, {0, 5, 0}, {0, 6, 0}, render.DEBUG_WHITE)
   return ok
 }

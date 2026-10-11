@@ -27,7 +27,7 @@ layout(set = 0, binding = 0) buffer ParticleBuffer {
     Particle particles[];
 };
 
-layout(set = 0, binding = 2) uniform ParamsBuffer {
+layout(push_constant) uniform Params {
     uint emitter_count;
     uint forcefield_count;
     float delta_time;

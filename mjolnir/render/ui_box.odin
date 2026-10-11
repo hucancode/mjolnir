@@ -4,7 +4,7 @@ import cont "../containers"
 import "core:log"
 
 create_box :: proc(
-  sys: ^System,
+  sys: ^UISystem,
   position: [2]f32,
   size: [2]f32,
   background_color: [4]u8 = {0, 0, 0, 0},
@@ -33,11 +33,11 @@ create_box :: proc(
 }
 
 box_add_child :: proc(
-  sys: ^System,
+  sys: ^UISystem,
   parent_handle: BoxHandle,
   child_handle: UIWidgetHandle,
 ) {
-  parent_widget := get_box(sys, parent_handle)
+  parent_widget := get_as(sys, parent_handle, Box)
   if parent_widget == nil do return
 
   child_widget := get_widget(sys, child_handle)
@@ -54,11 +54,11 @@ box_add_child :: proc(
 }
 
 box_remove_child :: proc(
-  sys: ^System,
+  sys: ^UISystem,
   parent_handle: BoxHandle,
   child_handle: UIWidgetHandle,
 ) {
-  parent_widget := get_box(sys, parent_handle)
+  parent_widget := get_as(sys, parent_handle, Box)
   if parent_widget == nil do return
 
   // Find and remove child

@@ -21,6 +21,7 @@ struct Camera {
     float far;
     vec4 position;
     vec4 frustum_planes[6];
+    mat4 inv_view_projection;
 };
 
 struct MaterialData {
@@ -33,6 +34,10 @@ struct MaterialData {
     float emissive_value;
     uint features;
     vec4 base_color_factor;
+    uint frame_columns;
+    uint frame_rows;
+    uint frame_index;
+    uint _pad0;
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
@@ -73,36 +78,7 @@ layout(location = 5) flat in uint node_index;
 
 layout(location = 0) out vec4 outColor;
 
-const float PI = 3.14159265359;
-const float EPSILON = 0.00001;
-const float MAX_REFLECTION_LOD = 9.0;
 const float AMBIENT_STRENGTH = 3.0;
-
-float distributionGGX(float NdotH, float roughness) {
-    float a = roughness * roughness;
-    float a2 = a * a;
-    float NdotH2 = NdotH * NdotH;
-    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
-    denom = PI * denom * denom;
-    return a2 / max(denom, EPSILON);
-}
-
-float geometrySchlickGGX(float NdotV, float roughness) {
-    float r = (roughness + 1.0);
-    float k = (r * r) / 8.0;
-    float denom = NdotV * (1.0 - k) + k;
-    return NdotV / max(denom, EPSILON);
-}
-
-float geometrySmith(float NdotV, float NdotL, float roughness) {
-    float ggx1 = geometrySchlickGGX(NdotV, roughness);
-    float ggx2 = geometrySchlickGGX(NdotL, roughness);
-    return ggx1 * ggx2;
-}
-
-vec3 fresnelSchlick(float cosTheta, vec3 F0) {
-    return F0 + (1.0 - F0) * pow(max(1.0 - cosTheta, 0.0), 5.0);
-}
 
 vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(max(1.0 - cosTheta, 0.0), 5.0);

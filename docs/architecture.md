@@ -60,10 +60,11 @@ flowchart TB
 - `render` is the only Vulkan user. Its subpackage `render/gpu` is
   the Vulkan layer (context, swapchain, buffers, images, pipelines,
   deferred destruction and the bindless descriptor-array mechanism).
-  `render/bindless` defines render's own arrays (textures, samplers,
-  cube maps, the mesh arena, the scene set, the indirect draw lists)
-  and `render/mesh` the vertex format, primitive builders and OBJ
-  loader. Shaders (`render/shader`)
+  `render/mesh` holds the vertex format, primitive builders and OBJ
+  loader, and `render/gltf` the glTF loader. The passes and render's
+  own descriptor arrays (textures, samplers, cube maps, the mesh arena,
+  the scene sets, the indirect draw lists) are private files of
+  `package render`. Shaders (`render/shader`)
   and embedded assets (`render/assets`) live inside the module, so
   the folder lifts out whole.
 - `platform` is the only GLFW user, including layer 3 and the
@@ -112,7 +113,7 @@ module.
   tag bits. No meshes, materials, lights, cameras or skeletons. It
   runs headless.
 - `render` owns everything that only affects appearance: meshes,
-  materials, textures, sprites, emitters, force fields, lights and
+  materials, textures, emitters, force fields, lights and
   cameras, plus their staging into GPU buffers.
 - `animation` owns poses. An `Animator` is a plain value the
   application keeps next to the node it drives.
@@ -224,12 +225,12 @@ infrastructure.
 
 - **2D maps** for directional + spot. Compute pass clips against the
   light frustum; depth-only graphics pass writes a 512² slice.
-- **Cubemap** for point lights. Geometry-shader-amplified single
-  draw renders all six faces (`-define:REQUIRE_GEOMETRY_SHADER=true`
-  required at build).
+- **Cubemap** for point lights. Six frustum-culled depth passes, one
+  per face, reuse the same depth-only vertex shader as the 2D maps.
 
-Shadow maps live in `MAX_SHADOW_MAPS` fixed slots, handed out each
-frame to the first shadow casters in slot order.
+Shadow maps live in `MAX_SHADOW_MAPS` fixed slots. A shadow caster
+keeps its map while it casts; new casters, in slot order, take a free
+map of their kind first, so maps rarely reallocate.
 
 ---
 

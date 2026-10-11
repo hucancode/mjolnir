@@ -1,99 +1,22 @@
-package post_process
+#+private
+package render
 
-import "../bindless"
-import "../gpu"
+import "gpu"
 import "base:intrinsics"
 import "core:log"
 import "core:reflect"
 import vk "vendor:vulkan"
 
-@(private)
-SHADER_POSTPROCESS_VERT :: #load("../shader/postprocess/vert.spv")
-@(private)
-SHADER_POSTPROCESS_FRAG :: #load("../shader/postprocess/frag.spv")
-@(private)
-SHADER_BLOOM_FRAG :: #load("../shader/bloom/frag.spv")
-@(private)
-SHADER_BLUR_FRAG :: #load("../shader/blur/frag.spv")
-@(private)
-SHADER_GRAYSCALE_FRAG :: #load("../shader/grayscale/frag.spv")
-@(private)
-SHADER_TONEMAP_FRAG :: #load("../shader/tonemap/frag.spv")
-@(private)
-SHADER_OUTLINE_FRAG :: #load("../shader/outline/frag.spv")
-@(private)
-SHADER_FOG_FRAG :: #load("../shader/fog/frag.spv")
-@(private)
-SHADER_CROSSHATCH_FRAG :: #load("../shader/crosshatch/frag.spv")
-@(private)
-SHADER_DOF_FRAG :: #load("../shader/dof/frag.spv")
-
-@(private)
-BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
-
-// Effect structs are pushed verbatim right after the base fields of
-// PushConstant (offset 32); their layout must match each shader's push block.
-GrayscaleEffect :: struct {
-  weights:  [3]f32, // zero = Rec. 601 luma, filled by render.add_effect
-  strength: f32,
-}
-
-ToneMapEffect :: struct {
-  exposure: f32,
-  gamma:    f32,
-}
-
-BlurEffect :: struct {
-  radius:         f32,
-  direction:      f32, // 0.0 = horizontal, 1.0 = vertical; set by render.add_effect
-  weight_falloff: f32, // 0.0 = box blur, 1.0 = gaussian blur
-}
-
-BloomEffect :: struct {
-  threshold:   f32,
-  intensity:   f32,
-  blur_radius: f32,
-  direction:   f32, // 0.0 = horizontal, 1.0 = vertical; set by render.add_effect
-}
-
-OutlineEffect :: struct {
-  color:     [3]f32,
-  thickness: f32,
-}
-
-FogEffect :: struct {
-  color:   [3]f32,
-  density: f32,
-  start:   f32,
-  end:     f32,
-}
-
-CrossHatchEffect :: struct {
-  hatch_offset_y:   f32,
-  lum_threshold_01: f32,
-  lum_threshold_02: f32,
-  lum_threshold_03: f32,
-  lum_threshold_04: f32,
-}
-
-DoFEffect :: struct {
-  focus_distance:  f32, // Distance to the focus plane
-  focus_range:     f32, // Range where objects are in focus
-  blur_strength:   f32, // Maximum blur radius
-  bokeh_intensity: f32, // Bokeh effect intensity
-}
-
-// nil is the copy pass that brings the input to the output unchanged
-PostprocessEffect :: union {
-  GrayscaleEffect,
-  ToneMapEffect,
-  BlurEffect,
-  BloomEffect,
-  OutlineEffect,
-  FogEffect,
-  CrossHatchEffect,
-  DoFEffect,
-}
+SHADER_POSTPROCESS_VERT :: #load("shader/postprocess/vert.spv")
+SHADER_POSTPROCESS_FRAG :: #load("shader/postprocess/frag.spv")
+SHADER_BLOOM_FRAG :: #load("shader/bloom/frag.spv")
+SHADER_BLUR_FRAG :: #load("shader/blur/frag.spv")
+SHADER_GRAYSCALE_FRAG :: #load("shader/grayscale/frag.spv")
+SHADER_TONEMAP_FRAG :: #load("shader/tonemap/frag.spv")
+SHADER_OUTLINE_FRAG :: #load("shader/outline/frag.spv")
+SHADER_FOG_FRAG :: #load("shader/fog/frag.spv")
+SHADER_CROSSHATCH_FRAG :: #load("shader/crosshatch/frag.spv")
+SHADER_DOF_FRAG :: #load("shader/dof/frag.spv")
 
 // Fragment shaders indexed by the PostprocessEffect union tag (0 = nil).
 FRAG_SHADERS := [?][]u8 {
@@ -111,52 +34,42 @@ FRAG_SHADERS := [?][]u8 {
 
 // Odin stores a union's variant bytes at offset 0, so `effect` places the
 // active effect struct at offset 32, followed by the (unread) tag.
-@(private)
-PushConstant :: struct {
-  position_texture_index: u32,
-  normal_texture_index:   u32,
-  albedo_texture_index:   u32,
-  metallic_texture_index: u32,
-  emissive_texture_index: u32,
-  depth_texture_index:    u32,
-  input_image_index:      u32,
+PostProcessPushConstant :: struct {
+  // camera clip planes, for effects that linearize depth (fog, dof, outline)
+  camera_near:          f32,
+  camera_far:           f32,
+  normal_texture_index: u32,
+  depth_texture_index:  u32,
+  input_image_index:    u32,
   // bloom: the scene as it entered bloom, composited by the V pass
-  original_image_index:   u32,
-  effect:                 PostprocessEffect,
+  original_image_index: u32,
+  _:                    [2]u32,
+  effect:               PostprocessEffect,
 }
-#assert(offset_of(PushConstant, effect) == 32)
-#assert(size_of(PushConstant) <= 128)
+#assert(offset_of(PostProcessPushConstant, effect) == 32)
+#assert(size_of(PostProcessPushConstant) <= 128)
 
-Renderer :: struct {
+PostProcessRenderer :: struct {
   pipelines_hdr:   [len(FRAG_SHADERS)]vk.Pipeline,
   pipelines_ldr:   [len(FRAG_SHADERS)]vk.Pipeline,
   pipeline_layout: vk.PipelineLayout,
   effect_stack:    [dynamic]PostprocessEffect,
-  // 3 ping-pong buffers: bloom V pass needs to read H output AND pre-bloom
-  // scene simultaneously while writing to a third slot. With only 2 buffers
-  // V would have to write to one of its inputs when bloom isn't the last pass.
-  images:          [3]bindless.Texture2DHandle,
+  // Up to 3 ping-pong buffers per frame in flight, allocated as the stack
+  // needs them: a bloom V pass reads the H output and the pre-bloom scene
+  // while writing a third.
+  images:          [gpu.FRAMES_IN_FLIGHT][3]Texture2DHandle,
 }
 
-setup :: proc(
-  self: ^Renderer,
+post_process_teardown :: proc(
+  self: ^PostProcessRenderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^bindless.TextureManager,
-  extent: vk.Extent2D,
-) -> vk.Result {
-  return create_images(gctx, self, texture_manager, extent)
-}
-
-teardown :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-  texture_manager: ^bindless.TextureManager,
+  texture_manager: ^TextureManager,
 ) {
-  destroy_images(self, gctx, texture_manager)
+  post_process_release_images(self, gctx, texture_manager)
 }
 
-init :: proc(
-  self: ^Renderer,
+post_process_init :: proc(
+  self: ^PostProcessRenderer,
   gctx: ^gpu.GPUContext,
   color_format: vk.Format,
   textures_set_layout: vk.DescriptorSetLayout,
@@ -165,26 +78,19 @@ init :: proc(
 ) {
   self.effect_stack = make([dynamic]PostprocessEffect)
   defer if ret != .SUCCESS do delete(self.effect_stack)
-  vert_module := gpu.create_shader_module(
-    gctx.device,
-    SHADER_POSTPROCESS_VERT,
-  ) or_return
-  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
   self.pipeline_layout = gpu.create_pipeline_layout(
     gctx,
-    vk.PushConstantRange{stageFlags = {.FRAGMENT}, size = size_of(PushConstant)},
+    vk.PushConstantRange{stageFlags = {.FRAGMENT}, size = size_of(PostProcessPushConstant)},
     textures_set_layout,
   ) or_return
   hdr_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
   ldr_formats := [?]vk.Format{color_format}
   blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_OVERRIDE}
   for shader_code, i in FRAG_SHADERS {
-    frag_module := gpu.create_shader_module(gctx.device, shader_code) or_return
-    defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
     desc := gpu.GraphicsPipelineDesc {
-      vert = vert_module,
-      frag = frag_module,
-      specialization = &bindless.SHADER_SPEC_CONSTANTS,
+      vert = SHADER_POSTPROCESS_VERT,
+      frag = shader_code,
+      specialization = &SHADER_SPEC_CONSTANTS,
       topology = .TRIANGLE_LIST,
       raster = gpu.DOUBLE_SIDED_RASTERIZER,
       blend = blend[:],
@@ -199,15 +105,27 @@ init :: proc(
   return .SUCCESS
 }
 
-@(private)
-create_images :: proc(
+// Ping-pong images the stack needs: none when a single effect writes the
+// output directly, two to alternate, a third when a bloom V pass must keep
+// its composite source.
+post_process_image_count :: proc(effects: []PostprocessEffect) -> int {
+  if len(effects) <= 1 do return 0
+  for e in effects do if _, ok := e.(BloomEffect); ok do return min(len(effects) - 1, 3)
+  return min(len(effects) - 1, 2)
+}
+
+// Allocate the ping-pong images the current stack needs and does not have
+// yet. Images are kept until the swapchain is resized or the level torn down.
+post_process_ensure_images :: proc(
+  self: ^PostProcessRenderer,
   gctx: ^gpu.GPUContext,
-  self: ^Renderer,
-  texture_manager: ^bindless.TextureManager,
+  texture_manager: ^TextureManager,
   extent: vk.Extent2D,
+  frame_index: u32,
 ) -> vk.Result {
-  for &handle in self.images {
-    handle = bindless.allocate_texture_2d(
+  for &handle in self.images[frame_index][:post_process_image_count(self.effect_stack[:])] {
+    if handle != {} do continue
+    handle = allocate_texture_2d(
       texture_manager,
       gctx,
       extent,
@@ -215,32 +133,24 @@ create_images :: proc(
       {.COLOR_ATTACHMENT, .SAMPLED},
     ) or_return
   }
-  log.debugf("created post-process image")
   return .SUCCESS
 }
 
-@(private)
-destroy_images :: proc(
-  self: ^Renderer,
+post_process_release_images :: proc(
+  self: ^PostProcessRenderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^bindless.TextureManager,
+  texture_manager: ^TextureManager,
 ) {
-  for handle in self.images {
-    bindless.free_texture_2d(texture_manager, gctx, handle)
+  for &frame in self.images {
+    for &handle in frame {
+      if handle == {} do continue
+      free_texture_2d(texture_manager, gctx, handle)
+      handle = {}
+    }
   }
 }
 
-recreate_images :: proc(
-  gctx: ^gpu.GPUContext,
-  self: ^Renderer,
-  texture_manager: ^bindless.TextureManager,
-  extent: vk.Extent2D,
-) -> vk.Result {
-  destroy_images(self, gctx, texture_manager)
-  return create_images(gctx, self, texture_manager, extent)
-}
-
-shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+post_process_shutdown :: proc(self: ^PostProcessRenderer, gctx: ^gpu.GPUContext) {
   for &p in self.pipelines_hdr {
     vk.DestroyPipeline(gctx.device, p, nil)
     p = 0
@@ -254,17 +164,20 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   delete(self.effect_stack)
 }
 
-// record runs the post-process effect stack into output_view. An empty stack
+// post_process_record runs the post-process effect stack into output_view. An empty stack
 // copies the input to output.
-record :: proc(
-  self: ^Renderer,
+post_process_record :: proc(
+  self: ^PostProcessRenderer,
   command_buffer: vk.CommandBuffer,
+  frame_index: u32,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
   final_image_idx: u32,
-  gbuffer: bindless.GBuffer,
-  texture_manager: ^bindless.TextureManager,
+  gbuffer: GBuffer,
+  near, far: f32,
+  texture_manager: ^TextureManager,
 ) {
+  images := &self.images[frame_index]
   effects := self.effect_stack[:]
   // with no effect, a single copy (nil effect) brings the input to output
   copy_only := [1]PostprocessEffect{nil}
@@ -272,7 +185,7 @@ record :: proc(
   gpu.set_viewport_scissor(command_buffer, extent, flip_y = false)
   // Slot tracking for 3-buffer ping-pong.
   //   current_input_slot == -1 means current input is `final_image_idx`
-  //   (external, not one of self.images), so no transition required.
+  //   (external, not one of the ping-pong images), so no transition required.
   //   bloom_h_input_slot is set when an H pass runs and consumed by the V pass
   //   that follows, so V can composite against the scene as it entered bloom.
   current_input_slot := -1
@@ -303,14 +216,14 @@ record :: proc(
     }
     dst_view := output_view
     if !is_last {
-      dst_texture := bindless.get_texture_2d(
+      dst_texture := get_texture_2d(
         texture_manager,
-        self.images[dst_slot],
+        images[dst_slot],
       )
       if dst_texture == nil {
         log.errorf(
           "Post-process image handle %v not found",
-          self.images[dst_slot],
+          images[dst_slot],
         )
         continue
       }
@@ -324,14 +237,14 @@ record :: proc(
       dst_view = dst_texture.view
     }
     if current_input_slot >= 0 {
-      src_texture := bindless.get_texture_2d(
+      src_texture := get_texture_2d(
         texture_manager,
-        self.images[current_input_slot],
+        images[current_input_slot],
       )
       if src_texture == nil {
         log.errorf(
           "Post-process source image handle %v not found",
-          self.images[current_input_slot],
+          images[current_input_slot],
         )
         continue
       }
@@ -348,7 +261,8 @@ record :: proc(
       command_buffer,
       extent,
       nil,
-      gpu.create_color_attachment(dst_view, .CLEAR, .STORE, BG_BLUE_GRAY),
+      // the fullscreen triangle overwrites every pixel
+      gpu.create_color_attachment(dst_view, .DONT_CARE, .STORE),
     )
     tag := reflect.get_union_variant_raw_tag(effect)
     pipeline := self.pipelines_ldr[tag] if is_last else self.pipelines_hdr[tag]
@@ -359,23 +273,21 @@ record :: proc(
       self.pipeline_layout,
       texture_manager.descriptor_set,
     )
-    push := PushConstant {
-      position_texture_index = gbuffer.position,
-      normal_texture_index   = gbuffer.normal,
-      albedo_texture_index   = gbuffer.albedo,
-      metallic_texture_index = gbuffer.metallic_roughness,
-      emissive_texture_index = gbuffer.emissive,
-      depth_texture_index    = gbuffer.depth,
-      input_image_index      = input_image_index,
-      original_image_index   = input_image_index if is_bloom_h else bloom_h_input_image_idx,
-      effect                 = effect,
+    push := PostProcessPushConstant {
+      camera_near          = near,
+      camera_far           = far,
+      normal_texture_index = gbuffer.normal,
+      depth_texture_index  = gbuffer.depth,
+      input_image_index    = input_image_index,
+      original_image_index = input_image_index if is_bloom_h else bloom_h_input_image_idx,
+      effect               = effect,
     }
     vk.CmdPushConstants(
       command_buffer,
       self.pipeline_layout,
       {.FRAGMENT},
       0,
-      size_of(PushConstant),
+      size_of(PostProcessPushConstant),
       &push,
     )
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
@@ -389,7 +301,7 @@ record :: proc(
     }
     if !is_last {
       current_input_slot = dst_slot
-      current_input_image_idx = self.images[dst_slot].index
+      current_input_image_idx = images[dst_slot].index
     }
   }
 }

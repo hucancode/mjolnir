@@ -224,9 +224,8 @@ bake.append_triangles(&b, wall_positions, wall_indices, offset = wall_pos, is_ob
 bake.build(&navmesh, &b)
 ```
 
-An OBJ file works the same way: `mesh.load_obj(path)` returns an
-`ObjMesh{positions, indices}` to append (free it with
-`mesh.obj_mesh_destroy`).
+Triangles from a file work the same way; the `obj_loader` example
+reads OBJ positions and faces into plain arrays.
 
 To draw the result, upload `nav.debug_triangles(&navmesh)` as a
 render mesh.

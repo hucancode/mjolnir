@@ -87,7 +87,6 @@ get_all :: proc(buffer: ^MutableBuffer($T)) -> []T {
 
 write :: proc {
   mutable_buffer_write,
-  mutable_buffer_write_multi,
   buffer_write_multi,
 }
 
@@ -97,14 +96,6 @@ mutable_buffer_write :: proc(
   index: int = 0,
 ) {
   get_all(buffer)[index] = data^
-}
-
-mutable_buffer_write_multi :: proc(
-  buffer: ^MutableBuffer($T),
-  data: []T,
-  index: int = 0,
-) {
-  copy(get_all(buffer)[index:], data)
 }
 
 mutable_buffer_destroy :: proc(device: vk.Device, buffer: ^MutableBuffer($T)) {
@@ -171,10 +162,10 @@ BindlessBuffer :: struct($T: typeid) {
 }
 
 // One storage buffer and descriptor set per frame in flight.
-PerFrameBindlessBuffer :: struct($T: typeid, $N: int) {
-  buffers:         [N]MutableBuffer(T),
+PerFrameBindlessBuffer :: struct($T: typeid) {
+  buffers:         [FRAMES_IN_FLIGHT]MutableBuffer(T),
   set_layout:      vk.DescriptorSetLayout,
-  descriptor_sets: [N]vk.DescriptorSet,
+  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
 bindless_buffer_init :: proc(
@@ -203,7 +194,7 @@ bindless_buffer_destroy :: proc(self: ^BindlessBuffer($T), gctx: ^GPUContext) {
 }
 
 per_frame_bindless_buffer_init :: proc(
-  self: ^PerFrameBindlessBuffer($T, $N),
+  self: ^PerFrameBindlessBuffer($T),
   gctx: ^GPUContext,
   capacity: int,
   stages: vk.ShaderStageFlags,
@@ -222,8 +213,28 @@ per_frame_bindless_buffer_init :: proc(
   return .SUCCESS
 }
 
+// Replace frame `frame`'s buffer with an empty one of `capacity` elements
+// and point its descriptor set at it. The caller guarantees no submitted work
+// still uses that frame's buffer or set.
+per_frame_bindless_buffer_resize :: proc(
+  self: ^PerFrameBindlessBuffer($T),
+  gctx: ^GPUContext,
+  frame: u32,
+  capacity: int,
+) -> vk.Result {
+  grown := create_mutable_buffer(gctx, T, capacity, {.STORAGE_BUFFER}) or_return
+  mutable_buffer_destroy(gctx.device, &self.buffers[frame])
+  self.buffers[frame] = grown
+  update_descriptor_set(
+    gctx,
+    self.descriptor_sets[frame],
+    {.STORAGE_BUFFER, buffer_info(&self.buffers[frame])},
+  )
+  return .SUCCESS
+}
+
 per_frame_bindless_buffer_destroy :: proc(
-  self: ^PerFrameBindlessBuffer($T, $N),
+  self: ^PerFrameBindlessBuffer($T),
   gctx: ^GPUContext,
 ) {
   free_descriptor_sets(gctx, ..self.descriptor_sets[:])

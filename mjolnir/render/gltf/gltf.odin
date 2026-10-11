@@ -122,6 +122,9 @@ load_material :: proc(
     emissive = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_SRGB) or_return
     features |= {.EMISSIVE_TEXTURE}
   }
+  // render keeps one emissive scale; take the brightest factor channel
+  emissive_value := max(mat.emissive_factor[0], mat.emissive_factor[1], mat.emissive_factor[2])
+  if mat.has_emissive_strength do emissive_value *= mat.emissive_strength.emissive_strength
   handle = render.create_material(
     r,
     features,
@@ -132,6 +135,7 @@ load_material :: proc(
     emissive,
     metallic_value = metallic,
     roughness_value = roughness,
+    emissive_value = emissive_value,
     base_color_factor = base_color,
   ) or_return
   cache[mat] = handle

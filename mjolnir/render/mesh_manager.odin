@@ -1,8 +1,8 @@
-package bindless
+package render
 
-import cont "../../containers"
-import "../gpu"
-import "../mesh"
+import cont "../containers"
+import "gpu"
+import "mesh"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -116,7 +116,7 @@ mesh_manager_shutdown :: proc(manager: ^MeshManager, gctx: ^gpu.GPUContext) {
 }
 
 @(private)
-upload :: proc(
+mesh_manager_upload :: proc(
   gctx: ^gpu.GPUContext,
   slab: ^cont.SlabAllocator,
   buffer: ^$B,
@@ -129,7 +129,7 @@ upload :: proc(
   count := u32(len(data))
   offset, ok := cont.slab_alloc(slab, count)
   if !ok do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  gpu.write(gctx, buffer, data, int(offset)) or_return
+  gpu.queue_buffer_write(gctx, buffer, data, int(offset)) or_return
   return {offset = offset, count = count}, .SUCCESS
 }
 
@@ -143,19 +143,19 @@ allocate_mesh :: proc(
   allocations: MeshAllocations,
   ret: vk.Result,
 ) {
-  allocations.vertices = upload(
+  allocations.vertices = mesh_manager_upload(
     gctx,
     &manager.vertex_slab,
     &manager.vertex_buffer,
     geometry_data.vertices,
   ) or_return
-  allocations.indices = upload(
+  allocations.indices = mesh_manager_upload(
     gctx,
     &manager.index_slab,
     &manager.index_buffer,
     geometry_data.indices,
   ) or_return
-  allocations.skinning = upload(
+  allocations.skinning = mesh_manager_upload(
     gctx,
     &manager.vertex_skinning_slab,
     &manager.vertex_skinning_buffer,

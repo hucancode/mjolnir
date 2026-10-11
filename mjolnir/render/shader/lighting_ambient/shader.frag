@@ -22,6 +22,7 @@ struct Camera {
     float far;
     vec4 position;
     vec4 frustum_planes[6];
+    mat4 inv_view_projection;
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
@@ -38,7 +39,7 @@ layout(push_constant) uniform AmbientPushConstant {
     uint prefilter_index;
     uint brdf_lut_index;
     uint environment_index;
-    uint position_texture_index;
+    uint depth_texture_index;
     uint normal_texture_index;
     uint albedo_texture_index;
     uint metallic_texture_index;
@@ -64,10 +65,16 @@ vec2 dirToEquirectUv(vec3 dir) {
     return vec2(u, v);
 }
 
+// World position of the G-buffer texel at framebuffer uv, rebuilt from its
+// depth. The G-buffer pass flips the viewport, so ndc.y runs against uv.y.
+vec3 worldPosition(Camera camera, vec2 uv, float depth) {
+    vec4 p = camera.inv_view_projection * vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
+    return p.xyz / p.w;
+}
+
 vec3 sample_skybox(Camera camera, vec2 uv) {
-    mat4 inv_vp = inverse(camera.projection * camera.view);
     vec2 ndc = uv * 2.0 - 1.0;
-    vec4 world_far = inv_vp * vec4(ndc, 1.0, 1.0);
+    vec4 world_far = camera.inv_view_projection * vec4(ndc, 1.0, 1.0);
     vec3 dir = normalize(world_far.xyz / world_far.w - camera.position.xyz);
     float b = clamp(skybox_blur, 0.0, 1.0);
     if (b <= 0.0 || prefilter_index == INVALID_TEXTURE) {
@@ -81,10 +88,11 @@ vec3 sample_skybox(Camera camera, vec2 uv) {
 void main() {
     Camera camera = camera_buffer.cameras[camera_index];
     vec2 uv = v_uv;
-    vec3 position = texture(sampler2D(textures[position_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz;
+    float depth = texelFetch(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), ivec2(gl_FragCoord.xy), 0).r;
 
-    // Background (no geometry): draw skybox if enabled, else discard.
-    if (dot(position, position) < 1e-6) {
+    // Background (depth left at the far clear value): draw skybox if
+    // enabled, else discard.
+    if (depth >= 1.0) {
         if (skybox_enabled != 0u && environment_index != INVALID_TEXTURE) {
             vec3 sky = sample_skybox(camera, uv) * skybox_intensity;
             outColor = vec4(sky, 1.0);
@@ -92,6 +100,7 @@ void main() {
         }
         discard;
     }
+    vec3 position = worldPosition(camera, uv, depth);
 
     vec3 normal = texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz * 2.0 - 1.0;
     vec3 albedo = texture(sampler2D(textures[albedo_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rgb;

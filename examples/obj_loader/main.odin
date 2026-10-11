@@ -52,13 +52,13 @@ main :: proc() {
   files := OBJ_FILES
   scales := OBJ_SCALES
   for i in 0 ..< 3 {
-    obj, ok := mesh.load_obj(files[i], scales[i])
+    obj, ok := load_obj(files[i], scales[i])
     if !ok {
       log.errorf("failed to load %s", files[i])
       continue
     }
     geom := mesh.from_triangles(obj.positions, obj.indices)
-    mesh.obj_mesh_destroy(&obj)
+    obj_mesh_destroy(&obj)
     aabb := mesh.aabb_from_vertices(geom.vertices)
     log.infof("%s: %d verts, %d tris, aabb %v..%v", files[i], len(geom.vertices), len(geom.indices) / 3, aabb.min, aabb.max)
     loaded_aabb[i] = {aabb.min, aabb.max}

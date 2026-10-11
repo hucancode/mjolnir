@@ -27,15 +27,15 @@ flag, parent, event handlers, user-data pointer):
 
 Each widget kind has its own distinct handle type
 (`Quad2DHandle`, …) on top of `UIWidgetHandle` for compile-time
-safety. `get_quad2d`, `get_text2d`, `get_mesh2d`, `get_box` resolve a
-handle to its widget pointer (nil for a stale handle); edit fields
-directly. Shared fields go through `get_widget_base(get_widget(&sys, h))`,
+safety. `get_as(&sys, handle, T)` resolves a handle to a pointer to
+widget type `T` (`Quad2D`, `Text2D`, `Mesh2D`, `Box`); it is nil for a
+stale handle or a widget of another kind. Edit fields directly. Shared fields go through `get_widget_base(get_widget(&sys, h))`,
 e.g. `position`, `visible`, `event_handlers` and `user_data` (the pointer
 delivered as `event.user_data`). Text2D strings change through
 `set_text(&sys, text_handle, str)`, which re-lays out the glyphs.
 
 ```odin
-if q := render.get_quad2d(&sys, button); q != nil {
+if q := render.get_as(&sys, button, render.Quad2D); q != nil {
   q.color = {255, 100, 100, 255}
   q.event_handlers = handlers
   q.user_data = app
@@ -59,7 +59,7 @@ re-parenting.
 `process_input(&sys, &state)` runs one input tick through the widget
 tree. Hit testing considers only interactive widgets — those with a
 mouse handler on themselves or an ancestor — top-down by z-order.
-`System` keeps the hovered, captured and focused widget across ticks:
+`UISystem` keeps the hovered, captured and focused widget across ticks:
 
 - `HOVER_IN` / `HOVER_OUT` when the hovered widget changes, `MOVE` to
   the captured or hovered widget.
@@ -69,7 +69,8 @@ mouse handler on themselves or an ancestor — top-down by z-order.
 - `KEY_DOWN` / `KEY_UP` (with OS auto-repeat flagged) and text events
   to the focused widget.
 
-Every event bubbles to the parents. `process_input` skips the tick
+Every event bubbles to the parents; each widget on the way sees its own
+`user_data`. `process_input` skips the tick
 while another consumer has captured the mouse. Otherwise it marks the
 mouse captured while a widget is hovered or holds a press, and the
 keyboard captured while the focused widget handles key or text

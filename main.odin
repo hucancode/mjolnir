@@ -8,7 +8,6 @@ import "mjolnir/animation"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
-import "mjolnir/render/post_process"
 import "mjolnir/world"
 
 App :: struct {
@@ -25,7 +24,7 @@ ALL_POINT_LIGHT :: false
 ENABLE_DIRECTIONAL_LIGHT :: true
 portal_camera_handle: render.CameraHandle
 portal_material_handle: render.MaterialHandle
-warrior_sprite: render.SpriteHandle
+warrior_sprite: render.MaterialHandle
 warrior_time: f32
 
 // A loaded glTF and one animator per skinned node in it.
@@ -477,7 +476,7 @@ setup :: proc(app: ^App) {
   }
   when false {
     log.info("Setting up bloom...")
-    render.add_effect(&app.renderer, post_process.BloomEffect{threshold = 0.8, intensity = 0.5, blur_radius = 16.0})
+    render.add_effect(&app.renderer, render.BloomEffect{threshold = 0.8, intensity = 0.5, blur_radius = 16.0})
     // A bright white ball to test the bloom effect
     if emissive_handle, emissive_ok := render.create_material(&app.renderer, emissive_value = 30.0); emissive_ok {
       bright_ball := spawn(
@@ -587,19 +586,19 @@ setup :: proc(app: ^App) {
     world.scale(&app.scene, handle, 0.2)
   }
   when false {
-    render.debug_sphere(&app.renderer, {0, 5, 0}, 5, render.debug_color(.WHITE), life = 5)
-    render.debug_cube(&app.renderer, {2, 3, 0}, size = {1, 1, 1}, color = render.debug_color(.CYAN), life = 5)
-    render.debug_arrow(&app.renderer, {0, 0, 0}, {3, 3, 0}, render.debug_color(.YELLOW), life = 5)
+    render.debug_sphere(&app.renderer, {0, 5, 0}, 5, render.DEBUG_WHITE, life = 5)
+    render.debug_cube(&app.renderer, {2, 3, 0}, size = {1, 1, 1}, color = render.DEBUG_CYAN, life = 5)
+    render.debug_arrow(&app.renderer, {0, 0, 0}, {3, 3, 0}, render.DEBUG_YELLOW, life = 5)
     render.debug_axes(&app.renderer, {0, 0, 0}, scale = 2)
   }
-  // render.add_effect(&app.renderer, post_process.FogEffect{color = {0.4, 0.0, 0.8}, density = 0.02, start = 5.0, end = 20.0})
-  // render.add_effect(&app.renderer, post_process.BloomEffect{threshold = 0.2, intensity = 1.0, blur_radius = 4.0})
-  // render.add_effect(&app.renderer, post_process.CrossHatchEffect{hatch_offset_y = 5.0, lum_threshold_01 = 0.6, lum_threshold_02 = 0.3, lum_threshold_03 = 0.15, lum_threshold_04 = 0.07})
-  // render.add_effect(&app.renderer, post_process.BlurEffect{radius = 18.0, weight_falloff = 1.0})
-  // render.add_effect(&app.renderer, post_process.ToneMapEffect{exposure = 1.5, gamma = 1.3})
-  // render.add_effect(&app.renderer, post_process.DoFEffect{focus_distance = 3.0, focus_range = 2.0, blur_strength = 20.0, bokeh_intensity = 0.5})
-  // render.add_effect(&app.renderer, post_process.GrayscaleEffect{strength = 0.9})
-  // render.add_effect(&app.renderer, post_process.OutlineEffect{thickness = 2.0, color = {1.0, 0.0, 0.0}})
+  // render.add_effect(&app.renderer, render.FogEffect{color = {0.4, 0.0, 0.8}, density = 0.02, start = 5.0, end = 20.0})
+  // render.add_effect(&app.renderer, render.BloomEffect{threshold = 0.2, intensity = 1.0, blur_radius = 4.0})
+  // render.add_effect(&app.renderer, render.CrossHatchEffect{hatch_offset_y = 5.0, lum_threshold_01 = 0.6, lum_threshold_02 = 0.3, lum_threshold_03 = 0.15, lum_threshold_04 = 0.07})
+  // render.add_effect(&app.renderer, render.BlurEffect{radius = 18.0, weight_falloff = 1.0})
+  // render.add_effect(&app.renderer, render.ToneMapEffect{exposure = 1.5, gamma = 1.3})
+  // render.add_effect(&app.renderer, render.DoFEffect{focus_distance = 3.0, focus_range = 2.0, blur_strength = 20.0, bokeh_intensity = 0.5})
+  // render.add_effect(&app.renderer, render.GrayscaleEffect{strength = 0.9})
+  // render.add_effect(&app.renderer, render.OutlineEffect{thickness = 2.0, color = {1.0, 0.0, 0.0}})
   when true {
     portal_camera_handle = render.create_camera(
       &app.renderer,
@@ -639,36 +638,22 @@ setup :: proc(app: ^App) {
     warrior_sprite_texture, warrior_sprite_ret := render.create_texture_from_path(&app.renderer, "assets/Warrior_Sheet-Effect.png",
     )
     if warrior_sprite_ret == .SUCCESS {
-      sprite_quad := app.renderer.builtin_meshes[render.Primitive.QUAD_XY]
       // 6x17 sprite sheet using frames 0-98, animated in update
-      sprite_handle, sprite_ok := render.create_sprite(
+      sprite_material, sprite_ok := render.material_sprite(
         &app.renderer,
         warrior_sprite_texture,
         frame_columns = 6,
         frame_rows = 17,
       )
-      warrior_sprite = sprite_handle
+      warrior_sprite = sprite_material
       if sprite_ok {
-        sprite_material, mat_ok := render.create_material(
-          &app.renderer,
-          {.ALBEDO_TEXTURE},
-          type = .TRANSPARENT,
-          albedo_handle = warrior_sprite_texture,
-        )
-        if mat_ok {
-          sprite_attachment := render.SpriteAttachment {
-            sprite_handle = sprite_handle,
-            mesh_handle   = sprite_quad,
-            material      = sprite_material,
-          }
-          handle, spawn_ok := spawn(
-            app,
-            {4, 1.5, 0},
-            sprite_attachment,
-          )
-          if spawn_ok {
-            world.scale(&app.scene, handle, 3.0)
-          }
+        sprite_attachment := render.MeshAttachment {
+          handle   = app.renderer.builtin_meshes[.QUAD_XY],
+          material = sprite_material,
+        }
+        handle, spawn_ok := spawn(app, {4, 1.5, 0}, sprite_attachment)
+        if spawn_ok {
+          world.scale(&app.scene, handle, 3.0)
         }
       }
     }

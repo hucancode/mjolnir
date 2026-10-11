@@ -1,61 +1,58 @@
-package debug_line
+#+private
+package render
 
-import "../gpu"
+import "gpu"
 import "core:log"
 import "core:sync"
 import vk "vendor:vulkan"
 
-@(private)
-SHADER_VERT :: #load("../shader/debug_line/vert.spv")
-@(private)
-SHADER_FRAG :: #load("../shader/debug_line/frag.spv")
+DEBUG_LINE_SHADER_VERT :: #load("shader/debug_line/vert.spv")
+DEBUG_LINE_SHADER_FRAG :: #load("shader/debug_line/frag.spv")
 
-@(private)
 MAX_SEGMENTS :: 65536
-// Every queued segment fits, so record never drops one.
-@(private)
+// Every queued segment fits, so debug_line_record never drops one.
 MAX_VERTICES :: 2 * MAX_SEGMENTS
 
-Vertex :: struct {
+DebugLineVertex :: struct {
   position: [3]f32,
   color:    [4]f32,
 }
 
 // A line to draw. `life` is how long it stays, in seconds of the clock
 // advanced by `advance`; zero or less draws it for one frame.
-Segment :: struct {
+DebugLineSegment :: struct {
   a, b:         [3]f32,
   color:        [4]f32,
   life:         f32,
   bypass_depth: bool,
 }
 
-@(private)
-Queued :: struct {
-  using segment: Segment,
+DebugLineQueued :: struct {
+  using segment: DebugLineSegment,
   expiry:        f32,
 }
 
-Renderer :: struct {
+DebugLineRenderer :: struct {
   pipeline_layout: vk.PipelineLayout,
   pipeline:        vk.Pipeline,
-  vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex),
-  segments:        [dynamic]Queued,
+  vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(DebugLineVertex),
+  segments:        [dynamic]DebugLineQueued,
   now:             f32,
   mu:              sync.Mutex,
 }
 
-init :: proc(
-  self: ^Renderer,
+debug_line_init :: proc(
+  self: ^DebugLineRenderer,
   gctx: ^gpu.GPUContext,
   camera_set_layout: vk.DescriptorSetLayout,
+  color_format: vk.Format,
 ) -> (
   ret: vk.Result,
 ) {
   for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
     self.vertex_buffers[i] = gpu.create_mutable_buffer(
       gctx,
-      Vertex,
+      DebugLineVertex,
       MAX_VERTICES,
       {.VERTEX_BUFFER},
     ) or_return
@@ -67,27 +64,23 @@ init :: proc(
     camera_set_layout,
   ) or_return
 
-  vert_module := gpu.create_shader_module(gctx.device, SHADER_VERT) or_return
-  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-  frag_module := gpu.create_shader_module(gctx.device, SHADER_FRAG) or_return
-  defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
 
   bindings := [?]vk.VertexInputBindingDescription {
-    {binding = 0, stride = size_of(Vertex), inputRate = .VERTEX},
+    {binding = 0, stride = size_of(DebugLineVertex), inputRate = .VERTEX},
   }
   attrs := [?]vk.VertexInputAttributeDescription {
-    {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(Vertex, position))},
-    {location = 1, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(Vertex, color))},
+    {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(DebugLineVertex, position))},
+    {location = 1, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(DebugLineVertex, color))},
   }
   // Depth test toggled dynamically per draw to fold overlay variant into the same pipeline.
   dyn_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_TEST_ENABLE}
-  color_formats := [?]vk.Format{.B8G8R8A8_SRGB}
-  blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ADDITIVE}
+  color_formats := [?]vk.Format{color_format}
+  blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ALPHA}
   self.pipeline = gpu.create_graphics_pipeline(
     gctx,
     {
-      vert = vert_module,
-      frag = frag_module,
+      vert = DEBUG_LINE_SHADER_VERT,
+      frag = DEBUG_LINE_SHADER_FRAG,
       vertex_bindings = bindings[:],
       vertex_attributes = attrs[:],
       topology = .LINE_LIST,
@@ -101,12 +94,12 @@ init :: proc(
     },
   ) or_return
 
-  self.segments = make([dynamic]Queued, 0, 1024)
+  self.segments = make([dynamic]DebugLineQueued, 0, 1024)
   log.debugf("debug_line renderer initialized")
   return .SUCCESS
 }
 
-shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+debug_line_shutdown :: proc(self: ^DebugLineRenderer, gctx: ^gpu.GPUContext) {
   delete(self.segments)
   for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
     gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[i])
@@ -117,18 +110,17 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   self.pipeline_layout = 0
 }
 
-// Sentinel for one-frame draws; dropped after the first record() packs them.
-@(private)
+// Sentinel for one-frame draws; dropped after the first debug_line_record() packs them.
 ONE_FRAME_EXPIRY :: f32(-1.0)
 
 // Advance the clock that segment lifetimes count against.
-advance :: proc(self: ^Renderer, delta_time: f32) {
+debug_line_advance :: proc(self: ^DebugLineRenderer, delta_time: f32) {
   sync.mutex_lock(&self.mu)
   self.now += delta_time
   sync.mutex_unlock(&self.mu)
 }
 
-add_segments :: proc(self: ^Renderer, segs: ..Segment) {
+debug_line_add_segments :: proc(self: ^DebugLineRenderer, segs: ..DebugLineSegment) {
   if len(segs) == 0 do return
   sync.mutex_lock(&self.mu)
   defer sync.mutex_unlock(&self.mu)
@@ -144,12 +136,12 @@ add_segments :: proc(self: ^Renderer, segs: ..Segment) {
   }
   for seg in segs {
     expiry := ONE_FRAME_EXPIRY if seg.life <= 0 else self.now + seg.life
-    append(&self.segments, Queued{segment = seg, expiry = expiry})
+    append(&self.segments, DebugLineQueued{segment = seg, expiry = expiry})
   }
 }
 
-record :: proc(
-  self: ^Renderer,
+debug_line_record :: proc(
+  self: ^DebugLineRenderer,
   cmd: vk.CommandBuffer,
   frame_index: u32,
   camera_set: vk.DescriptorSet,
@@ -173,7 +165,7 @@ record :: proc(
   write := 0
   for seg in self.segments {
     if seg.expiry > 0 && seg.expiry < now do continue
-    v: []Vertex
+    v: []DebugLineVertex
     if seg.bypass_depth {
       back -= 2
       v = mapped[back:][:2]

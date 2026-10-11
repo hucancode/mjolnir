@@ -1,11 +1,25 @@
 package render
 
-import "bindless"
 import cont "../containers"
-import geom "../geometry"
 import "mesh"
 import "gpu"
 import vk "vendor:vulkan"
+
+// Starting bone size classes, about 16 MB per frame in flight. Every class
+// doubles when one runs out (grow_bones); classes with no blocks never grow.
+@(private)
+BONE_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
+  block_size, block_count: u32,
+} {
+  {block_size = 32, block_count = 256},
+  {block_size = 64, block_count = 256},
+  {block_size = 128, block_count = 1024},
+  {block_size = 256, block_count = 256},
+  {block_size = 512, block_count = 32},
+  {block_size = 1024, block_count = 8},
+  {block_size = 0, block_count = 0},
+  {block_size = 0, block_count = 0},
+}
 
 // Allocate every per-resource bindless buffer + the bone slab. Paired with
 // destroy_scene_buffers. Called once during render.init before any subsystem
@@ -17,19 +31,7 @@ init_scene_buffers :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  cont.slab_init(
-    &self.internal.bone_matrix_slab,
-    {
-      {32, 64},
-      {64, 128},
-      {128, 4096},
-      {256, 1792},
-      {512, 0},
-      {1024, 0},
-      {2048, 0},
-      {4096, 0},
-    },
-  )
+  cont.slab_init(&self.internal.bone_matrix_slab, BONE_SLAB_CONFIG)
   gpu.per_frame_bindless_buffer_init(
     &self.internal.bone_buffer,
     gctx,
@@ -49,23 +51,23 @@ init_scene_buffers :: proc(
   defer if ret != .SUCCESS {
     gpu.per_frame_bindless_buffer_destroy(&self.internal.camera_buffer, gctx)
   }
-  gpu.bindless_buffer_init(
+  gpu.per_frame_bindless_buffer_init(
     &self.internal.material_buffer,
     gctx,
     MAX_MATERIALS,
     {.VERTEX, .FRAGMENT},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.material_buffer, gctx)
+    gpu.per_frame_bindless_buffer_destroy(&self.internal.material_buffer, gctx)
   }
-  gpu.bindless_buffer_init(
+  gpu.per_frame_bindless_buffer_init(
     &self.internal.node_data_buffer,
     gctx,
     MAX_NODES_IN_SCENE,
     {.VERTEX, .FRAGMENT, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.node_data_buffer, gctx)
+    gpu.per_frame_bindless_buffer_destroy(&self.internal.node_data_buffer, gctx)
   }
   gpu.bindless_buffer_init(
     &self.internal.mesh_data_buffer,
@@ -76,41 +78,31 @@ init_scene_buffers :: proc(
   defer if ret != .SUCCESS {
     gpu.bindless_buffer_destroy(&self.internal.mesh_data_buffer, gctx)
   }
-  gpu.bindless_buffer_init(
+  gpu.per_frame_bindless_buffer_init(
     &self.internal.emitter_buffer,
     gctx,
     MAX_EMITTERS,
     {.COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.emitter_buffer, gctx)
+    gpu.per_frame_bindless_buffer_destroy(&self.internal.emitter_buffer, gctx)
   }
-  gpu.bindless_buffer_init(
+  gpu.per_frame_bindless_buffer_init(
     &self.internal.forcefield_buffer,
     gctx,
     MAX_FORCE_FIELDS,
     {.COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.forcefield_buffer, gctx)
-  }
-  gpu.bindless_buffer_init(
-    &self.internal.sprite_buffer,
-    gctx,
-    MAX_SPRITES,
-    {.VERTEX, .FRAGMENT},
   ) or_return
   return .SUCCESS
 }
 
 @(private)
 destroy_scene_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.bindless_buffer_destroy(&self.internal.material_buffer, gctx)
-  gpu.bindless_buffer_destroy(&self.internal.node_data_buffer, gctx)
+  gpu.per_frame_bindless_buffer_destroy(&self.internal.material_buffer, gctx)
+  gpu.per_frame_bindless_buffer_destroy(&self.internal.node_data_buffer, gctx)
   gpu.bindless_buffer_destroy(&self.internal.mesh_data_buffer, gctx)
-  gpu.bindless_buffer_destroy(&self.internal.emitter_buffer, gctx)
-  gpu.bindless_buffer_destroy(&self.internal.forcefield_buffer, gctx)
-  gpu.bindless_buffer_destroy(&self.internal.sprite_buffer, gctx)
+  gpu.per_frame_bindless_buffer_destroy(&self.internal.emitter_buffer, gctx)
+  gpu.per_frame_bindless_buffer_destroy(&self.internal.forcefield_buffer, gctx)
   gpu.per_frame_bindless_buffer_destroy(&self.internal.camera_buffer, gctx)
   gpu.per_frame_bindless_buffer_destroy(&self.internal.bone_buffer, gctx)
   cont.slab_destroy(&self.internal.bone_matrix_slab)
@@ -127,7 +119,7 @@ upload_mesh :: proc(
   geometry_data: mesh.Geometry,
 ) -> vk.Result {
   res: vk.Result
-  m.allocations, res = bindless.allocate_mesh(&render.mesh_manager, gctx, geometry_data)
+  m.allocations, res = allocate_mesh(&render.mesh_manager, gctx, geometry_data)
   if res != .SUCCESS do return res
   aabb := mesh.aabb_from_vertices(geometry_data.vertices)
   data := MeshData {
@@ -144,12 +136,6 @@ upload_mesh :: proc(
 }
 
 @(private)
-upload_node_data :: proc(render: ^Manager, index: u32, node_data: ^NodeData) {
-  assert(index < MAX_NODES_IN_SCENE, "node index exceeds MAX_NODES_IN_SCENE")
-  gpu.write(&render.internal.node_data_buffer.buffer, node_data, int(index))
-}
-
-@(private)
 upload_bone_matrices :: proc(
   render: ^Manager,
   frame_index: u32,
@@ -157,42 +143,11 @@ upload_bone_matrices :: proc(
   matrices: []matrix[4, 4]f32,
 ) {
   assert(int(frame_index) < gpu.FRAMES_IN_FLIGHT, "frame_index out of range")
-  assert(
-    int(offset) + len(matrices) <= int(render.internal.bone_matrix_slab.capacity),
-    "bone matrix range exceeds slab capacity",
-  )
   frame_buffer := &render.internal.bone_buffer.buffers[frame_index]
   if frame_buffer.mapped == nil do return
   l := int(offset)
   r := l + len(matrices)
   gpu_slice := gpu.get_all(frame_buffer)
+  assert(r <= len(gpu_slice), "bone matrix range exceeds the bone buffer")
   copy(gpu_slice[l:r], matrices[:])
-}
-
-@(private)
-upload_camera_data :: proc(
-  render: ^Manager,
-  camera_index: u32,
-  view, projection: matrix[4, 4]f32,
-  position: [3]f32,
-  extent: [2]u32,
-  near, far: f32,
-  frame_index: u32,
-) {
-  assert(camera_index < MAX_ACTIVE_CAMERAS, "camera index exceeds MAX_ACTIVE_CAMERAS")
-  assert(int(frame_index) < gpu.FRAMES_IN_FLIGHT, "frame_index out of range")
-  camera_data: CameraGPU
-  camera_data.view = view
-  camera_data.projection = projection
-  camera_data.viewport_extent = {f32(extent[0]), f32(extent[1])}
-  camera_data.near = near
-  camera_data.far = far
-  camera_data.position = [4]f32{position.x, position.y, position.z, 1.0}
-  frustum := geom.make_frustum(camera_data.projection * camera_data.view)
-  camera_data.frustum_planes = frustum.planes
-  gpu.write(
-    &render.internal.camera_buffer.buffers[frame_index],
-    &camera_data,
-    int(camera_index),
-  )
 }

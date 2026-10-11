@@ -14,33 +14,43 @@ struct Camera {
     float far;
     vec4 position;
     vec4 frustum_planes[6];
+    mat4 inv_view_projection;
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
 };
 
+struct MaterialData {
+    uint albedo_index;
+    uint metallic_roughness_index;
+    uint normal_index;
+    uint emissive_index;
+    float metallic_value;
+    float roughness_value;
+    float emissive_value;
+    uint features;
+    vec4 base_color_factor;
+    uint frame_columns;
+    uint frame_rows;
+    uint frame_index;
+    uint _pad0;
+};
+
+layout(set = 2, binding = 0) readonly buffer MaterialBuffer {
+    MaterialData materials[];
+};
+
 struct NodeData {
     mat4 world_matrix;
     uint material_id;
     uint mesh_id;
-    uint attachment_data_index;  // For skinned meshes: bone matrix offset; For sprites: sprite index
+    uint attachment_data_index;
     uint flags;
 };
 
-layout(set = 2, binding = 0) readonly buffer NodeBuffer {
+layout(set = 3, binding = 0) readonly buffer NodeBuffer {
     NodeData nodes[];
-};
-
-struct SpriteData {
-    uint texture_index;
-    uint frame_columns;
-    uint frame_rows;
-    uint frame_index;
-};
-
-layout(set = 3, binding = 0) readonly buffer SpriteBuffer {
-    SpriteData sprites[];
 };
 
 layout(push_constant) uniform PushConstants {
@@ -57,8 +67,7 @@ void main() {
     uint node_index = uint(gl_InstanceIndex);
     mat4 world = nodes[node_index].world_matrix;
     NodeData node = nodes[node_index];
-    uint sprite_index = node.attachment_data_index;
-    SpriteData sprite = sprites[sprite_index];
+    MaterialData sprite = materials[node.material_id];
     vec3 camera_right = vec3(camera.view[0][0], camera.view[1][0], camera.view[2][0]);
     vec3 camera_up = vec3(camera.view[0][1], camera.view[1][1], camera.view[2][1]);
     // Extract position from world matrix
@@ -77,8 +86,8 @@ void main() {
     vec2 uv_offset = vec2(float(column) * frame_width, float(row) * frame_height);
     vec2 uv_size = vec2(frame_width, frame_height);
     outUV = inUV * uv_size + uv_offset;
-    outColor = inColor;
+    outColor = inColor * sprite.base_color_factor;
     outPosition = worldPosition.xyz;
-    outTextureIndex = sprite.texture_index;
+    outTextureIndex = sprite.albedo_index;
     gl_Position = camera.projection * camera.view * worldPosition;
 }

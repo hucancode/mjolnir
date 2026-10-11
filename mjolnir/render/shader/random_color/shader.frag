@@ -13,6 +13,10 @@ struct MaterialData {
     float emissive_value;
     uint features;
     vec4 base_color_factor;
+    uint frame_columns;
+    uint frame_rows;
+    uint frame_index;
+    uint _pad0;
 };
 
 layout(set = 3, binding = 0) readonly buffer MaterialBuffer {

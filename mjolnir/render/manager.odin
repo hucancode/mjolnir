@@ -1,17 +1,7 @@
 package render
 
-import "bindless"
 import cont "../containers"
 import "gpu"
-import "ambient"
-import "debug_line"
-import "direct_light"
-import "forward"
-import "geometry"
-import "occlusion_culling"
-import "particles"
-import "post_process"
-import "shadow"
 import vk "vendor:vulkan"
 
 MAX_NODES_IN_SCENE :: 65536
@@ -21,7 +11,6 @@ MAX_ACTIVE_CAMERAS :: 128
 MAX_LIGHTS :: 256
 MAX_MESHES :: 65536
 MAX_MATERIALS :: 4096
-MAX_SPRITES :: 4096
 MAX_SHADOW_MAPS :: 16
 SHADOW_MAP_SIZE :: 512
 // Frames a freed CPU resource slot stays reserved before reuse, so in-flight
@@ -30,9 +19,7 @@ SHADOW_MAP_SIZE :: 512
 RETIRE_GRACE :: gpu.FRAMES_IN_FLIGHT + 1
 
 Handle :: cont.Handle
-MeshHandle :: bindless.MeshHandle
 MaterialHandle :: distinct Handle
-SpriteHandle :: distinct Handle
 EmitterHandle :: distinct Handle
 ForceFieldHandle :: distinct Handle
 CameraHandle :: distinct Handle
@@ -63,6 +50,8 @@ MaterialType :: enum {
   WIREFRAME,
   TRANSPARENT,
   RANDOM_COLOR,
+  // camera-facing billboard showing one cell of the albedo sprite sheet
+  SPRITE,
 }
 
 @(private)
@@ -128,14 +117,10 @@ MaterialData :: struct {
   emissive_value:           f32,
   features:                 ShaderFeatureSet,
   base_color_factor:        [4]f32,
-}
-
-@(private)
-SpriteData :: struct {
-  texture_index: u32,
-  frame_columns: u32,
-  frame_rows:    u32,
-  frame_index:   u32,
+  frame_columns:            u32,
+  frame_rows:               u32,
+  frame_index:              u32,
+  _:                        u32,
 }
 
 // CameraGPU is the SSBO layout uploaded each frame to camera_buffer; rendered
@@ -150,14 +135,9 @@ CameraGPU :: struct {
   far:             f32,
   position:        [4]f32,
   frustum_planes:  [6][4]f32,
+  // rebuilds world positions from G-buffer depth
+  inv_view_projection: matrix[4, 4]f32,
 }
-
-@(private)
-EmitterData :: particles.Emitter
-@(private)
-ForceFieldData :: particles.ForceField
-MAX_EMITTERS :: particles.MAX_EMITTERS
-MAX_FORCE_FIELDS :: particles.MAX_FORCE_FIELDS
 
 // Internal owns GPU primitives and CPU-side bookkeeping. Private to render.
 @(private)
@@ -166,46 +146,34 @@ Internal :: struct {
   compute_command_buffers:      [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Set by setup, cleared by teardown; frame renders nothing while false.
   level_ready:                  bool,
-  bone_buffer:                  gpu.PerFrameBindlessBuffer(
-    matrix[4, 4]f32,
-    gpu.FRAMES_IN_FLIGHT,
-  ),
-  camera_buffer:                gpu.PerFrameBindlessBuffer(
-    CameraGPU,
-    gpu.FRAMES_IN_FLIGHT,
-  ),
-  material_buffer:              gpu.BindlessBuffer(MaterialData),
-  node_data_buffer:             gpu.BindlessBuffer(NodeData),
+  bone_buffer:                  gpu.PerFrameBindlessBuffer(matrix[4, 4]f32),
+  camera_buffer:                gpu.PerFrameBindlessBuffer(CameraGPU),
+  material_buffer:              gpu.PerFrameBindlessBuffer(MaterialData),
+  node_data_buffer:             gpu.PerFrameBindlessBuffer(NodeData),
   mesh_data_buffer:             gpu.BindlessBuffer(MeshData),
-  emitter_buffer:               gpu.BindlessBuffer(EmitterData),
-  forcefield_buffer:            gpu.BindlessBuffer(ForceFieldData),
-  sprite_buffer:                gpu.BindlessBuffer(SpriteData),
+  emitter_buffer:               gpu.PerFrameBindlessBuffer(EmitterData),
+  forcefield_buffer:            gpu.PerFrameBindlessBuffer(ForceFieldData),
   bone_matrix_slab:             cont.SlabAllocator,
   bones:                        map[u32]BonePalette,
   // Pass renderers - never accessed from outside the render package.
-  geometry:                     geometry.Renderer,
-  direct_light:                 direct_light.Renderer,
-  forward:                      forward.Renderer,
-  particles:                    particles.Renderer,
-  debug_line_renderer:          debug_line.Renderer,
+  geometry:                     GBufferRenderer,
+  direct_light:                 DirectLightRenderer,
+  forward:                      ForwardRenderer,
+  particles:                    ParticlesRenderer,
+  debug_line_renderer:          DebugLineRenderer,
   ui:                           OverlayRenderer,
   // Compute / culling / shadow systems.
-  visibility:                   occlusion_culling.System,
-  shadow:                       shadow.System,
-  // Slots whose attachment is a light; collect_lights reads them each frame.
-  light_slots:                  map[u32]struct{},
+  visibility:                   OcclusionSystem,
+  shadow:                       ShadowSystem,
+  // This frame's lights, rebuilt by collect_lights on flush.
   frame_lights:                 [dynamic]FrameLight,
   shadow_maps:                  [MAX_SHADOW_MAPS]ShadowMap,
   staging:                      Staging,
-  // Pending overlay font atlas upload, applied by flush on the render thread.
-  ui_atlas_pixels:              []u8,
-  ui_atlas_extent:              [2]u32,
-  ui_atlas_dirty:               bool,
 }
 
 // Public Manager surface. Callers outside the render package use these
 // fields and the public procs.
-//   * meshes / materials / sprites / emitters / forcefields: CPU-side
+//   * meshes / materials / emitters / forcefields: CPU-side
 //     resources. Create and change them through the procs in resources.odin;
 //     changes reach the GPU through staging.
 //   * instances: per-slot looks (mesh, light, emitter, ...), indexed by
@@ -234,7 +202,6 @@ Manager :: struct {
   internal:          Internal,
   meshes:            cont.Pool(Mesh),
   materials:         cont.Pool(Material),
-  sprites:           cont.Pool(Sprite),
   emitters:          cont.Pool(Emitter),
   forcefields:       cont.Pool(ForceField),
   instances:         [dynamic]Instance,
@@ -245,34 +212,29 @@ Manager :: struct {
   // Single source of truth for active scene node count. Drives compute
   // dispatch sizing across visibility, depth pyramid, and both shadow culls.
   node_count:        u32,
-  mesh_manager:      bindless.MeshManager,
-  texture_manager:   bindless.TextureManager,
-  ambient:           ambient.Renderer,
-  post_process:      post_process.Renderer,
+  mesh_manager:      MeshManager,
+  texture_manager:   TextureManager,
+  ambient:           AmbientRenderer,
+  post_process:      PostProcessRenderer,
 }
 
 AttachmentType :: enum {
   FINAL_IMAGE        = 0,
-  POSITION           = 1,
-  NORMAL             = 2,
-  ALBEDO             = 3,
-  METALLIC_ROUGHNESS = 4,
-  EMISSIVE           = 5,
-  DEPTH              = 6,
+  NORMAL             = 1,
+  ALBEDO             = 2,
+  METALLIC_ROUGHNESS = 3,
+  EMISSIVE           = 4,
+  DEPTH              = 5,
 }
 
 PerspectiveProjection :: struct {
   fov:          f32,
   aspect_ratio: f32,
-  near:         f32,
-  far:          f32,
 }
 
 OrthographicProjection :: struct {
   width:  f32,
   height: f32,
-  near:   f32,
-  far:    f32,
 }
 
 CameraProjection :: union {
@@ -286,13 +248,15 @@ Camera :: struct {
   position:                     [3]f32,
   rotation:                     quaternion128,
   projection:                   CameraProjection,
+  // clip planes, shared by both projections
+  near, far:                    f32,
   extent:                       [2]u32, // width, height
-  attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]bindless.Texture2DHandle,
-  // One indirect draw list per bindless.DrawPipeline (double-buffered for
+  attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]Texture2DHandle,
+  // One indirect draw list per DrawPipeline (double-buffered for
   // async compute). Frame N compute writes to buffers[N], Frame N graphics
   // reads from buffers[N-1].
-  draws:                        bindless.DrawBuffers,
-  depth_pyramid:                [gpu.FRAMES_IN_FLIGHT]occlusion_culling.DepthPyramid,
+  draws:                        DrawBuffers,
+  depth_pyramid:                [gpu.FRAMES_IN_FLIGHT]DepthPyramid,
   descriptor_set:               [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  depth_reduce_descriptor_sets: [gpu.FRAMES_IN_FLIGHT][occlusion_culling.MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
+  depth_reduce_descriptor_sets: [gpu.FRAMES_IN_FLIGHT][MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
 }

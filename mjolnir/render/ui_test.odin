@@ -1,3 +1,4 @@
+#+private file
 package render
 
 import "base:runtime"
@@ -13,12 +14,12 @@ TEST_FONT :: #load("../../assets/Outfit-Regular.ttf")
 
 @(test)
 test_destroy_widget_invalidates_handle :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 16, {})
 	defer ui_shutdown(&sys)
 	h, _ := create_quad2d(&sys, {10, 20}, {30, 40})
 	destroy_widget(&sys, UIWidgetHandle(h))
-	testing.expect(t, get_quad2d(&sys, h) == nil, "stale handle must miss")
+	testing.expect(t, get_as(&sys, h, Quad2D) == nil, "stale handle must miss")
 }
 
 // ---------------------------------------------------------------
@@ -27,7 +28,7 @@ test_destroy_widget_invalidates_handle :: proc(t: ^testing.T) {
 
 @(test)
 test_box_add_remove_child :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 8, {})
 	defer ui_shutdown(&sys)
 
@@ -35,7 +36,7 @@ test_box_add_remove_child :: proc(t: ^testing.T) {
 	child, _ := create_quad2d(&sys, {10, 10}, {20, 20})
 
 	box_add_child(&sys, parent, UIWidgetHandle(child))
-	pb := get_box(&sys, parent)
+	pb := get_as(&sys, parent, Box)
 	testing.expect(t, len(pb.children) == 1, "child appended")
 	cw := get_widget(&sys, UIWidgetHandle(child))
 	parent_ref, has := get_widget_base(cw).parent.?
@@ -49,7 +50,7 @@ test_box_add_remove_child :: proc(t: ^testing.T) {
 
 @(test)
 test_compute_layout_propagates_world_position :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 16, {})
 	defer ui_shutdown(&sys)
 
@@ -61,9 +62,9 @@ test_compute_layout_propagates_world_position :: proc(t: ^testing.T) {
 
 	compute_layout(&sys, UIWidgetHandle(root))
 
-	rb := get_box(&sys, root)
-	mb := get_box(&sys, mid)
-	lq := get_quad2d(&sys, leaf)
+	rb := get_as(&sys, root, Box)
+	mb := get_as(&sys, mid, Box)
+	lq := get_as(&sys, leaf, Quad2D)
 	testing.expect(t, rb.world_position == [2]f32{100, 200}, "root world == position")
 	testing.expect(t, mb.world_position == [2]f32{130, 240}, "mid world == root + mid local")
 	testing.expect(t, lq.world_position == [2]f32{135, 246}, "leaf world == mid + leaf local")
@@ -71,15 +72,15 @@ test_compute_layout_propagates_world_position :: proc(t: ^testing.T) {
 
 @(test)
 test_compute_layout_all_skips_orphans :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 8, {})
 	defer ui_shutdown(&sys)
 
 	a, _ := create_quad2d(&sys, {1, 1}, {1, 1})
 	b, _ := create_quad2d(&sys, {2, 2}, {1, 1})
 	compute_layout_all(&sys)
-	wa := get_quad2d(&sys, a)
-	wb := get_quad2d(&sys, b)
+	wa := get_as(&sys, a, Quad2D)
+	wb := get_as(&sys, b, Quad2D)
 	testing.expect(t, wa.world_position == wa.position, "orphan a layout self")
 	testing.expect(t, wb.world_position == wb.position, "orphan b layout self")
 }
@@ -90,7 +91,7 @@ test_compute_layout_all_skips_orphans :: proc(t: ^testing.T) {
 
 @(test)
 test_point_in_widget_quad_box :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 4, {})
 	defer ui_shutdown(&sys)
 
@@ -105,7 +106,7 @@ test_point_in_widget_quad_box :: proc(t: ^testing.T) {
 
 @(test)
 test_pick_widget_picks_top_z :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 8, {})
 	defer ui_shutdown(&sys)
 
@@ -128,7 +129,7 @@ test_pick_widget_picks_top_z :: proc(t: ^testing.T) {
 
 @(test)
 test_pick_widget_skips_invisible :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 4, {})
 	defer ui_shutdown(&sys)
 	h, _ := create_quad2d(&sys, {0, 0}, {10, 10})
@@ -158,7 +159,7 @@ key_handler :: proc(event: KeyEvent) {
 
 @(test)
 test_dispatch_mouse_bubbles_to_parent :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 8, {})
 	defer ui_shutdown(&sys)
 
@@ -170,21 +171,14 @@ test_dispatch_mouse_bubbles_to_parent :: proc(t: ^testing.T) {
 	set_handlers(&sys, UIWidgetHandle(parent), {on_mouse_down = mouse_handler})
 	set_handlers(&sys, UIWidgetHandle(child), {on_mouse_down = mouse_handler})
 
-	dispatch_mouse_event(&sys, UIWidgetHandle(child),
-		MouseEvent{type = .CLICK_DOWN, position = {15, 15}, button = .LEFT, widget = UIWidgetHandle(child)},
-		bubble = true)
+	dispatch_event(&sys, UIWidgetHandle(child),
+		MouseEvent{type = .CLICK_DOWN, position = {15, 15}, button = .LEFT, widget = UIWidgetHandle(child)})
 	testing.expectf(t, mouse_calls == 2, "child + parent should fire, got %d", mouse_calls)
-
-	mouse_calls = 0
-	dispatch_mouse_event(&sys, UIWidgetHandle(child),
-		MouseEvent{type = .CLICK_DOWN, position = {15, 15}, button = .LEFT, widget = UIWidgetHandle(child)},
-		bubble = false)
-	testing.expectf(t, mouse_calls == 1, "no bubble: child only, got %d", mouse_calls)
 }
 
 @(test)
 test_dispatch_key_only_matched_handler :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 4, {})
 	defer ui_shutdown(&sys)
 
@@ -192,16 +186,16 @@ test_dispatch_key_only_matched_handler :: proc(t: ^testing.T) {
 	key_calls = 0
 	set_handlers(&sys, UIWidgetHandle(h), {on_key_down = key_handler})
 
-	dispatch_key_event(&sys, UIWidgetHandle(h),
+	dispatch_event(&sys, UIWidgetHandle(h),
 		KeyEvent{type = .KEY_UP, key = .SPACE, widget = UIWidgetHandle(h)})
 	testing.expect(t, key_calls == 0, "KEY_UP should not call on_key_down")
 
-	dispatch_key_event(&sys, UIWidgetHandle(h),
+	dispatch_event(&sys, UIWidgetHandle(h),
 		KeyEvent{type = .KEY_DOWN, key = .SPACE, widget = UIWidgetHandle(h)})
 	testing.expect(t, key_calls == 1, "KEY_DOWN should call once")
 }
 
-set_handlers :: proc(sys: ^System, h: UIWidgetHandle, handlers: EventHandlers) {
+set_handlers :: proc(sys: ^UISystem, h: UIWidgetHandle, handlers: EventHandlers) {
 	get_widget_base(get_widget(sys, h)).event_handlers = handlers
 }
 
@@ -228,14 +222,14 @@ all_mouse :: EventHandlers {
 }
 
 // Feed one tick of accumulated input to the system.
-tick :: proc(sys: ^System, s: ^input.State, acc: ^input.Accumulator) {
+tick :: proc(sys: ^UISystem, s: ^input.State, acc: ^input.Accumulator) {
 	input.new_frame(s, acc)
 	process_input(sys, s)
 }
 
 @(test)
 test_process_input_hover_click_capture :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 8, {})
 	defer ui_shutdown(&sys)
 	defer delete(events)
@@ -277,7 +271,7 @@ test_process_input_hover_click_capture :: proc(t: ^testing.T) {
 
 @(test)
 test_process_input_focus_routes_keys_and_text :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 8, {})
 	defer ui_shutdown(&sys)
 	defer delete(typed)
@@ -317,29 +311,8 @@ test_process_input_focus_routes_keys_and_text :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_key_edge_order :: proc(t: ^testing.T) {
-	s: input.State
-	acc: input.Accumulator
-	input.on_key(&acc, .A, .PRESS)
-	input.on_key(&acc, .A, .RELEASE)
-	input.on_key(&acc, .B, .PRESS)
-	input.new_frame(&s, &acc)
-	input.on_key(&acc, .B, .RELEASE)
-	input.on_key(&acc, .B, .PRESS)
-	input.new_frame(&s, &acc)
-	it := 0
-	k, p, ok := input.next_key_edge(&s, &it)
-	testing.expect(t, ok && k == .B && !p, "re-pressed key: release first")
-	k, p, ok = input.next_key_edge(&s, &it)
-	testing.expect(t, ok && k == .B && p, "then press")
-	_, _, ok = input.next_key_edge(&s, &it)
-	testing.expect(t, !ok, "no more edges")
-	testing.expect(t, input.key_down(&s, .B) && !input.key_pressed(&s, .A), "state")
-}
-
-@(test)
 test_box_background_draws :: proc(t: ^testing.T) {
-	sys: System
+	sys: UISystem
 	ui_init(&sys, TEST_FONT, 4, {})
 	defer ui_shutdown(&sys)
 	create_box(&sys, {0, 0}, {10, 10})
@@ -355,12 +328,12 @@ test_box_background_draws :: proc(t: ^testing.T) {
 // ---------------------------------------------------------------
 
 bench_ui_state :: struct {
-	sys:  System,
+	sys:  UISystem,
 	root: BoxHandle,
 	hits: int,
 }
 
-build_subtree :: proc(sys: ^System, parent: BoxHandle, depth: int, branch: int) {
+build_subtree :: proc(sys: ^UISystem, parent: BoxHandle, depth: int, branch: int) {
 	if depth == 0 do return
 	for _ in 0 ..< branch {
 		c, _ := create_box(sys, {1, 1}, {10, 10})
