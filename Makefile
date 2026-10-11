@@ -118,7 +118,7 @@ doc:
 	pandoc docs/home.md -s -c style.css -o docs/index.html
 
 compare-physics:
-	git stash
+	git stash -u
 	odin build examples/physics -out:bin/physics_before -disable-assert -no-bounds-check -o:speed -define:NX=30 -define:NY=30 -define:NZ=30
 	git stash pop
 	odin build examples/physics -out:bin/physics_after -disable-assert -no-bounds-check -o:speed -define:NX=30 -define:NY=30 -define:NZ=30
