@@ -56,6 +56,7 @@ load_texture :: proc(
   texture: ^cgltf.texture,
   gltf_path: string,
   cache: ^map[^cgltf.texture]render.Texture2DHandle,
+  format: vk.Format = .R8G8B8A8_SRGB,
 ) -> (
   handle: render.Texture2DHandle,
   ok: bool,
@@ -77,7 +78,7 @@ load_texture :: proc(
   }
   defer delete(pixel_data)
   res: vk.Result
-  handle, res = render.create_texture_from_data(r, pixel_data, .R8G8B8A8_UNORM)
+  handle, res = render.create_texture_from_data(r, pixel_data, format)
   if res != .SUCCESS do return {}, false
   cache[texture] = handle
   log.infof("Created texture %v", handle)
@@ -105,20 +106,20 @@ load_material :: proc(
     metallic = mat.pbr_metallic_roughness.metallic_factor
     roughness = mat.pbr_metallic_roughness.roughness_factor
     if tex := mat.pbr_metallic_roughness.metallic_roughness_texture.texture; tex != nil {
-      metallic_roughness = load_texture(r, tex, gltf_path, textures) or_return
+      metallic_roughness = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_UNORM) or_return
       features |= {.METALLIC_ROUGHNESS_TEXTURE}
     }
   }
   if tex := mat.pbr_metallic_roughness.base_color_texture.texture; tex != nil {
-    albedo = load_texture(r, tex, gltf_path, textures) or_return
+    albedo = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_SRGB) or_return
     features |= {.ALBEDO_TEXTURE}
   }
   if tex := mat.normal_texture.texture; tex != nil {
-    normal = load_texture(r, tex, gltf_path, textures) or_return
+    normal = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_UNORM) or_return
     features |= {.NORMAL_TEXTURE}
   }
   if tex := mat.emissive_texture.texture; tex != nil {
-    emissive = load_texture(r, tex, gltf_path, textures) or_return
+    emissive = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_SRGB) or_return
     features |= {.EMISSIVE_TEXTURE}
   }
   handle = render.create_material(
