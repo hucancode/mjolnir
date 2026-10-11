@@ -1,7 +1,6 @@
-package ui
+package render
 
 import cont "../containers"
-import cmd "../draw2d"
 import "core:log"
 import "core:slice"
 import fs "vendor:fontstash"
@@ -9,7 +8,7 @@ import fs "vendor:fontstash"
 System :: struct {
   widget_pool:  cont.Pool(Widget),
   font_context: ^fs.FontContext,
-  staging:      [dynamic]cmd.RenderCommand,
+  staging:      [dynamic]RenderCommand,
   hovered:      Maybe(UIWidgetHandle), // interactive widget under the cursor
   captured:     Maybe(UIWidgetHandle), // pressed widget, kept until all buttons release
   focused:      Maybe(UIWidgetHandle), // receives key and text events
@@ -18,19 +17,15 @@ System :: struct {
 // Glyph sizes rasterized at init so the first atlas upload covers typical text.
 DEFAULT_PREWARM_SIZES :: []f32{12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96}
 
-// draw2d types that appear in this package's API.
-Vertex2D :: cmd.Vertex2D
-NO_TEXTURE :: cmd.NO_TEXTURE
-
 // font_data is a TTF/OTF file in memory; it is copied.
-init :: proc(
+ui_init :: proc(
   self: ^System,
   font_data: []u8,
   max_widgets: u32 = 4096,
   prewarm_sizes: []f32 = DEFAULT_PREWARM_SIZES,
 ) -> bool {
   cont.init(&self.widget_pool, max_widgets)
-  self.staging = make([dynamic]cmd.RenderCommand, 0, 256)
+  self.staging = make([dynamic]RenderCommand, 0, 256)
   font_atlas_width := 512
   font_atlas_height := 512
   self.font_context = new(fs.FontContext)
@@ -53,7 +48,7 @@ init :: proc(
   return true
 }
 
-shutdown :: proc(self: ^System) {
+ui_shutdown :: proc(self: ^System) {
   cont.destroy(&self.widget_pool, cleanup_widget)
   delete(self.staging)
   if self.font_context != nil {
@@ -163,8 +158,8 @@ destroy_widget :: proc(sys: ^System, handle: UIWidgetHandle) {
 
 // This frame's draw commands plus the font atlas when it changed. Hand it to
 // the 2D renderer; the commands stay valid until the next call.
-draw_list :: proc(sys: ^System) -> cmd.DrawList {
-  list := cmd.DrawList{commands = build_commands(sys)}
+draw_list :: proc(sys: ^System) -> DrawList {
+  list := DrawList{commands = build_commands(sys)}
   if pixels, w, h, changed := take_font_atlas(sys); changed {
     list.atlas = pixels
     list.atlas_size = {w, h}
@@ -175,7 +170,7 @@ draw_list :: proc(sys: ^System) -> cmd.DrawList {
 // Lay out all widgets and return this frame's draw commands. The slice is
 // valid until the next call; glyph data lives in the temp allocator.
 @(private)
-build_commands :: proc(sys: ^System) -> []cmd.RenderCommand {
+build_commands :: proc(sys: ^System) -> []RenderCommand {
   compute_layout_all(sys)
   clear(&sys.staging)
 
@@ -185,7 +180,7 @@ build_commands :: proc(sys: ^System) -> []cmd.RenderCommand {
 
     switch &w in widget {
     case Quad2D:
-      command := cmd.DrawQuadCommand {
+      command := DrawQuadCommand {
         position   = w.world_position,
         size       = w.size,
         color      = w.color,
@@ -195,7 +190,7 @@ build_commands :: proc(sys: ^System) -> []cmd.RenderCommand {
       append(&sys.staging, command)
 
     case Mesh2D:
-      command := cmd.DrawMeshCommand {
+      command := DrawMeshCommand {
         position   = w.world_position,
         vertices   = w.vertices,
         indices    = w.indices,
@@ -206,9 +201,9 @@ build_commands :: proc(sys: ^System) -> []cmd.RenderCommand {
 
     case Text2D:
       // Convert glyphs to draw commands
-      glyphs := make([]cmd.DrawTextGlyph, len(w.glyphs), context.temp_allocator)
+      glyphs := make([]DrawTextGlyph, len(w.glyphs), context.temp_allocator)
       for glyph, idx in w.glyphs {
-        glyphs[idx] = cmd.DrawTextGlyph {
+        glyphs[idx] = DrawTextGlyph {
           p0    = glyph.p0,
           p1    = glyph.p1,
           uv0   = glyph.uv0,
@@ -216,7 +211,7 @@ build_commands :: proc(sys: ^System) -> []cmd.RenderCommand {
           color = w.color,
         }
       }
-      command := cmd.DrawTextCommand {
+      command := DrawTextCommand {
         position = w.world_position,
         glyphs   = glyphs,
         z_order  = w.z_order,
@@ -225,11 +220,11 @@ build_commands :: proc(sys: ^System) -> []cmd.RenderCommand {
 
     case Box:
       if w.background_color.a == 0 do continue
-      command := cmd.DrawQuadCommand {
+      command := DrawQuadCommand {
         position   = w.world_position,
         size       = w.size,
         color      = w.background_color,
-        texture_id = cmd.NO_TEXTURE,
+        texture_id = NO_TEXTURE,
         z_order    = w.z_order,
       }
       append(&sys.staging, command)

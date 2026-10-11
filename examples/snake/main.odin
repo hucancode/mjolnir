@@ -4,7 +4,6 @@ import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
-import "../../mjolnir/ui"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
@@ -36,8 +35,8 @@ Game :: struct {
   score:       int,
   best:        int,
   alive:       bool,
-  score_label: ui.Text2DHandle,
-  best_label:  ui.Text2DHandle,
+  score_label: render.Text2DHandle,
+  best_label:  render.Text2DHandle,
 }
 
 g: Game
@@ -48,7 +47,7 @@ App :: struct {
   renderer: render.Manager,
   camera:   render.CameraController,
   input:    input.State,
-  gui:      ui.System,
+  gui:      render.System,
 }
 
 main :: proc() {
@@ -67,8 +66,8 @@ main :: proc() {
   font, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
   if err != nil do return
   defer delete(font)
-  if !ui.init(&app.gui, font) do return
-  defer ui.shutdown(&app.gui)
+  if !render.ui_init(&app.gui, font) do return
+  defer render.ui_shutdown(&app.gui)
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -79,7 +78,7 @@ should_close :: proc(app: ^App) -> bool {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  render.stage_ui(&app.renderer, ui.draw_list(&app.gui))
+  render.stage_ui(&app.renderer, render.draw_list(&app.gui))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
@@ -108,8 +107,8 @@ setup :: proc(app: ^App) {
   render.attach(&app.renderer, spot.index, render.spot_light_attachment({0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true))
   world.rotate(&app.scene, spot, math.PI * 0.55, linalg.VECTOR3F32_X_AXIS)
 
-  g.score_label, _ = ui.create_text2d(&app.gui, position = {20, 20}, text = "Score: 0", font_size = 28, color = {255, 255, 255, 255})
-  g.best_label, _  = ui.create_text2d(&app.gui, position = {20, 60}, text = "Best: 0",  font_size = 24, color = {255, 220, 100, 255})
+  g.score_label, _ = render.create_text2d(&app.gui, position = {20, 20}, text = "Score: 0", font_size = 28, color = {255, 255, 255, 255})
+  g.best_label, _  = render.create_text2d(&app.gui, position = {20, 60}, text = "Best: 0",  font_size = 24, color = {255, 220, 100, 255})
 
   g.head_node = spawn_primitive(app, .CUBE, .YELLOW)
   world.scale(&app.scene, g.head_node, SEGMENT_SCALE)
@@ -183,7 +182,7 @@ on_key :: proc(key: input.Key) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  ui.process_input(&app.gui, &app.input)
+  render.process_input(&app.gui, &app.input)
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   step_game(app, dt)
   world.update(&app.scene)
@@ -239,6 +238,6 @@ step_game :: proc(app: ^App, dt: f32) {
 }
 
 refresh_score_ui :: proc(app: ^App) {
-  ui.set_text(&app.gui, g.score_label, fmt.tprintf("Score: %d", g.score))
-  ui.set_text(&app.gui, g.best_label,  fmt.tprintf("Best: %d",  g.best))
+  render.set_text(&app.gui, g.score_label, fmt.tprintf("Score: %d", g.score))
+  render.set_text(&app.gui, g.best_label,  fmt.tprintf("Best: %d",  g.best))
 }

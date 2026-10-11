@@ -1,6 +1,5 @@
-package ui
+package render
 
-import cmd "../draw2d"
 
 WidgetBase :: struct {
   position:       [2]f32,
@@ -14,7 +13,7 @@ WidgetBase :: struct {
 
 Mesh2D :: struct {
   using base:    WidgetBase,
-  vertices:      []cmd.Vertex2D,
+  vertices:      []Vertex2D,
   indices:       []u32,
   texture:       u32, // bindless texture index, or NO_TEXTURE
 }

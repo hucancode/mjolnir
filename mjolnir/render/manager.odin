@@ -12,7 +12,6 @@ import "occlusion_culling"
 import "particles"
 import "post_process"
 import "shadow"
-import ui_render "ui"
 import vk "vendor:vulkan"
 
 MAX_NODES_IN_SCENE :: 65536
@@ -189,7 +188,7 @@ Internal :: struct {
   forward:                      forward.Renderer,
   particles:                    particles.Renderer,
   debug_line_renderer:          debug_line.Renderer,
-  ui:                           ui_render.Renderer,
+  ui:                           OverlayRenderer,
   // Compute / culling / shadow systems.
   visibility:                   occlusion_culling.System,
   shadow:                       shadow.System,

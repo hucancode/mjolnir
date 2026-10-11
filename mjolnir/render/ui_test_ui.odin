@@ -1,11 +1,10 @@
-package ui
+package render
 
 import "base:runtime"
 import "core:log"
 import "core:testing"
 import "core:time"
 import "../input"
-import cmd "../draw2d"
 
 // init() needs no GPU, only allocates pool/staging/fontstash atlas.
 // All tests below avoid GPU and font glyph rasterization.
@@ -15,8 +14,8 @@ TEST_FONT :: #load("../../assets/Outfit-Regular.ttf")
 @(test)
 test_destroy_widget_invalidates_handle :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 16, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 16, {})
+	defer ui_shutdown(&sys)
 	h, _ := create_quad2d(&sys, {10, 20}, {30, 40})
 	destroy_widget(&sys, UIWidgetHandle(h))
 	testing.expect(t, get_quad2d(&sys, h) == nil, "stale handle must miss")
@@ -29,8 +28,8 @@ test_destroy_widget_invalidates_handle :: proc(t: ^testing.T) {
 @(test)
 test_box_add_remove_child :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 8, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 8, {})
+	defer ui_shutdown(&sys)
 
 	parent, _ := create_box(&sys, {0, 0}, {100, 100})
 	child, _ := create_quad2d(&sys, {10, 10}, {20, 20})
@@ -51,8 +50,8 @@ test_box_add_remove_child :: proc(t: ^testing.T) {
 @(test)
 test_compute_layout_propagates_world_position :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 16, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 16, {})
+	defer ui_shutdown(&sys)
 
 	root, _ := create_box(&sys, {100, 200}, {500, 500})
 	mid, _ := create_box(&sys, {30, 40}, {200, 200})
@@ -73,8 +72,8 @@ test_compute_layout_propagates_world_position :: proc(t: ^testing.T) {
 @(test)
 test_compute_layout_all_skips_orphans :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 8, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 8, {})
+	defer ui_shutdown(&sys)
 
 	a, _ := create_quad2d(&sys, {1, 1}, {1, 1})
 	b, _ := create_quad2d(&sys, {2, 2}, {1, 1})
@@ -92,8 +91,8 @@ test_compute_layout_all_skips_orphans :: proc(t: ^testing.T) {
 @(test)
 test_point_in_widget_quad_box :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 4, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 4, {})
+	defer ui_shutdown(&sys)
 
 	h, _ := create_quad2d(&sys, {10, 10}, {20, 20})
 	q := get_widget(&sys, UIWidgetHandle(h))
@@ -107,8 +106,8 @@ test_point_in_widget_quad_box :: proc(t: ^testing.T) {
 @(test)
 test_pick_widget_picks_top_z :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 8, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 8, {})
+	defer ui_shutdown(&sys)
 
 	low, _ := create_quad2d(&sys, {0, 0}, {100, 100}, {}, {255, 255, 255, 255}, 0)
 	high, _ := create_quad2d(&sys, {10, 10}, {20, 20}, {}, {255, 255, 255, 255}, 5)
@@ -130,8 +129,8 @@ test_pick_widget_picks_top_z :: proc(t: ^testing.T) {
 @(test)
 test_pick_widget_skips_invisible :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 4, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 4, {})
+	defer ui_shutdown(&sys)
 	h, _ := create_quad2d(&sys, {0, 0}, {10, 10})
 	get_widget_base(get_widget(&sys, UIWidgetHandle(h))).visible = false
 	got := pick_widget(&sys, {5, 5})
@@ -160,8 +159,8 @@ key_handler :: proc(event: KeyEvent) {
 @(test)
 test_dispatch_mouse_bubbles_to_parent :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 8, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 8, {})
+	defer ui_shutdown(&sys)
 
 	parent, _ := create_box(&sys, {0, 0}, {100, 100})
 	child, _ := create_quad2d(&sys, {10, 10}, {20, 20})
@@ -186,8 +185,8 @@ test_dispatch_mouse_bubbles_to_parent :: proc(t: ^testing.T) {
 @(test)
 test_dispatch_key_only_matched_handler :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 4, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 4, {})
+	defer ui_shutdown(&sys)
 
 	h, _ := create_quad2d(&sys, {0, 0}, {1, 1})
 	key_calls = 0
@@ -237,8 +236,8 @@ tick :: proc(sys: ^System, s: ^input.State, acc: ^input.Accumulator) {
 @(test)
 test_process_input_hover_click_capture :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 8, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 8, {})
+	defer ui_shutdown(&sys)
 	defer delete(events)
 	clear(&events)
 	h, _ := create_quad2d(&sys, {10, 10}, {20, 20})
@@ -279,8 +278,8 @@ test_process_input_hover_click_capture :: proc(t: ^testing.T) {
 @(test)
 test_process_input_focus_routes_keys_and_text :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 8, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 8, {})
+	defer ui_shutdown(&sys)
 	defer delete(typed)
 	clear(&typed)
 	key_calls = 0
@@ -341,13 +340,13 @@ test_key_edge_order :: proc(t: ^testing.T) {
 @(test)
 test_box_background_draws :: proc(t: ^testing.T) {
 	sys: System
-	init(&sys, TEST_FONT, 4, {})
-	defer shutdown(&sys)
+	ui_init(&sys, TEST_FONT, 4, {})
+	defer ui_shutdown(&sys)
 	create_box(&sys, {0, 0}, {10, 10})
 	create_box(&sys, {5, 5}, {10, 10}, {1, 2, 3, 255})
 	cmds := build_commands(&sys)
 	testing.expect(t, len(cmds) == 1, "only the opaque box draws")
-	q, is_quad := cmds[0].(cmd.DrawQuadCommand)
+	q, is_quad := cmds[0].(DrawQuadCommand)
 	testing.expect(t, is_quad && q.color == {1, 2, 3, 255} && q.position == {5, 5}, "box quad")
 }
 
@@ -377,7 +376,7 @@ bench_compute_layout_deep_tree :: proc(t: ^testing.T) {
 		rounds   = 5000,
 		setup    = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_ui_state)opts.user_data
-			init(&s.sys, TEST_FONT, 4096, {})
+			ui_init(&s.sys, TEST_FONT, 4096, {})
 			s.root, _ = create_box(&s.sys, {0, 0}, {1000, 1000})
 			build_subtree(&s.sys, s.root, 4, 4)
 			return .Okay
@@ -392,7 +391,7 @@ bench_compute_layout_deep_tree :: proc(t: ^testing.T) {
 		},
 		teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_ui_state)opts.user_data
-			shutdown(&s.sys)
+			ui_shutdown(&s.sys)
 			return .Okay
 		},
 		user_data = &state,
@@ -410,7 +409,7 @@ bench_pick_widget_many :: proc(t: ^testing.T) {
 		rounds   = 2000,
 		setup    = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_ui_state)opts.user_data
-			init(&s.sys, TEST_FONT, 1024, {})
+			ui_init(&s.sys, TEST_FONT, 1024, {})
 			for i in 0 ..< 512 {
 				x := f32((i * 13) % 800)
 				y := f32((i * 7) % 600)
@@ -432,7 +431,7 @@ bench_pick_widget_many :: proc(t: ^testing.T) {
 		},
 		teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_ui_state)opts.user_data
-			shutdown(&s.sys)
+			ui_shutdown(&s.sys)
 			return .Okay
 		},
 		user_data = &state,

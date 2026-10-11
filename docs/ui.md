@@ -2,14 +2,12 @@
 title: UI
 ---
 
-Layer 2. Logical 2D UI — widget tree, layout, hit-testing, event
-dispatch, font atlas. Its output is a `draw2d.DrawList`
+Part of `render`. Logical 2D UI — widget tree, layout, hit-testing, event
+dispatch, font atlas. Its output is a `render.DrawList`
 (`draw_list`): the frame's commands plus the font atlas when it
 changed. Drawing them is the renderer's job (`render.stage_ui`). Input arrives as an `input.State` snapshot.
-`ui.Vertex2D` and `ui.NO_TEXTURE` re-export the `draw2d` types that
-appear in widget APIs.
 
-`init(&sys, font_data)` takes a TTF/OTF file in memory (it is copied)
+`render.ui_init(&sys, font_data)` takes a TTF/OTF file in memory (it is copied)
 and fails if the font cannot be parsed. Reading the file is the
 caller's job.
 
@@ -37,7 +35,7 @@ delivered as `event.user_data`). Text2D strings change through
 `set_text(&sys, text_handle, str)`, which re-lays out the glyphs.
 
 ```odin
-if q := ui.get_quad2d(&sys, button); q != nil {
+if q := render.get_quad2d(&sys, button); q != nil {
   q.color = {255, 100, 100, 255}
   q.event_handlers = handlers
   q.user_data = app

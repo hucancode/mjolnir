@@ -1,15 +1,14 @@
-package ui
+package render
 
 import cont "../containers"
-import cmd "../draw2d"
 import "core:log"
 
 create_mesh2d :: proc(
   sys: ^System,
   position: [2]f32,
-  vertices: []cmd.Vertex2D,
+  vertices: []Vertex2D,
   indices: []u32,
-  texture: u32 = cmd.NO_TEXTURE,
+  texture: u32 = NO_TEXTURE,
   z_order: i32 = 0,
 ) -> (
   Mesh2DHandle,
@@ -22,7 +21,7 @@ create_mesh2d :: proc(
   }
 
   // Copy vertices and indices
-  vertices_copy := make([]cmd.Vertex2D, len(vertices))
+  vertices_copy := make([]Vertex2D, len(vertices))
   copy(vertices_copy, vertices)
   indices_copy := make([]u32, len(indices))
   copy(indices_copy, indices)
@@ -45,7 +44,7 @@ create_quad2d :: proc(
   sys: ^System,
   position: [2]f32,
   size: [2]f32,
-  texture: u32 = cmd.NO_TEXTURE,
+  texture: u32 = NO_TEXTURE,
   color: [4]u8 = {255, 255, 255, 255},
   z_order: i32 = 0,
 ) -> (

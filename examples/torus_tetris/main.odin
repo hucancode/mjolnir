@@ -4,7 +4,6 @@ import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
-import "../../mjolnir/ui"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
@@ -49,8 +48,8 @@ State :: struct {
   has_active:           bool,
   transparent_material: [len(render.Color)]render.MaterialHandle,
   opaque_material:      [len(render.Color)]render.MaterialHandle,
-  score_label:          ui.Text2DHandle,
-  high_label:           ui.Text2DHandle,
+  score_label:          render.Text2DHandle,
+  high_label:           render.Text2DHandle,
 }
 
 PIECE_ALPHA :: f32(0.5)
@@ -67,7 +66,7 @@ App :: struct {
   renderer: render.Manager,
   camera:   render.CameraController,
   input:    input.State,
-  gui:      ui.System,
+  gui:      render.System,
 }
 
 state: State
@@ -88,8 +87,8 @@ main :: proc() {
   font, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
   if err != nil do return
   defer delete(font)
-  if !ui.init(&app.gui, font) do return
-  defer ui.shutdown(&app.gui)
+  if !render.ui_init(&app.gui, font) do return
+  defer render.ui_shutdown(&app.gui)
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -100,7 +99,7 @@ should_close :: proc(app: ^App) -> bool {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  render.stage_ui(&app.renderer, ui.draw_list(&app.gui))
+  render.stage_ui(&app.renderer, render.draw_list(&app.gui))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
@@ -126,8 +125,8 @@ setup :: proc(app: ^App) {
     state.opaque_material[i] = render.create_material(&app.renderer, type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0})
   }
   state.fall_period = FALL_PERIOD
-  state.score_label, _ = ui.create_text2d(&app.gui, position = {20, 20}, text = "Score: 0", font_size = 32, color = {255, 255, 255, 255})
-  state.high_label, _ = ui.create_text2d(&app.gui, position = {20, 60}, text = "High: 0", font_size = 24, color = {255, 220, 100, 255})
+  state.score_label, _ = render.create_text2d(&app.gui, position = {20, 20}, text = "Score: 0", font_size = 32, color = {255, 255, 255, 255})
+  state.high_label, _ = render.create_text2d(&app.gui, position = {20, 60}, text = "High: 0", font_size = 24, color = {255, 220, 100, 255})
   reset_game(app)
   refresh_score_ui(app)
 }
@@ -250,7 +249,7 @@ drop_step :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  ui.process_input(&app.gui, &app.input)
+  render.process_input(&app.gui, &app.input)
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   step_game(app, dt)
   world.update(&app.scene)
@@ -294,6 +293,6 @@ on_key :: proc(app: ^App, key: input.Key) {
 }
 
 refresh_score_ui :: proc(app: ^App) {
-  ui.set_text(&app.gui, state.score_label, fmt.tprintf("Score: %d", state.score))
-  ui.set_text(&app.gui, state.high_label,  fmt.tprintf("High: %d",  state.high_score))
+  render.set_text(&app.gui, state.score_label, fmt.tprintf("Score: %d", state.score))
+  render.set_text(&app.gui, state.high_label,  fmt.tprintf("High: %d",  state.high_score))
 }

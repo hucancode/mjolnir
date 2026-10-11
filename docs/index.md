@@ -79,13 +79,11 @@ odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 |---|---|---|
 | 1 | `containers` | [containers](containers.html) |
 | 1 | `geometry`   | [geometry](geometry.html) |
-| 1 | `draw2d`     | 2D vertex + draw command types shared by `ui` and `render` |
 | 1 | `input`      | [input](input.html) |
 | 2 | `platform`   | [platform](platform.html) |
 | 2 | `world`      | [world](world.html) |
-| 2 | `render`     | [render](render.html) (incl. `render/gpu`, `render/bindless`, `render/mesh`) |
+| 2 | `render`     | [render](render.html) (incl. 2D draw commands, [ui](ui.html), `render/gpu`, `render/bindless`, `render/mesh`) |
 | 2 | `animation`  | [animation](animation.html) |
 | 2 | `physics`    | [physics](physics.html) |
 | 2 | `navigation` | [navigation](navigation.html) |
-| 2 | `ui`         | [ui](ui.html) |
 | 3 | `mjolnir`    | [engine](engine.html) |

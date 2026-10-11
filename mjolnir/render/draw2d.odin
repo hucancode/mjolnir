@@ -1,6 +1,6 @@
 // 2D draw commands: the data contract between a 2D producer (ui) and a 2D
 // renderer (render/ui). Plain data, no dependencies.
-package draw2d
+package render
 
 // texture_id value meaning "untextured"; the renderer substitutes a white texture.
 NO_TEXTURE :: max(u32)

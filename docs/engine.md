@@ -68,8 +68,8 @@ tears its module down in reverse.
 
 Add modules by adding a field and their lines:
 
-- **ui:** `ui.init` with a font in `main`, `ui.process_input` in
-  `update`, `render.stage_ui(&app.renderer, ui.draw_list(&app.gui))`
+- **ui:** `render.ui_init` with a font in `main`, `render.process_input` in
+  `update`, `render.stage_ui(&app.renderer, render.draw_list(&app.gui))`
   in `frame`.
 - **debug UI:** `render.debug_ui_input` first in `update`, and
   `render.debug_ui(&app.renderer)` widgets in `frame` before
@@ -94,7 +94,7 @@ schedules or locks anything. A full `update` with every module:
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
-  ui.process_input(&app.gui, &app.input)
+  render.process_input(&app.gui, &app.input)
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   // gameplay, reading app.input
   physics.step(&app.phys, dt)
@@ -119,7 +119,7 @@ input a UI took.
 ### UI → render
 
 Once per frame, before `render.frame`:
-`render.stage_ui(&app.renderer, ui.draw_list(&app.gui))`. The draw list
+`render.stage_ui(&app.renderer, render.draw_list(&app.gui))`. The draw list
 carries the font atlas on frames where it changed.
 
 ### Platform → render

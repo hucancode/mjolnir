@@ -1,6 +1,5 @@
 package render
 
-import "../draw2d"
 import "bindless"
 import "../input"
 import "gpu"
@@ -8,13 +7,12 @@ import cont "../containers"
 import "core:fmt"
 import "core:math"
 import "core:sync"
-import ui_render "ui"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
 // Submit this frame's 2D overlay. The commands must stay valid until the
 // frame is recorded; a non-empty atlas is copied and uploaded on flush.
-stage_ui :: proc(self: ^Manager, list: draw2d.DrawList) {
+stage_ui :: proc(self: ^Manager, list: DrawList) {
   self.internal.ui.commands = list.commands
   if len(list.atlas) == 0 do return
   sync.mutex_lock(&self.internal.staging.mutex)
@@ -35,7 +33,7 @@ flush_ui_atlas :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
   if len(self.internal.ui_atlas_pixels) == 0 do return .SUCCESS
   if !self.internal.ui_atlas_dirty && self.internal.ui.font_atlas != {} do return .SUCCESS
   self.internal.ui_atlas_dirty = false
-  return ui_render.upload_font_atlas(
+  return overlay_upload_font_atlas(
     &self.internal.ui,
     gctx,
     &self.texture_manager,

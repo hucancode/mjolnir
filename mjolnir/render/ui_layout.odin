@@ -1,5 +1,5 @@
 #+private
-package ui
+package render
 
 import cont "../containers"
 

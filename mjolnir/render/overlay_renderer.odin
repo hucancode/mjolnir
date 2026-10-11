@@ -3,11 +3,10 @@
 // - draw2d commands staged by the app (game UI), sorted by z_order;
 // - the microui debug context, clipped per microui clip rect and scaled by
 //   the window DPI.
-package ui_render
+package render
 
-import "../bindless"
-import cmd "../../draw2d"
-import "../gpu"
+import "bindless"
+import "gpu"
 import "core:log"
 import "core:math/linalg"
 import "core:slice"
@@ -19,7 +18,6 @@ UI_MAX_VERTICES :: 65536
 @(private)
 UI_MAX_INDICES :: 98304
 
-Vertex2D :: cmd.Vertex2D
 
 VERTEX2D_BINDING_DESCRIPTION := vk.VertexInputBindingDescription {
   binding   = 0,
@@ -34,7 +32,7 @@ VERTEX2D_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
   {binding = 0, location = 3, format = .R32_UINT,       offset = u32(offset_of(Vertex2D, texture_id))},
 }
 
-Renderer :: struct {
+OverlayRenderer :: struct {
   pipeline_layout: vk.PipelineLayout,
   pipeline:        vk.Pipeline,
   vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex2D),
@@ -46,8 +44,8 @@ Renderer :: struct {
   index_count:     u32,
   batches:         [dynamic]DrawBatch,
   // Staged draw2d commands, owned by the caller until the frame is recorded.
-  commands:        []cmd.RenderCommand,
-  white_texture:   bindless.Texture2DHandle, // drawn for cmd.NO_TEXTURE
+  commands:        []RenderCommand,
+  white_texture:   bindless.Texture2DHandle, // drawn for NO_TEXTURE
   font_atlas:      bindless.Texture2DHandle, // sampled by text commands
   debug_ctx:       mu.Context,
   debug_open:      bool, // mu.begin ran this frame; frame closes it
@@ -66,8 +64,8 @@ DrawBatch :: struct {
   scissor:     vk.Rect2D,
 }
 
-init :: proc(
-  self: ^Renderer,
+overlay_init :: proc(
+  self: ^OverlayRenderer,
   gctx: ^gpu.GPUContext,
   textures_set_layout: vk.DescriptorSetLayout,
   format: vk.Format,
@@ -92,8 +90,8 @@ init :: proc(
   return .SUCCESS
 }
 
-setup :: proc(
-  self: ^Renderer,
+overlay_setup :: proc(
+  self: ^OverlayRenderer,
   gctx: ^gpu.GPUContext,
   texture_manager: ^bindless.TextureManager,
 ) -> vk.Result {
@@ -134,7 +132,7 @@ setup :: proc(
 }
 
 // Textures are destroyed with the texture manager's teardown.
-teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+overlay_teardown :: proc(self: ^OverlayRenderer, gctx: ^gpu.GPUContext) {
   for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
     gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[i])
     gpu.mutable_buffer_destroy(gctx.device, &self.index_buffers[i])
@@ -145,8 +143,8 @@ teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 }
 
 // Replace the font atlas texture with R8 pixels of size width x height.
-upload_font_atlas :: proc(
-  self: ^Renderer,
+overlay_upload_font_atlas :: proc(
+  self: ^OverlayRenderer,
   gctx: ^gpu.GPUContext,
   texture_manager: ^bindless.TextureManager,
   pixels: []u8,
@@ -194,12 +192,12 @@ allocate_alpha_texture :: proc(
 
 @(private)
 create_pipeline :: proc(
-  self: ^Renderer,
+  self: ^OverlayRenderer,
   gctx: ^gpu.GPUContext,
   format: vk.Format,
 ) -> vk.Result {
-  vert_code := #load("../shader/ui/vert.spv")
-  frag_code := #load("../shader/ui/frag.spv")
+  vert_code := #load("shader/ui/vert.spv")
+  frag_code := #load("shader/ui/frag.spv")
   vert_module := gpu.create_shader_module(gctx.device, vert_code) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
   frag_module := gpu.create_shader_module(gctx.device, frag_code) or_return
@@ -226,7 +224,7 @@ create_pipeline :: proc(
   return .SUCCESS
 }
 
-shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+overlay_shutdown :: proc(self: ^OverlayRenderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   delete(self.batches)
@@ -235,8 +233,8 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 // Record the overlay into `color_view` inside its own rendering scope. Draws
 // the staged draw2d commands when `draw_commands` is set and the debug UI
 // when `draw_debug` is set.
-record :: proc(
-  self: ^Renderer,
+overlay_record :: proc(
+  self: ^OverlayRenderer,
   texture_manager: ^bindless.TextureManager,
   command_buffer: vk.CommandBuffer,
   color_view: vk.ImageView,
@@ -305,13 +303,13 @@ record :: proc(
 }
 
 @(private)
-begin_batch :: proc(self: ^Renderer, scissor: vk.Rect2D) {
+begin_batch :: proc(self: ^OverlayRenderer, scissor: vk.Rect2D) {
   end_batch(self)
   append(&self.batches, DrawBatch{first_index = self.index_count, scissor = scissor})
 }
 
 @(private)
-end_batch :: proc(self: ^Renderer) {
+end_batch :: proc(self: ^OverlayRenderer) {
   if len(self.batches) == 0 do return
   last := &self.batches[len(self.batches) - 1]
   last.index_count = self.index_count - last.first_index
@@ -320,7 +318,7 @@ end_batch :: proc(self: ^Renderer) {
 // Append one axis-aligned quad. Quads beyond the buffer capacity are dropped.
 @(private)
 push_quad :: proc(
-  self: ^Renderer,
+  self: ^OverlayRenderer,
   p0, p1, uv0, uv1: [2]f32,
   color: [4]u8,
   texture_id: u32,
@@ -338,7 +336,7 @@ push_quad :: proc(
 }
 
 @(private)
-batch_commands :: proc(self: ^Renderer) {
+batch_commands :: proc(self: ^OverlayRenderer) {
   CommandSortKey :: struct {
     z_order:   i32,
     cmd_index: int,
@@ -347,9 +345,9 @@ batch_commands :: proc(self: ^Renderer) {
   for command, i in self.commands {
     z: i32
     switch c in command {
-    case cmd.DrawQuadCommand: z = c.z_order
-    case cmd.DrawMeshCommand: z = c.z_order
-    case cmd.DrawTextCommand: z = c.z_order
+    case DrawQuadCommand: z = c.z_order
+    case DrawMeshCommand: z = c.z_order
+    case DrawTextCommand: z = c.z_order
     }
     keys[i] = {z, i}
   }
@@ -358,25 +356,25 @@ batch_commands :: proc(self: ^Renderer) {
   })
   for key in keys {
     switch c in self.commands[key.cmd_index] {
-    case cmd.DrawQuadCommand:
+    case DrawQuadCommand:
       push_quad(self, c.position, c.position + c.size, {0, 0}, {1, 1}, c.color, resolve_texture(self, c.texture_id))
-    case cmd.DrawTextCommand:
+    case DrawTextCommand:
       for g in c.glyphs {
         push_quad(self, c.position + g.p0, c.position + g.p1, g.uv0, g.uv1, g.color, self.font_atlas.index)
       }
-    case cmd.DrawMeshCommand:
+    case DrawMeshCommand:
       push_mesh(self, c, resolve_texture(self, c.texture_id))
     }
   }
 }
 
 @(private)
-resolve_texture :: proc(self: ^Renderer, texture_id: u32) -> u32 {
-  return self.white_texture.index if texture_id == cmd.NO_TEXTURE else texture_id
+resolve_texture :: proc(self: ^OverlayRenderer, texture_id: u32) -> u32 {
+  return self.white_texture.index if texture_id == NO_TEXTURE else texture_id
 }
 
 @(private)
-push_mesh :: proc(self: ^Renderer, mesh: cmd.DrawMeshCommand, texture_id: u32) {
+push_mesh :: proc(self: ^OverlayRenderer, mesh: DrawMeshCommand, texture_id: u32) {
   if self.vertex_count + u32(len(mesh.vertices)) > UI_MAX_VERTICES ||
      self.index_count + u32(len(mesh.indices)) > UI_MAX_INDICES {
     return
@@ -395,10 +393,10 @@ push_mesh :: proc(self: ^Renderer, mesh: cmd.DrawMeshCommand, texture_id: u32) {
 // Convert the microui command list to quads in pixels. microui works in
 // window coordinates; positions and clip rects are scaled by dpi_scale.
 @(private)
-batch_debug_ui :: proc(self: ^Renderer, extent: vk.Extent2D) {
+batch_debug_ui :: proc(self: ^OverlayRenderer, extent: vk.Extent2D) {
   atlas_size := [2]f32{mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT}
   scale := self.dpi_scale
-  quad :: proc(self: ^Renderer, dst, src: mu.Rect, color: mu.Color, atlas_size: [2]f32, scale: f32) {
+  quad :: proc(self: ^OverlayRenderer, dst, src: mu.Rect, color: mu.Color, atlas_size: [2]f32, scale: f32) {
     p0 := [2]f32{f32(dst.x), f32(dst.y)} * scale
     p1 := [2]f32{f32(dst.x + dst.w), f32(dst.y + dst.h)} * scale
     uv0 := [2]f32{f32(src.x), f32(src.y)} / atlas_size

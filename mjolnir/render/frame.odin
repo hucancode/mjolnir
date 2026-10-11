@@ -14,7 +14,6 @@ import "occlusion_culling"
 import "particles"
 import "post_process"
 import "shadow"
-import ui_render "ui"
 import vk "vendor:vulkan"
 
 @(private)
@@ -460,7 +459,7 @@ record_frame :: proc(
       swapchain_extent,
     )
   }
-  ui_render.record(
+  overlay_record(
     &self.internal.ui,
     &self.texture_manager,
     cmd,

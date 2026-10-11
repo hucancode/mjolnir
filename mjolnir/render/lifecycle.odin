@@ -14,7 +14,6 @@ import "occlusion_culling"
 import "particles"
 import "post_process"
 import "shadow"
-import ui_render "ui"
 import vk "vendor:vulkan"
 
 @(private)
@@ -76,7 +75,7 @@ init_subsystems :: proc(
     gctx,
     self.internal.camera_buffer.set_layout,
   ) or_return
-  ui_render.init(
+  overlay_init(
     &self.internal.ui,
     gctx,
     self.texture_manager.set_layout,
@@ -183,7 +182,7 @@ setup_level :: proc(self: ^Manager) -> (ret: vk.Result) {
     &self.texture_manager,
     swapchain_extent,
   ) or_return
-  ui_render.setup(&self.internal.ui, gctx, &self.texture_manager) or_return
+  overlay_setup(&self.internal.ui, gctx, &self.texture_manager) or_return
   if _, ok := main_camera(self); !ok {
     cam, created := create_camera(
       self,
@@ -211,7 +210,7 @@ teardown :: proc(self: ^Manager) {
   for _, handle in cont.next(&it, CameraHandle) do destroy_camera(self, handle)
   // texture_manager_teardown destroys the shadow textures
   for &sm in self.internal.shadow_maps do sm.textures = {}
-  ui_render.teardown(&self.internal.ui, gctx)
+  overlay_teardown(&self.internal.ui, gctx)
   post_process.teardown(&self.post_process, gctx, &self.texture_manager)
   ambient.teardown(&self.ambient, gctx, &self.texture_manager)
   bindless.texture_manager_teardown(&self.texture_manager, gctx)
@@ -265,7 +264,7 @@ shutdown :: proc(self: ^Manager) {
   if gpu.has_async_compute(gctx) {
     gpu.free_compute_command_buffer(gctx, self.internal.compute_command_buffers[:])
   }
-  ui_render.shutdown(&self.internal.ui, gctx)
+  overlay_shutdown(&self.internal.ui, gctx)
   debug_line.shutdown(&self.internal.debug_line_renderer, gctx)
   post_process.shutdown(&self.post_process, gctx)
   particles.shutdown(&self.internal.particles, gctx)

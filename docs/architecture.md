@@ -39,18 +39,16 @@ flowchart TB
     direction LR
     platform["platform<br/>GLFW window<br/>vulkan surface"]
     world["world<br/>scene graph<br/>change feed"]
-    render["render<br/>Vulkan, frame, passes<br/>bindless, looks"]
+    render["render<br/>Vulkan, frame, passes<br/>bindless, looks<br/>2D draw commands, ui"]
     animation["animation<br/>tracks, skeletons<br/>animators, IK"]
     physics["physics<br/>rigid body<br/>BVH broadphase"]
     nav["navigation<br/>runtime: detour, crowd<br/>bake: recast"]
-    ui["ui<br/>widgets, layout<br/>draw commands"]
   end
 
   subgraph L1["Layer 1 — Primitives"]
     direction LR
     geometry["geometry<br/>math, AABB, frustum<br/>BVH, octree"]
     containers["containers<br/>handle pool<br/>slab allocator"]
-    draw2d["draw2d<br/>2D draw commands"]
     input["input<br/>per-tick snapshot<br/>keys, mouse, text"]
   end
 
