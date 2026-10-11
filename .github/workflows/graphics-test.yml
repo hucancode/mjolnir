@@ -35,6 +35,8 @@ jobs:
 
       - name: Install runtime dependencies
         run: |
+          # lavapipe needs Mesa >= 25.3 for VK_KHR_unified_image_layouts
+          sudo add-apt-repository -y ppa:kisak/kisak-mesa
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             xvfb \
@@ -44,18 +46,19 @@ jobs:
             build-essential \
             pkg-config \
             libpng-dev \
+            libharfbuzz0b \
             gdb
           sudo ln -sf /usr/lib/x86_64-linux-gnu/libglfw.so.3 /usr/lib/x86_64-linux-gnu/libglfw.so
 
       - name: Install ImageMagick 7
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          wget -q https://imagemagick.org/archive/ImageMagick.tar.gz
-          tar xzf ImageMagick.tar.gz
-          cd ImageMagick-7.*
-          ./configure --quiet --disable-shared --disable-docs
-          make -j$(nproc) >/dev/null
-          sudo make install >/dev/null
-          sudo ldconfig /usr/local/lib
+          gh release download -R ImageMagick/ImageMagick --pattern '*-gcc-x86_64.AppImage' -O magick.AppImage
+          chmod +x magick.AppImage
+          ./magick.AppImage --appimage-extract >/dev/null
+          sudo mv squashfs-root /opt/imagemagick
+          sudo ln -sf /opt/imagemagick/AppRun /usr/local/bin/magick
           magick --version | head -1
 
       - name: Verify lavapipe is selected
