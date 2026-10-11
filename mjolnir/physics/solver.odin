@@ -319,7 +319,30 @@ SolverPass :: enum {
   Restitution,
 }
 
-// One pass over contacts. indices == nil means all contacts.
+@(private = "file")
+solve_contact :: #force_inline proc(
+  world: ^World,
+  c: ^Contact,
+  pass: SolverPass,
+  soft: [2]Softness,
+  inv_h: f32,
+) {
+  a, a_ok := get_body(world, c.body_a)
+  b, b_ok := get_body(world, c.body_b)
+  if !a_ok || !b_ok do return
+  switch pass {
+  case .Warmstart:
+    warmstart_contact(c, a, b)
+  case .Bias:
+    resolve_velocity(c, a, b, soft[c.b_dynamic ? 0 : 1], inv_h, true)
+  case .Relax:
+    resolve_velocity(c, a, b, soft[c.b_dynamic ? 0 : 1], inv_h, false)
+  case .Restitution:
+    apply_restitution(c, a, b)
+  }
+}
+
+// One pass over the contacts at `indices`.
 @(private = "file")
 run_pass :: proc(
   world: ^World,
@@ -328,22 +351,8 @@ run_pass :: proc(
   soft: [2]Softness,
   inv_h: f32,
 ) {
-  contacts := world.contacts[:]
-  n := indices != nil ? len(indices) : len(contacts)
-  #no_bounds_check for k in 0 ..< n {
-    c := &contacts[indices != nil ? indices[k] : k]
-    a := get_body(world, c.body_a) or_continue
-    b := get_body(world, c.body_b) or_continue
-    switch pass {
-    case .Warmstart:
-      warmstart_contact(c, a, b)
-    case .Bias:
-      resolve_velocity(c, a, b, soft[c.b_dynamic ? 0 : 1], inv_h, true)
-    case .Relax:
-      resolve_velocity(c, a, b, soft[c.b_dynamic ? 0 : 1], inv_h, false)
-    case .Restitution:
-      apply_restitution(c, a, b)
-    }
+  #no_bounds_check for idx in indices {
+    solve_contact(world, &world.contacts[idx], pass, soft, inv_h)
   }
 }
 
@@ -368,7 +377,9 @@ worker_contact_phase :: proc(
 ) {
   world := data.world
   if data.num_threads == 1 {
-    run_pass(world, nil, pass, soft, inv_h)
+    #no_bounds_check for &c in world.contacts {
+      solve_contact(world, &c, pass, soft, inv_h)
+    }
     return
   }
   expected := i32(data.num_threads)

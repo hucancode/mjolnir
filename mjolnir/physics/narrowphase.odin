@@ -959,9 +959,11 @@ narrowphase_pair :: proc(world: ^World, handle_a, handle_b: BodyHandle, out: ^[d
   }
   manifold, hit := collide_bodies(body_a, body_b, SPECULATIVE_DISTANCE)
   if !hit do return
-  wake_up(body_a)
+  // Wake only sleepers: wake_up resets the sleep timer, so calling it on
+  // every touching body would keep resting bodies awake forever.
+  if body_a.is_sleeping do wake_up(body_a)
   b_dynamic := is_dynamic(body_b)
-  if b_dynamic do wake_up(body_b)
+  if b_dynamic && body_b.is_sleeping do wake_up(body_b)
   contact := Contact {
     body_a      = handle_a,
     body_b      = handle_b,

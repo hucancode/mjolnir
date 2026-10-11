@@ -1,5 +1,6 @@
 package physics
 
+import "core:math/linalg"
 import "core:testing"
 
 @(test)
@@ -70,4 +71,53 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
     on_ground > 0,
     "No bodies remained on ground — all fell off edges",
   )
+}
+
+@(test)
+test_resting_body_falls_asleep :: proc(t: ^testing.T) {
+  physics_world: World
+  init(&physics_world, thread_count = 1)
+  defer shutdown(&physics_world)
+  create_body(&physics_world, {0, -0.5, 0}, collider = BoxCollider{half_extents = {10, 0.5, 10}})
+  handle := create_body(&physics_world, {0, 0.5, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 1)
+  for _ in 0 ..< 120 {
+    step(&physics_world, 1.0 / 60.0)
+  }
+  body := get_body(&physics_world, handle)
+  testing.expect(t, body.is_sleeping, "box resting on the ground should be asleep after 2s")
+}
+
+// An 8x8x8 block of boxes dropped on the ground runs the multi-threaded
+// graph-colored solver (hundreds of contacts) and must settle, not keep
+// churning.
+@(test)
+test_parallel_pile_settles :: proc(t: ^testing.T) {
+  N :: 8
+  physics_world: World
+  init(&physics_world, thread_count = 4)
+  defer shutdown(&physics_world)
+  create_body(&physics_world, {0, -0.5, 0}, collider = BoxCollider{half_extents = {30, 0.5, 30}})
+  handles: [N * N * N]BodyHandle
+  i := 0
+  for x in 0 ..< N {
+    for y in 0 ..< N {
+      for z in 0 ..< N {
+        pos := [3]f32{f32(x) * 1.1, f32(y) * 1.1 + 2, f32(z) * 1.1}
+        handles[i] = create_body(&physics_world, pos, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 1)
+        i += 1
+      }
+    }
+  }
+  max_contacts := 0
+  for _ in 0 ..< 600 {
+    step(&physics_world, 1.0 / 60.0)
+    max_contacts = max(max_contacts, physics_world.last_perf.contact_count)
+  }
+  testing.expect(t, max_contacts >= SOLVER_PARALLEL_THRESHOLD)
+  max_speed: f32
+  for handle in handles {
+    body := get_body(&physics_world, handle) or_continue
+    max_speed = max(max_speed, linalg.length(body.velocity))
+  }
+  testing.expectf(t, max_speed < 2.0, "pile still churning: max speed %v m/s", max_speed)
 }

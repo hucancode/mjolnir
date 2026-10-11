@@ -5,7 +5,7 @@ import "../geometry"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:os"
+import si "core:sys/info"
 import "core:thread"
 import "core:time"
 
@@ -28,6 +28,9 @@ MAX_ROTATION_PER_STEP :: 0.25 * math.PI
 // the solver's speculative branch stops approach exactly at touch, preventing
 // tunneling at moderate speeds without CCD.
 SPECULATIVE_DISTANCE :: 0.02
+// Destroyed moving bodies stay in the dynamic BVH as stale entries (their
+// handles no longer resolve); rebuild once this many accumulate.
+BVH_REBUILD_THRESHOLD :: #config(PHYSICS_BVH_REBUILD_THRESHOLD, 512)
 
 BodyHandle :: distinct cont.Handle
 
@@ -124,6 +127,7 @@ World :: struct {
   // rebuilds that BVH
   dynamic_bvh_dirty:    bool,
   static_bvh_dirty:     bool,
+  dynamic_bvh_stale:    int,
   thread_count:         int,
   thread_pool:          thread.Pool,
   // Dense list of awake moving body indices, rebuilt after narrowphase each
@@ -143,7 +147,9 @@ BroadPhaseEntry :: struct {
   bounds: geometry.Aabb,
 }
 
-// thread_count: worker threads for step; 0 = one per CPU core, 1 = no pool.
+// thread_count: worker threads for step; 0 = one per physical CPU core minus
+// one (the caller's thread joins in while waiting), 1 = no pool. The solver
+// spin-waits at barriers, so oversubscribing cores stalls every worker.
 init :: proc(self: ^World, gravity := [3]f32{0, -9.81, 0}, thread_count := 0) -> bool {
   self^ = {}
   cont.init(&self.bodies)
@@ -153,13 +159,19 @@ init :: proc(self: ^World, gravity := [3]f32{0, -9.81, 0}, thread_count := 0) ->
   }
   self.dynamic_bvh.bounds_func = bounds_func
   self.static_bvh.bounds_func = bounds_func
-  self.thread_count = thread_count > 0 ? thread_count : os.get_processor_core_count()
+  self.thread_count = thread_count > 0 ? thread_count : default_thread_count()
   if self.thread_count > 1 {
     thread.pool_init(&self.thread_pool, context.allocator, self.thread_count)
     thread.pool_start(&self.thread_pool)
     log.infof("physics: thread pool started with %d threads", self.thread_count)
   }
   return true
+}
+
+@(private)
+default_thread_count :: proc() -> int {
+  physical, _, ok := si.cpu_core_count()
+  return ok ? max(1, physical - 1) : 1
 }
 
 shutdown :: proc(self: ^World) {
@@ -217,6 +229,12 @@ create_body :: proc(
 }
 
 destroy_body :: proc(self: ^World, handle: BodyHandle) {
+  body := get_body(self, handle) or_else nil
+  if body == nil do return
+  if body.moving && !body.is_sensor {
+    self.dynamic_bvh_stale += 1
+    if self.dynamic_bvh_stale >= BVH_REBUILD_THRESHOLD do self.dynamic_bvh_dirty = true
+  }
   cont.free(&self.bodies, handle)
 }
 
@@ -334,7 +352,7 @@ body_poses :: proc(self: ^World, allocator := context.temp_allocator) -> []BodyP
   return poses[:]
 }
 
-// Rebuilds dirty BVHs; destroyed bodies are dropped here.
+// Rebuilds dirty BVHs; stale entries of destroyed bodies are dropped here.
 @(private)
 refresh_broadphase :: proc(self: ^World) -> (rebuilt_dynamic, rebuilt_static: bool) {
   if !self.dynamic_bvh_dirty && !self.static_bvh_dirty do return
@@ -362,6 +380,7 @@ refresh_broadphase :: proc(self: ^World) -> (rebuilt_dynamic, rebuilt_static: bo
   if self.dynamic_bvh_dirty {
     build(self, &self.dynamic_bvh, dynamic_entries[:])
     self.dynamic_bvh_dirty = false
+    self.dynamic_bvh_stale = 0
     rebuilt_dynamic = true
   }
   if self.static_bvh_dirty {
@@ -450,7 +469,6 @@ step_kill :: proc(self: ^World) {
     append(&self.killed, KilledBody{handle, body.user})
     destroy_body(self, handle)
   }
-  if len(self.killed) > 0 do self.dynamic_bvh_dirty = true
 }
 
 @(private)
