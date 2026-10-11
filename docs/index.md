@@ -75,15 +75,15 @@ odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 
 ## Module intros
 
-| Layer | Module | Doc |
-|---|---|---|
-| 1 | `containers` | [containers](containers.html) |
-| 1 | `geometry`   | [geometry](geometry.html) |
-| 1 | `input`      | [input](input.html) |
-| 2 | `platform`   | [platform](platform.html) |
-| 2 | `world`      | [world](world.html) |
-| 2 | `render`     | [render](render.html) (incl. 2D draw commands, [ui](ui.html), `render/gpu`, `render/bindless`, `render/mesh`) |
-| 2 | `animation`  | [animation](animation.html) |
-| 2 | `physics`    | [physics](physics.html) |
-| 2 | `navigation` | [navigation](navigation.html) |
-| 3 | `mjolnir`    | [engine](engine.html) |
+| Layer | Module |
+|---|---|
+| 1 | [containers](containers.html) |
+| 1 | [geometry](geometry.html) |
+| 1 | [input](input.html) |
+| 2 | [platform](platform.html) |
+| 2 | [world](world.html) |
+| 2 | [render](render.html)|
+| 2 | [animation](animation.html) |
+| 2 | [physics](physics.html) |
+| 2 | [navigation](navigation.html) |
+| 3 | [engine](engine.html) |
