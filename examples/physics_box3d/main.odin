@@ -111,9 +111,10 @@ setup :: proc(app: ^App) {
   world.scale(&app.scene, ball_visual, SPHERE_RADIUS)
 
   // Shared unit shapes; densities give every piece PIECE_MASS. CreateHullShape
-  // clones the hull, so the cylinder is freed after setup.
+  // clones the hull, so the cylinder is freed after setup. The hull spans
+  // y in [yOffset, yOffset+height]; -1 centers it like the mesh.
   box_hull := b3.MakeBoxHull(1, 1, 1)
-  cylinder_hull := b3.CreateCylinder(2.0, 1.0, 0, 16)
+  cylinder_hull := b3.CreateCylinder(2.0, 1.0, -1.0, 16)
   defer b3.DestroyHull(cylinder_hull)
   for x in 0 ..< NX do for y in 0 ..< NY do for z in 0 ..< NZ {
     pos := [3]f32{f32(x - NX/2) * 3.0, f32(y) * 3.0 + 10.0, f32(z - NZ/2) * 3.0}
