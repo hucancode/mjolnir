@@ -1,7 +1,6 @@
-# Rules for a coder
-- single source of truth. no derived info unless perf evidence
-- no dup info across structs. no pointer on struct
-- min struct count
-- modules layered, deps top→bottom, <5 layers
-- no indirection/wrapper
-- user write less code. no leak internal detail
+1. single source of truth. no derived/duplicated info across structs. no pointer on struct
+2. keep struct count minimal
+3. modules layered, dependency go top→bottom, <5 layers
+6. be straightforward, no branch/special-casing
+4. be terse, no indirection/wrapper
+5. data-oriented, use large constiguous array. hate small scattered arrays.
