@@ -79,12 +79,32 @@ GPUContext :: struct {
   device_properties:    vk.PhysicalDeviceProperties,
   trash:                DeferredTrash, // loose vk resources awaiting deferred destruction
   uploads:              [dynamic]PendingCopy, // buffer copies for the next frame
+  // Async compute only: timeline semaphores signalled with the frame serial
+  // + 1 when that frame's graphics / compute submission completes.
+  graphics_timeline:    vk.Semaphore,
+  compute_timeline:     vk.Semaphore,
+  frame_serial:         u64, // frames submitted so far
 }
 
 // Compute work is recorded and submitted separately only when the device has
 // a dedicated compute queue family.
 has_async_compute :: proc(self: ^GPUContext) -> bool {
   return self.compute_family != self.graphics_family
+}
+
+// Fill a create info's sharing fields. With async compute, resources both
+// queues access are CONCURRENT across the graphics and compute families, so
+// they need no ownership transfers.
+@(private)
+set_sharing :: proc(self: ^GPUContext, info: ^$T, shared: bool, families: ^[2]u32) {
+  families^ = {self.graphics_family, self.compute_family}
+  if shared && has_async_compute(self) {
+    info.sharingMode = .CONCURRENT
+    info.queueFamilyIndexCount = 2
+    info.pQueueFamilyIndices = raw_data(families[:])
+  } else {
+    info.sharingMode = .EXCLUSIVE
+  }
 }
 
 // Global context for debug callback
@@ -113,6 +133,22 @@ device_init :: proc(self: ^GPUContext) -> vk.Result {
   physical_device_init(self) or_return
   logical_device_init(self) or_return
   command_pool_init(self) or_return
+  if has_async_compute(self) do timelines_init(self) or_return
+  return .SUCCESS
+}
+
+@(private = "file")
+timelines_init :: proc(self: ^GPUContext) -> vk.Result {
+  type_info := vk.SemaphoreTypeCreateInfo {
+    sType         = .SEMAPHORE_TYPE_CREATE_INFO,
+    semaphoreType = .TIMELINE,
+  }
+  info := vk.SemaphoreCreateInfo {
+    sType = .SEMAPHORE_CREATE_INFO,
+    pNext = &type_info,
+  }
+  vk.CreateSemaphore(self.device, &info, nil, &self.graphics_timeline) or_return
+  vk.CreateSemaphore(self.device, &info, nil, &self.compute_timeline) or_return
   return .SUCCESS
 }
 
@@ -125,6 +161,8 @@ shutdown :: proc(self: ^GPUContext) {
   }
   vk.DestroyCommandPool(self.device, self.command_pool, nil)
   vk.DestroyCommandPool(self.device, self.compute_command_pool, nil)
+  vk.DestroySemaphore(self.device, self.graphics_timeline, nil)
+  vk.DestroySemaphore(self.device, self.compute_timeline, nil)
   vk.DestroyDevice(self.device, nil)
   vk.DestroySurfaceKHR(self.instance, self.surface, nil)
   when ENABLE_VALIDATION_LAYERS {
@@ -489,6 +527,7 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     runtimeDescriptorArray                    = true,
     descriptorBindingPartiallyBound           = true,
     descriptorBindingVariableDescriptorCount  = true,
+    timelineSemaphore                         = true, // async compute sync
     pNext                                     = &vulkan_13_features,
   }
   device_create_info := vk.DeviceCreateInfo {

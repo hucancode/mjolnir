@@ -114,6 +114,7 @@ occlusion_setup_pyramid :: proc(
     .R32_SFLOAT,
     {.SAMPLED, .STORAGE, .TRANSFER_DST},
     generate_mips = true,
+    shared = true,
   ) or_return
   img := get_texture_2d(texture_manager, pyramid.texture)
   cmd := gpu.begin_single_time_command(gctx) or_return

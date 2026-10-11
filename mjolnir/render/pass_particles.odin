@@ -54,9 +54,8 @@ particles_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Ca
 		log.error("Particle renderer missing camera attachments")
 		return
 	}
-	// Without async compute the simulation shares this queue: it wrote the
-	// particles drawn here at the end of the previous frame. The lighting pass
-	// wrote the color image just before.
+	// The simulation wrote the particles drawn here at the end of the previous
+	// frame. The lighting pass wrote the color image just before.
 	gpu.memory_barrier(
 		command_buffer,
 		{.SHADER_WRITE, .COLOR_ATTACHMENT_WRITE},

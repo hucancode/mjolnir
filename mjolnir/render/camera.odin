@@ -284,6 +284,7 @@ create_targets :: proc(
       extent,
       .D32_SFLOAT,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+      shared = true, // the depth pyramid build reads it
     ) or_return
   }
   // Move the fresh depth images out of UNDEFINED so first-frame sampling is
@@ -380,8 +381,8 @@ allocate_descriptors :: proc(
         vk.DescriptorImageInfo,
       },
     }
-    // set[k] is bound while recording frame k-1, which flushed node data
-    // into the previous frame's copy
+    // set[k] is bound while recording frame k-1, which flushed node and
+    // camera data into the previous frame's copies
     writes[0] = {
       .STORAGE_BUFFER,
       gpu.buffer_info(&node_data_buffer.buffers[prev_frame_index]),
@@ -389,7 +390,7 @@ allocate_descriptors :: proc(
     writes[1] = {.STORAGE_BUFFER, gpu.buffer_info(&mesh_data_buffer.buffer)}
     writes[2] = {
       .STORAGE_BUFFER,
-      gpu.buffer_info(&camera_buffer.buffers[frame_index]),
+      gpu.buffer_info(&camera_buffer.buffers[prev_frame_index]),
     }
     writes[3] = {.STORAGE_BUFFER, gpu.buffer_info(&camera.draws.count[frame_index])}
     writes[4] = {.STORAGE_BUFFER, gpu.buffer_info(&camera.draws.commands[frame_index])}

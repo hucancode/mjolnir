@@ -95,6 +95,8 @@ particles_simulate :: proc(
   forcefield_set: vk.DescriptorSet,
   node_data_set: vk.DescriptorSet,
 ) {
+  // This frame's particle draw reads what the simulation is about to rewrite.
+  gpu.memory_barrier(command_buffer, {}, {}, {.VERTEX_INPUT, .VERTEX_SHADER}, {.COMPUTE_SHADER})
   gpu.bind_pipeline(
     command_buffer,
     .COMPUTE,

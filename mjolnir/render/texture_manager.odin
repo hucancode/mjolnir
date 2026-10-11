@@ -130,12 +130,13 @@ allocate_texture_2d :: proc(
   format: vk.Format,
   usage: vk.ImageUsageFlags,
   generate_mips: bool = false,
+  shared := false, // also accessed by the async compute queue
 ) -> (
   handle: Texture2DHandle,
   ret: vk.Result,
 ) {
   mips := gpu.calculate_mip_levels(extent.width, extent.height) if generate_mips else 1
-  img := gpu.image_create(gctx, extent, format, usage, mips) or_return
+  img := gpu.image_create(gctx, extent, format, usage, mips, shared = shared) or_return
   gpu_handle, slot, ok := cont.alloc(&self.images_2d, Texture2DHandle)
   if !ok {
     gpu.image_destroy(gctx.device, &img)

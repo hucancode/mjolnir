@@ -195,6 +195,20 @@ per-mesh descriptor binding. Visibility culling runs as a compute
 pass per camera (frustum + depth-pyramid occlusion) and writes the
 indirect draw commands the next graphics pass consumes.
 
+Frame N's culling builds the depth pyramid from frame N-1's depth and
+writes the draw lists frame N+1 draws. On a device with a dedicated
+compute queue family, the pyramid and culling run there, overlapping frame
+N's graphics work. Two timeline semaphores order the queues:
+
+- compute N waits for graphics N-1, which wrote the depth compute N reads
+  and drew from the lists compute N rewrites;
+- graphics N waits for compute N-1 at indirect draw and depth test, since
+  it draws compute N-1's lists and rewrites the depth compute N-1 read.
+
+Buffers, camera depth and the pyramid use `CONCURRENT` sharing across the
+two families, so no ownership transfers are needed. Particle simulation
+always runs on the graphics queue at the end of the frame.
+
 ## Why deferred + light volumes
 
 Forward shading scales as `pixels × lights`. The deferred pass writes

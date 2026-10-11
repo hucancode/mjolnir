@@ -252,9 +252,9 @@ Camera :: struct {
   near, far:                    f32,
   extent:                       [2]u32, // width, height
   attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]Texture2DHandle,
-  // One indirect draw list per DrawPipeline (double-buffered for
-  // async compute). Frame N compute writes to buffers[N], Frame N graphics
-  // reads from buffers[N-1].
+  // One indirect draw list per DrawPipeline per frame in flight. Frame N's
+  // culling writes the lists frame N+1 draws; frame N draws the lists frame
+  // N-1's culling wrote.
   draws:                        DrawBuffers,
   depth_pyramid:                [gpu.FRAMES_IN_FLIGHT]DepthPyramid,
   descriptor_set:               [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,

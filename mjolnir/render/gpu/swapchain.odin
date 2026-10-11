@@ -15,7 +15,6 @@ Swapchain :: struct {
   in_flight_fences:            [FRAMES_IN_FLIGHT]vk.Fence,
   image_available_semaphores:  [FRAMES_IN_FLIGHT]vk.Semaphore, // Per frame-in-flight
   render_finished_semaphores:  []vk.Semaphore, // Per swapchain image (for presentation sync)
-  compute_finished_semaphores: [FRAMES_IN_FLIGHT]vk.Semaphore, // Per frame-in-flight (for compute->graphics sync)
 }
 
 swapchain_init :: proc(
@@ -166,12 +165,6 @@ swapchain_init :: proc(
       gctx.device,
       &semaphore_info,
       nil,
-      &self.compute_finished_semaphores[i],
-    ) or_return
-    vk.CreateSemaphore(
-      gctx.device,
-      &semaphore_info,
-      nil,
       &self.image_available_semaphores[i],
     ) or_return
     fence_info := vk.FenceCreateInfo {
@@ -207,9 +200,6 @@ swapchain_destroy :: proc(self: ^Swapchain, device: vk.Device) {
   for semaphore in self.image_available_semaphores {
     vk.DestroySemaphore(device, semaphore, nil)
   }
-  for semaphore in self.compute_finished_semaphores {
-    vk.DestroySemaphore(device, semaphore, nil)
-  }
   for fence in self.in_flight_fences {
     vk.DestroyFence(device, fence, nil)
   }
@@ -230,8 +220,20 @@ swapchain_recreate :: proc(
 
 // Block until the GPU has finished the last submission that used this
 // frame-in-flight slot, so its per-frame buffers may be rewritten.
-wait_frame :: proc(device: vk.Device, self: ^Swapchain, frame_index: u32) -> vk.Result {
-  return vk.WaitForFences(device, 1, &self.in_flight_fences[frame_index], true, math.max(u64))
+wait_frame :: proc(gctx: ^GPUContext, self: ^Swapchain, frame_index: u32) -> vk.Result {
+  vk.WaitForFences(gctx.device, 1, &self.in_flight_fences[frame_index], true, math.max(u64)) or_return
+  if !has_async_compute(gctx) || gctx.frame_serial < FRAMES_IN_FLIGHT do return .SUCCESS
+  // The compute submission that last used this slot runs independently of
+  // the fenced graphics one; it still owns the slot's command buffer and
+  // reads its node and camera buffers.
+  value := gctx.frame_serial - FRAMES_IN_FLIGHT + 1
+  wait_info := vk.SemaphoreWaitInfo {
+    sType          = .SEMAPHORE_WAIT_INFO,
+    semaphoreCount = 1,
+    pSemaphores    = &gctx.compute_timeline,
+    pValues        = &value,
+  }
+  return vk.WaitSemaphores(gctx.device, &wait_info, math.max(u64))
 }
 
 // Acquire the next swapchain image. Call after wait_frame.
@@ -256,6 +258,13 @@ acquire_next_image :: proc(
   return
 }
 
+// Submit this frame's graphics (and with async compute, compute) work, then
+// present. Async compute for frame n culls for frame n+1, so the queues
+// overlap within a frame and chain across frames:
+//   compute n waits graphics n-1 (it reads depth n-1 and rewrites the draw
+//   lists graphics n-1 drew from)
+//   graphics n waits compute n-1 (it draws the lists compute n-1 wrote and
+//   rewrites the depth compute n-1 read)
 submit_queue_and_present :: proc(
   gctx: ^GPUContext,
   self: ^Swapchain,
@@ -263,6 +272,7 @@ submit_queue_and_present :: proc(
   compute_command_buffer: ^vk.CommandBuffer,
   frame_index: u32,
 ) -> vk.Result {
+  serial := gctx.frame_serial
   wait_infos := [2]vk.SemaphoreSubmitInfo {
     {
       sType = .SEMAPHORE_SUBMIT_INFO,
@@ -271,24 +281,47 @@ submit_queue_and_present :: proc(
     },
     {
       sType = .SEMAPHORE_SUBMIT_INFO,
-      semaphore = self.compute_finished_semaphores[frame_index],
-      stageMask = {.VERTEX_INPUT, .COMPUTE_SHADER},
+      semaphore = gctx.compute_timeline,
+      value = serial, // compute n-1 signalled n
+      stageMask = {.DRAW_INDIRECT, .EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
     },
   }
-  wait_count: u32 = 1
+  signal_infos := [2]vk.SemaphoreSubmitInfo {
+    {
+      sType = .SEMAPHORE_SUBMIT_INFO,
+      semaphore = self.render_finished_semaphores[self.image_index],
+      stageMask = {.ALL_COMMANDS},
+    },
+    {
+      sType = .SEMAPHORE_SUBMIT_INFO,
+      semaphore = gctx.graphics_timeline,
+      value = serial + 1,
+      stageMask = {.ALL_COMMANDS},
+    },
+  }
+  sync_count: u32 = 1
   if has_async_compute(gctx) {
-    wait_count = 2
+    sync_count = 2
     compute_cmd_info := vk.CommandBufferSubmitInfo {
       sType         = .COMMAND_BUFFER_SUBMIT_INFO,
       commandBuffer = compute_command_buffer^,
     }
+    compute_wait := vk.SemaphoreSubmitInfo {
+      sType     = .SEMAPHORE_SUBMIT_INFO,
+      semaphore = gctx.graphics_timeline,
+      value     = serial, // graphics n-1 signalled n
+      stageMask = {.ALL_COMMANDS},
+    }
     compute_signal := vk.SemaphoreSubmitInfo {
       sType     = .SEMAPHORE_SUBMIT_INFO,
-      semaphore = self.compute_finished_semaphores[frame_index],
+      semaphore = gctx.compute_timeline,
+      value     = serial + 1,
       stageMask = {.ALL_COMMANDS},
     }
     compute_submit := vk.SubmitInfo2 {
       sType                    = .SUBMIT_INFO_2,
+      waitSemaphoreInfoCount   = 1,
+      pWaitSemaphoreInfos      = &compute_wait,
       commandBufferInfoCount   = 1,
       pCommandBufferInfos      = &compute_cmd_info,
       signalSemaphoreInfoCount = 1,
@@ -300,19 +333,14 @@ submit_queue_and_present :: proc(
     sType         = .COMMAND_BUFFER_SUBMIT_INFO,
     commandBuffer = command_buffer^,
   }
-  gfx_signal := vk.SemaphoreSubmitInfo {
-    sType     = .SEMAPHORE_SUBMIT_INFO,
-    semaphore = self.render_finished_semaphores[self.image_index],
-    stageMask = {.ALL_COMMANDS},
-  }
   graphics_submit := vk.SubmitInfo2 {
     sType                    = .SUBMIT_INFO_2,
-    waitSemaphoreInfoCount   = wait_count,
+    waitSemaphoreInfoCount   = sync_count,
     pWaitSemaphoreInfos      = &wait_infos[0],
     commandBufferInfoCount   = 1,
     pCommandBufferInfos      = &gfx_cmd_info,
-    signalSemaphoreInfoCount = 1,
-    pSignalSemaphoreInfos    = &gfx_signal,
+    signalSemaphoreInfoCount = sync_count,
+    pSignalSemaphoreInfos    = &signal_infos[0],
   }
   vk.QueueSubmit2(
     gctx.graphics_queue,
@@ -320,6 +348,7 @@ submit_queue_and_present :: proc(
     &graphics_submit,
     self.in_flight_fences[frame_index],
   ) or_return
+  gctx.frame_serial += 1
   image_indices := [?]u32{self.image_index}
   present_info := vk.PresentInfoKHR {
     sType              = .PRESENT_INFO_KHR,

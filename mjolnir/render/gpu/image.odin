@@ -45,6 +45,8 @@ image_create :: proc(
   usage: vk.ImageUsageFlags,
   mip_levels: u32 = 1,
   cube := false,
+  // also accessed by the async compute queue
+  shared := false,
 ) -> (
   img: Image,
   ret: vk.Result,
@@ -67,9 +69,10 @@ image_create :: proc(
     tiling        = .OPTIMAL,
     initialLayout = .UNDEFINED,
     usage         = usage,
-    sharingMode   = .EXCLUSIVE,
     samples       = {._1},
   }
+  families: [2]u32
+  set_sharing(gctx, &create_info, shared, &families)
   vk.CreateImage(gctx.device, &create_info, nil, &img.image) or_return
   mem_reqs: vk.MemoryRequirements
   vk.GetImageMemoryRequirements(gctx.device, img.image, &mem_reqs)

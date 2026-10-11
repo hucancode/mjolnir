@@ -31,8 +31,9 @@ create_mutable_buffer :: proc(
     sType       = .BUFFER_CREATE_INFO,
     size        = vk.DeviceSize(buffer.bytes_count),
     usage       = usage,
-    sharingMode = .EXCLUSIVE,
   }
+  families: [2]u32
+  set_sharing(gctx, &create_info, true, &families)
   vk.CreateBuffer(gctx.device, &create_info, nil, &buffer.buffer) or_return
   mem_reqs: vk.MemoryRequirements
   vk.GetBufferMemoryRequirements(gctx.device, buffer.buffer, &mem_reqs)
@@ -67,8 +68,9 @@ malloc_buffer :: proc(
     sType       = .BUFFER_CREATE_INFO,
     size        = vk.DeviceSize(buffer.bytes_count),
     usage       = usage | {.TRANSFER_DST},
-    sharingMode = .EXCLUSIVE,
   }
+  families: [2]u32
+  set_sharing(gctx, &create_info, true, &families)
   vk.CreateBuffer(gctx.device, &create_info, nil, &buffer.buffer) or_return
   mem_reqs: vk.MemoryRequirements
   vk.GetBufferMemoryRequirements(gctx.device, buffer.buffer, &mem_reqs)

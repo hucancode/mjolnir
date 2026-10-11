@@ -11,9 +11,20 @@ record_compute_commands :: proc(
   frame_index: u32,
   cmd: vk.CommandBuffer,
 ) {
-  // Compute for frame N builds pyramid[N] and writes the draw lists of
-  // frame N+1, culled against pyramid[N].
+  // Compute for frame N builds pyramid[N] from frame N-1's depth and writes
+  // the draw lists of frame N+1, culled against pyramid[N].
   next_frame_index := (frame_index + 1) % gpu.FRAMES_IN_FLIGHT
+  if !gpu.has_async_compute(&self.gctx) {
+    // Same queue: order frame N-1's depth writes before the pyramid reads
+    // them. The async queue gets this from its semaphore wait.
+    gpu.memory_barrier(
+      cmd,
+      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      {.SHADER_READ},
+      {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
+      {.COMPUTE_SHADER},
+    )
+  }
   it := cont.iterator(&self.cameras)
   for cam, handle in cont.next(&it, CameraHandle) {
     occlusion_build_pyramid(
@@ -33,13 +44,6 @@ record_compute_commands :: proc(
       cam.descriptor_set[next_frame_index],
     )
   }
-  particles_simulate(
-    &self.internal.particles,
-    cmd,
-    self.internal.emitter_buffer.descriptor_sets[frame_index],
-    self.internal.forcefield_buffer.descriptor_sets[frame_index],
-    self.internal.node_data_buffer.descriptor_sets[frame_index],
-  )
 }
 
 @(private)
@@ -170,7 +174,16 @@ record_frame :: proc(
   // Staged commands point into caller memory valid for this frame only.
   self.internal.ui.commands = nil
 
-  // Compute (potentially on a separate async queue command buffer).
+  // Simulate after drawing: the next frame draws this frame's particles.
+  particles_simulate(
+    &self.internal.particles,
+    cmd,
+    self.internal.emitter_buffer.descriptor_sets[frame_index],
+    self.internal.forcefield_buffer.descriptor_sets[frame_index],
+    self.internal.node_data_buffer.descriptor_sets[frame_index],
+  )
+  // Culling and the depth pyramid, on the async compute queue when there is
+  // one (ordering in gpu.submit_queue_and_present).
   compute_cmd := cmd
   if gpu.has_async_compute(&self.gctx) {
     compute_cmd = self.internal.compute_command_buffers[frame_index]
@@ -180,7 +193,6 @@ record_frame :: proc(
   if gpu.has_async_compute(&self.gctx) {
     gpu.end_record(compute_cmd) or_return
   }
-
 
   present_barrier := vk.ImageMemoryBarrier2 {
     sType = .IMAGE_MEMORY_BARRIER_2,
@@ -220,7 +232,7 @@ frame :: proc(
   if !self.internal.level_ready do return true
   gctx := &self.gctx
   // Wait before flushing: flush rewrites this frame slot's per-frame buffers.
-  res := gpu.wait_frame(gctx.device, &self.swapchain, self.frame_index)
+  res := gpu.wait_frame(gctx, &self.swapchain, self.frame_index)
   if res == .SUCCESS {
     tick_resource_pools(self)
     res = flush(self, gctx, self.frame_index)
