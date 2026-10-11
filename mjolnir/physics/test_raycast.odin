@@ -24,7 +24,7 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     state := new(Physics_Raycast_State)
-    init(&state.physics, enable_parallel = false)
+    init(&state.physics, thread_count = 1)
     // Spawn a 50x50 grid of bodies (2500 total)
     grid_size := 50
     spacing: f32 = 1.0
@@ -33,7 +33,7 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
         world_x := (f32(x) - f32(grid_size) * 0.5) * spacing
         world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
         pos := [3]f32{world_x, 0.5, world_z}
-        create_static_body(&state.physics, position = pos, collider = SphereCollider{radius = 0.5})
+        create_body(&state.physics, position = pos, collider = SphereCollider{radius = 0.5})
       }
     }
     step(&state.physics, 0.0)
@@ -165,37 +165,18 @@ test_raycast_cylinder :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_raycast_fan :: proc(t: ^testing.T) {
-  // 90 deg sector facing +Z
-  fan: Collider = FanCollider{radius = 2, height = 1, angle = math.PI / 2}
-  id := linalg.QUATERNIONF32_IDENTITY
-  // Hits the curved wall straight ahead
-  tt, n, hit := raycast_collider({origin = {0, 0, 5}, direction = {0, 0, -1}}, &fan, {}, id, 100)
-  testing.expect(t, hit && math.abs(tt - 3) < 1e-4)
-  testing.expect(t, near(n, {0, 0, 1}))
-  // Behind the fan: misses
-  _, _, hit = raycast_collider({origin = {-5, 0, -0.5}, direction = {1, 0, 0}}, &fan, {}, id, 100)
-  testing.expect(t, !hit)
-  // Through the side plane at +45 deg
-  tt, n, hit = raycast_collider({origin = {5, 0, 0.5}, direction = {-1, 0, 0}}, &fan, {}, id, 100)
-  testing.expect(t, hit)
-  testing.expectf(t, math.abs(tt - 4.5) < 1e-3, "t = %v", tt)
-  testing.expectf(t, near(n, {0.7071, 0, -0.7071}), "normal = %v", n)
-}
-
-@(test)
-test_set_body_pose_updates_broadphase :: proc(t: ^testing.T) {
+test_set_pose_updates_broadphase :: proc(t: ^testing.T) {
   w: World
-  init(&w, enable_parallel = false)
+  init(&w, thread_count = 1)
   defer shutdown(&w)
-  h := create_static_body(&w, position = {0, 0, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}})
+  h := create_body(&w, position = {0, 0, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}})
   step(&w, 1.0 / 60.0)
   ray := geometry.Ray{origin = {10, 5, 0}, direction = {0, -1, 0}}
   testing.expect(t, !raycast(&w, ray).hit)
-  set_body_pose(&w, h, [3]f32{10, 0, 0}, linalg.QUATERNIONF32_IDENTITY)
+  set_pose(&w, h, [3]f32{10, 0, 0}, linalg.QUATERNIONF32_IDENTITY)
   hit := raycast(&w, ray)
   testing.expect(t, hit.hit && math.abs(hit.t - 4.5) < 1e-4)
-  set_body_collider(&w, h, BoxCollider{half_extents = {1, 2, 1}})
+  set_collider(&w, h, BoxCollider{half_extents = {1, 2, 1}})
   hit = raycast(&w, ray)
   testing.expect(t, hit.hit && math.abs(hit.t - 3) < 1e-4)
 }

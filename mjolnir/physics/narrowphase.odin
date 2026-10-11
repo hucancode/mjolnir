@@ -1,16 +1,309 @@
 #+private
 package physics
 
-// Multi-point contact manifold generation. Analytic only — primitives are
-// sphere, box, cylinder (fan is trigger-only). Multi-point manifolds are what
-// let boxes rest flat and stacks stand still: a single averaged point cannot
-// resist tipping or twisting.
+// Narrowphase: broadphase pairs → contacts. Manifolds are analytic only —
+// primitives are sphere, box, cylinder. Multi-point manifolds are what let
+// boxes rest flat and stacks stand still: a single averaged point cannot
+// resist tipping or twisting. Every normal points from A to B.
 
 import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
 MAX_MANIFOLD_POINTS :: 4
+
+// Warmstart pair keys include handle generations so a recycled slot never
+// inherits the previous occupant's impulses.
+collision_pair_hash :: proc "contextless" (body_a, body_b: BodyHandle) -> u64 {
+  ha := u64(body_a.index) | (u64(body_a.generation) << 32)
+  hb := u64(body_b.index) | (u64(body_b.generation) << 32)
+  return ha * 0x9E3779B97F4A7C15 ~ (hb + 0x517CC1B727220A95)
+}
+
+mix_friction :: #force_inline proc "contextless" (a, b: f32) -> f32 {
+  return math.sqrt(a * b)
+}
+
+mix_restitution :: #force_inline proc "contextless" (a, b: f32) -> f32 {
+  return max(a, b)
+}
+
+ContactWarmstart :: struct {
+  count:           int,
+  feature_ids:     [MAX_MANIFOLD_POINTS]u32,
+  normal_impulses: [MAX_MANIFOLD_POINTS]f32,
+  tangent:         [2]f32,
+  twist:           f32,
+}
+
+contact_has_impulse :: #force_inline proc(c: ^Contact) -> bool {
+  if c.tangent_impulse != {0, 0} || c.twist_impulse != 0 do return true
+  for i in 0 ..< c.count {
+    if c.points[i].normal_impulse != 0 do return true
+  }
+  return false
+}
+
+contact_store_warmstart :: proc(c: ^Contact) -> (w: ContactWarmstart) {
+  w.count = c.count
+  for i in 0 ..< c.count {
+    w.feature_ids[i] = c.points[i].feature_id
+    w.normal_impulses[i] = c.points[i].normal_impulse
+  }
+  w.tangent = c.tangent_impulse
+  w.twist = c.twist_impulse
+  return
+}
+
+contact_apply_warmstart :: proc(c: ^Contact, w: ^ContactWarmstart) {
+  for i in 0 ..< c.count {
+    for j in 0 ..< w.count {
+      if c.points[i].feature_id == w.feature_ids[j] {
+        c.points[i].normal_impulse = w.normal_impulses[j]
+        break
+      }
+    }
+  }
+  c.tangent_impulse = w.tangent
+  c.twist_impulse = w.twist
+}
+
+bounding_spheres_intersect :: proc "contextless" (
+  pos_a: [3]f32,
+  radius_a: f32,
+  pos_b: [3]f32,
+  radius_b: f32,
+) -> bool {
+  radius_sum := radius_a + radius_b
+  return linalg.length2(pos_b - pos_a) <= radius_sum * radius_sum
+}
+
+// ---------------------------------------------------------------------------
+// Single-point primitive tests
+// ---------------------------------------------------------------------------
+
+test_sphere_sphere :: proc(
+  pos_a: [3]f32,
+  sphere_a: SphereCollider,
+  pos_b: [3]f32,
+  sphere_b: SphereCollider,
+) -> (
+  point: [3]f32,
+  normal: [3]f32,
+  penetration: f32,
+  hit: bool,
+) {
+  delta := pos_b - pos_a
+  distance_sq := linalg.length2(delta)
+  radius_sum := sphere_a.radius + sphere_b.radius
+  if distance_sq > radius_sum * radius_sum do return
+  distance := math.sqrt(distance_sq)
+  normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  penetration = radius_sum - distance
+  point = pos_a + normal * (sphere_a.radius - penetration * 0.5)
+  hit = true
+  return
+}
+
+// Point is the closest point on the box; normal points box → sphere. A
+// center inside the box gets the Y axis.
+test_box_sphere :: proc(
+  pos_box: [3]f32,
+  rot_box: quaternion128,
+  box: BoxCollider,
+  pos_sphere: [3]f32,
+  sphere: SphereCollider,
+) -> (
+  point: [3]f32,
+  normal: [3]f32,
+  penetration: f32,
+  hit: bool,
+) {
+  point = geometry.obb_closest_point({center = pos_box, half_extents = box.half_extents, rotation = rot_box}, pos_sphere)
+  delta := pos_sphere - point
+  dist_sq := linalg.length2(delta)
+  if dist_sq > sphere.radius * sphere.radius do return
+  distance := math.sqrt(dist_sq)
+  normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  penetration = sphere.radius - distance
+  hit = true
+  return
+}
+
+// Normal points sphere → cylinder, taken from the cylinder surface (stable
+// under deep penetration).
+test_sphere_cylinder :: proc(
+  pos_sphere: [3]f32,
+  sphere: SphereCollider,
+  pos_cylinder: [3]f32,
+  rot_cylinder: quaternion128,
+  cylinder: CylinderCollider,
+) -> (
+  point: [3]f32,
+  normal: [3]f32,
+  penetration: f32,
+  hit: bool,
+) {
+  // Cylinder local space: axis is Y
+  inv_rot := linalg.quaternion_inverse(rot_cylinder)
+  local_sphere := geometry.qmv(inv_rot, pos_sphere - pos_cylinder)
+  half_height := cylinder.height * 0.5
+  radial := [3]f32{local_sphere.x, 0, local_sphere.z}
+  radial_dist := linalg.length(radial)
+  radial_dir := radial_dist > math.F32_EPSILON ? radial / radial_dist : [3]f32{1, 0, 0}
+  rim := radial_dir * cylinder.radius
+  above := local_sphere.y > half_height
+  below := local_sphere.y < -half_height
+  inside_radial := radial_dist < cylinder.radius
+  // Closest point on the cylinder surface
+  local_closest: [3]f32
+  if above || below {
+    cap_y := above ? half_height : -half_height
+    local_closest = inside_radial ? {local_sphere.x, cap_y, local_sphere.z} : {rim.x, cap_y, rim.z}
+  } else if inside_radial {
+    // Center inside the cylinder: push out along the shallowest direction
+    dist_to_top := half_height - local_sphere.y
+    dist_to_bottom := local_sphere.y + half_height
+    dist_to_side := cylinder.radius - radial_dist
+    if dist_to_side <= dist_to_top && dist_to_side <= dist_to_bottom {
+      local_closest = {rim.x, local_sphere.y, rim.z}
+    } else if dist_to_top <= dist_to_bottom {
+      local_closest = {local_sphere.x, half_height, local_sphere.z}
+    } else {
+      local_closest = {local_sphere.x, -half_height, local_sphere.z}
+    }
+  } else {
+    local_closest = {rim.x, local_sphere.y, rim.z}
+  }
+  local_normal: [3]f32
+  if local_closest.y >= half_height - math.F32_EPSILON {
+    local_normal = {0, 1, 0}
+  } else if local_closest.y <= -half_height + math.F32_EPSILON {
+    local_normal = {0, -1, 0}
+  } else {
+    local_normal = radial_dir
+  }
+  world_closest := pos_cylinder + geometry.qmv(rot_cylinder, local_closest)
+  surface_normal := geometry.qmv(rot_cylinder, local_normal)
+  dist_sq := linalg.length2(pos_sphere - world_closest)
+  if dist_sq > sphere.radius * sphere.radius do return
+  penetration = sphere.radius - math.sqrt(dist_sq)
+  point = world_closest + surface_normal * (penetration * 0.5)
+  normal = -surface_normal
+  hit = true
+  return
+}
+
+// Box vs cylinder axis segment: samples the segment for the point nearest the
+// box, refines once, then tests that distance against the radius. Point is on
+// the box; normal points box → cylinder.
+test_box_cylinder :: proc(
+  pos_box: [3]f32,
+  rot_box: quaternion128,
+  box: BoxCollider,
+  pos_cylinder: [3]f32,
+  rot_cylinder: quaternion128,
+  cylinder: CylinderCollider,
+) -> (
+  point: [3]f32,
+  normal: [3]f32,
+  penetration: f32,
+  hit: bool,
+) {
+  obb := geometry.Obb{center = pos_box, half_extents = box.half_extents, rotation = rot_box}
+  axis := geometry.qy(rot_cylinder) * (cylinder.height * 0.5)
+  seg_start := pos_cylinder - axis
+  seg_end := pos_cylinder + axis
+  min_dist_sq := f32(math.F32_MAX)
+  #unroll for i in 0 ..= 4 {
+    sample := linalg.mix(seg_start, seg_end, f32(i) / 4.0)
+    on_box := geometry.obb_closest_point(obb, sample)
+    if d := linalg.length2(sample - on_box); d < min_dist_sq {
+      min_dist_sq = d
+      point = on_box
+    }
+  }
+  seg := seg_end - seg_start
+  on_axis := pos_cylinder
+  if seg_len_sq := linalg.length2(seg); seg_len_sq > 1e-6 {
+    on_axis = linalg.mix(seg_start, seg_end, linalg.saturate(linalg.dot(point - seg_start, seg) / seg_len_sq))
+    point = geometry.obb_closest_point(obb, on_axis)
+  }
+  delta := on_axis - point
+  dist_sq := linalg.length2(delta)
+  if dist_sq > cylinder.radius * cylinder.radius do return
+  distance := math.sqrt(dist_sq)
+  normal = distance > 1e-6 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  penetration = cylinder.radius - distance
+  hit = true
+  return
+}
+
+// Non-parallel cylinders, approximated as capsules: closest points between
+// the two axis segments against the radius sum.
+test_cylinder_cylinder :: proc(
+  pos_a: [3]f32,
+  rot_a: quaternion128,
+  cylinder_a: CylinderCollider,
+  pos_b: [3]f32,
+  rot_b: quaternion128,
+  cylinder_b: CylinderCollider,
+) -> (
+  point: [3]f32,
+  normal: [3]f32,
+  penetration: f32,
+  hit: bool,
+) {
+  axis_a := geometry.qy(rot_a) * (cylinder_a.height * 0.5)
+  axis_b := geometry.qy(rot_b) * (cylinder_b.height * 0.5)
+  p0_a := pos_a - axis_a
+  p0_b := pos_b - axis_b
+  d1 := 2 * axis_a
+  d2 := 2 * axis_b
+  r := p0_a - p0_b
+  a := linalg.dot(d1, d1)
+  e := linalg.dot(d2, d2)
+  f := linalg.dot(d2, r)
+  s, t: f32
+  if a <= math.F32_EPSILON && e <= math.F32_EPSILON {
+    s, t = 0, 0
+  } else if a <= math.F32_EPSILON {
+    t = clamp(f / e, 0.0, 1.0)
+  } else {
+    c := linalg.dot(d1, r)
+    if e <= math.F32_EPSILON {
+      s = clamp(-c / a, 0.0, 1.0)
+    } else {
+      b := linalg.dot(d1, d2)
+      denom := a * e - b * b
+      s = denom != 0 ? clamp((b * f - c * e) / denom, 0.0, 1.0) : 0
+      t = (b * s + f) / e
+      if t < 0 {
+        t = 0
+        s = clamp(-c / a, 0.0, 1.0)
+      } else if t > 1 {
+        t = 1
+        s = clamp((b - c) / a, 0.0, 1.0)
+      }
+    }
+  }
+  c1 := p0_a + d1 * s
+  c2 := p0_b + d2 * t
+  delta := c2 - c1
+  dist_sq := linalg.length2(delta)
+  radius_sum := cylinder_a.radius + cylinder_b.radius
+  if dist_sq > radius_sum * radius_sum do return
+  distance := math.sqrt(dist_sq)
+  normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  penetration = radius_sum - distance
+  point = c1 + normal * (cylinder_a.radius - penetration * 0.5)
+  hit = true
+  return
+}
+
+// ---------------------------------------------------------------------------
+// Manifolds
+// ---------------------------------------------------------------------------
 
 ManifoldPoint :: struct {
   point:       [3]f32,
@@ -29,15 +322,21 @@ FEATURE_EDGE_CONTACT :: u32(0xE0000000)
 @(private = "file")
 FEATURE_SINGLE :: u32(0xF0000000)
 
-manifold_from_single_point :: #force_inline proc(
+// Wraps a single-point test result. Sphere tests run with the radius
+// inflated by `margin`; deflating the penetration back makes separated-but-
+// within-margin contacts come out negative (speculative).
+point_manifold :: #force_inline proc(
   point: [3]f32,
   normal: [3]f32,
   penetration: f32,
-) -> (m: Manifold) {
+  hit: bool,
+  margin: f32 = 0,
+) -> (m: Manifold, ok: bool) {
+  if !hit do return
   m.normal = normal
   m.count = 1
-  m.points[0] = {point = point, penetration = penetration, feature_id = FEATURE_SINGLE}
-  return
+  m.points[0] = {point = point, penetration = penetration - margin, feature_id = FEATURE_SINGLE}
+  return m, true
 }
 
 // ---------------------------------------------------------------------------
@@ -431,8 +730,8 @@ collide_boxes :: proc(
 // ---------------------------------------------------------------------------
 
 // Cap-contact rim points: 4 samples on the contact circle, clipped to
-// penetrating ones. Falls back to the single-point result when the contact
-// is not a cap resting case.
+// penetrating ones. Leaves `m` untouched when the contact is not a cap
+// resting case.
 @(private = "file")
 cylinder_cap_manifold :: proc(
   m: ^Manifold,
@@ -443,31 +742,32 @@ cylinder_cap_manifold :: proc(
   plane_point: [3]f32, // point on the opposing face plane
   plane_normal: [3]f32, // toward the cylinder
   margin: f32,
-) -> bool {
+) {
   axis := geometry.qy(cyl_rot)
   cap_dot := linalg.dot(axis, plane_normal)
   // Cap must be near-parallel to the face
-  if math.abs(cap_dot) < 0.966 do return false // cos(15°)
+  if math.abs(cap_dot) < 0.966 do return // cos(15°)
   cap_sign: f32 = cap_dot > 0 ? -1 : 1
   cap_center := cyl_pos + axis * (cap_sign * height * 0.5)
   t1 := linalg.normalize(linalg.orthogonal(axis))
   t2 := linalg.cross(axis, t1)
+  points: [MAX_MANIFOLD_POINTS]ManifoldPoint
   count := 0
   for i in 0 ..< 4 {
     dir := i == 0 ? t1 : i == 1 ? -t1 : i == 2 ? t2 : -t2
     p := cap_center + dir * radius
     sep := linalg.dot(plane_normal, p - plane_point)
     if sep >= margin do continue
-    m.points[count] = {
+    points[count] = {
       point       = p - plane_normal * (sep * 0.5),
       penetration = -sep,
       feature_id  = u32(i) | 0x00C10000,
     }
     count += 1
   }
-  if count < 2 do return false
+  if count < 2 do return
+  m.points = points
   m.count = count
-  return true
 }
 
 collide_box_cylinder :: proc(
@@ -477,24 +777,13 @@ collide_box_cylinder :: proc(
   pos_cyl: [3]f32,
   rot_cyl: quaternion128,
   cyl: CylinderCollider,
-  invert_normal: bool,
   margin: f32,
 ) -> (m: Manifold, hit: bool) {
-  point, normal, penetration, single_hit := test_box_cylinder(
-    pos_box, rot_box, box, pos_cyl, rot_cyl, cyl, invert_normal,
-  )
-  if !single_hit do return
-  m = manifold_from_single_point(point, normal, penetration)
-  hit = true
-  // Cap resting on a box face: build a rim manifold. Normal from A to B;
-  // plane normal must point toward the cylinder.
-  toward_cyl := invert_normal ? -normal : normal
-  // Only when the box face is the reference (normal near box face axis):
-  // find penetrating rim samples against the face plane through `point`.
-  if cylinder_cap_manifold(&m, pos_cyl, rot_cyl, cyl.radius, cyl.height, point, toward_cyl, margin) {
-    m.normal = normal
-  }
-  return
+  m = point_manifold(test_box_cylinder(pos_box, rot_box, box, pos_cyl, rot_cyl, cyl)) or_return
+  // Cap resting on a box face: replace the point with penetrating rim samples
+  // against the face plane through the box-side point.
+  cylinder_cap_manifold(&m, pos_cyl, rot_cyl, cyl.radius, cyl.height, m.points[0].point, m.normal, margin)
+  return m, true
 }
 
 collide_cylinders :: proc(
@@ -574,32 +863,17 @@ collide_cylinders :: proc(
   point, normal, penetration, single_hit := test_cylinder_cylinder(
     pos_a, rot_a, cyl_a, pos_b, rot_b, cyl_b,
   )
-  if !single_hit do return
-  return manifold_from_single_point(point, normal, penetration), true
+  return point_manifold(point, normal, penetration, single_hit)
 }
 
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
-// Wrap a single-point test result whose sphere was inflated by `margin`:
-// deflate the penetration back so separated-but-within-margin contacts come
-// out with negative penetration (speculative).
-@(private = "file")
-sphere_manifold :: #force_inline proc(
-  point: [3]f32,
-  normal: [3]f32,
-  penetration: f32,
-  h: bool,
-  margin: f32,
-) -> (m: Manifold, hit: bool) {
-  if !h do return
-  return manifold_from_single_point(point, normal, penetration - margin), true
-}
-
 // margin: speculative distance — contacts are generated while shapes are
 // still up to `margin` apart (penetration goes negative). The solver treats
-// separated points as speculative (velocity clamp only, no push).
+// separated points as speculative (velocity clamp only, no push). Mirrored
+// pairs reuse the B-vs-A routine and flip the normal.
 collide :: proc(
   collider_a: ^Collider,
   pos_a: [3]f32,
@@ -610,49 +884,45 @@ collide :: proc(
   margin: f32 = 0,
 ) -> (m: Manifold, hit: bool) {
   switch shape_a in collider_a {
-  case FanCollider:
-    return
   case SphereCollider:
     inflated := SphereCollider{radius = shape_a.radius + margin}
     switch shape_b in collider_b {
-    case FanCollider:
-      return
     case SphereCollider:
-      return sphere_manifold(test_sphere_sphere(pos_a, inflated, pos_b, shape_b), margin)
+      return point_manifold(test_sphere_sphere(pos_a, inflated, pos_b, shape_b), margin)
     case BoxCollider:
-      return sphere_manifold(test_box_sphere(pos_b, rot_b, shape_b, pos_a, inflated, invert_normal = true), margin)
+      m, hit = point_manifold(test_box_sphere(pos_b, rot_b, shape_b, pos_a, inflated), margin)
+      m.normal = -m.normal
+      return
     case CylinderCollider:
-      return sphere_manifold(test_sphere_cylinder(pos_a, inflated, pos_b, rot_b, shape_b), margin)
+      return point_manifold(test_sphere_cylinder(pos_a, inflated, pos_b, rot_b, shape_b), margin)
     }
   case BoxCollider:
     switch shape_b in collider_b {
-    case FanCollider:
-      return
     case SphereCollider:
       inflated := SphereCollider{radius = shape_b.radius + margin}
-      return sphere_manifold(test_box_sphere(pos_a, rot_a, shape_a, pos_b, inflated), margin)
+      return point_manifold(test_box_sphere(pos_a, rot_a, shape_a, pos_b, inflated), margin)
     case BoxCollider:
       return collide_boxes(pos_a, rot_a, shape_a, pos_b, rot_b, shape_b, margin)
     case CylinderCollider:
-      return collide_box_cylinder(pos_a, rot_a, shape_a, pos_b, rot_b, shape_b, invert_normal = false, margin = margin)
+      return collide_box_cylinder(pos_a, rot_a, shape_a, pos_b, rot_b, shape_b, margin)
     }
   case CylinderCollider:
     switch shape_b in collider_b {
-    case FanCollider:
-      return
     case SphereCollider:
       inflated := SphereCollider{radius = shape_b.radius + margin}
-      return sphere_manifold(test_sphere_cylinder(pos_b, inflated, pos_a, rot_a, shape_a, invert_normal = true), margin)
+      m, hit = point_manifold(test_sphere_cylinder(pos_b, inflated, pos_a, rot_a, shape_a), margin)
     case BoxCollider:
-      return collide_box_cylinder(pos_b, rot_b, shape_b, pos_a, rot_a, shape_a, invert_normal = true, margin = margin)
+      m, hit = collide_box_cylinder(pos_b, rot_b, shape_b, pos_a, rot_a, shape_a, margin)
     case CylinderCollider:
       return collide_cylinders(pos_a, rot_a, shape_a, pos_b, rot_b, shape_b, margin)
     }
+    m.normal = -m.normal
+    return
   }
   return
 }
 
-collide_bodies :: #force_inline proc(body_a: ^$A, body_b: ^$B, margin: f32 = 0) -> (Manifold, bool) {
+collide_bodies :: #force_inline proc(body_a, body_b: ^Body, margin: f32 = 0) -> (Manifold, bool) {
   return collide(
     &body_a.collider,
     body_a.position,
@@ -662,4 +932,94 @@ collide_bodies :: #force_inline proc(body_a: ^$A, body_b: ^$B, margin: f32 = 0) 
     body_b.rotation,
     margin,
   )
+}
+
+// ---------------------------------------------------------------------------
+// Pairs
+// ---------------------------------------------------------------------------
+
+// Narrowphase one broadphase pair into a contact whose body A is dynamic.
+// Pairs without a dynamic body, or where nothing awake can move, are skipped.
+narrowphase_pair :: proc(world: ^World, handle_a, handle_b: BodyHandle, out: ^[dynamic]Contact) {
+  handle_a, handle_b := handle_a, handle_b
+  body_a := get_body(world, handle_a) or_else nil
+  body_b := get_body(world, handle_b) or_else nil
+  if body_a == nil || body_b == nil do return
+  if !is_dynamic(body_a) {
+    if !is_dynamic(body_b) do return
+    body_a, body_b = body_b, body_a
+    handle_a, handle_b = handle_b, handle_a
+  }
+  if body_a.is_sleeping && (body_b.is_sleeping || !body_b.moving) do return
+  if !bounding_spheres_intersect(
+    body_a.cached_sphere_center, body_a.cached_sphere_radius + SPECULATIVE_DISTANCE,
+    body_b.cached_sphere_center, body_b.cached_sphere_radius,
+  ) {
+    return
+  }
+  manifold, hit := collide_bodies(body_a, body_b, SPECULATIVE_DISTANCE)
+  if !hit do return
+  wake_up(body_a)
+  b_dynamic := is_dynamic(body_b)
+  if b_dynamic do wake_up(body_b)
+  contact := Contact {
+    body_a      = handle_a,
+    body_b      = handle_b,
+    b_dynamic   = b_dynamic,
+    normal      = manifold.normal,
+    count       = manifold.count,
+    restitution = mix_restitution(body_a.restitution, body_b.restitution),
+    friction    = mix_friction(body_a.friction, body_b.friction),
+  }
+  for i in 0 ..< manifold.count {
+    contact.points[i] = ContactPoint {
+      point           = manifold.points[i].point,
+      base_separation = -manifold.points[i].penetration,
+      feature_id      = manifold.points[i].feature_id,
+    }
+  }
+  if w, found := &world.prev_warmstart[collision_pair_hash(handle_a, handle_b)]; found {
+    contact_apply_warmstart(&contact, w)
+  }
+  append(out, contact)
+}
+
+@(private = "file")
+CollisionContext :: struct {
+  dynamic_pairs: []geometry.BVHOverlapPair(BroadPhaseEntry),
+  static_pairs:  []geometry.BVHCrossPair(BroadPhaseEntry, BroadPhaseEntry),
+  contacts:      [][dynamic]Contact, // per task
+}
+
+// BVH tree-vs-tree traversal finds candidate pairs in O(N + K); narrowphase
+// splits them across tasks, each appending to its own contact list, which
+// are concatenated in task order.
+collision_detection :: proc(world: ^World) {
+  dynamic_pairs := make([dynamic]geometry.BVHOverlapPair(BroadPhaseEntry), context.temp_allocator)
+  static_pairs := make([dynamic]geometry.BVHCrossPair(BroadPhaseEntry, BroadPhaseEntry), context.temp_allocator)
+  geometry.bvh_find_all_overlaps(&world.dynamic_bvh, &dynamic_pairs)
+  geometry.bvh_find_cross_overlaps(&world.dynamic_bvh, &world.static_bvh, &static_pairs)
+  ctx := CollisionContext {
+    dynamic_pairs = dynamic_pairs[:],
+    static_pairs  = static_pairs[:],
+    contacts      = make([][dynamic]Contact, max(1, world.thread_count), context.temp_allocator),
+  }
+  parallel_for(world, len(dynamic_pairs) + len(static_pairs), &ctx, proc(world: ^World, ctx: rawptr, task, start, end: int) {
+    ctx := (^CollisionContext)(ctx)
+    out := &ctx.contacts[task]
+    n_dyn := len(ctx.dynamic_pairs)
+    #no_bounds_check for i in start ..< end {
+      if i < n_dyn {
+        pair := ctx.dynamic_pairs[i]
+        narrowphase_pair(world, pair.a.handle, pair.b.handle, out)
+      } else {
+        pair := ctx.static_pairs[i - n_dyn]
+        narrowphase_pair(world, pair.a.handle, pair.b.handle, out)
+      }
+    }
+  })
+  for c in ctx.contacts {
+    append(&world.contacts, ..c[:])
+    delete(c)
+  }
 }

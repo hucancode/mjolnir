@@ -73,11 +73,11 @@ setup :: proc(app: ^App) {
   rand_mat := app.renderer.builtin_materials[.WHITE]
 
   ground := world.spawn(&app.scene, {0, -0.5, 0})
-  physics.create_static_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {PLANE_WIDTH, 0.5, PLANE_HEIGHT}}, user = world.Handle(ground))
+  physics.create_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {PLANE_WIDTH, 0.5, PLANE_HEIGHT}}, user = world.Handle(ground))
   ground_visual := spawn_mesh(app, ground_mesh, ground_mat, ground)
   world.scale_xyz(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   ball := world.spawn(&app.scene, {2.5, SPHERE_RADIUS, 0})
-  physics.create_static_body(&phys, {2.5, SPHERE_RADIUS, 0}, collider = physics.SphereCollider{radius = SPHERE_RADIUS}, user = world.Handle(ball))
+  physics.create_body(&phys, {2.5, SPHERE_RADIUS, 0}, collider = physics.SphereCollider{radius = SPHERE_RADIUS}, user = world.Handle(ball))
   ball_visual := spawn_mesh(app, sphere_mesh, sphere_mat, ball)
   world.scale(&app.scene, ball_visual, SPHERE_RADIUS)
 
@@ -93,7 +93,7 @@ setup :: proc(app: ^App) {
     case 2: collider = physics.SphereCollider{radius = 1.0}; piece_mesh = rand_sphere_mesh
     }
     node := world.spawn(&app.scene, pos)
-    physics.create_dynamic_body(&phys, pos, mass = 50.0, collider = collider, user = world.Handle(node))
+    physics.create_body(&phys, pos, mass = 50.0, collider = collider, user = world.Handle(node))
     spawn_mesh(app, piece_mesh, piece_mat, node)
   }
   log.infof("Created %d physics objects", PIECE_COUNT)
@@ -111,6 +111,7 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   physics.step(&phys, dt)
+  for k in phys.killed do world.despawn(&app.scene, world.NodeHandle(k.user))
   for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)

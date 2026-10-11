@@ -27,7 +27,7 @@ BULLET_RADIUS :: f32(0.15)
 BULLET_MASS :: f32(0.05)
 START_POS :: [3]f32{-15.0, 1.5, 0.0}
 
-bullet_body: physics.DynamicRigidBodyHandle
+bullet_body: physics.BodyHandle
 bullet_node: world.NodeHandle
 wall_nodes: [WALL_COUNT]world.NodeHandle
 target_wall: i32 = 1
@@ -68,7 +68,7 @@ setup :: proc(app: ^App) {
 
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
   ground := world.spawn(&app.scene, {0, -0.5, 0})
-  physics.create_static_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {30.0, 0.5, 12.0}}, user = world.Handle(ground))
+  physics.create_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {30.0, 0.5, 12.0}}, user = world.Handle(ground))
   ground_visual := world.spawn_child(&app.scene, ground)
   render.attach(&app.renderer, ground_visual.index, render.MeshAttachment{handle = cube_mesh, material = app.renderer.builtin_materials[.GRAY], cast_shadow = true})
   world.scale_xyz(&app.scene, ground_visual, 30.0, 0.5, 12.0)
@@ -79,18 +79,18 @@ setup :: proc(app: ^App) {
     wall_z := (f32(i) - f32(WALL_COUNT - 1) * 0.5) * WALL_SPACING
     wall_pos := [3]f32{WALL_X, 1.5, wall_z}
     wall_nodes[i] = world.spawn(&app.scene, wall_pos)
-    physics.create_static_body(&phys, wall_pos, collider = physics.BoxCollider{half_extents = {half_thick, 1.5, 2.0}}, user = world.Handle(wall_nodes[i]))
+    physics.create_body(&phys, wall_pos, collider = physics.BoxCollider{half_extents = {half_thick, 1.5, 2.0}}, user = world.Handle(wall_nodes[i]))
     wall_visual := world.spawn_child(&app.scene, wall_nodes[i])
     render.attach(&app.renderer, wall_visual.index, render.MeshAttachment{handle = cube_mesh, material = app.renderer.builtin_materials[wall_colors[i]], cast_shadow = true})
     world.scale_xyz(&app.scene, wall_visual, half_thick, 1.5, 2.0)
   }
 
   bullet_node = world.spawn(&app.scene, START_POS)
-  bullet_body = physics.create_dynamic_body(&phys, START_POS, mass = BULLET_MASS, collider = physics.SphereCollider{radius = BULLET_RADIUS}, user = world.Handle(bullet_node))
+  bullet_body = physics.create_body(&phys, START_POS, mass = BULLET_MASS, collider = physics.SphereCollider{radius = BULLET_RADIUS}, user = world.Handle(bullet_node))
   bullet_visual := world.spawn_child(&app.scene, bullet_node)
   render.attach(&app.renderer, bullet_visual.index, render.primitive(&app.renderer, .SPHERE, .CYAN))
   world.scale_xyz(&app.scene, bullet_visual, BULLET_RADIUS, BULLET_RADIUS, BULLET_RADIUS)
-  body := physics.get_dynamic_body(&phys, bullet_body)
+  body := physics.get_body(&phys, bullet_body)
   body.linear_damping = 0
   body.angular_damping = 0
   body.restitution = 0.1
@@ -102,7 +102,7 @@ target_z :: proc() -> f32 {
 }
 
 fire_bullet :: proc(app: ^App) {
-  physics.set_body_pose(&phys, bullet_body, {START_POS.x, START_POS.y, target_z()}, linalg.QUATERNIONF32_IDENTITY)
+  physics.set_pose(&phys, bullet_body, {START_POS.x, START_POS.y, target_z()}, linalg.QUATERNIONF32_IDENTITY)
   physics.set_velocity(&phys, bullet_body, {f32(bullet_speed), 0, 0})
   physics.set_angular_velocity(&phys, bullet_body, {})
 }
@@ -115,9 +115,9 @@ update :: proc(app: ^App, dt: f32) {
     auto_fire_timer += dt
     if auto_fire_timer >= 2.0 { auto_fire_timer = 0; fire_bullet(app) }
   }
-  if body, ok := physics.get_dynamic_body(&phys, bullet_body); ok && (body.position.x > 20.0 || body.position.x < -25.0) {
+  if body, ok := physics.get_body(&phys, bullet_body); ok && (body.position.x > 20.0 || body.position.x < -25.0) {
     physics.set_velocity(&phys, bullet_body, {})
-    physics.set_body_pose(&phys, bullet_body, {START_POS.x, START_POS.y, target_z()}, body.rotation)
+    physics.set_pose(&phys, bullet_body, {START_POS.x, START_POS.y, target_z()}, body.rotation)
   }
   physics.step(&phys, dt)
   for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
@@ -158,8 +158,8 @@ debug_ui :: proc(app: ^App) {
     mu.label(ctx, fmt.tprintf("CCD bodies tested: %d", perf.ccd_bodies_tested))
     mu.label(ctx, fmt.tprintf("CCD swept candidates: %d", perf.ccd_total_candidates))
     mu.label(ctx, fmt.tprintf("CCD time: %.3f ms", perf.ccd_ms))
-    mu.label(ctx, fmt.tprintf("Static contacts: %d", perf.static_contact_count))
-    if body, ok := physics.get_dynamic_body(&phys, bullet_body); ok {
+    mu.label(ctx, fmt.tprintf("Contacts: %d", perf.contact_count))
+    if body, ok := physics.get_body(&phys, bullet_body); ok {
       mu.label(ctx, fmt.tprintf("Bullet x: %.2f  vel: %.1f", body.position.x, linalg.length(body.velocity)))
     }
   }

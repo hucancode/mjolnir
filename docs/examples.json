@@ -21,12 +21,11 @@
   },
   {
     "name": "aoe",
-    "desc": "Area-of-effect query + trigger volumes.",
+    "desc": "Area-of-effect query over static bodies.",
     "notes": [
-      "Triggers don't generate contacts — overlap-test only.",
-      "<code>physics.query_triggers_in_sphere</code> for snapshots; <code>phys.trigger_overlaps</code> for continuous events.",
-      "Mouse picking: <code>render.cursor_ray</code> → <code>physics.raycast_trigger</code>.",
-      "<code>hit.body_handle</code> is a union — <code>switch</code> on the variant."
+      "<code>physics.overlap</code> with a <code>SphereCollider</code> lists the bodies inside the effect radius.",
+      "Mouse picking: <code>render.cursor_ray</code> → <code>physics.raycast</code>; <code>hit.body</code> keys the body → mesh map.",
+      "For continuous overlap events, create a body with <code>is_sensor = true</code> and read <code>phys.sensor_overlaps</code> after <code>step</code>."
     ]
   },
   {
@@ -34,7 +33,7 @@
     "desc": "Fast projectiles don't tunnel through thin walls.",
     "notes": [
       "No extra setup — the step keeps fast bodies from tunneling automatically.",
-      "Tune response through <code>body := physics.get_dynamic_body(&phys, h)</code>: <code>body.friction</code>, <code>body.restitution</code>, <code>body.linear_damping</code>, <code>body.angular_damping</code>.",
+      "Tune response through <code>body := physics.get_body(&phys, h)</code>: <code>body.friction</code>, <code>body.restitution</code>, <code>body.linear_damping</code>, <code>body.angular_damping</code>.",
       "Set <code>phys.gravity = {0,0,0}</code> on your <code>physics.World</code> for pure ballistic tests."
     ]
   },
@@ -52,7 +51,7 @@
     "name": "collision",
     "desc": "Static and dynamic bodies of every shape, moved and reshaped live.",
     "notes": [
-      "<code>physics.set_body_pose</code> / <code>set_body_collider</code> move or reshape static and dynamic bodies and keep the BVH consistent.",
+      "<code>physics.set_pose</code> / <code>set_collider</code> move or reshape a body and keep the BVH consistent; moving a static body makes it kinematic.",
       "<code>physics.raycast</code> tests rotated boxes and cylinders exactly and returns the surface normal."
     ]
   },
@@ -134,7 +133,7 @@
     "desc": "Character controller, movement are powered by physics engine.",
     "notes": [
       "The cube is a dynamic body; <code>physics.apply_force</code> moves it from <code>input.axis</code>, <code>apply_impulse</code> jumps on <code>input.key_pressed(.SPACE)</code>.",
-      "<code>physics.set_body_mass</code> sets the mass and recomputes the inertia from the collider.",
+      "<code>physics.set_mass</code> sets the mass and recomputes the inertia from the collider.",
       "Glue in <code>update</code>: <code>physics.step</code>, then copy <code>physics.body_poses</code> into the world."
     ]
   },
@@ -221,10 +220,9 @@
     "name": "physics",
     "desc": "Rigid body cubes, spheres, cylinders.",
     "notes": [
-      "Each body is a <code>physics.create_static_body</code> / <code>create_dynamic_body</code> call with <code>user</code> set to its node; the dynamic one sets inertia from its collider.",
+      "Each body is a <code>physics.create_body</code> call with <code>user</code> set to its node; <code>mass = 0</code> makes it static, a dynamic body gets its inertia from its collider.",
       "Glue in <code>update</code>: <code>physics.step</code>, then <code>world.set_world_pose</code> for every <code>physics.body_poses</code> entry.",
-      "<code>physics.World.gravity</code> defaults to <code>{0, -9.81, 0}</code>.",
-      "<code>KILL_Y = -50.0</code> — bodies that fall below are killed."
+      "<code>physics.World.gravity</code> defaults to <code>{0, -9.81, 0}</code>."
     ]
   },
   {

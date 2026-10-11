@@ -1,6 +1,5 @@
 package physics
 
-import "core:math/linalg"
 import "core:testing"
 
 @(test)
@@ -12,21 +11,11 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
   SPHERE_RADIUS :: 3.0
   GROUND_HALF :: f32(14.0)
   physics_world: World
-  init(&physics_world, {0, -20, 0}, false) // 2x earth gravity
+  init(&physics_world, {0, -20, 0}, thread_count = 1) // 2x earth gravity
   defer shutdown(&physics_world)
-  create_static_body(
-    &physics_world,
-    {0, -0.5, 0},
-    linalg.QUATERNIONF32_IDENTITY,
-    BoxCollider{half_extents = {GROUND_HALF, 0.5, GROUND_HALF}},
-  )
-  create_static_body(
-    &physics_world,
-    {2.5, SPHERE_RADIUS, 0},
-    linalg.QUATERNIONF32_IDENTITY,
-    SphereCollider{radius = SPHERE_RADIUS},
-  )
-  body_handles: [PIECE_COUNT]DynamicRigidBodyHandle
+  create_body(&physics_world, {0, -0.5, 0}, collider = BoxCollider{half_extents = {GROUND_HALF, 0.5, GROUND_HALF}})
+  create_body(&physics_world, {2.5, SPHERE_RADIUS, 0}, collider = SphereCollider{radius = SPHERE_RADIUS})
+  body_handles: [PIECE_COUNT]BodyHandle
   idx := 0
   for x in 0 ..< NX {
     for y in 0 ..< NY {
@@ -38,47 +27,12 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
           f32(z - NZ / 2) * 3.0,
         }
 
-        switch idx % 3 {
-        case 0:
-          // Cylinder
-          body_handles[idx] = create_dynamic_body(
-            &physics_world,
-            pos,
-            linalg.QUATERNIONF32_IDENTITY,
-            50.0,
-            CylinderCollider{radius = 1.0, height = 2.0},
-          )
-          if body, ok := get_dynamic_body(&physics_world, body_handles[idx]);
-             ok {
-            set_cylinder_inertia(body, 1.0, 2.0)
-          }
-        case 1:
-          // Cube
-          body_handles[idx] = create_dynamic_body(
-            &physics_world,
-            pos,
-            linalg.QUATERNIONF32_IDENTITY,
-            50.0,
-            BoxCollider{half_extents = {1.0, 1.0, 1.0}},
-          )
-          if body, ok := get_dynamic_body(&physics_world, body_handles[idx]);
-             ok {
-            set_box_inertia(body, {1.0, 1.0, 1.0})
-          }
-        case 2:
-          // Sphere
-          body_handles[idx] = create_dynamic_body(
-            &physics_world,
-            pos,
-            linalg.QUATERNIONF32_IDENTITY,
-            50.0,
-            SphereCollider{radius = 1.0},
-          )
-          if body, ok := get_dynamic_body(&physics_world, body_handles[idx]);
-             ok {
-            set_sphere_inertia(body, 1.0)
-          }
+        colliders := [3]Collider {
+          CylinderCollider{radius = 1.0, height = 2.0},
+          BoxCollider{half_extents = {1.0, 1.0, 1.0}},
+          SphereCollider{radius = 1.0},
         }
+        body_handles[idx] = create_body(&physics_world, pos, collider = colliders[idx % 3], mass = 50.0)
         idx += 1
       }
     }
@@ -93,8 +47,8 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
   // edge bodies in the example (ground is 14x14, bodies start at up to ±48).
   on_ground := 0
   for handle, i in body_handles {
-    body, ok := get_dynamic_body(&physics_world, handle)
-    if !ok do continue // already removed by KILL_Y cleanup
+    // Fell off the ground edge and was killed below KILL_Y
+    body := get_body(&physics_world, handle) or_continue
     // Outside ground bounds — no ground underneath, expected to fall
     if body.position.x < -GROUND_HALF ||
        body.position.x > GROUND_HALF ||

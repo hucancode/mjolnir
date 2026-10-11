@@ -5,14 +5,16 @@ import "core:math"
 import "core:math/linalg"
 
 // Per-substep velocity integration: gravity, external force/torque, damping.
-// Forces are held for the whole frame (cleared in step cleanup) so each
-// substep integrates them with the substep dt — the TGS scheme.
+// Forces are held for the whole frame (cleared in step finalize) so each
+// substep integrates them with the substep dt — the TGS scheme. Kinematic
+// bodies keep their velocity.
 // start/end index into world.awake_list (dense, prefiltered)
 integrate_velocities_range :: proc(world: ^World, start, end: int, h: f32) {
   pool := &world.bodies
   list := world.awake_list[:]
   #no_bounds_check for li in start ..< end {
     body := &pool.entries[list[li]].item
+    if body.inv_mass == 0 do continue
     body.velocity += (world.gravity + body.force * body.inv_mass) * h
     body.velocity *= math.pow(1.0 - body.linear_damping, h)
     if body.enable_rotation {
@@ -32,7 +34,7 @@ integrate_positions_range :: proc(world: ^World, start, end: int, h: f32, ccd_ha
   #no_bounds_check for li in start ..< end {
     i := int(list[li])
     body := &pool.entries[i].item
-    if i < len(ccd_handled) && ccd_handled[i] do continue // CCD already advanced this body
+    if ccd_handled[i] do continue // CCD already advanced this body
     // Safety clamps: runaway state breaks CCD sweeps and quaternion integration
     speed_sq := linalg.length2(body.velocity)
     if speed_sq > MAX_LINEAR_SPEED * MAX_LINEAR_SPEED {

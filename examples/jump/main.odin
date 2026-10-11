@@ -12,7 +12,7 @@ import "core:math/linalg"
 import mu "vendor:microui"
 
 cube_handle: world.NodeHandle
-cube_body: physics.DynamicRigidBodyHandle
+cube_body: physics.BodyHandle
 box_collider := physics.BoxCollider{half_extents = {0.5, 0.5, 0.5}}
 time_since_jump: f32
 
@@ -50,12 +50,12 @@ main :: proc() {
   app.camera = render.orbit_controller()
 
   ground := world.spawn(&app.scene, {0, -0.5, 0})
-  physics.create_static_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {40.0, 0.5, 40.0}}, user = world.Handle(ground))
+  physics.create_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {40.0, 0.5, 40.0}}, user = world.Handle(ground))
   ground_visual := world.spawn_child(&app.scene, ground)
   render.attach(&app.renderer, ground_visual.index, render.primitive(&app.renderer, .CUBE, .GRAY))
   world.scale_xyz(&app.scene, ground_visual, 40.0, 0.5, 40.0)
   cube_handle = world.spawn(&app.scene, {0, 3, 0})
-  cube_body = physics.create_dynamic_body(&phys, {0, 3, 0}, mass = f32(mass), collider = box_collider, user = world.Handle(cube_handle))
+  cube_body = physics.create_body(&phys, {0, 3, 0}, mass = f32(mass), collider = box_collider, user = world.Handle(cube_handle))
   cube_visual := world.spawn_child(&app.scene, cube_handle)
   render.attach(&app.renderer, cube_visual.index, render.primitive(&app.renderer, .CUBE, .CYAN))
   s := box_collider.half_extents
@@ -75,7 +75,7 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   time_since_jump += dt
   if mass != last_mass {
-    physics.set_body_mass(&phys, cube_body, f32(mass))
+    physics.set_mass(&phys, cube_body, f32(mass))
     last_mass = mass
   }
   f := [3]f32 {

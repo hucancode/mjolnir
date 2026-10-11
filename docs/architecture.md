@@ -248,22 +248,20 @@ for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.Nod
 Inside `step`:
 
 ```
-sleep timers → warmstart cache → gravity → integrate velocity
-            → CCD pass (clamp dt for fast bodies)
-            → BVH rebuild (only if kill-count above threshold)
+warmstart cache → CCD (park fast bodies before impact) → BVH rebuild if dirty
+→ refit → broadphase → narrow-phase (once per frame) → prepare contacts
 
 substep × NUM_SUBSTEPS:
-  refit → broadphase → narrow-phase → prepare contact
-  → warmstart (first substep) → solver iters → stabilization iters
-  → integrate position + rotation → cached AABB
+  integrate velocity → warmstart → soft-bias solve
+  → integrate position + rotation → relax solve
 
-trigger overlap → defer-kill bodies below KILL_Y
+restitution → sensor overlaps → island sleep
 ```
 
-Key choices: BVH (not grid) broadphase, refit-most-frames /
-rebuild-when-dirty, warmstart from previous frame, Baumgarte bias
-with a separate bias-free stabilization pass, deferred kills to keep
-handle generations stable inside a step.
+Key choices: BVH (not grid) broadphase with moving and static trees,
+collide once and solve in substeps with soft contacts (TGS-soft),
+speculative contacts plus CCD only for fast bodies, island sleeping.
+See [physics](physics.html).
 
 ---
 

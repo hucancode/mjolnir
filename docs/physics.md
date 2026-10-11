@@ -5,125 +5,125 @@ title: Physics
 Layer 2. Rigid-body dynamics, collisions, spatial queries. Physics knows
 nothing about the scene graph: the application owns a `physics.World`,
 steps it in `update`, and copies `body_poses` back into world nodes
-(see [engine](engine.html#wiring-modules)). Every body and trigger carries a `user` handle
-for that link; bodies are destroyed explicitly, not with their node.
+(see [engine](engine.html#wiring-modules)). Every body carries a `user`
+handle for that link; bodies are destroyed explicitly, not with their
+node, except dynamic bodies that fall below `KILL_Y` (see below).
 
 ## Step layout
 
 ```
-update sleep timers
-cache previous contacts (for warmstart)
-apply gravity
-integrate velocities (forces, damping)
-CCD pass (swept tests, clamp dt for tunneling-prone bodies)
-rebuild a BVH if bodies were created (or, dynamic only, kill-count > threshold)
-
-substep loop × NUM_SUBSTEPS:
-  bvh_refit
-  broadphase (BVH traversal → contact candidates)
-  narrow-phase (test_box_box / sphere_cyl / …)
-  prepare_contact (mass matrix, Baumgarte bias)
-  warmstart from previous frame (first substep only)
-  constraint solver × CONSTRAINT_SOLVER_ITERS
-  stabilization × STABILIZATION_ITERS (bias-free)
-  integrate positions + rotations
-  update cached AABB
-
-trigger overlap detection
-mark bodies below KILL_Y dead (deferred removal next rebuild)
+cache this frame's contact impulses (for warmstart)
+CCD: sweep fast dynamic bodies against static geometry, park them before impact
+rebuild a BVH if bodies were created or changed role
+if any body is awake:
+  refit dynamic BVH
+  broadphase (BVH tree-vs-tree) → narrowphase manifolds (speculative margin)
+  prepare contacts (effective masses, friction basis)
+  substep loop × NUM_SUBSTEPS:
+    integrate velocities (gravity, forces, damping)
+    warm start
+    solve with soft bias
+    integrate positions
+    relax (solve without bias)
+  restitution pass
+  clear forces, refresh cached bounds
+destroy dynamic bodies below KILL_Y
+sensor overlaps
+island sleep
 ```
 
 ## Why this shape
 
+- **Collide once, solve in substeps (TGS-soft).** Contacts are built
+  once per frame; each substep recovers the current separation from
+  how far the bodies moved. The penetration bias is a soft spring
+  whose energy the relax pass removes, so stacks rest without jitter.
 - **BVH broadphase, not grid.** Dense and sparse scenes both work
-  without tuning. Rebuilds are amortized: refit each substep, full
-  rebuild only when enough bodies died that the tree is unbalanced.
-- **CCD only when needed.** A swept test fires when a body's
-  per-frame translation exceeds a fraction of its bounding sphere.
-  Bullets and projectiles "just work" without tunneling; slow bodies
-  pay nothing.
-- **Warmstart + Baumgarte stabilization.** Re-use last frame's
-  contact impulses so the solver starts close to convergence, then a
-  bias-free stabilization pass cancels positional drift without
-  injecting energy.
-- **Deferred kills.** A body below `KILL_Y` is marked dead and only
-  removed at the next BVH rebuild — keeps handle generations stable
-  inside a single step.
+  without tuning. Moving bodies live in a refit-every-frame BVH;
+  static bodies in a separate one that is only rebuilt when it changes.
+- **Speculative contacts plus CCD only when needed.** Contacts are
+  created slightly before touch, which stops moderate-speed tunneling.
+  A swept test fires only when a body moves more than half its
+  smallest extent in one frame.
+- **Island sleep.** Touching dynamic bodies sleep together once every
+  member has been still for `SLEEP_TIME_THRESHOLD`.
 
 ## World
 
-`init(&w, gravity, enable_parallel)` and `shutdown(&w)` own the world;
-`teardown(&w)` destroys every body and trigger but keeps the world
-ready for reuse. `step(&w, dt)` advances one frame in `NUM_SUBSTEPS`
-substeps. `w.gravity` is read every step; setting `w.paused = true`
-makes `step` a no-op. After each step
-`w.last_perf` holds a `PerfFrame` of timings and counters, and
-`w.dynamic_contacts` / `w.static_contacts` hold the frame's contact
-manifolds (read-only, for debug drawing).
+`init(&w, gravity, thread_count)` and `shutdown(&w)` own the world.
+`thread_count = 0` starts one worker per CPU core; `1` runs everything
+on the calling thread. `teardown(&w)` destroys every body but keeps
+the world ready for reuse. `step(&w, dt)` advances one frame in
+`NUM_SUBSTEPS` substeps; to pause, skip the call. `w.gravity` is read
+every step. After each step `w.last_perf` holds a `PerfFrame` of
+timings and counters, `w.contacts` the frame's contact manifolds and
+`w.sensor_overlaps` the sensor overlaps (read-only).
 
-Bodies are addressed by `DynamicRigidBodyHandle`,
-`StaticRigidBodyHandle` and `TriggerHandle`. `get_dynamic_body`,
-`get_static_body` and `get_trigger` (overloaded as `get`) return a
-pointer to the `DynamicRigidBody`, `StaticRigidBody` or `TriggerBody`
-(`ok = false` for a stale handle). The solver, CCD, narrow phase and
-parallel stepping are package-private.
+A dynamic body that falls below `KILL_Y` (default `-50`, override with
+`-define:PHYSICS_KILL_Y=...`) is destroyed during `step` and listed in
+`w.killed` as a `KilledBody{body, user}` for that frame only. The
+handle is already stale; use `user` to drop the scene node:
+
+```odin
+physics.step(&phys, dt)
+for k in phys.killed do world.despawn(&app.scene, world.NodeHandle(k.user))
+```
+
+## Bodies
+
+There is one body kind, addressed by `BodyHandle`. Mass decides the
+role:
+
+| Body | How |
+|---|---|
+| dynamic | `mass > 0`. Fully simulated |
+| static | `mass = 0` (the default). Never moves |
+| kinematic | a `mass = 0` body moved with `set_pose` / `set_velocity`. Moves by its velocity, pushes dynamic bodies, is never pushed back |
+| sensor | `is_sensor = true`. Reports overlaps, never simulated or hit by queries |
+
+```odin
+h := physics.create_body(&w, pos, rot, collider, mass = 10, user = node)
+s := physics.create_body(&w, pos, rot, collider, user = node) // static
+t := physics.create_body(&w, pos, rot, collider, is_sensor = true)
+physics.destroy_body(&w, h)
+```
+
+`get_body(&w, h)` returns a pointer to the `Body` (`ok = false` for a
+stale handle). The solver, CCD, narrowphase and parallel stepping are
+package-private.
 
 ## Colliders
 
-`Collider` is a union of `SphereCollider`, `BoxCollider`,
-`CylinderCollider`, `FanCollider` (a cylinder wedge — useful for
-cone-of-influence triggers). `create_dynamic_body` sets the body's
-inertia tensor from its collider and mass; `set_body_mass` recomputes
-it from the collider at the new mass.
-
-## Creating and destroying
-
-```odin
-h := physics.create_dynamic_body(&w, pos, rot, mass, collider, user = node)
-s := physics.create_static_body(&w, pos, rot, collider, user = node)
-t := physics.create_trigger(&w, pos, rot, collider, user = node)
-physics.destroy_body(&w, h) // or destroy_trigger
-```
+`Collider` is a union of `SphereCollider`, `BoxCollider` and
+`CylinderCollider` (axis = local Y). A dynamic body's inertia tensor
+comes from its collider and mass.
 
 ## Moving and reshaping bodies
 
-Plain fields are written through the body pointer:
-`restitution`, `friction` (dynamic and static), `linear_damping`,
-`angular_damping` (dynamic). Anything that has to keep derived state
-consistent goes through a setter on a handle; an invalid handle is
-ignored.
+Plain fields are written through the body pointer: `restitution`,
+`friction`, `linear_damping`, `angular_damping`. Anything that has to
+keep derived state consistent goes through a setter; an invalid handle
+is ignored.
 
-| Proc | Applies to |
+| Proc | Effect |
 |---|---|
-| `set_body_pose(&w, h, position, rotation)` | dynamic, static, trigger |
-| `set_body_collider(&w, h, collider)` | dynamic, static, trigger |
-| `set_body_mass(&w, h, mass)` | dynamic |
-| `set_velocity(&w, h, v)` / `set_angular_velocity(&w, h, w)` | dynamic |
-| `apply_force(&w, h, f)` / `apply_impulse(&w, h, j)` | dynamic |
+| `set_pose(&w, h, position, rotation)` | teleport and wake; a static body becomes kinematic |
+| `set_collider(&w, h, collider)` | reshape, reset inertia, wake |
+| `set_mass(&w, h, mass)` | `> 0` makes the body dynamic, `0` freezes it as kinematic |
+| `set_velocity(&w, h, v)` / `set_angular_velocity(&w, h, w)` | wake; a static body becomes kinematic |
+| `apply_force(&w, h, f)` / `apply_impulse(&w, h, j)` | dynamic bodies only; wake |
 
-Pose and collider setters keep the cached bounds and the BVH
-consistent: static bodies refit the static BVH at once, dynamic bodies
-wake up and are refit by the next `step`, and a new dynamic collider
-also resets the inertia. Velocity setters, forces and impulses wake the
-body. Forces accumulate until the next `step` and are cleared after it.
-
+Forces accumulate until the next `step` and are cleared after it.
 Reads go through the body pointer (`body.position`, `body.rotation`,
-`body.velocity`, `body.angular_velocity`). `body_poses(&w)`
-lists the poses of awake dynamic bodies with a `user` link, for copying
-into the scene graph after `step`.
+`body.velocity`, `body.angular_velocity`). `body_poses(&w)` lists the
+poses of awake moving bodies with a `user` link, for copying into the
+scene graph after `step`.
 
-## Raycasts
+## Queries
 
-`raycast`, `raycast_single` and `raycast_trigger` test the BVH
-candidates exactly: boxes, cylinders and fans are tested in the
-collider's local frame and return the true surface normal. A ray that
-starts inside a shape hits at `t = 0`.
-
-## Triggers
-
-Triggers don't generate contact responses. They overlap-test only.
-`trigger_overlaps` and `trigger_static_overlaps` are
-populated each step for continuous-overlap events; on-demand
-snapshots are available via `query_trigger`, `query_trigger_static`
-and `query_triggers_in_sphere`. `query_sphere` and `query_box` return
-the dynamic bodies overlapping a volume.
+`raycast(&w, ray, max_dist, first_hit)` returns the closest hit (or
+the first found with `first_hit = true`) as a `RayHit` with the body,
+distance, point and surface normal. A ray that starts inside a shape
+hits at `t = 0`. `overlap(&w, collider, position, rotation, &results)`
+lists the bodies overlapping any collider shape, e.g. a
+`SphereCollider` for an area-of-effect. Neither reports sensors.

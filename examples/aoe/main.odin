@@ -11,7 +11,7 @@ import "core:log"
 import "core:math"
 
 cube_mesh_handles: [dynamic]world.NodeHandle
-cube_body_to_mesh: map[physics.TriggerHandle]world.NodeHandle
+cube_body_to_mesh: map[physics.BodyHandle]world.NodeHandle
 effector_sphere: world.NodeHandle
 effector_position: [3]f32
 orbit_angle: f32 = 0.0
@@ -46,7 +46,7 @@ main :: proc() {
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
   app.camera = render.orbit_controller()
 
-  cube_body_to_mesh = make(map[physics.TriggerHandle]world.NodeHandle)
+  cube_body_to_mesh = make(map[physics.BodyHandle]world.NodeHandle)
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
   cube_mat := app.renderer.builtin_materials[.CYAN]
@@ -60,7 +60,7 @@ main :: proc() {
     pos := [3]f32{world_x, 0.5, world_z}
     half := 0.5 * cube_scale
     parent := world.spawn(&app.scene, pos) or_continue
-    body_handle := physics.create_trigger(
+    body_handle := physics.create_body(
       &phys,
       pos,
       collider = physics.BoxCollider{half_extents = {half, half, half}},
@@ -94,21 +94,18 @@ update :: proc(app: ^App, dt: f32) {
     ray_origin, ray_dir, ok := render.cursor_ray(&app.renderer, app.input.cursor)
     if !ok do break mouse_click
     log.infof("Ray: origin=%v, direction=%v", ray_origin, ray_dir)
-    hit := physics.raycast_trigger(&phys, geometry.Ray{origin = ray_origin, direction = ray_dir})
+    hit := physics.raycast(&phys, geometry.Ray{origin = ray_origin, direction = ray_dir})
     clicked_cube = {}
     if !hit.hit do break mouse_click
-    #partial switch bh in hit.body_handle {
-    case physics.TriggerHandle:
-      if mh, ok := cube_body_to_mesh[bh]; ok do clicked_cube = mh
-    }
+    if mh, ok := cube_body_to_mesh[hit.body]; ok do clicked_cube = mh
   }
   orbit_angle += dt * 0.5
   effector_position = {math.cos(orbit_angle) * orbit_radius, 1.0, math.sin(orbit_angle) * orbit_radius}
   world.translate(&app.scene, effector_sphere, effector_position)
   for h in cube_mesh_handles do world.scale(&app.scene, h, cube_scale)
-  affected: [dynamic]physics.TriggerHandle
+  affected: [dynamic]physics.BodyHandle
   defer delete(affected)
-  physics.query_triggers_in_sphere(&phys, effector_position, effect_radius, &affected)
+  physics.overlap(&phys, physics.SphereCollider{radius = effect_radius}, effector_position, 1, &affected)
   for bh in affected do if mh, ok := cube_body_to_mesh[bh]; ok do world.scale(&app.scene, mh, 0.1)
   world.scale(&app.scene, clicked_cube, cube_scale * 3.0)
   physics.step(&phys, dt)

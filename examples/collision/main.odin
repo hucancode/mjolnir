@@ -41,10 +41,7 @@ Body :: struct {
   mass:          mu.Real,
   node:          world.NodeHandle, // physics-driven parent
   visual:        world.NodeHandle, // mesh child; mesh swapped in place on shape change
-  // physics handles (recreated on reset)
-  is_static:     bool,
-  static_handle: physics.StaticRigidBodyHandle,
-  dyn_handle:    physics.DynamicRigidBodyHandle,
+  handle:        physics.BodyHandle, // recreated on reset
   // change tracking
   built_shape:   Shape,
   built_size:    [3]f32,
@@ -72,6 +69,7 @@ scenery: [5]SceneryBox // ground + 4 walls (static, not editable)
 selected: int = -1
 circle_angle: f32
 reset_requested: bool
+paused: bool
 phys: physics.World
 
 default_bodies :: proc() -> [3]Body {
@@ -128,7 +126,7 @@ spawn_scene :: proc(app: ^App) {
   scenery[4] = {center = {0, wy, -GROUND_HALF.z}, half = {GROUND_HALF.x, WALL_HEIGHT, WALL_THICK}}
   for &s in scenery {
     s.node, _ = world.spawn(&app.scene, s.center)
-    physics.create_static_body(&phys, s.center, collider = physics.BoxCollider{half_extents = s.half}, user = world.Handle(s.node))
+    physics.create_body(&phys, s.center, collider = physics.BoxCollider{half_extents = s.half}, user = world.Handle(s.node))
     visual := world.spawn_child(&app.scene, s.node)
     render.attach(&app.renderer, visual.index, render.primitive(&app.renderer, .CUBE, .GRAY))
     world.scale_xyz(&app.scene, visual, s.half.x, s.half.y, s.half.z)
@@ -199,25 +197,17 @@ obj_rotation :: proc(b: ^Body) -> quaternion128 {
 }
 
 // Create the physics body for b's current descriptor and wire the node to it.
+// The static body has no user link: the example poses its node directly.
 create_body_physics :: proc(app: ^App, b: ^Body) {
-  col := obj_collider(b)
-  q := obj_rotation(b)
   if b.kind == .Static {
-    b.is_static = true
-    b.static_handle = physics.create_static_body(&phys, b.position, q, col)
+    b.handle = physics.create_body(&phys, b.position, obj_rotation(b), obj_collider(b))
   } else {
-    b.is_static = false
-    b.dyn_handle = physics.create_dynamic_body(&phys, b.position, q, f32(b.mass), col, user = world.Handle(b.node))
+    b.handle = physics.create_body(&phys, b.position, obj_rotation(b), obj_collider(b), f32(b.mass), user = world.Handle(b.node))
   }
 }
 
 apply_shape :: proc(app: ^App, b: ^Body) {
-  col := obj_collider(b)
-  if b.is_static {
-    physics.set_body_collider(&phys, b.static_handle, col)
-  } else {
-    physics.set_body_collider(&phys, b.dyn_handle, col)
-  }
+  physics.set_collider(&phys, b.handle, obj_collider(b))
   render.attach(
     &app.renderer,
     b.visual.index,
@@ -239,10 +229,10 @@ drive_circle :: proc(b: ^Body) {
   target := center + [3]f32{math.cos(a), 0, math.sin(a)} * CIRCLE_RADIUS
   tangent :=
     [3]f32{-math.sin(a), 0, math.cos(a)} * (CIRCLE_RADIUS * CIRCLE_OMEGA)
-  body, ok := physics.get_dynamic_body(&phys, b.dyn_handle)
+  body, ok := physics.get_body(&phys, b.handle)
   if !ok do return
   desired := tangent + (target - body.position) * 3.0
-  physics.apply_impulse(&phys, b.dyn_handle, (desired - body.velocity) * f32(b.mass))
+  physics.apply_impulse(&phys, b.handle, (desired - body.velocity) * f32(b.mass))
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -261,7 +251,7 @@ update :: proc(app: ^App, dt: f32) {
     render.update(&app.renderer, dt)
     return
   }
-  if !phys.paused do circle_angle += dt * CIRCLE_OMEGA
+  if !paused do circle_angle += dt * CIRCLE_OMEGA
 
   for i in 0 ..< len(bodies) {
     b := &bodies[i]
@@ -273,9 +263,9 @@ update :: proc(app: ^App, dt: f32) {
   for i in 0 ..< len(bodies) {
     b := &bodies[i]
     q := obj_rotation(b)
-    if b.is_static {
+    if b.kind == .Static {
       if !b.applied_valid || b.position != b.applied_pos || q != b.applied_rot {
-        physics.set_body_pose(&phys, b.static_handle, b.position, q)
+        physics.set_pose(&phys, b.handle, b.position, q)
         world.translate(&app.scene, b.node, b.position)
         world.rotate(&app.scene, b.node, q)
         b.applied_pos = b.position
@@ -284,16 +274,16 @@ update :: proc(app: ^App, dt: f32) {
       }
       continue
     }
-    if b.mass > 0 do physics.set_body_mass(&phys, b.dyn_handle, f32(b.mass))
+    if b.mass > 0 do physics.set_mass(&phys, b.handle, f32(b.mass))
     if b.kind == .DynamicCircle {
-      if !phys.paused do drive_circle(b)
+      if !paused do drive_circle(b)
     } else if !b.applied_valid ||
        b.position != b.applied_pos ||
        q != b.applied_rot {
       // DynamicStill: teleport only when the user edits the transform.
-      physics.set_body_pose(&phys, b.dyn_handle, b.position, q)
-      physics.set_velocity(&phys, b.dyn_handle, {})
-      physics.set_angular_velocity(&phys, b.dyn_handle, {})
+      physics.set_pose(&phys, b.handle, b.position, q)
+      physics.set_velocity(&phys, b.handle, {})
+      physics.set_angular_velocity(&phys, b.handle, {})
       b.applied_pos = b.position
       b.applied_rot = q
       b.applied_valid = true
@@ -303,7 +293,7 @@ update :: proc(app: ^App, dt: f32) {
   handle_picking(app)
   draw_contacts(app, dt)
   draw_selection(app)
-  physics.step(&phys, dt)
+  if !paused do physics.step(&phys, dt)
   for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
@@ -325,12 +315,7 @@ handle_picking :: proc(app: ^App) {
     return
   }
   selected = -1
-  #partial switch h in hit.body_handle {
-  case physics.DynamicRigidBodyHandle:
-    for &b, i in bodies do if !b.is_static && b.dyn_handle == h do selected = i
-  case physics.StaticRigidBodyHandle:
-    for &b, i in bodies do if b.is_static && b.static_handle == h do selected = i
-  }
+  for &b, i in bodies do if b.handle == hit.body do selected = i
 }
 
 draw_contacts :: proc(app: ^App, dt: f32) {
@@ -362,16 +347,10 @@ draw_contacts :: proc(app: ^App, dt: f32) {
       render.debug_arrow(&app.renderer, p, p + n * flen, {1, 0.25, 0.2, 1}, life, true)
     }
   }
-  for c in phys.static_contacts {
+  for c in phys.contacts {
     for i in 0 ..< c.count {
       p := c.points[i]
-      draw_one(app, p.point, c.normal, p.penetration, p.normal_impulse, dt, life)
-    }
-  }
-  for c in phys.dynamic_contacts {
-    for i in 0 ..< c.count {
-      p := c.points[i]
-      draw_one(app, p.point, c.normal, p.penetration, p.normal_impulse, dt, life)
+      draw_one(app, p.point, c.normal, -p.base_separation, p.normal_impulse, dt, life)
     }
   }
 }
@@ -383,10 +362,10 @@ body_transform :: proc(
   pos: [3]f32,
   rot: quaternion128,
 ) {
-  if b.is_static {
+  if b.kind == .Static {
     return b.position, obj_rotation(b)
   }
-  if body, ok := physics.get_dynamic_body(&phys, b.dyn_handle); ok {
+  if body, ok := physics.get_body(&phys, b.handle); ok {
     return body.position, body.rotation
   }
   return b.position, obj_rotation(b)
@@ -451,7 +430,7 @@ panel :: proc(app: ^App) {
       mu.slider(ctx, &b.euler_deg.y, -180, 180)
       mu.slider(ctx, &b.euler_deg.z, -180, 180)
 
-      if !b.is_static {
+      if b.kind != .Static {
         mu.label(ctx, "Mass")
         mu.slider(ctx, &b.mass, 0.5, 50)
       }
@@ -461,44 +440,19 @@ panel :: proc(app: ^App) {
     mu.layout_row(ctx, {150, -1}, 0)
     // Reset in the next update, not mid-way through building this frame's UI.
     if .SUBMIT in mu.button(ctx, "Reset Scene") do reset_requested = true
-    if .SUBMIT in mu.button(ctx, phys.paused ? "Resume" : "Pause") {
-      phys.paused = !phys.paused
-    }
+    if .SUBMIT in mu.button(ctx, paused ? "Resume" : "Pause") do paused = !paused
 
-    perf := phys.last_perf
-    mu.label(
-      ctx,
-      fmt.tprintf(
-        "Contacts: %d static, %d dynamic",
-        perf.static_contact_count,
-        perf.dynamic_contact_count,
-      ),
-    )
-
+    mu.label(ctx, fmt.tprintf("Contacts: %d", phys.last_perf.contact_count))
 
     mu.layout_row(ctx, {-1}, 0)
-    shown := 0
-    for c in phys.static_contacts {
-      if shown >= 6 do break
-      shown += 1
+    for c in phys.contacts[:min(6, len(phys.contacts))] {
       p := c.points[0]
       mu.label(
         ctx,
         fmt.tprintf(
-          "Static Contact x%d (%.1f,%.1f,%.1f) pen %.2f J %.1f",
-          c.count, p.point.x, p.point.y, p.point.z, p.penetration, p.normal_impulse,
-        ),
-      )
-    }
-    for c in phys.dynamic_contacts {
-      if shown >= 6 do break
-      shown += 1
-      p := c.points[0]
-      mu.label(
-        ctx,
-        fmt.tprintf(
-          "Dynamic Contact x%d (%.1f,%.1f,%.1f) pen %.2f J %.1f",
-          c.count, p.point.x, p.point.y, p.point.z, p.penetration, p.normal_impulse,
+          "%s Contact x%d (%.1f,%.1f,%.1f) pen %.2f J %.1f",
+          c.b_dynamic ? "Dynamic" : "Static",
+          c.count, p.point.x, p.point.y, p.point.z, -p.base_separation, p.normal_impulse,
         ),
       )
     }

@@ -197,9 +197,10 @@ land in the right place.
 
 The `physics.World` is a user value: `physics.init` it in `main`,
 `physics.shutdown` it on exit. Bodies are user-owned too. Despawning
-a node does not destroy its body or trigger; call
-`physics.destroy_body` / `physics.destroy_trigger` alongside
-`world.despawn`, or `physics.teardown` to clear everything.
+a node does not destroy its body; call `physics.destroy_body`
+alongside `world.despawn`, or `physics.teardown` to clear everything.
+The reverse happens for one case: a dynamic body that falls below
+`physics.KILL_Y` is destroyed by `step` and reported in `phys.killed`.
 
 ### World → camera
 
