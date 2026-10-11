@@ -12,28 +12,22 @@ import "core:math/linalg"
 import "core:math/rand"
 import b2 "vendor:box2d"
 
-// Same scene as examples/physics, simulated by Box2D in the XY plane: Box2D x/y
-// are world X/Y. Each Z row of pieces is its own slice (collision layer) of
-// one Box2D world, so rows never touch each other. An upright cylinder's XY
-// profile is a rectangle, so it simulates as a box.
-NX :: #config(NX, 4)
-NY :: #config(NY, 3)
-NZ :: #config(NZ, 5)
-PIECE_COUNT :: NX * NY * NZ
+// A wall of pieces simulated by Box2D in the XY plane: Box2D x/y are world X/Y
+// and every piece sits at Z = 0. An upright cylinder's XY profile is a
+// rectangle, so it simulates as a box.
+NX :: #config(NX, 8)
+NY :: #config(NY, 6)
+PIECE_COUNT :: NX * NY
 PIECE_MASS :: 50.0
 SPHERE_RADIUS :: 3.0
 SPHERE_X :: 2.5
 PLANE_WIDTH :: max(10.0, NX * 0.8)
-PLANE_HEIGHT :: max(10.0, NZ * 0.8)
+PLANE_HEIGHT :: 5.0
 KILL_Y :: -50.0
-// Category of shapes every slice collides with
-SHARED_BIT :: u64(1) << 63
-#assert(NZ < 63)
 
 Piece :: struct {
   body: b2.BodyId,
   node: world.NodeHandle,
-  z:    f32, // slice position on the world Z axis
 }
 
 App :: struct {
@@ -76,13 +70,11 @@ spawn_mesh :: proc(app: ^App, m: render.MeshHandle, mat: render.MaterialHandle, 
   return n
 }
 
-shape_def :: proc(density: f32, category, mask: u64) -> b2.ShapeDef {
+shape_def :: proc(density: f32) -> b2.ShapeDef {
   def := b2.DefaultShapeDef()
   def.density = density
   def.material.friction = 0.8
   def.material.restitution = 0.2
-  def.filter.categoryBits = category
-  def.filter.maskBits = mask
   return def
 }
 
@@ -111,7 +103,7 @@ setup :: proc(app: ^App) {
   ground := world.spawn(&app.scene, {0, -0.5, 0})
   ground_body := create_body(app, .staticBody, {0, -0.5})
   ground_box := b2.MakeBox(PLANE_WIDTH, 0.5)
-  _ = b2.CreatePolygonShape(ground_body, shape_def(0, SHARED_BIT, ~u64(0)), &ground_box)
+  _ = b2.CreatePolygonShape(ground_body, shape_def(0), &ground_box)
   ground_visual := spawn_mesh(app, ground_mesh, ground_mat, ground)
   world.scale_xyz(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   ball := world.spawn(&app.scene, {SPHERE_X, SPHERE_RADIUS, 0})
@@ -120,36 +112,29 @@ setup :: proc(app: ^App) {
 
   // Densities are per area and give every piece PIECE_MASS
   box := b2.MakeBox(1, 1)
-  for z in 0 ..< NZ {
-    row := u64(1) << u64(z)
-    slice_z := f32(z - NZ/2) * 3.0
-    // The ball as seen by this slice: the sphere's cross-section circle
-    if abs(slice_z) < SPHERE_RADIUS {
-      ball_body := create_body(app, .staticBody, {SPHERE_X, SPHERE_RADIUS})
-      _ = b2.CreateCircleShape(ball_body, shape_def(0, SHARED_BIT, row), &b2.Circle{radius = math.sqrt(SPHERE_RADIUS * SPHERE_RADIUS - slice_z * slice_z)})
+  ball_body := create_body(app, .staticBody, {SPHERE_X, SPHERE_RADIUS})
+  _ = b2.CreateCircleShape(ball_body, shape_def(0), &b2.Circle{radius = SPHERE_RADIUS})
+  for x in 0 ..< NX do for y in 0 ..< NY {
+    pos := [3]f32{f32(x - NX/2) * 3.0, f32(y) * 3.0 + 10.0, 0}
+    i := x * NY + y
+    body := create_body(app, .dynamicBody, pos.xy)
+    // Unit-sized shapes match the unit builtin meshes, so visuals need no scale.
+    piece_mesh, piece_mat := rand_cylinder_mesh, rand_mat
+    switch i % 3 {
+    case 0:
+      _ = b2.CreatePolygonShape(body, shape_def(PIECE_MASS / 4.0), &box)
+    case 1:
+      _ = b2.CreatePolygonShape(body, shape_def(PIECE_MASS / 4.0), &box)
+      piece_mesh, piece_mat = cube_mesh, cube_mat
+    case 2:
+      _ = b2.CreateCircleShape(body, shape_def(PIECE_MASS / math.PI), &b2.Circle{radius = 1.0})
+      piece_mesh = rand_sphere_mesh
     }
-    for x in 0 ..< NX do for y in 0 ..< NY {
-      pos := [3]f32{f32(x - NX/2) * 3.0, f32(y) * 3.0 + 10.0, slice_z}
-      i := (x * NY + y) * NZ + z
-      body := create_body(app, .dynamicBody, pos.xy)
-      // Unit-sized shapes match the unit builtin meshes, so visuals need no scale.
-      piece_mesh, piece_mat := rand_cylinder_mesh, rand_mat
-      switch i % 3 {
-      case 0:
-        _ = b2.CreatePolygonShape(body, shape_def(PIECE_MASS / 4.0, row, row | SHARED_BIT), &box)
-      case 1:
-        _ = b2.CreatePolygonShape(body, shape_def(PIECE_MASS / 4.0, row, row | SHARED_BIT), &box)
-        piece_mesh, piece_mat = cube_mesh, cube_mat
-      case 2:
-        _ = b2.CreateCircleShape(body, shape_def(PIECE_MASS / math.PI, row, row | SHARED_BIT), &b2.Circle{radius = 1.0})
-        piece_mesh = rand_sphere_mesh
-      }
-      node := world.spawn(&app.scene, pos)
-      spawn_mesh(app, piece_mesh, piece_mat, node)
-      append(&app.pieces, Piece{body, node, slice_z})
-    }
+    node := world.spawn(&app.scene, pos)
+    spawn_mesh(app, piece_mesh, piece_mat, node)
+    append(&app.pieces, Piece{body, node})
   }
-  log.infof("Created %d Box2D bodies in %d slices", PIECE_COUNT, NZ)
+  log.infof("Created %d Box2D bodies", PIECE_COUNT)
   render.main_camera_look_at(&app.renderer, {30, 25, 30}, {0, 5, 0})
   light := world.spawn(&app.scene, {0, 20, 0})
   render.attach(&app.renderer, light.index, render.spot_light_attachment({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25))
@@ -175,7 +160,7 @@ update :: proc(app: ^App, dt: f32) {
       continue
     }
     angle := b2.Rot_GetAngle(b2.Body_GetRotation(p.body))
-    world.set_world_pose(&app.scene, p.node, {pos.x, pos.y, p.z}, linalg.quaternion_angle_axis_f32(angle, linalg.VECTOR3F32_Z_AXIS))
+    world.set_world_pose(&app.scene, p.node, {pos.x, pos.y, 0}, linalg.quaternion_angle_axis_f32(angle, linalg.VECTOR3F32_Z_AXIS))
   }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
