@@ -223,21 +223,27 @@ only fragments actually reached by that light get shaded.
 
 ## Shadows
 
-- **2D shadow maps** for directional + spot lights. One compute pass
-  per light clips draws against the light frustum; one depth-only
-  graphics pass writes a 512² D32_SFLOAT map.
-- **Cubemap shadow maps** for point lights. Each of the six faces is
-  its own 90° view: the compute pass clips draws against the face
-  frustum and a depth-only pass writes that face.
+Every shadow map renders one or more views: a 2D map (directional and
+spot lights) one, a cube map (point lights) one per face, each a 90°
+view. Each frame one compute dispatch tests every node against every
+view and appends the visible casters to that view's draw list; then
+every view draws its list into a 512² D32_SFLOAT target with no
+barriers between views. Cube faces keep the viewport unflipped to match
+cube sampling, so they wind clockwise.
 
 Lighting samples both kinds through a depth-compare sampler, which
 filters the shadow test over 2×2 texels.
 
-There are `MAX_SHADOW_MAPS` fixed shadow slots. A shadow caster keeps
-its slot while it casts; new casters, in slot order, take a free slot
-of their kind first. A slot's draw buffers are created on first use
-and kept until shutdown; its textures switch between cube and 2D when
-it goes to a light of the other kind.
+There are `MAX_SHADOW_MAPS` shadow maps. Every light has a bounding
+sphere (radius = range; unbounded for directional lights). Each frame
+the shadow casters whose sphere touches some camera's frustum are
+ranked by `intensity × r² / (d² − r²)`, an estimate of the screen area
+the sphere covers. The top `SHADOW_RANKED_CASTERS` get a map; the
+remaining maps stay with casters that ranked within the last
+`SHADOW_GRACE_FRAMES` frames. Other casters light unshadowed. A
+selected caster keeps its map; the others take a free map of their kind
+first, and a map's textures switch between cube and 2D when it goes to
+a light of the other kind.
 
 ## Cameras
 

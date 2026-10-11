@@ -132,7 +132,7 @@ record_frame :: proc(
   cmd := self.internal.command_buffers[frame_index]
   gpu.begin_record(cmd) or_return
   gpu.record_uploads(&self.gctx, cmd)
-  for &fl in self.internal.frame_lights do shadow_record(self, frame_index, &fl)
+  shadow_record(self, frame_index)
 
   it := cont.iterator(&self.cameras)
   for cam, handle in cont.next(&it, CameraHandle) {

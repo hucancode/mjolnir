@@ -32,10 +32,14 @@ struct DrawCommand {
     uint first_instance;
 };
 
+struct ShadowView {
+    vec4 planes[6]; // normalized, pointing inward
+};
+
 layout(push_constant) uniform PushConstants {
-    vec4 frustum_planes[6];  // 96 bytes
     uint node_count;
-    uint max_draws;
+    uint view_count;
+    uint max_draws; // per view
     uint include_flags;
     uint exclude_flags;
 } params;
@@ -48,23 +52,25 @@ layout(set = 0, binding = 1) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
-layout(set = 0, binding = 2) buffer DrawCountBuffer {
-    uint draw_count;
+layout(set = 0, binding = 2) readonly buffer ViewBuffer {
+    ShadowView views[];
 };
 
-layout(set = 0, binding = 3) buffer DrawCommandBuffer {
+// One count per view.
+layout(set = 0, binding = 3) buffer DrawCountBuffer {
+    uint draw_counts[];
+};
+
+// View v's list starts at v * max_draws.
+layout(set = 0, binding = 4) buffer DrawCommandBuffer {
     DrawCommand commands[];
 };
 
-bool frustum_cull(vec3 center, vec3 extent) {
+bool in_view(uint v, vec3 center, vec3 extent) {
     for (int i = 0; i < 6; ++i) {
-        vec4 plane_raw = params.frustum_planes[i];
-        float denom = length(plane_raw.xyz);
-        if (denom <= 1e-6) continue;
-
-        vec3 normal = plane_raw.xyz / denom;
-        float distance = dot(normal, center) + plane_raw.w / denom;
-        float radius = dot(abs(normal), extent);
+        vec4 plane = views[v].planes[i];
+        float distance = dot(plane.xyz, center) + plane.w;
+        float radius = dot(abs(plane.xyz), extent);
         if (distance + radius < 0.0) {
             return false;
         }
@@ -72,6 +78,8 @@ bool frustum_cull(vec3 center, vec3 extent) {
     return true;
 }
 
+// One thread per node: test it against every view and append it to the
+// list of each view it touches.
 void main() {
     uint node_id = gl_GlobalInvocationID.x;
     if (node_id >= params.node_count) return;
@@ -89,7 +97,7 @@ void main() {
     }
 
     MeshData mesh = meshes[node.mesh_id];
-    mat4 world = nodes[node_id].world_matrix;
+    mat4 world = node.world_matrix;
 
     vec3 local_min = mesh.aabb_min;
     vec3 local_max = mesh.aabb_max;
@@ -100,12 +108,7 @@ void main() {
     mat3 world3 = mat3(world);
     mat3 abs_world3 = mat3(abs(world3[0]), abs(world3[1]), abs(world3[2]));
     vec3 world_extent = abs_world3 * local_extent;
-
-    bool visible = true;
-    if ((node.flags & NODE_FLAG_CULLING_ENABLED) != 0u) {
-        visible = frustum_cull(world_center, world_extent);
-    }
-    if (!visible) return;
+    bool culling = (node.flags & NODE_FLAG_CULLING_ENABLED) != 0u;
 
     DrawCommand cmd;
     cmd.index_count = mesh.index_count;
@@ -114,8 +117,11 @@ void main() {
     cmd.vertex_offset = mesh.vertex_offset;
     cmd.first_instance = node_id;
 
-    uint draw_index = atomicAdd(draw_count, 1);
-    if (draw_index < params.max_draws) {
-        commands[draw_index] = cmd;
+    for (uint v = 0u; v < params.view_count; ++v) {
+        if (culling && !in_view(v, world_center, world_extent)) continue;
+        uint draw_index = atomicAdd(draw_counts[v], 1u);
+        if (draw_index < params.max_draws) {
+            commands[v * params.max_draws + draw_index] = cmd;
+        }
     }
 }

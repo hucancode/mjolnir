@@ -13,6 +13,15 @@ MAX_MESHES :: 65536
 MAX_MATERIALS :: 4096
 MAX_SHADOW_MAPS :: 16
 SHADOW_MAP_SIZE :: 512
+// Shadow casters ranked by screen coverage get a map; the rest of the maps go
+// to casters that ranked within the last SHADOW_GRACE_FRAMES frames.
+SHADOW_RANKED_CASTERS :: 12
+SHADOW_GRACE_FRAMES :: 30
+#assert(SHADOW_RANKED_CASTERS <= MAX_SHADOW_MAPS)
+// A cube map renders six views, any other map one.
+MAX_SHADOW_VIEWS :: MAX_SHADOW_MAPS * 6
+// Draw list capacity of one shadow view.
+SHADOW_VIEW_MAX_DRAWS :: 4096
 // Frames a freed CPU resource slot stays reserved before reuse, so in-flight
 // frames never see a recycled index.
 @(private)

@@ -14,10 +14,26 @@ SHADOW_DEPTH_VERT :: #load("shader/shadow/vert.spv")
 SHADOW_INCLUDE :: NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
 SHADOW_EXCLUDE :: NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_SPRITE}
 
+// One depth render into a shadow map: a spot or directional light renders
+// one view, a point light one per cube face. Cube faces are mirror images of
+// an ordinary view, so they keep the viewport unflipped to match cube
+// sampling and wind clockwise.
+ShadowView :: struct {
+  view_projection: matrix[4, 4]f32,
+  target:          vk.ImageView,
+  flip_y:          bool,
+  front_face:      vk.FrontFace,
+}
+
+// A view as the cull shader reads it: normalized frustum planes.
+ShadowViewGPU :: struct {
+  planes: [6][4]f32,
+}
+
 ShadowCullPushConstants :: struct {
-  planes:        [6][4]f32,
   node_count:    u32,
-  max_draws:     u32,
+  view_count:    u32,
+  max_draws:     u32, // per view
   include_flags: u32,
   exclude_flags: u32,
 }
@@ -29,12 +45,18 @@ ShadowDepthPushConstants :: struct {
 // Depth passes bind every mesh set except the camera.
 SHADOW_SETS :: MESH_SETS - {.CAMERA}
 
+// One cull dispatch per frame tests every node against every view and appends
+// the visible casters to that view's draw list: view v owns
+// draws.count[v] and draws.commands[v*SHADOW_VIEW_MAX_DRAWS:].
 ShadowSystem :: struct {
   cull_descriptor_layout: vk.DescriptorSetLayout,
+  cull_descriptor_sets:   [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
   cull_pipeline_layout:   vk.PipelineLayout,
   cull_pipeline:          vk.Pipeline,
   depth_pipeline_layout:  vk.PipelineLayout,
   depth_pipeline:         vk.Pipeline,
+  views:                  [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(ShadowViewGPU),
+  draws:                  DrawBuffers,
 }
 
 // Per-frame shadow math for one light, shared by the depth pass and the
@@ -141,8 +163,9 @@ shadow_init :: proc(r: ^Manager) -> (ret: vk.Result) {
     gctx,
     {.STORAGE_BUFFER, {.COMPUTE}}, // nodes
     {.STORAGE_BUFFER, {.COMPUTE}}, // meshes
-    {.STORAGE_BUFFER, {.COMPUTE}}, // draw_count
-    {.STORAGE_BUFFER, {.COMPUTE}}, // draw_commands
+    {.STORAGE_BUFFER, {.COMPUTE}}, // views
+    {.STORAGE_BUFFER, {.COMPUTE}}, // draw counts
+    {.STORAGE_BUFFER, {.COMPUTE}}, // draw commands
   ) or_return
   self.cull_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
@@ -154,13 +177,29 @@ shadow_init :: proc(r: ^Manager) -> (ret: vk.Result) {
     #load("shader/shadow/cull.spv"),
     self.cull_pipeline_layout,
   ) or_return
+  draw_buffers_init(&self.draws, gctx, SHADOW_VIEW_MAX_DRAWS, lists = MAX_SHADOW_VIEWS) or_return
+  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
+    self.views[frame] = gpu.create_mutable_buffer(
+      gctx,
+      ShadowViewGPU,
+      MAX_SHADOW_VIEWS,
+      {.STORAGE_BUFFER},
+    ) or_return
+    self.cull_descriptor_sets[frame] = gpu.create_descriptor_set(
+      gctx,
+      &self.cull_descriptor_layout,
+      {.STORAGE_BUFFER, gpu.buffer_info(&r.internal.node_data_buffer.buffers[frame])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&r.internal.mesh_data_buffer.buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&self.views[frame])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&self.draws.count[frame])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&self.draws.commands[frame])},
+    ) or_return
+  }
   self.depth_pipeline_layout = create_scene_pipeline_layout(
     r,
     SHADOW_SETS,
     {stageFlags = {.VERTEX}, size = size_of(ShadowDepthPushConstants)},
   ) or_return
-  // Cube faces are mirror images of an ordinary view, so the front face is
-  // set per draw.
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .FRONT_FACE}
   self.depth_pipeline = gpu.create_graphics_pipeline(
     gctx,
@@ -184,67 +223,109 @@ shadow_shutdown :: proc(self: ^ShadowSystem, gctx: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(gctx.device, self.depth_pipeline_layout, nil)
   vk.DestroyPipeline(gctx.device, self.cull_pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.cull_pipeline_layout, nil)
+  gpu.free_descriptor_sets(gctx, ..self.cull_descriptor_sets[:])
+  for &views in self.views do gpu.mutable_buffer_destroy(gctx.device, &views)
+  draw_buffers_destroy(&self.draws, gctx)
   vk.DestroyDescriptorSetLayout(gctx.device, self.cull_descriptor_layout, nil)
   self^ = {}
 }
 
-shadow_create_per_light_descriptor :: proc(
-  self: ^ShadowSystem,
-  gctx: ^gpu.GPUContext,
-  node_buffer: vk.DescriptorBufferInfo,
-  mesh_buffer: vk.DescriptorBufferInfo,
-  draw_count: vk.DescriptorBufferInfo,
-  draw_commands: vk.DescriptorBufferInfo,
-) -> (
-  vk.DescriptorSet,
-  vk.Result,
-) {
-  return gpu.create_descriptor_set(
-    gctx,
-    &self.cull_descriptor_layout,
-    {.STORAGE_BUFFER, node_buffer},
-    {.STORAGE_BUFFER, mesh_buffer},
-    {.STORAGE_BUFFER, draw_count},
-    {.STORAGE_BUFFER, draw_commands},
-  )
+shadow_view_count :: proc(sm: ^ShadowMap) -> int {
+  return 6 if sm.cube else 1
 }
 
-// Render one light's shadow map for this frame. A spot or directional light
-// is one view; a point light is six, one per cube face. Each view culls the
-// casters inside its frustum into the light's draw list and draws their
-// depth; cube faces take turns on the one list.
-shadow_record :: proc(r: ^Manager, frame_index: u32, fl: ^FrameLight) {
-  sm := fl.shadow_map
-  if sm == nil do return
-  cmd := r.internal.command_buffers[frame_index]
-  depth :=
-    get_texture_cube(&r.texture_manager, sm.textures[frame_index]) if sm.cube else get_texture_2d(&r.texture_manager, sm.textures[frame_index])
-  if depth == nil do return
-  gpu.image_discard_barrier(
-    cmd,
-    depth.image,
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    {.EARLY_FRAGMENT_TESTS},
-    {.DEPTH},
-    layer_count = 6 if sm.cube else 1,
-  )
-  if sm.cube {
-    for face_view, face in depth.face_views {
-      if face > 0 {
-        // the previous face's draw has read the list this cull rewrites
-        gpu.memory_barrier(
-          cmd,
-          {.INDIRECT_COMMAND_READ},
-          {.TRANSFER_WRITE, .SHADER_WRITE},
-          {.DRAW_INDIRECT},
-          {.TRANSFER, .COMPUTE_SHADER},
-        )
-      }
-      view_projection := fl.info.projection * point_face_view(fl.params.position, face)
-      shadow_draw_view(r, frame_index, sm, view_projection, face_view, cube_face = true)
+// View `face` of a light's shadow map `depth`.
+shadow_view :: proc(fl: ^FrameLight, depth: ^gpu.Image, face: int) -> ShadowView {
+  if fl.shadow_map.cube {
+    return {
+      view_projection = fl.info.projection * point_face_view(fl.params.position, face),
+      target = depth.face_views[face],
+      flip_y = false,
+      front_face = .CLOCKWISE,
     }
-  } else {
-    shadow_draw_view(r, frame_index, sm, fl.info.view_projection, depth.view, cube_face = false)
+  }
+  return {
+    view_projection = fl.info.view_projection,
+    target = depth.view,
+    flip_y = true,
+    front_face = .COUNTER_CLOCKWISE,
+  }
+}
+
+// Render every shadow map of this frame: collect the views of all lights
+// with a map, cull every node against all of them in one dispatch, then draw
+// each view's list into its target.
+shadow_record :: proc(r: ^Manager, frame_index: u32) {
+  self := &r.internal.shadow
+  cmd := r.internal.command_buffers[frame_index]
+  views: [MAX_SHADOW_VIEWS]ShadowView
+  view_count := 0
+  gpu_views := gpu.get_all(&self.views[frame_index])
+  for &fl in r.internal.frame_lights {
+    sm := fl.shadow_map
+    if sm == nil do continue
+    depth :=
+      get_texture_cube(&r.texture_manager, sm.textures[frame_index]) if sm.cube else get_texture_2d(&r.texture_manager, sm.textures[frame_index])
+    if depth == nil do continue
+    count := shadow_view_count(sm)
+    gpu.image_discard_barrier(
+      cmd,
+      depth.image,
+      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      {.EARLY_FRAGMENT_TESTS},
+      {.DEPTH},
+      layer_count = u32(count),
+    )
+    for face in 0 ..< count {
+      views[view_count] = shadow_view(&fl, depth, face)
+      gpu_views[view_count] = {geom.make_frustum(views[view_count].view_projection).planes}
+      view_count += 1
+    }
+  }
+  if view_count == 0 do return
+  commands := &self.draws.commands[frame_index]
+  counts := &self.draws.count[frame_index]
+  vk.CmdFillBuffer(cmd, counts.buffer, 0, vk.DeviceSize(counts.bytes_count), 0)
+  gpu.buffer_barrier(
+    cmd,
+    counts.buffer,
+    vk.DeviceSize(counts.bytes_count),
+    {.TRANSFER_WRITE},
+    {.SHADER_READ, .SHADER_WRITE},
+    {.TRANSFER},
+    {.COMPUTE_SHADER},
+  )
+  gpu.bind_pipeline(cmd, .COMPUTE, self.cull_pipeline, self.cull_pipeline_layout, self.cull_descriptor_sets[frame_index])
+  cull := ShadowCullPushConstants {
+    node_count    = r.node_count,
+    view_count    = u32(view_count),
+    max_draws     = SHADOW_VIEW_MAX_DRAWS,
+    include_flags = transmute(u32)SHADOW_INCLUDE,
+    exclude_flags = transmute(u32)SHADOW_EXCLUDE,
+  }
+  vk.CmdPushConstants(cmd, self.cull_pipeline_layout, {.COMPUTE}, 0, size_of(cull), &cull)
+  vk.CmdDispatch(cmd, (r.node_count + 63) / 64, 1, 1)
+  indirect_barrier(cmd, commands, counts)
+  // bound state outlives the rendering scopes below
+  bind_scene(r, cmd, frame_index, self.depth_pipeline, self.depth_pipeline_layout, SHADOW_SETS)
+  extent := vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
+  stride :: size_of(vk.DrawIndexedIndirectCommand)
+  for &v, i in views[:view_count] {
+    gpu.begin_rendering(cmd, extent, gpu.create_depth_attachment(v.target))
+    gpu.set_viewport_scissor(cmd, extent, flip_y = v.flip_y)
+    vk.CmdSetFrontFace(cmd, v.front_face)
+    push := ShadowDepthPushConstants{v.view_projection}
+    vk.CmdPushConstants(cmd, self.depth_pipeline_layout, {.VERTEX}, 0, size_of(push), &push)
+    vk.CmdDrawIndexedIndirectCount(
+      cmd,
+      commands.buffer,
+      vk.DeviceSize(i * SHADOW_VIEW_MAX_DRAWS * stride),
+      counts.buffer,
+      vk.DeviceSize(i * size_of(u32)),
+      SHADOW_VIEW_MAX_DRAWS,
+      stride,
+    )
+    vk.CmdEndRendering(cmd)
   }
   gpu.memory_barrier(
     cmd,
@@ -253,86 +334,4 @@ shadow_record :: proc(r: ^Manager, frame_index: u32, fl: ^FrameLight) {
     {.LATE_FRAGMENT_TESTS},
     {.FRAGMENT_SHADER},
   )
-}
-
-// Cull the casters inside `view_projection` into the shadow map's draw list,
-// then draw their depth into `target`.
-@(private = "file")
-shadow_draw_view :: proc(
-  r: ^Manager,
-  frame_index: u32,
-  sm: ^ShadowMap,
-  view_projection: matrix[4, 4]f32,
-  target: vk.ImageView,
-  cube_face: bool,
-) {
-  self := &r.internal.shadow
-  cmd := r.internal.command_buffers[frame_index]
-  commands := &sm.draws.commands[frame_index]
-  count := &sm.draws.count[frame_index]
-  shadow_cull(r, cmd, geom.make_frustum(view_projection).planes, count.buffer, sm.descriptor_sets[frame_index])
-  indirect_barrier(cmd, commands, count)
-  extent := vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
-  gpu.begin_rendering(cmd, extent, gpu.create_depth_attachment(target))
-  // 2D maps flip Y like the cameras; cube faces stay unflipped to match cube
-  // sampling, which mirrors them, so their winding turns clockwise.
-  gpu.set_viewport_scissor(cmd, extent, flip_y = !cube_face)
-  vk.CmdSetFrontFace(cmd, .CLOCKWISE if cube_face else .COUNTER_CLOCKWISE)
-  bind_scene(r, cmd, frame_index, self.depth_pipeline, self.depth_pipeline_layout, SHADOW_SETS)
-  push := ShadowDepthPushConstants{view_projection}
-  vk.CmdPushConstants(cmd, self.depth_pipeline_layout, {.VERTEX}, 0, size_of(push), &push)
-  vk.CmdDrawIndexedIndirectCount(
-    cmd,
-    commands.buffer,
-    0,
-    count.buffer,
-    0,
-    MAX_NODES_IN_SCENE,
-    u32(size_of(vk.DrawIndexedIndirectCommand)),
-  )
-  vk.CmdEndRendering(cmd)
-}
-
-@(private = "file")
-shadow_cull :: proc(
-  r: ^Manager,
-  command_buffer: vk.CommandBuffer,
-  planes: [6][4]f32,
-  draw_count_buffer: vk.Buffer,
-  descriptor_set: vk.DescriptorSet,
-) {
-  self := &r.internal.shadow
-  vk.CmdFillBuffer(command_buffer, draw_count_buffer, 0, vk.DeviceSize(size_of(u32)), 0)
-  gpu.buffer_barrier(
-    command_buffer,
-    draw_count_buffer,
-    vk.DeviceSize(size_of(u32)),
-    {.TRANSFER_WRITE},
-    {.SHADER_READ, .SHADER_WRITE},
-    {.TRANSFER},
-    {.COMPUTE_SHADER},
-  )
-  gpu.bind_pipeline(
-    command_buffer,
-    .COMPUTE,
-    self.cull_pipeline,
-    self.cull_pipeline_layout,
-    descriptor_set,
-  )
-  push := ShadowCullPushConstants {
-    planes        = planes,
-    node_count    = r.node_count,
-    max_draws     = MAX_NODES_IN_SCENE,
-    include_flags = transmute(u32)SHADOW_INCLUDE,
-    exclude_flags = transmute(u32)SHADOW_EXCLUDE,
-  }
-  vk.CmdPushConstants(
-    command_buffer,
-    self.cull_pipeline_layout,
-    {.COMPUTE},
-    0,
-    size_of(push),
-    &push,
-  )
-  vk.CmdDispatch(command_buffer, (r.node_count + 63) / 64, 1, 1)
 }
