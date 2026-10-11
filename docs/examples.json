@@ -222,7 +222,26 @@
     "notes": [
       "Each body is a <code>physics.create_body</code> call with <code>user</code> set to its node; <code>mass = 0</code> makes it static, a dynamic body gets its inertia from its collider.",
       "Glue in <code>update</code>: <code>physics.step</code>, then <code>world.set_world_pose</code> for every <code>physics.body_poses</code> entry.",
-      "<code>physics.World.gravity</code> defaults to <code>{0, -9.81, 0}</code>."
+      "<code>physics.World.gravity</code> defaults to <code>{0, -9.81, 0}</code>.",
+      "Bodies that fall below <code>physics.KILL_Y</code> are destroyed by <code>step</code>; despawn their nodes from <code>phys.killed</code>."
+    ]
+  },
+  {
+    "name": "physics_box2d",
+    "desc": "The physics scene on vendor:box2d, one XY slice per Z row.",
+    "notes": [
+      "Box2D x/y are world X/Y; each Z row is a collision layer (<code>filter.categoryBits</code> / <code>maskBits</code>), so rows never touch.",
+      "The ball is its cross-section circle in each slice; cylinders simulate as their rectangular profile.",
+      "Glue in <code>update</code>: <code>b2.World_Step</code>, then <code>world.set_world_pose</code> for each awake body with the angle as a rotation about Z."
+    ]
+  },
+  {
+    "name": "physics_box3d",
+    "desc": "The physics scene on vendor:box3d.",
+    "notes": [
+      "Boxes are <code>b3.MakeBoxHull</code>, cylinders <code>b3.CreateCylinder</code> hulls (cloned by <code>CreateHullShape</code>, then freed).",
+      "Shape density is set so each piece weighs 50, matching <code>examples/physics</code>.",
+      "Glue in <code>update</code>: <code>b3.World_Step</code>, then <code>world.set_world_pose</code> for each awake body."
     ]
   },
   {
