@@ -183,24 +183,33 @@ lighting_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Cam
   )
   sphere := cont.get(r.meshes, r.builtin_meshes[.SPHERE])
   cone := cont.get(r.meshes, r.builtin_meshes[.CONE])
-  for &fl in r.internal.frame_lights {
-    shadow_map: u32 = NO_SHADOW
-    shadow_view_projection: matrix[4, 4]f32
-    if sm := fl.shadow_map; sm != nil {
-      shadow_map = sm.textures[frame_index].index
-      shadow_view_projection = fl.info.projection if sm.cube else fl.info.view_projection
+  // Lights grouped by type: one pipeline bind per type.
+  for type in LightType {
+    bound := false
+    for &fl in r.internal.frame_lights {
+      if fl.type != type do continue
+      if !bound {
+        vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipelines[type])
+        bound = true
+      }
+      shadow_map: u32 = NO_SHADOW
+      shadow_view_projection: matrix[4, 4]f32
+      if sm := fl.shadow_map; sm != nil {
+        shadow_map = sm.textures[frame_index].index
+        shadow_view_projection = fl.info.projection if sm.cube else fl.info.view_projection
+      }
+      direct_light_record_light(
+        self,
+        cmd,
+        fl.type,
+        fl.params,
+        cone.allocations if fl.type == .SPOT else sphere.allocations,
+        cam_index,
+        gbuffer,
+        shadow_map,
+        shadow_view_projection,
+      )
     }
-    direct_light_record_light(
-      self,
-      cmd,
-      fl.type,
-      fl.params,
-      cone.allocations if fl.type == .SPOT else sphere.allocations,
-      cam_index,
-      gbuffer,
-      shadow_map,
-      shadow_view_projection,
-    )
   }
   vk.CmdEndRendering(cmd)
 }
@@ -231,7 +240,6 @@ direct_light_record_light :: proc(
     albedo_and_metallic_indices = pack(gbuffer.albedo, gbuffer.metallic_roughness),
   }
   if type == .SPOT do push.direction = linalg.normalize(light.direction)
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipelines[type])
   vk.CmdPushConstants(
     command_buffer,
     self.pipeline_layout,

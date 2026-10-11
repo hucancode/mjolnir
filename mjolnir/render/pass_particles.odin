@@ -94,12 +94,5 @@ particles_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Ca
 	)
 	vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
 	vk.CmdEndRendering(command_buffer)
-	// ...and rewrites them later in this frame.
-	gpu.memory_barrier(
-		command_buffer,
-		{},
-		{},
-		{.VERTEX_SHADER},
-		{.COMPUTE_SHADER},
-	)
+	// particles_simulate orders this draw before it rewrites the particles.
 }

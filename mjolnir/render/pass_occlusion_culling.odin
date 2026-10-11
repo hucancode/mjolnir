@@ -144,6 +144,8 @@ occlusion_destroy_pyramid :: proc(
 }
 
 // Reduce the camera's depth into every mip of `pyramid`, one dispatch per mip.
+// Each mip's writes are visible to later compute reads: the next mip's reduce
+// and, after the last mip, the culling pass.
 occlusion_build_pyramid :: proc(
   self: ^OcclusionSystem,
   command_buffer: vk.CommandBuffer,
@@ -155,15 +157,6 @@ occlusion_build_pyramid :: proc(
   if img == nil do return
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.reduce_pipeline)
   for mip in 0 ..< img.mip_levels {
-    if mip > 0 {
-      gpu.memory_barrier(
-        command_buffer,
-        {.SHADER_WRITE},
-        {.SHADER_READ},
-        {.COMPUTE_SHADER},
-        {.COMPUTE_SHADER},
-      )
-    }
     vk.CmdBindDescriptorSets(
       command_buffer,
       .COMPUTE,
@@ -179,6 +172,13 @@ occlusion_build_pyramid :: proc(
     width := max(1, img.extent.width >> mip)
     height := max(1, img.extent.height >> mip)
     vk.CmdDispatch(command_buffer, (width + 31) / 32, (height + 31) / 32, 1)
+    gpu.memory_barrier(
+      command_buffer,
+      {.SHADER_WRITE},
+      {.SHADER_READ},
+      {.COMPUTE_SHADER},
+      {.COMPUTE_SHADER},
+    )
   }
 }
 
