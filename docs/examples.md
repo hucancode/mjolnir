@@ -49,12 +49,6 @@ title: Examples
   cursor: pointer;
   color: var(--muted);
 }
-#examples details ul {
-  margin: 0;
-  padding: 0.4rem 0.75rem 0.6rem 1.75rem;
-  line-height: 1.4;
-}
-#examples details li { margin: 0.15rem 0; }
 #examples details pre {
   margin: 0;
   max-height: 24rem;
@@ -96,12 +90,6 @@ fetch('examples.json').then(r => r.json()).then(items => {
     const cap = document.createElement('figcaption');
     cap.append(e.name, Object.assign(document.createElement('span'), { textContent: e.desc }));
     fig.appendChild(cap);
-    if (e.notes && e.notes.length > 0) {
-        const notes = document.createElement('details');
-        notes.innerHTML = `<summary>Notes</summary><ul>${e.notes.map(n => `<li>${n}</li>`).join('')}</ul>`;
-        fig.appendChild(notes);
-    }
-
     const code = document.createElement('details');
     code.innerHTML = `<summary>Show code</summary><pre><code class="language-odin">Loading…</code></pre>`;
     code.addEventListener('toggle', async () => {
