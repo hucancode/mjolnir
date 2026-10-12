@@ -3,4 +3,4 @@
 3. modules layered, dependency go top→bottom, <5 layers
 6. be straightforward, no branch/special-casing
 4. be terse, no indirection/wrapper
-5. data-oriented, use large constiguous array. hate small scattered arrays.
+5. data-oriented, use large constiguous array. avoid small scattered arrays
