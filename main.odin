@@ -5,6 +5,7 @@ import "core:math"
 import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/animation"
+import "mjolnir/geometry"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
@@ -14,7 +15,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   mjolnir.CameraController,
+  free_cam: bool,
   input:    input.State,
 }
 
@@ -84,9 +85,31 @@ add_node_clip :: proc(app: ^App, node: world.NodeHandle, clip: animation.Clip) -
   return &node_clips[len(node_clips) - 1]
 }
 
+// WASD/QE fly, mouse look.
+fly_camera :: proc(app: ^App, dt: f32) {
+  cam := render.main_camera(&app.renderer)
+  if cam == nil || app.input.keyboard_captured do return
+  s := &app.input
+  move := geometry.qx(cam.rotation) * input.axis(s, .A, .D) + {0, 1, 0} * input.axis(s, .Q, .E) - geometry.qz(cam.rotation) * input.axis(s, .S, .W)
+  cam.position += move * 5 * dt
+  d := s.mouse_delta * 0.002
+  cam.rotation = linalg.quaternion_angle_axis(-d.x, linalg.VECTOR3F32_Y_AXIS) * cam.rotation
+  cam.rotation = linalg.quaternion_angle_axis(-d.y, geometry.qx(cam.rotation)) * cam.rotation
+}
+
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  if app.free_cam do fly_camera(app, dt)
+  else {
+    if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
+      yaw, pitch, dist := render.camera_orbit_state(cam)
+      if input.mouse_down(&app.input, .LEFT) {
+        yaw += app.input.mouse_delta.x * 0.02
+        pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+      }
+      render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+    }
+  }
   if !app.input.keyboard_captured {
     it := 0
     for key, pressed in input.next_key_edge(&app.input, &it) do on_key(app, key, pressed)
@@ -123,7 +146,6 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = mjolnir.orbit_controller()
   defer for &c in characters do mjolnir.gltf_scene_destroy(&c.scene)
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
@@ -663,11 +685,7 @@ on_key :: proc(app: ^App, key: input.Key, pressed: bool) {
   log.infof("key %v %v", key, "PRESS" if pressed else "RELEASE")
   if !pressed do return
   if key == .TAB {
-    if _, is_free := app.camera.data.(mjolnir.FreeCameraData); is_free {
-      app.camera = mjolnir.orbit_controller()
-    } else {
-      app.camera = mjolnir.free_controller()
-    }
+    app.free_cam = !app.free_cam
   }
 }
 

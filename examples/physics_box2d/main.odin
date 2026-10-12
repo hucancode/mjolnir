@@ -34,7 +34,6 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   mjolnir.CameraController,
   input:    input.State,
   phys:     b2.WorldId,
   pieces:   [dynamic]Piece,
@@ -57,7 +56,6 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = mjolnir.orbit_controller()
 
   setup(app)
 
@@ -147,7 +145,10 @@ should_close :: proc(app: ^App) -> bool {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
+    yaw, pitch, dist := render.camera_orbit_state(cam)
+    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+  }
   b2.World_Step(app.phys, dt, 4)
   for i := len(app.pieces) - 1; i >= 0; i -= 1 {
     p := app.pieces[i]

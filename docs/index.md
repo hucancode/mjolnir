@@ -26,7 +26,7 @@ To use Mjolnir, run `make shader` to compile shaders to SPIR-V and copy the
 - Splines, tweens
 - Rigid-body physics (tunneling-safe for fast bodies)
 - Recast + Detour navigation, crowd steering
-- 2D UI: widgets, layout, events, fontstash text
+- 2D UI: flex layout, anchors, text wrap, clip and scroll, hit testing (`ui`, `font`)
 - Render to texture
 - Post-process: tonemap, bloom, blur, fog, outline, DoF, crosshatch
 

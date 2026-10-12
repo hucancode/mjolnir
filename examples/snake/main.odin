@@ -44,7 +44,6 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   mjolnir.CameraController,
   input:    input.State,
   font:     font.Font,
 }
@@ -61,7 +60,6 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = mjolnir.orbit_controller()
   font_data, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
   if err != nil do return
   defer delete(font_data)
@@ -183,7 +181,10 @@ on_key :: proc(key: input.Key) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
+    yaw, pitch, dist := render.camera_orbit_state(cam)
+    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+  }
   step_game(app, dt)
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)

@@ -12,7 +12,6 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   mjolnir.CameraController,
   input:    input.State,
 }
 
@@ -50,7 +49,6 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = mjolnir.orbit_controller()
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -102,7 +100,14 @@ spawn_mesh :: proc(app: ^App, mesh: render.MeshHandle, material: render.Material
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
-  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
+    yaw, pitch, dist := render.camera_orbit_state(cam)
+    if input.mouse_down(&app.input, .LEFT) {
+      yaw += app.input.mouse_delta.x * 0.02
+      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+    }
+    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+  }
   clear(&app.renderer.post_process.effect_stack)
   if outline_on    do append(&app.renderer.post_process.effect_stack, render.OutlineEffect{thickness = f32(outline_thickness)})
   if fog_on        do append(&app.renderer.post_process.effect_stack, render.FogEffect{color = {0.55, 0.6, 0.7}, start = f32(fog_start), end = f32(fog_end)})

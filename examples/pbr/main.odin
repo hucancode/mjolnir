@@ -42,7 +42,6 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   mjolnir.CameraController,
   input:    input.State,
 }
 
@@ -59,7 +58,6 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = mjolnir.orbit_controller()
 
   render.main_camera_look_at(&app.renderer, {0, 0.2, 3.5}, {0, 0, 0})
   dir_light = world.spawn(&app.scene, {4, 6, 4})
@@ -86,7 +84,14 @@ swap_model :: proc(app: ^App, index: int) {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
-  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
+    yaw, pitch, dist := render.camera_orbit_state(cam)
+    if input.mouse_down(&app.input, .LEFT) {
+      yaw += app.input.mouse_delta.x * 0.02
+      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+    }
+    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+  }
   if l, ok := render.attachment(&app.renderer, dir_light.index, render.LightAttachment); ok {
     l.color[3] = f32(dir_intensity)
     render.attach(&app.renderer, dir_light.index, l)

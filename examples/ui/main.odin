@@ -22,7 +22,6 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   mjolnir.CameraController,
   input:    input.State,
   font:     font.Font,
   gui:      ui.UI,
@@ -51,7 +50,6 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = mjolnir.orbit_controller()
   font_data, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
   if err != nil do return
   defer delete(font_data)
@@ -132,7 +130,14 @@ update :: proc(app: ^App, dt: f32) {
     list := ui.node(&app.gui, app.list)
     list.scroll.y = clamp(list.scroll.y - app.input.scroll.y * 20, 0, 12 * 32 - 4 - 120)
   }
-  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
+    yaw, pitch, dist := render.camera_orbit_state(cam)
+    if input.mouse_down(&app.input, .LEFT) {
+      yaw += app.input.mouse_delta.x * 0.02
+      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+    }
+    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+  }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
   render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))

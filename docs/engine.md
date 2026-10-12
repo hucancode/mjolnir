@@ -8,14 +8,6 @@ Layer 3, optional. The `mjolnir` package holds three things:
   update thread. It imports no layer-2 module.
 - **Asset loading** (`load_gltf`): one asset fills several modules
   (world nodes, render looks, animation rigs), so it lives above them.
-- **Camera controllers** (`orbit_controller`, `free_controller`,
-  `follow_controller`, `camera_controller_update`): input drives
-  render's main camera, two modules, so they live above both. Keys are
-  fixed: WASD + QE to move, shift to pan or boost, left drag to orbit;
-  devices `input.State` marks captured are ignored.
-
-Everything else is the application's: it owns every module value,
-brings them up, and writes the glue between them. This page shows how.
 
 ## Building an application
 
@@ -24,7 +16,6 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   mjolnir.CameraController,
   input:    input.State,
 }
 
@@ -40,7 +31,6 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = mjolnir.orbit_controller()
 
   cube := world.spawn(&app.scene)
   render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, .RED))
@@ -54,7 +44,14 @@ should_close :: proc(app: ^App) -> bool {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
+    yaw, pitch, dist := render.camera_orbit_state(cam)
+    if input.mouse_down(&app.input, .LEFT) {
+      yaw += app.input.mouse_delta.x * 0.02
+      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+    }
+    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+  }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
   render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
@@ -103,8 +100,7 @@ update :: proc(app: ^App, dt: f32) {
   render.debug_ui_input(&app.renderer, &app.input)
   ui.layout(&app.gui, viewport, &app.font) // the window, in cursor units
   ui.update_input(&app.gui, &app.input)
-  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
-  // gameplay, reading app.input
+  // camera, gameplay, reading app.input
   physics.step(&app.phys, dt)
   for b in physics.body_poses(&app.phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
   for &a, i in app.animators do anim.animator_update(&a, &app.model.rigs[app.model.skinned[i].rig], dt, world.world_matrix(&app.scene, app.model.skinned[i].node))

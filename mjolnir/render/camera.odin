@@ -65,6 +65,46 @@ camera_look_at :: proc(self: ^Camera, from, to: [3]f32, up: [3]f32 = {0, 0, 0}) 
   self.rotation = linalg.to_quaternion(rotation_matrix)
 }
 
+// Place the camera on a sphere around `target` and look at it. `yaw` turns
+// around the Y axis (0 = +X), `pitch` is elevation above the XZ plane. The up
+// vector follows yaw/pitch so the view stays smooth through the poles.
+camera_orbit :: proc(self: ^Camera, yaw, pitch, distance: f32, target: [3]f32 = {0, 0, 0}) {
+  cp, sp := math.cos(pitch), math.sin(pitch)
+  cy, sy := math.cos(yaw), math.sin(yaw)
+  position := target + distance * [3]f32{cp * cy, sp, cp * sy}
+  camera_look_at(self, position, target, {-sp * cy, cp, -sp * sy})
+}
+
+// The inverse of camera_orbit: yaw, pitch and distance of the camera's
+// current pose around `target`.
+camera_orbit_state :: proc(self: ^Camera, target: [3]f32 = {0, 0, 0}) -> (yaw, pitch, distance: f32) {
+  offset := self.position - target
+  distance = max(linalg.length(offset), 0.001)
+  yaw = math.atan2(offset.z, offset.x)
+  pitch = math.asin(clamp(offset.y / distance, -1, 1))
+  return
+}
+
+// Blend the camera's transform toward a pose: position lerps, rotation slerps
+// along the short arc. t = 1 snaps; call every tick with
+// `1 - exp(-speed * dt)` for frame-rate independent smoothing.
+camera_lerp :: proc(self: ^Camera, position: [3]f32, rotation: quaternion128, t: f32) {
+  self.position = linalg.lerp(self.position, position, t)
+  self.rotation = linalg.quaternion_slerp(self.rotation, rotation, t)
+}
+
+// camera_lerp toward the pose of a camera at `from` looking at `to`.
+camera_lerp_look_at :: proc(self: ^Camera, from, to: [3]f32, t: f32, up: [3]f32 = {0, 0, 0}) {
+  goal := Camera{}
+  camera_look_at(&goal, from, to, up)
+  camera_lerp(self, goal.position, goal.rotation, t)
+}
+
+// camera_lerp toward a world matrix (see camera_set_transform).
+camera_lerp_transform :: proc(self: ^Camera, world_matrix: matrix[4, 4]f32, t: f32) {
+  camera_lerp(self, world_matrix[3].xyz, linalg.quaternion_from_matrix4_f32(world_matrix), t)
+}
+
 // Place a camera with a world matrix (e.g. a node's world transform when the
 // camera follows a logical entity). The camera looks down the matrix's -Z.
 camera_set_transform :: proc(self: ^Camera, world_matrix: matrix[4, 4]f32) {

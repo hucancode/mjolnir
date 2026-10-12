@@ -26,7 +26,6 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   mjolnir.CameraController,
   input:    input.State,
 }
 
@@ -42,7 +41,6 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = mjolnir.orbit_controller()
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -175,7 +173,14 @@ build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
+    yaw, pitch, dist := render.camera_orbit_state(cam)
+    if input.mouse_down(&app.input, .LEFT) {
+      yaw += app.input.mouse_delta.x * 0.02
+      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+    }
+    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+  }
   spin += dt * f32(rotate_speed)
   set_spin(app, wave_node,   wave_visible,   spin, {-6, 0, 0})
   set_spin(app, knot_node,   knot_visible,   spin, {0, 1.5, 0})

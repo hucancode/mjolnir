@@ -326,8 +326,12 @@ UI, and is presented to the swapchain. `render.camera_attachment(&r, cam, .FINAL
 returns a bindless handle — feed it to a UI quad or a material for
 minimaps, mirrors and render-to-texture surfaces.
 
-Camera controllers (input → camera pose) live in the `mjolnir`
-package; see the engine docs.
+There is no built-in camera controller. Drive `render.Camera` yourself
+with `camera_look_at`, `camera_orbit` (+ `camera_orbit_state` to read
+yaw/pitch/distance back from the pose), and `camera_lerp`,
+`camera_lerp_look_at`, `camera_lerp_transform` to ease position and
+rotation toward a pose. `examples/cameras` builds orbit, free-fly and
+follow cameras this way.
 
 ## UI and debug UI
 

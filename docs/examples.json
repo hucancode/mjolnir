@@ -17,7 +17,7 @@
   },
   {
     "name": "cameras",
-    "desc": "Orbit / free / follow camera controllers."
+    "desc": "Orbit, free-fly and follow cameras built from render camera primitives (orbit, look_at, lerp)."
   },
   {
     "name": "collision",

@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import geom "../../mjolnir/geometry"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -11,9 +12,9 @@ import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
 
-ControllerMode :: enum {ORBIT, FREE, FOLLOW}
+CameraMode :: enum {ORBIT, FREE, FOLLOW}
 
-mode: ControllerMode = .ORBIT
+mode: CameraMode = .ORBIT
 follow_target: [3]f32 = {0, 0.6, 0}
 runner_handle: world.NodeHandle
 runner_phase: f32
@@ -24,11 +25,16 @@ follow_offset_y:   mu.Real = 3.0
 follow_offset_back:mu.Real = 6.0
 follow_lerp:       mu.Real = 5.0
 
+// The whole "controller": orbit state is just yaw/pitch/distance around a target.
+orbit_state :: struct {
+  yaw, pitch, distance: f32,
+}
+
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   mjolnir.CameraController,
+  orbit:    orbit_state,
   input:    input.State,
 }
 
@@ -44,9 +50,11 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = mjolnir.orbit_controller()
 
   render.main_camera_look_at(&app.renderer, {0, 6, 12}, {0, 0, 0})
+  if cam, ok := render.main_camera(&app.renderer); ok {
+    app.orbit.yaw, app.orbit.pitch, app.orbit.distance = render.camera_orbit_state(cam)
+  }
   sun := world.spawn(&app.scene, {6, 12, 6})
   render.attach(&app.renderer, sun.index, render.directional_light_attachment(color = {1, 0.97, 0.92, 1}, shadow_radius = 6.0, cast_shadow = true))
   ground := world.spawn(&app.scene)
@@ -81,18 +89,19 @@ spawn_landmark :: proc(app: ^App, pos: [3]f32, color: render.Color) {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
-  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   runner_phase += dt * 0.6
   follow_target = {7.0 * math.sin(runner_phase), 0.6, 4.0 * math.sin(runner_phase * 2.0)}
   world.translate(&app.scene, runner_handle, follow_target)
-
-  if free, ok := &app.camera.data.(mjolnir.FreeCameraData); ok {
-    free.move_speed = f32(free_speed)
-  }
-  if follow, ok := &app.camera.data.(mjolnir.FollowCameraData); ok {
-    follow.target = follow_target
-    follow.offset = {0, f32(follow_offset_y), f32(follow_offset_back)}
-    follow.follow_speed = f32(follow_lerp)
+  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
+    switch mode {
+    case .ORBIT: orbit_camera(app, cam)
+    case .FREE:  free_camera(app, cam, dt)
+    case .FOLLOW:
+      // pose chases a point behind/above the runner; position and rotation both ease
+      t := 1 - math.exp(-f32(follow_lerp) * dt)
+      from := follow_target + {0, f32(follow_offset_y), f32(follow_offset_back)}
+      render.camera_lerp_look_at(cam, from, follow_target, t)
+    }
   }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
@@ -127,21 +136,36 @@ frame :: proc(app: ^App) -> bool {
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
-switch_mode :: proc(app: ^App, new_mode: ControllerMode) {
+switch_mode :: proc(app: ^App, new_mode: CameraMode) {
   if mode == new_mode do return
   mode = new_mode
-  switch new_mode {
-  case .ORBIT:  app.camera = mjolnir.orbit_controller()
-  case .FREE:   app.camera = mjolnir.free_controller(f32(free_speed))
-  case .FOLLOW: app.camera = mjolnir.follow_controller(follow_target, {0, f32(follow_offset_y), f32(follow_offset_back)}, f32(follow_lerp))
+  if cam, ok := render.main_camera(&app.renderer); ok && new_mode == .ORBIT {
+    app.orbit.yaw, app.orbit.pitch, app.orbit.distance = render.camera_orbit_state(cam)
+    orbit_distance = mu.Real(app.orbit.distance)
   }
 }
 
-// Orbit distance is the camera's distance to the orbit target; move along the view ray.
+// Orbit distance is the camera's distance to the origin.
 set_orbit_distance :: proc(app: ^App) {
-  orbit, is_orbit := app.camera.data.(mjolnir.OrbitCameraData)
-  cam, has_cam := render.main_camera(&app.renderer)
-  if !is_orbit || !has_cam do return
-  dir := linalg.normalize(cam.position - orbit.target)
-  render.camera_look_at(cam, orbit.target + dir * f32(orbit_distance), orbit.target)
+  app.orbit.distance = f32(orbit_distance)
+}
+
+orbit_camera :: proc(app: ^App, cam: ^render.Camera) {
+  o := &app.orbit
+  if input.mouse_down(&app.input, .LEFT) {
+    d := app.input.mouse_delta * 0.02
+    o.yaw += d.x
+    o.pitch = clamp(o.pitch + d.y, -1.5, 1.5)
+  }
+  o.distance = clamp(o.distance - app.input.scroll.y * 2, 2, 40)
+  render.camera_orbit(cam, o.yaw, o.pitch, o.distance)
+}
+
+free_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
+  s := &app.input
+  move := geom.qx(cam.rotation) * input.axis(s, .A, .D) + {0, 1, 0} * input.axis(s, .Q, .E) - geom.qz(cam.rotation) * input.axis(s, .S, .W)
+  cam.position += move * f32(free_speed) * dt
+  d := s.mouse_delta * 0.002
+  cam.rotation = linalg.quaternion_angle_axis(-d.x, linalg.VECTOR3F32_Y_AXIS) * cam.rotation
+  cam.rotation = linalg.quaternion_angle_axis(-d.y, geom.qx(cam.rotation)) * cam.rotation
 }

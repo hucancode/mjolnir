@@ -50,8 +50,8 @@ consumers share one snapshot without knowing about each other.
 `new_frame` clears both. Each consumer, in priority order, skips a
 device that is already captured and captures the ones it owns. With
 mjolnir's modules the order is `render.debug_ui_input`, then
-`ui.update_input`, then `mjolnir.camera_controller_update`. Gameplay
-reads the flags last:
+`ui.update_input`, then your camera code. Gameplay reads the flags
+last:
 
 ```odin
 if !state.keyboard_captured && input.key_pressed(&state, .SPACE) do jump()
