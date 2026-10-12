@@ -59,8 +59,8 @@ PipelineId :: enum {
 //     shaders read them. Create them through the create_* procs; material,
 //     emitter and forcefield return pointers into the table the next frame
 //     draws from, to edit in place.
-//   * attachments: per-slot lights, emitters and force fields, indexed by
-//     transform slot (meshes live in the slot's node record). A slot is
+//   * attachments: per-slot emitters and force fields, indexed by transform
+//     slot (meshes live in the slot's node record, lights in `lights`). A slot is
 //     whatever index the caller uses to identify a transform; the engine uses
 //     world node indices.
 //   * cameras: views with their GPU targets. `main_camera` is presented.
@@ -90,6 +90,10 @@ Renderer :: struct {
   // per slot; the slot's node record is in the node table. Its length is the
   // node count every cull dispatch covers.
   attachments:             [dynamic]Attachment,
+  // attached lights, densely in no particular order, and the slot each
+  // shines from
+  lights:                  [dynamic]Light,
+  light_slots:             [dynamic]u32,
   builtin_materials:       [Color]MaterialHandle,
   builtin_meshes:          [Primitive]MeshHandle,
   cameras:                 []Camera,
@@ -337,6 +341,8 @@ shutdown :: proc(self: ^Renderer) {
   delete(self.cameras)
   delete(self.meshes)
   delete(self.attachments)
+  delete(self.lights)
+  delete(self.light_slots)
   gpu.swapchain_destroy(&self.swapchain, gctx.device)
   gpu.shutdown(gctx)
 }
@@ -513,6 +519,7 @@ stage_transforms :: proc(self: ^Renderer, changes: []$T) {
 stage_slot_removal :: proc(self: ^Renderer, slot: u32) {
   sync.recursive_mutex_lock(&self.mutex)
   defer sync.recursive_mutex_unlock(&self.mutex)
+  detach_light(self, slot)
   if int(slot) >= len(self.attachments) do return
   #partial switch a in self.attachments[slot] {
   case EmitterHandle:
@@ -532,6 +539,17 @@ clear_slots :: proc(self: ^Renderer) {
   sync.recursive_mutex_lock(&self.mutex)
   defer sync.recursive_mutex_unlock(&self.mutex)
   for i := len(self.attachments) - 1; i >= 0; i -= 1 do stage_slot_removal(self, u32(i))
+  clear(&self.lights)
+  clear(&self.light_slots)
+}
+
+// Drop the light at `slot`, if any. Caller holds the render mutex.
+@(private = "file")
+detach_light :: proc(self: ^Renderer, slot: u32) {
+  i, found := slice.linear_search(self.light_slots[:], slot)
+  if !found do return
+  unordered_remove(&self.lights, i)
+  unordered_remove(&self.light_slots, i)
 }
 
 // Free a slot's bone table range. Caller holds the render mutex.
@@ -623,25 +641,29 @@ grow_bones :: proc(self: ^Renderer) -> vk.Result {
 }
 
 // Draw `attachment` at `slot`, replacing what the slot drew before. A mesh
-// goes into the slot's node record; emitters and force fields are bound to
+// goes into the slot's node record, a light into `lights`; emitters and force fields are bound to
 // the slot's transform.
 attach :: proc(self: ^Renderer, slot: u32, attachment: Attachment) {
   sync.recursive_mutex_lock(&self.mutex)
   defer sync.recursive_mutex_unlock(&self.mutex)
   node := slot_node(self, slot)
-  self.attachments[slot] = attachment
+  self.attachments[slot] = nil
+  detach_light(self, slot)
   node.mesh_id, node.material_id = INVALID_NODE.mesh_id, INVALID_NODE.material_id
   node.flags -= {.CASTS_SHADOW}
   switch a in attachment {
   case MeshAttachment:
-    self.attachments[slot] = nil
     node.mesh_id, node.material_id = u32(a.handle), u32(a.material)
     if a.cast_shadow do node.flags += {.CASTS_SHADOW}
+  case Light:
+    append(&self.lights, a)
+    append(&self.light_slots, slot)
   case EmitterHandle:
+    self.attachments[slot] = a
     if em, ok := emitter(self, a); ok do em.node_index = slot
   case ForceFieldHandle:
+    self.attachments[slot] = a
     if ff, ok := forcefield(self, a); ok do ff.node_index = slot
-  case Light:
   }
   mark_dirty(self, .NODES, NodeData, int(slot))
 }
@@ -663,6 +685,9 @@ attachment :: proc(
     node := write_table(self, .NODES, NodeData)[slot]
     if node.mesh_id == INVALID_NODE.mesh_id do return
     return {MeshHandle(node.mesh_id), MaterialHandle(node.material_id), .CASTS_SHADOW in node.flags}, true
+  } else when T == Light {
+    i := slice.linear_search(self.light_slots[:], slot) or_return
+    return self.lights[i], true
   } else {
     return self.attachments[slot].(T)
   }
@@ -947,7 +972,7 @@ pack_lights :: proc(lights, dst: []Light) -> (count: [LightType]u32, layers: u32
 }
 
 // Write this frame's lights into frame `frame_index`'s light table: the
-// ambient light, then the light slots in slot order, truncated to MAX_LIGHTS,
+// ambient light, then the attached lights, truncated to MAX_LIGHTS,
 // grouped by type (light_count). The shadow casters some camera view (written
 // by flush_cameras) sees are ranked for the shadow maps (select_shadow_casters),
 // and every face of the selected maps is written into the view table.
@@ -965,9 +990,9 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   _, has_eye := main_camera(self)
   eye := &views[CAMERA_VIEW_BASE + u32(self.main_camera)]
   nodes := frame_table(self, .NODES, NodeData, frame_index)
-  for attachment, slot in self.attachments {
+  for &light, i in self.lights {
     if n == MAX_LIGHTS do break
-    light := attachment.(Light) or_continue
+    slot := self.light_slots[i]
     if .VISIBLE not_in nodes[slot].flags do continue
     lights[n] = place_light(light, nodes[slot].world_matrix)
     n += 1

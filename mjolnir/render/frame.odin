@@ -41,7 +41,8 @@ record_compute_commands :: proc(
     {.COMPUTE_SHADER, .TRANSFER},
     {.COMPUTE_SHADER},
   )
-  occlusion_cull(self, cmd, CAMERA_VIEW_BASE, self.camera_slots.high_water)
+  // camera slot 0 is never handed out
+  occlusion_cull(self, cmd, CAMERA_VIEW_BASE + 1, self.camera_slots.high_water - 1)
 }
 
 // Record every camera's passes phase by phase, so one barrier orders each
