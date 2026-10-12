@@ -30,6 +30,8 @@ To use Mjolnir, run `make shader` to compile shaders to SPIR-V and copy the
 - Render to texture
 - Post-process: tonemap, bloom, blur, fog, outline, DoF, crosshatch
 
+See [`examples`](examples.html) for features showcase
+
 ## Build commands
 
 ```bash
@@ -63,26 +65,3 @@ odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 - For visual issues: build with `-define:FRAME_LIMIT=10`, inspect logs.
 - Capture screenshots with `make capture`.
 - Slow the renderer with `-define:RENDER_FPS=4` to read render logs frame by frame.
-- Call `render.debug_ui(&r)` in the `frame` callback for the microui overlay, or pass `show_stats = true` to `render.frame` for renderer stats.
-
-## Read more
-
-- [`architecture`](architecture.html) — layer design, frame phases,
-  world/render boundary, staging, bindless + GPU-driven model
-- [`engine`](engine.html) — building an application and wiring modules together
-- [`examples`](examples.html) — runnable examples with notes
-
-## Module intros
-
-| Layer | Module |
-|---|---|
-| 1 | [containers](containers.html) |
-| 1 | [geometry](geometry.html) |
-| 1 | [input](input.html) |
-| 2 | [platform](platform.html) |
-| 2 | [world](world.html) |
-| 2 | [render](render.html)|
-| 2 | [animation](animation.html) |
-| 2 | [physics](physics.html) |
-| 2 | [navigation](navigation.html) |
-| 3 | [engine](engine.html) |
