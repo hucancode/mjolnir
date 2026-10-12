@@ -19,7 +19,7 @@ App :: struct {
   input:    input.State,
 }
 
-LIGHT_COUNT :: 4
+LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 ENABLE_DIRECTIONAL_LIGHT :: true
@@ -423,7 +423,7 @@ setup :: proc(app: ^App) {
           0.5 + 0.5 * math.sin(f32(i)),
           0.5 + 0.5 * math.cos(f32(i)),
           0.5 + 0.5 * math.sin(f32(i)),
-          1,
+          0.5,
         }
         // Calculate fixed local position in a circle
         angle := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
