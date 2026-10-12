@@ -90,29 +90,7 @@ vec4 bokeh_blur(vec2 uv, float blur_radius) {
         }
     }
 
-    vec4 original = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
-    return total_weight > 0.0 ? color / total_weight : original;
-}
-
-// Fast separable Gaussian blur for performance
-vec4 gaussian_blur(vec2 uv, float blur_radius, bool horizontal) {
-    vec2 texel_size = 1.0 / vec2(textureSize(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
-    vec4 color = vec4(0.0);
-    float total_weight = 0.0;
-
-    float sigma = blur_radius * 0.3;
-    vec2 direction = horizontal ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
-
-    // Use fewer samples for performance
-    for (float i = -blur_radius; i <= blur_radius; i += 1.0) {
-        vec2 offset = direction * i * texel_size;
-        vec4 sample_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), uv + offset);
-        float weight = gaussian_weight(abs(i), sigma);
-
-        color += sample_color * weight;
-        total_weight += weight;
-    }
-
+    // the center sample always lands, so total_weight > 0
     return color / total_weight;
 }
 
@@ -122,17 +100,6 @@ void main() {
     float linear_depth = linearize_depth(depth);
     // Calculate blur amount based on depth
     float blur_radius = compute_blur_amount(linear_depth);
-    vec4 final_color;
-    if (blur_radius < 0.5) {
-        // Sharp - no blur needed
-        final_color = original_color;
-    } else if (blur_radius < 4.0) {
-        // Light blur - use fast Gaussian
-        final_color = gaussian_blur(v_uv, blur_radius, true); // Could do separable passes
-    } else {
-        // Heavy blur - use bokeh effect
-        final_color = bokeh_blur(v_uv, blur_radius);
-    }
-
-    out_color = final_color;
+    // in focus: sharp
+    out_color = blur_radius < 0.5 ? original_color : bokeh_blur(v_uv, blur_radius);
 }

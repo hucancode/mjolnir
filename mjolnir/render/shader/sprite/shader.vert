@@ -77,8 +77,8 @@ layout(location = 3) flat out uint outTextureIndex;
 void main() {
     View camera = views[camera_index];
     uint node_index = uint(gl_InstanceIndex);
-    mat4 world = nodes[node_index].world_matrix;
     NodeData node = nodes[node_index];
+    mat4 world = node.world_matrix;
     MaterialData sprite = materials[node.material_id];
     vec3 camera_right = vec3(camera.view[0][0], camera.view[1][0], camera.view[2][0]);
     vec3 camera_up = vec3(camera.view[0][1], camera.view[1][1], camera.view[2][1]);

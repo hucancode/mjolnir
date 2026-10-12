@@ -42,13 +42,8 @@ void main() {
     // Use fewer samples for efficiency - step by 0.5 for smoother results
     for (float i = -blur_radius; i <= blur_radius; i += 0.5) {
         vec2 offset = blur_direction * i * texel_size;
-        // Choose between Gaussian and box blur based on weight_falloff
-        float weight;
-        if (weight_falloff > 0.0) {
-            weight = gaussian_weight(i, sigma);
-        } else {
-            weight = 1.0;
-        }
+        // weight_falloff blends a box (0) into a Gaussian (1)
+        float weight = mix(1.0, gaussian_weight(i, sigma), weight_falloff);
         color += texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + offset) * weight;
         total_weight += weight;
     }

@@ -19,7 +19,6 @@ RETIRE_GRACE :: FRAMES_IN_FLIGHT + 1
 
 Trash :: union {
   Buffer,
-  Image,
   vk.ImageView,
 }
 
@@ -39,8 +38,6 @@ destroy_item :: proc(device: vk.Device, item: ^TrashItem) {
   switch &t in item.trash {
   case Buffer:
     buffer_destroy(device, &t)
-  case Image:
-    image_destroy(device, &t)
   case vk.ImageView:
     vk.DestroyImageView(device, t, nil)
   }
@@ -68,9 +65,3 @@ deferred_flush :: proc(gctx: ^GPUContext) {
   clear(&gctx.trash)
 }
 
-@(private)
-deferred_destroy :: proc(gctx: ^GPUContext) {
-  delete(gctx.trash)
-  gctx.trash = {}
-  uploads_destroy(gctx)
-}

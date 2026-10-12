@@ -301,104 +301,35 @@ make_cylinder :: proc(
   radius: f32 = 1.0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> Geometry {
-  // Vertices: (segments+1)*2 for body, 1 center+segments+1 for each cap
-  body_verts := (segments + 1) * 2
-  cap_verts := (segments + 2) * 2 // +1 for center, +segments+1 for rim (duplicate first for UV seam)
-  vert_count := body_verts + cap_verts
-  idx_count := segments * 6 + segments * 3 * 2
-  vertices := make([]Vertex, vert_count)
-  indices := make([]u32, idx_count)
+  // The body's top and bottom rings interleaved, then per cap its center and
+  // rim. Every ring repeats its first vertex for the UV seam.
+  ring := segments + 1
+  top_center := 2 * ring
+  bottom_center := top_center + 1 + ring
+  vertices := make([]Vertex, 2 * ring + 2 * (ring + 1))
+  indices := make([]u32, segments * 12)
   half_h := height * 0.5
-  v: u32 = 0
-  // Body vertices (top and bottom rings)
-  for i in 0 ..= segments {
+  vertices[top_center] = {position = {0, half_h, 0}, normal = {0, 1, 0}, color = color, uv = {0.5, 0.5}}
+  vertices[bottom_center] = {position = {0, -half_h, 0}, normal = {0, -1, 0}, color = color, uv = {0.5, 0.5}}
+  for i in 0 ..< ring {
     theta := 2.0 * math.PI * f32(i) / f32(segments)
-    x := math.cos(theta)
-    z := math.sin(theta)
-    // Top ring
-    vertices[v] = Vertex {
-      position = {radius * x, half_h, radius * z},
-      normal   = {x, 0, z},
-      color    = color,
-      uv       = {f32(i) / f32(segments), 0.0},
-    }
-    v += 1
-    // Bottom ring
-    vertices[v] = Vertex {
-      position = {radius * x, -half_h, radius * z},
-      normal   = {x, 0, z},
-      color    = color,
-      uv       = {f32(i) / f32(segments), 1.0},
-    }
-    v += 1
+    x, z := math.cos(theta), math.sin(theta)
+    top, bottom := [3]f32{radius * x, half_h, radius * z}, [3]f32{radius * x, -half_h, radius * z}
+    u := f32(i) / f32(segments)
+    cap_uv := [2]f32{0.5 + 0.5 * x, 0.5 + 0.5 * z}
+    vertices[2 * i] = {position = top, normal = {x, 0, z}, color = color, uv = {u, 0}}
+    vertices[2 * i + 1] = {position = bottom, normal = {x, 0, z}, color = color, uv = {u, 1}}
+    vertices[top_center + 1 + i] = {position = top, normal = {0, 1, 0}, color = color, uv = cap_uv}
+    vertices[bottom_center + 1 + i] = {position = bottom, normal = {0, -1, 0}, color = color, uv = cap_uv}
   }
-  // Top cap center
-  top_center := v
-  vertices[v] = Vertex {
-    position = {0, half_h, 0},
-    normal   = {0, 1, 0},
-    color    = color,
-    uv       = {0.5, 0.5},
-  }
-  v += 1
-  // Top cap rim
-  for i in 0 ..= segments {
-    theta := 2.0 * math.PI * f32(i) / f32(segments)
-    x := math.cos(theta)
-    z := math.sin(theta)
-    vertices[v] = Vertex {
-      position = {radius * x, half_h, radius * z},
-      normal   = {0, 1, 0},
-      color    = color,
-      uv       = {0.5 + 0.5 * x, 0.5 + 0.5 * z},
-    }
-    v += 1
-  }
-  // Bottom cap center
-  bottom_center := v
-  vertices[v] = Vertex {
-    position = {0, -half_h, 0},
-    normal   = {0, -1, 0},
-    color    = color,
-    uv       = {0.5, 0.5},
-  }
-  v += 1
-  // Bottom cap rim
-  for i in 0 ..= segments {
-    theta := 2.0 * math.PI * f32(i) / f32(segments)
-    x := math.cos(theta)
-    z := math.sin(theta)
-    vertices[v] = Vertex {
-      position = {radius * x, -half_h, radius * z},
-      normal   = {0, -1, 0},
-      color    = color,
-      uv       = {0.5 + 0.5 * x, 0.5 + 0.5 * z},
-    }
-    v += 1
-  }
-  // Indices
-  i := 0
-  // Body
+  // per segment: a body quad, then a triangle of each cap
   for seg in 0 ..< segments {
-    a := seg * 2
-    b := a + 1
-    c := (seg + 1) * 2
-    d := c + 1
-    p := indices[i:]
-    p[0], p[1], p[2], p[3], p[4], p[5] = a, c, b, b, c, d
-    i += 6
-  }
-  top_rim := top_center + 1
-  for seg in 0 ..< segments {
-    p := indices[i:]
-    p[0], p[1], p[2] = top_center, top_rim + seg + 1, top_rim + seg
-    i += 3
-  }
-  bottom_rim := bottom_center + 1
-  for seg in 0 ..< segments {
-    p := indices[i:]
-    p[0], p[1], p[2] = bottom_center, bottom_rim + seg, bottom_rim + seg + 1
-    i += 3
+    a, c := seg * 2, (seg + 1) * 2
+    top_rim, bottom_rim := top_center + 1 + seg, bottom_center + 1 + seg
+    p := indices[seg * 12:]
+    p[0], p[1], p[2], p[3], p[4], p[5] = a, c, a + 1, a + 1, c, c + 1
+    p[6], p[7], p[8] = top_center, top_rim + 1, top_rim
+    p[9], p[10], p[11] = bottom_center, bottom_rim, bottom_rim + 1
   }
   return make_geometry(vertices, indices)
 }

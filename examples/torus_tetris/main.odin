@@ -64,7 +64,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   render.CameraController,
+  camera:   mjolnir.CameraController,
   input:    input.State,
   gui:      render.UISystem,
 }
@@ -83,7 +83,7 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = render.orbit_controller()
+  app.camera = mjolnir.orbit_controller()
   font, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
   if err != nil do return
   defer delete(font)
@@ -250,7 +250,7 @@ drop_step :: proc(app: ^App) {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.process_input(&app.gui, &app.input)
-  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   step_game(app, dt)
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)

@@ -1,8 +1,5 @@
 #version 450
 
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec4 inColor;
-
 layout(location = 0) out vec4 outColor;
 
 struct View {
@@ -32,12 +29,26 @@ layout(set = 0, binding = 0) readonly buffer ViewBuffer {
     View views[];
 };
 
+struct Segment {
+    vec3 a;
+    float expiry;
+    vec3 b;
+    uint bypass_depth;
+    vec4 color;
+};
+
+layout(set = 0, binding = 12) readonly buffer DebugLines {
+    Segment segments[];
+};
+
 layout(push_constant) uniform PushConstants {
     uint camera_index;
 };
 
 void main() {
-    View camera = views[camera_index];
-    gl_Position = camera.projection * camera.view * vec4(inPosition, 1.0);
-    outColor = inColor;
+    // vertex 2i is segment i's a end, 2i + 1 its b end
+    Segment s = segments[gl_VertexIndex >> 1];
+    vec3 position = (gl_VertexIndex & 1) == 0 ? s.a : s.b;
+    gl_Position = views[camera_index].view_projection * vec4(position, 1.0);
+    outColor = s.color;
 }

@@ -1,7 +1,6 @@
 package render
 
 import "../input"
-import "gpu"
 import "core:math"
 import "core:sync"
 import mu "vendor:microui"
@@ -11,11 +10,11 @@ import vk "vendor:vulkan"
 // should show. The commands must stay valid until that frame is recorded; a
 // non-empty atlas is copied and uploaded on flush.
 stage_ui :: proc(self: ^Manager, list: DrawList) {
-  ui := &self.internal.ui
+  ui := &self.ui
   ui.commands = list.commands
   if len(list.atlas) == 0 do return
-  sync.mutex_lock(&self.internal.staging.mutex)
-  defer sync.mutex_unlock(&self.internal.staging.mutex)
+  sync.mutex_lock(&self.staging.mutex)
+  defer sync.mutex_unlock(&self.staging.mutex)
   if len(ui.atlas_pixels) != len(list.atlas) {
     delete(ui.atlas_pixels)
     ui.atlas_pixels = make([]u8, len(list.atlas))
@@ -28,19 +27,21 @@ stage_ui :: proc(self: ^Manager, list: DrawList) {
 // Upload the staged atlas when it changed, or when the GPU copy is gone
 // (first frame, after setup).
 @(private)
-flush_ui_atlas :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
-  ui := &self.internal.ui
+flush_ui_atlas :: proc(self: ^Manager) -> (ret: vk.Result) {
+  ui := &self.ui
   if len(ui.atlas_pixels) == 0 do return .SUCCESS
   if !ui.atlas_dirty && ui.font_atlas != {} do return .SUCCESS
   ui.atlas_dirty = false
-  return overlay_upload_font_atlas(ui, gctx, &self.texture_manager)
+  destroy_texture(self, ui.font_atlas)
+  ui.font_atlas, ret = allocate_alpha_texture(self, ui.atlas_pixels, ui.atlas_extent[0], ui.atlas_extent[1])
+  return
 }
 
 // The microui debug context for this frame. Build widgets on the render
 // thread before frame, which draws and closes it. Frames that never call this
 // draw no debug UI.
 debug_ui :: proc(self: ^Manager) -> ^mu.Context {
-  r := &self.internal.ui
+  r := &self.ui
   if !r.debug_open {
     mu.begin(&r.debug_ctx)
     r.debug_open = true
@@ -51,7 +52,7 @@ debug_ui :: proc(self: ^Manager) -> ^mu.Context {
 // End the debug UI frame if debug_ui opened one; true when there is one to draw.
 @(private)
 debug_ui_close :: proc(self: ^Manager) -> bool {
-  r := &self.internal.ui
+  r := &self.ui
   if !r.debug_open do return false
   mu.end(&r.debug_ctx)
   r.debug_open = false
@@ -63,7 +64,7 @@ debug_ui_close :: proc(self: ^Manager) -> bool {
 // With USE_PARALLEL_UPDATE the update thread feeds the microui context that
 // the render thread builds, sharing it across threads.
 debug_ui_input :: proc(self: ^Manager, s: ^input.State) {
-  r := &self.internal.ui
+  r := &self.ui
   ctx := &r.debug_ctx
   hovered := ctx.hover_root != nil
   x, y := i32(math.round(s.cursor.x)), i32(math.round(s.cursor.y))

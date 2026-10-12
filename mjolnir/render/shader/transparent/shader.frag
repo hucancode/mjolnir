@@ -152,11 +152,7 @@ void main() {
         N = normalize(mat3(T, B, N) * normalSample);
     }
 
-    View camera = views[camera_index];
-    mat4 invView = inverse(camera.view);
-    vec3 cameraPos = invView[3].xyz;
-    vec3 V = normalize(cameraPos - inWorldPos);
-    vec3 R = reflect(-V, N);
+    vec3 V = normalize(views[camera_index].position.xyz - inWorldPos);
 
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo.rgb, metallic);

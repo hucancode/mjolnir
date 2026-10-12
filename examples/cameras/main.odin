@@ -28,7 +28,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   render.CameraController,
+  camera:   mjolnir.CameraController,
   input:    input.State,
 }
 
@@ -44,7 +44,7 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = render.orbit_controller()
+  app.camera = mjolnir.orbit_controller()
 
   render.main_camera_look_at(&app.renderer, {0, 6, 12}, {0, 0, 0})
   sun := world.spawn(&app.scene, {6, 12, 6})
@@ -81,15 +81,15 @@ spawn_landmark :: proc(app: ^App, pos: [3]f32, color: render.Color) {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
-  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   runner_phase += dt * 0.6
   follow_target = {7.0 * math.sin(runner_phase), 0.6, 4.0 * math.sin(runner_phase * 2.0)}
   world.translate(&app.scene, runner_handle, follow_target)
 
-  if free, ok := &app.camera.data.(render.FreeCameraData); ok {
+  if free, ok := &app.camera.data.(mjolnir.FreeCameraData); ok {
     free.move_speed = f32(free_speed)
   }
-  if follow, ok := &app.camera.data.(render.FollowCameraData); ok {
+  if follow, ok := &app.camera.data.(mjolnir.FollowCameraData); ok {
     follow.target = follow_target
     follow.offset = {0, f32(follow_offset_y), f32(follow_offset_back)}
     follow.follow_speed = f32(follow_lerp)
@@ -131,15 +131,15 @@ switch_mode :: proc(app: ^App, new_mode: ControllerMode) {
   if mode == new_mode do return
   mode = new_mode
   switch new_mode {
-  case .ORBIT:  app.camera = render.orbit_controller()
-  case .FREE:   app.camera = render.free_controller(f32(free_speed))
-  case .FOLLOW: app.camera = render.follow_controller(follow_target, {0, f32(follow_offset_y), f32(follow_offset_back)}, f32(follow_lerp))
+  case .ORBIT:  app.camera = mjolnir.orbit_controller()
+  case .FREE:   app.camera = mjolnir.free_controller(f32(free_speed))
+  case .FOLLOW: app.camera = mjolnir.follow_controller(follow_target, {0, f32(follow_offset_y), f32(follow_offset_back)}, f32(follow_lerp))
   }
 }
 
 // Orbit distance is the camera's distance to the orbit target; move along the view ray.
 set_orbit_distance :: proc(app: ^App) {
-  orbit, is_orbit := app.camera.data.(render.OrbitCameraData)
+  orbit, is_orbit := app.camera.data.(mjolnir.OrbitCameraData)
   cam, has_cam := render.main_camera(&app.renderer)
   if !is_orbit || !has_cam do return
   dir := linalg.normalize(cam.position - orbit.target)

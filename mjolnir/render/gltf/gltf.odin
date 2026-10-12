@@ -97,25 +97,26 @@ load_material :: proc(
   ok: bool,
 ) {
   if handle, ok = cache[mat]; ok do return
-  albedo, metallic_roughness, normal, emissive: render.TextureHandle
   base_color := [4]f32{1, 1, 1, 1}
   metallic, roughness: f32 = 0, 1
   if mat.has_pbr_metallic_roughness {
     base_color = mat.pbr_metallic_roughness.base_color_factor
     metallic = mat.pbr_metallic_roughness.metallic_factor
     roughness = mat.pbr_metallic_roughness.roughness_factor
-    if tex := mat.pbr_metallic_roughness.metallic_roughness_texture.texture; tex != nil {
-      metallic_roughness = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_UNORM) or_return
-    }
   }
-  if tex := mat.pbr_metallic_roughness.base_color_texture.texture; tex != nil {
-    albedo = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_SRGB) or_return
+  // albedo, metallic-roughness, normal, emissive; color data is sRGB
+  sources := [4]struct {
+    texture: ^cgltf.texture,
+    format:  vk.Format,
+  } {
+    {mat.pbr_metallic_roughness.base_color_texture.texture, .R8G8B8A8_SRGB},
+    {mat.pbr_metallic_roughness.metallic_roughness_texture.texture, .R8G8B8A8_UNORM},
+    {mat.normal_texture.texture, .R8G8B8A8_UNORM},
+    {mat.emissive_texture.texture, .R8G8B8A8_SRGB},
   }
-  if tex := mat.normal_texture.texture; tex != nil {
-    normal = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_UNORM) or_return
-  }
-  if tex := mat.emissive_texture.texture; tex != nil {
-    emissive = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_SRGB) or_return
+  tex: [4]render.TextureHandle
+  for src, i in sources do if src.texture != nil {
+    tex[i] = load_texture(r, src.texture, gltf_path, textures, src.format) or_return
   }
   // render keeps one emissive scale; take the brightest factor channel
   emissive_value := max(mat.emissive_factor[0], mat.emissive_factor[1], mat.emissive_factor[2])
@@ -123,10 +124,10 @@ load_material :: proc(
   handle = render.create_material(
     r,
     .PBR,
-    albedo,
-    metallic_roughness,
-    normal,
-    emissive,
+    tex[0],
+    tex[1],
+    tex[2],
+    tex[3],
     metallic_value = metallic,
     roughness_value = roughness,
     emissive_value = emissive_value,
@@ -163,8 +164,8 @@ load_geometry :: proc(gltf_mesh: ^cgltf.mesh, include_skinning: bool) -> mesh.Ge
       for i in 0 ..< count do append(&indices, vertex_offset + u32(i))
     }
   }
-  if include_skinning do return mesh.make_geometry(vertices[:], indices[:], skinnings[:])
-  return mesh.make_geometry(vertices[:], indices[:])
+  // nil skinnings without include_skinning
+  return mesh.make_geometry(vertices[:], indices[:], skinnings[:])
 }
 
 @(private = "file")

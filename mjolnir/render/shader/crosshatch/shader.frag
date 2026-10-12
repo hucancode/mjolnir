@@ -22,10 +22,8 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint _pad1;
     uint _pad2;
     float hatch_offset_y;
-    float lum_threshold_01;
-    float lum_threshold_02;
-    float lum_threshold_03;
-    float lum_threshold_04;
+    // below threshold i, stroke family i darkens the pixel
+    float lum_thresholds[4];
 };
 
 const float HATCH_BRIGHTNESS = 0.35;
@@ -49,11 +47,12 @@ void main() {
     float a = screen_pos.x + screen_pos.y;
     float b = screen_pos.x - screen_pos.y;
 
+    // the two diagonals, then both again shifted by hatch_offset_y
+    float strokes[4] = float[4](a, b, a - hatch_offset_y, b - hatch_offset_y);
     float hatched = 1.0;
-    if (lum < lum_threshold_01 && stroke_mask(a) > 0.5) hatched = HATCH_BRIGHTNESS;
-    if (lum < lum_threshold_02 && stroke_mask(b) > 0.5) hatched = HATCH_BRIGHTNESS;
-    if (lum < lum_threshold_03 && stroke_mask(a - hatch_offset_y) > 0.5) hatched = HATCH_BRIGHTNESS;
-    if (lum < lum_threshold_04 && stroke_mask(b - hatch_offset_y) > 0.5) hatched = HATCH_BRIGHTNESS;
+    for (int i = 0; i < 4; i++) {
+        if (lum < lum_thresholds[i] && stroke_mask(strokes[i]) > 0.5) hatched = HATCH_BRIGHTNESS;
+    }
 
     out_color = vec4(color * hatched, rgba.a);
 }

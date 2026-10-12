@@ -13,7 +13,7 @@ App :: struct {
   window:    platform.Platform,
   scene:     world.World,
   renderer:  render.Manager,
-  camera:    render.CameraController,
+  camera:    mjolnir.CameraController,
   input:     input.State,
   gltf:      mjolnir.GltfScene,
   // one animator per skinned node of the scene
@@ -32,7 +32,7 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = render.orbit_controller()
+  app.camera = mjolnir.orbit_controller()
   defer mjolnir.gltf_scene_destroy(&app.gltf)
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
@@ -58,7 +58,7 @@ setup :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   rot := dt * math.PI * 0.05
   for h in app.gltf.roots do world.rotate_by(&app.scene, h, rot)
   for s, i in app.gltf.skinned do anim.animator_update(&app.animators[i], &app.gltf.rigs[s.rig], dt)

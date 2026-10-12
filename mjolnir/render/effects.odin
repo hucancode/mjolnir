@@ -36,12 +36,11 @@ FogEffect :: struct {
   end:   f32,
 }
 
+// Below lum_thresholds[i] (tonemapped luminance), stroke family i hatches
+// the pixel: the two diagonals, then both shifted by hatch_offset_y.
 CrossHatchEffect :: struct {
-  hatch_offset_y:   f32,
-  lum_threshold_01: f32,
-  lum_threshold_02: f32,
-  lum_threshold_03: f32,
-  lum_threshold_04: f32,
+  hatch_offset_y: f32,
+  lum_thresholds: [4]f32,
 }
 
 DoFEffect :: struct {

@@ -44,7 +44,7 @@ draw_lists_init :: proc(
     buffer = gpu.buffer_create(&r.gctx, size, {.STORAGE_BUFFER, .INDIRECT_BUFFER}, host_visible = false) or_return
     gpu.write_descriptor(
       &r.gctx,
-      r.texture_manager.descriptor_set,
+      r.scene.bindless_set,
       BINDING_DRAW_LISTS,
       slot + u32(frame),
       .STORAGE_BUFFER,

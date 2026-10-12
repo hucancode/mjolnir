@@ -60,7 +60,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   render.CameraController,
+  camera:   mjolnir.CameraController,
   input:    input.State,
 }
 
@@ -94,7 +94,7 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = render.orbit_controller()
+  app.camera = mjolnir.orbit_controller()
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -238,7 +238,7 @@ drive_circle :: proc(b: ^Body) {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
-  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   if reset_requested {
     reset_requested = false
     physics.teardown(&phys)

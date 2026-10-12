@@ -13,23 +13,6 @@ READ_ONLY_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
   depthCompareOp  = .LESS_OR_EQUAL,
 }
 
-STANDARD_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
-  polygonMode = .FILL,
-  cullMode    = {.BACK},
-  frontFace   = .COUNTER_CLOCKWISE,
-  lineWidth   = 1.0,
-}
-
-DOUBLE_SIDED_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
-  polygonMode = .FILL,
-  lineWidth   = 1.0,
-}
-
-LINE_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
-  polygonMode = .LINE,
-  lineWidth   = 1.0,
-}
-
 BLEND_OVERRIDE := vk.PipelineColorBlendAttachmentState {
   colorWriteMask = {.R, .G, .B, .A},
 }
@@ -62,7 +45,8 @@ HDR_COLOR_FORMAT :: vk.Format.R16G16B16A16_SFLOAT
 // Vulkan values create_graphics_pipeline writes into GraphicsPipelineCreateInfo.
 // Shader stages are SPIR-V code with entry point "main"; `frag` is optional
 // (empty).
-// `raster` and `depth` need no sType. `depth` applies only when
+// Front faces wind counter-clockwise; zero `polygon_mode` and `cull_mode`
+// fill both faces. `depth` needs no sType. `depth` applies only when
 // `depth_format` is set; `blend` holds one entry per color format. Empty
 // `dynamic_states` means viewport + scissor. Pipelines target dynamic
 // rendering with one sample per pixel.
@@ -72,7 +56,8 @@ GraphicsPipelineDesc :: struct {
   vertex_bindings:   []vk.VertexInputBindingDescription,
   vertex_attributes: []vk.VertexInputAttributeDescription,
   topology:          vk.PrimitiveTopology,
-  raster:            vk.PipelineRasterizationStateCreateInfo,
+  polygon_mode:      vk.PolygonMode,
+  cull_mode:         vk.CullModeFlags,
   depth:             vk.PipelineDepthStencilStateCreateInfo,
   blend:             []vk.PipelineColorBlendAttachmentState,
   color_formats:     []vk.Format,
@@ -121,7 +106,13 @@ create_graphics_pipeline :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  desc.raster.sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO
+  raster := vk.PipelineRasterizationStateCreateInfo {
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = desc.polygon_mode,
+    cullMode    = desc.cull_mode,
+    frontFace   = .COUNTER_CLOCKWISE,
+    lineWidth   = 1,
+  }
   multisample := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
@@ -154,7 +145,7 @@ create_graphics_pipeline :: proc(
     pVertexInputState   = &vertex_input,
     pInputAssemblyState = &input_assembly,
     pViewportState      = &viewport,
-    pRasterizationState = &desc.raster,
+    pRasterizationState = &raster,
     pMultisampleState   = &multisample,
     pDepthStencilState  = &desc.depth if desc.depth_format != .UNDEFINED else nil,
     pColorBlendState    = &blend if len(desc.blend) > 0 else nil,
@@ -174,10 +165,6 @@ begin_record :: proc(
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = flags},
   )
-}
-
-end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
-  return vk.EndCommandBuffer(command_buffer)
 }
 
 allocate_descriptor_set :: proc(
@@ -212,20 +199,6 @@ allocate_command_buffer :: proc(
       commandBufferCount = u32(len(out_commands)),
     },
     raw_data(out_commands),
-  )
-}
-
-// Return command buffers to `pool` (default: the graphics pool).
-free_command_buffer :: proc(
-  gctx: ^GPUContext,
-  commands: []vk.CommandBuffer,
-  pool: vk.CommandPool = 0,
-) {
-  vk.FreeCommandBuffers(
-    gctx.device,
-    pool if pool != 0 else gctx.command_pool,
-    u32(len(commands)),
-    raw_data(commands),
   )
 }
 
@@ -311,30 +284,6 @@ write_descriptor :: proc(
   vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
 }
 
-create_pipeline_layout :: proc(
-  gctx: ^GPUContext,
-  pc_range: Maybe(vk.PushConstantRange),
-  ds: ..vk.DescriptorSetLayout,
-) -> (
-  layout: vk.PipelineLayout,
-  ret: vk.Result,
-) {
-  pc_range, has_pc := pc_range.?
-  vk.CreatePipelineLayout(
-    gctx.device,
-    &vk.PipelineLayoutCreateInfo {
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = u32(len(ds)),
-      pSetLayouts = raw_data(ds),
-      pushConstantRangeCount = 1 if has_pc else 0,
-      pPushConstantRanges = &pc_range,
-    },
-    nil,
-    &layout,
-  ) or_return
-  ret = .SUCCESS
-  return
-}
 
 // Discard of one image, all mips and layers: UNDEFINED → GENERAL, ready for
 // `access` at `stage`.
@@ -452,19 +401,6 @@ bind_vertex_index_buffers :: proc(
 
 // Viewport and scissor covering `extent`. Clip-space y points down, as the
 // projections in geometry build it.
-set_viewport_scissor :: proc(command_buffer: vk.CommandBuffer, extent: vk.Extent2D) {
-  viewport := vk.Viewport {
-    width    = f32(extent.width),
-    height   = f32(extent.height),
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = extent,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-}
-
 create_color_attachment :: proc(
   view: vk.ImageView,
   load_op: vk.AttachmentLoadOp = .CLEAR,
@@ -497,6 +433,8 @@ create_depth_attachment :: proc(
   }
 }
 
+// Begin a dynamic rendering scope over `extent`, its viewport and scissor
+// covering it.
 begin_rendering :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
@@ -514,4 +452,8 @@ begin_rendering :: proc(
     pColorAttachments = raw_data(color_attachments),
   }
   vk.CmdBeginRendering(command_buffer, &render_info)
+  // every pipeline's viewport and scissor are dynamic: cover the render area
+  viewport := vk.Viewport{width = f32(extent.width), height = f32(extent.height), maxDepth = 1}
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdSetScissor(command_buffer, 0, 1, &render_info.renderArea)
 }

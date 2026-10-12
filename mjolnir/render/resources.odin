@@ -4,7 +4,43 @@ import cont "../containers"
 import "core:sync"
 import "gpu"
 import "mesh"
-import vk "vendor:vulkan"
+
+// An emitter, stored as the emit shader reads it. std430 rounds the struct to
+// 16 bytes (it holds vec4s); #align(16) keeps the Odin array stride equal to
+// the GLSL one.
+Emitter :: struct #align(16) {
+  initial_velocity:  [3]f32,
+  size_start:        f32,
+  color_start:       [4]f32,
+  color_end:         [4]f32,
+  particle_lifetime: f32,
+  position_spread:   f32,
+  velocity_spread:   f32,
+  // first of this emitter's particles among the frame's new particles;
+  // render writes it every frame
+  emit_first:        u32,
+  size_end:          f32,
+  weight:            f32,
+  weight_spread:     f32,
+  // bindless texture of the particles (texture_index), NO_TEXTURE for none
+  texture_index:     u32,
+  // transform slot the particles spawn from, set by attach
+  node_index:        u32,
+  // particles per second while enabled, accumulated by update
+  emission_rate:     f32,
+  enabled:           b32,
+}
+#assert(size_of(Emitter) == 96)
+
+// A force field, stored as the simulation reads it.
+ForceField :: struct {
+  tangent_strength: f32,
+  strength:         f32,
+  area_of_effect:   f32,
+  // transform slot the field is centered on, set by attach
+  node_index:       u32,
+  enabled:          b32,
+}
 
 @(private)
 init_resource_pools :: proc(self: ^Manager) {
@@ -31,7 +67,7 @@ destroy_resource_pools :: proc(self: ^Manager) {
 @(private)
 tick_resource_pools :: proc(self: ^Manager) {
   gpu.deferred_tick(&self.gctx)
-  texture_manager_tick(&self.texture_manager, &self.gctx)
+  textures_tick(self)
   cont.tick(&self.meshes, self, mesh_retire)
   cont.tick(&self.materials, nil, nil)
   cont.tick(&self.emitters, nil, nil)
@@ -57,7 +93,7 @@ forcefield :: proc(r: ^Manager, h: ForceFieldHandle) -> (^ForceField, bool) #opt
 set_material :: proc(r: ^Manager, h: MaterialHandle, value: Material) -> bool {
   m := cont.get(r.materials, h) or_return
   m^ = value
-  stage_frames(r, &r.internal.staging.materials, h.index)
+  stage_frames(r, &r.staging.materials, h.index)
   return true
 }
 
@@ -74,7 +110,7 @@ set_emitter :: proc(r: ^Manager, h: EmitterHandle, value: Emitter) -> bool {
 set_forcefield :: proc(r: ^Manager, h: ForceFieldHandle, value: ForceField) -> bool {
   ff := cont.get(r.forcefields, h) or_return
   ff^ = value
-  stage_frames(r, &r.internal.staging.forcefields, h.index)
+  stage_frames(r, &r.staging.forcefields, h.index)
   return true
 }
 
@@ -94,7 +130,7 @@ create_mesh :: proc(
     mesh.delete_geometry(geometry_data)
     return
   }
-  staging := &self.internal.staging
+  staging := &self.staging
   sync.mutex_lock(&staging.mutex)
   append(&staging.mesh_handles, handle)
   append(&staging.mesh_geometry, geometry_data)
@@ -109,42 +145,7 @@ destroy_mesh :: proc(self: ^Manager, handle: MeshHandle) {
 // Pool retire callback: no frame in flight reads the mesh any more.
 @(private)
 mesh_retire :: proc(item: ^MeshData, user: rawptr) {
-  free_mesh(&(^Manager)(user).mesh_manager, item^)
-}
-
-// ---------- textures ----------
-
-
-// Load an image file (png, jpg, hdr, ...) into a bindless 2D texture.
-create_texture_from_path :: proc(
-  self: ^Manager,
-  path: string,
-  format: vk.Format = .R8G8B8A8_SRGB,
-  generate_mips: bool = false,
-) -> (
-  handle: TextureHandle,
-  ret: vk.Result,
-) {
-  return create_texture_2d_from_path(&self.gctx, &self.texture_manager, path, format, generate_mips)
-}
-
-// Decode an encoded image (png, jpg, ...) held in memory into a bindless 2D texture.
-create_texture_from_data :: proc(
-  self: ^Manager,
-  data: []u8,
-  format: vk.Format = .R8G8B8A8_SRGB,
-  generate_mips: bool = false,
-) -> (
-  handle: TextureHandle,
-  ret: vk.Result,
-) {
-  return create_texture_2d_from_data(&self.gctx, &self.texture_manager, data, format, generate_mips)
-}
-
-// Free a texture loaded with create_texture_from_*. Its GPU image is released
-// once no frame in flight samples it; teardown frees every texture.
-destroy_texture :: proc(self: ^Manager, handle: TextureHandle) {
-  free_texture(&self.texture_manager, &self.gctx, handle)
+  free_mesh((^Manager)(user), item^)
 }
 
 // ---------- materials ----------
@@ -183,7 +184,7 @@ create_material :: proc(
     frame_columns            = max(frame_columns, 1),
     frame_rows               = max(frame_rows, 1),
   }
-  stage_frames(self, &self.internal.staging.materials, handle.index)
+  stage_frames(self, &self.staging.materials, handle.index)
   return handle, true
 }
 
@@ -243,13 +244,13 @@ material_sprite :: proc(
 set_sprite_frame :: proc(self: ^Manager, handle: MaterialHandle, frame: u32) -> bool {
   m := cont.get(self.materials, handle) or_return
   m.frame_index = frame % (m.frame_columns * m.frame_rows)
-  stage_frames(self, &self.internal.staging.materials, handle.index)
+  stage_frames(self, &self.staging.materials, handle.index)
   return true
 }
 
 destroy_material :: proc(self: ^Manager, handle: MaterialHandle) -> bool {
   cont.free_deferred(&self.materials, handle) or_return
-  stage_frames(self, &self.internal.staging.materials, handle.index)
+  stage_frames(self, &self.staging.materials, handle.index)
   return true
 }
 
@@ -318,7 +319,7 @@ create_emitter :: proc(
   ok: bool,
 ) #optional_ok {
   handle, em := cont.alloc(&self.emitters, EmitterHandle) or_return
-  staging := &self.internal.staging
+  staging := &self.staging
   sync.mutex_lock(&staging.mutex)
   staging.emit_accumulator[handle.index] = 0
   staging.emit_pending[handle.index] = 0
@@ -363,13 +364,13 @@ create_forcefield :: proc(
     area_of_effect   = area_of_effect,
     enabled          = true,
   }
-  stage_frames(self, &self.internal.staging.forcefields, handle.index)
+  stage_frames(self, &self.staging.forcefields, handle.index)
   return handle, true
 }
 
 destroy_forcefield :: proc(self: ^Manager, handle: ForceFieldHandle) -> bool {
   cont.free_deferred(&self.forcefields, handle) or_return
-  stage_frames(self, &self.internal.staging.forcefields, handle.index)
+  stage_frames(self, &self.staging.forcefields, handle.index)
   return true
 }
 
@@ -377,12 +378,12 @@ destroy_forcefield :: proc(self: ^Manager, handle: ForceFieldHandle) -> bool {
 // time and emitter accumulators. Call once per update tick; the next frame
 // emits and simulates everything accumulated since the previous one.
 update :: proc(self: ^Manager, delta_time: f32) {
-  debug_line_advance(&self.internal.debug_line_renderer, delta_time)
+  debug_line_advance(&self.debug_line_renderer, delta_time)
   if delta_time <= 0 do return
-  sync.mutex_lock(&self.internal.staging.mutex)
-  defer sync.mutex_unlock(&self.internal.staging.mutex)
-  self.internal.staging.particle_time += delta_time
-  staging := &self.internal.staging
+  sync.mutex_lock(&self.staging.mutex)
+  defer sync.mutex_unlock(&self.staging.mutex)
+  self.staging.particle_time += delta_time
+  staging := &self.staging
   it := cont.iterator(&self.emitters)
   for em, h in cont.next(&it, EmitterHandle) {
     accum := &staging.emit_accumulator[h.index]

@@ -17,11 +17,6 @@ DEBUG_ORANGE :: [4]f32{1, 0.5, 0, 1}
 
 CIRCLE_SEGMENTS :: 24
 
-@(private = "file")
-dl :: proc(self: ^Manager) -> ^DebugLineRenderer {
-  return &self.internal.debug_line_renderer
-}
-
 // n must be normalized.
 @(private = "file")
 orthonormal_basis :: proc(n: [3]f32) -> (u, v: [3]f32) {
@@ -37,14 +32,12 @@ fill_circle :: proc(
   center, u, v: [3]f32,
   radius: f32,
   color: [4]f32,
-  life: f32,
-  bypass_depth: bool,
 ) {
   prev := center + u * radius
   for i in 1 ..= CIRCLE_SEGMENTS {
     t := f32(i) / f32(CIRCLE_SEGMENTS) * math.TAU
     p := center + u * (radius * math.cos(t)) + v * (radius * math.sin(t))
-    segs[i - 1] = {a = prev, b = p, color = color, life = life, bypass_depth = bypass_depth}
+    segs[i - 1] = {a = prev, b = p, color = color}
     prev = p
   }
 }
@@ -56,10 +49,7 @@ debug_segment :: proc(
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
-  debug_line_add_segments(
-    dl(self),
-    DebugLineSegment{a = a, b = b, color = color, life = life, bypass_depth = bypass_depth},
-  )
+  debug_line_add(&self.debug_line_renderer, life, bypass_depth, {a = a, b = b, color = color})
 }
 
 debug_aabb :: proc(
@@ -124,9 +114,9 @@ push_box_edges :: proc(
   }
   segs: [12]DebugLineSegment
   for e, i in edges {
-    segs[i] = {a = c[e[0]], b = c[e[1]], color = color, life = life, bypass_depth = bypass_depth}
+    segs[i] = {a = c[e[0]], b = c[e[1]], color = color}
   }
-  debug_line_add_segments(dl(self), ..segs[:])
+  debug_line_add(&self.debug_line_renderer, life, bypass_depth, ..segs[:])
 }
 
 debug_circle :: proc(
@@ -139,8 +129,8 @@ debug_circle :: proc(
 ) {
   u, v := orthonormal_basis(linalg.normalize0(normal))
   segs: [CIRCLE_SEGMENTS]DebugLineSegment
-  fill_circle(segs[:], center, u, v, radius, color, life, bypass_depth)
-  debug_line_add_segments(dl(self), ..segs[:])
+  fill_circle(segs[:], center, u, v, radius, color)
+  debug_line_add(&self.debug_line_renderer, life, bypass_depth, ..segs[:])
 }
 
 debug_sphere :: proc(
@@ -155,10 +145,10 @@ debug_sphere :: proc(
   X :: [3]f32{1, 0, 0}
   Y :: [3]f32{0, 1, 0}
   Z :: [3]f32{0, 0, 1}
-  fill_circle(segs[0 * CIRCLE_SEGMENTS:1 * CIRCLE_SEGMENTS], center, Y, Z, radius, color, life, bypass_depth)
-  fill_circle(segs[1 * CIRCLE_SEGMENTS:2 * CIRCLE_SEGMENTS], center, X, Z, radius, color, life, bypass_depth)
-  fill_circle(segs[2 * CIRCLE_SEGMENTS:3 * CIRCLE_SEGMENTS], center, X, Y, radius, color, life, bypass_depth)
-  debug_line_add_segments(dl(self), ..segs[:])
+  fill_circle(segs[0 * CIRCLE_SEGMENTS:1 * CIRCLE_SEGMENTS], center, Y, Z, radius, color)
+  fill_circle(segs[1 * CIRCLE_SEGMENTS:2 * CIRCLE_SEGMENTS], center, X, Z, radius, color)
+  fill_circle(segs[2 * CIRCLE_SEGMENTS:3 * CIRCLE_SEGMENTS], center, X, Y, radius, color)
+  debug_line_add(&self.debug_line_renderer, life, bypass_depth, ..segs[:])
 }
 
 debug_arrow :: proc(
@@ -170,26 +160,20 @@ debug_arrow :: proc(
 ) {
   dir := to - from
   length := linalg.length(dir)
-  if length < 1e-5 {
-    debug_line_add_segments(
-      dl(self),
-      DebugLineSegment{a = from, b = to, color = color, life = life, bypass_depth = bypass_depth},
-    )
-    return
-  }
-  d := dir / length
+  // a zero-length arrow's head collapses onto `to`
+  d := linalg.normalize0(dir)
   u, v := orthonormal_basis(d)
   head_len := min(length * 0.2, 0.5)
   head_r := head_len * 0.4
   base := to - d * head_len
   segs: [5]DebugLineSegment
-  segs[0] = {a = from, b = to, color = color, life = life, bypass_depth = bypass_depth}
+  segs[0] = {a = from, b = to, color = color}
   for i in 0 ..< 4 {
     t := f32(i) / 4.0 * math.TAU
     p := base + u * (head_r * math.cos(t)) + v * (head_r * math.sin(t))
-    segs[1 + i] = {a = to, b = p, color = color, life = life, bypass_depth = bypass_depth}
+    segs[1 + i] = {a = to, b = p, color = color}
   }
-  debug_line_add_segments(dl(self), ..segs[:])
+  debug_line_add(&self.debug_line_renderer, life, bypass_depth, ..segs[:])
 }
 
 debug_axes :: proc(
@@ -205,11 +189,11 @@ debug_axes :: proc(
   z := linalg.quaternion_mul_vector3(rotation, [3]f32{0, 0, scale})
   // Canonical axis colors (pure RGB) — independent of DEBUG_PALETTE.BLUE which is tinted.
   segs := [3]DebugLineSegment {
-    {a = origin, b = origin + x, color = {1, 0, 0, 1}, life = life, bypass_depth = bypass_depth},
-    {a = origin, b = origin + y, color = {0, 1, 0, 1}, life = life, bypass_depth = bypass_depth},
-    {a = origin, b = origin + z, color = {0, 0, 1, 1}, life = life, bypass_depth = bypass_depth},
+    {a = origin, b = origin + x, color = {1, 0, 0, 1}},
+    {a = origin, b = origin + y, color = {0, 1, 0, 1}},
+    {a = origin, b = origin + z, color = {0, 0, 1, 1}},
   }
-  debug_line_add_segments(dl(self), ..segs[:])
+  debug_line_add(&self.debug_line_renderer, life, bypass_depth, ..segs[:])
 }
 
 debug_point :: proc(
@@ -222,9 +206,9 @@ debug_point :: proc(
 ) {
   h := size * 0.5
   segs := [3]DebugLineSegment {
-    {a = p - {h, 0, 0}, b = p + {h, 0, 0}, color = color, life = life, bypass_depth = bypass_depth},
-    {a = p - {0, h, 0}, b = p + {0, h, 0}, color = color, life = life, bypass_depth = bypass_depth},
-    {a = p - {0, 0, h}, b = p + {0, 0, h}, color = color, life = life, bypass_depth = bypass_depth},
+    {a = p - {h, 0, 0}, b = p + {h, 0, 0}, color = color},
+    {a = p - {0, h, 0}, b = p + {0, h, 0}, color = color},
+    {a = p - {0, 0, h}, b = p + {0, 0, h}, color = color},
   }
-  debug_line_add_segments(dl(self), ..segs[:])
+  debug_line_add(&self.debug_line_renderer, life, bypass_depth, ..segs[:])
 }

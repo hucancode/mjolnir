@@ -15,21 +15,12 @@ record_compute_commands :: proc(
   // the draw lists of frame N+1, culled against pyramid[N].
   next_frame_index := (frame_index + 1) % gpu.FRAMES_IN_FLIGHT
   prev_frame_index := (frame_index + gpu.FRAMES_IN_FLIGHT - 1) % gpu.FRAMES_IN_FLIGHT
-  // Same queue: frame N-1's depth writes land before the pyramids read them,
-  // and the draws of the lists finish before they are cleared. The async
-  // queue gets this from its semaphore wait.
-  if !gpu.has_async_compute(&self.gctx) {
-    gpu.memory_barrier(
-      cmd,
-      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-      {.SHADER_READ},
-      {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS, .DRAW_INDIRECT},
-      {.COMPUTE_SHADER, .TRANSFER},
-    )
-  }
+  // Frame N-1's depth writes land before the pyramids read them, and the
+  // draws of the lists finish before they are cleared: the compute
+  // submission waits for graphics N-1 (gpu.submit_queue_and_present).
   // Every camera's pyramid and list clear, then one cull over every camera
   // slot; an empty slot's view draws nothing.
-  vk.CmdBindPipeline(cmd, .COMPUTE, self.internal.visibility.reduce_pipeline)
+  vk.CmdBindPipeline(cmd, .COMPUTE, self.pipelines[.DEPTH_REDUCE])
   it := cont.iterator(&self.cameras)
   for cam in cont.next(&it, CameraHandle) {
     draw_lists_clear(&cam.draws, cmd, next_frame_index)
@@ -57,7 +48,7 @@ record_compute_commands :: proc(
 // so the passes record only their scopes.
 @(private)
 record_camera_passes :: proc(self: ^Manager, frame_index: u32) {
-  cmd := self.internal.command_buffers[frame_index]
+  cmd := self.command_buffers[frame_index]
   discards := make([dynamic]gpu.ImageDiscard, context.temp_allocator)
   it := cont.iterator(&self.cameras)
   for cam in cont.next(&it, CameraHandle) {
@@ -113,15 +104,10 @@ record_camera_passes :: proc(self: ^Manager, frame_index: u32) {
 // final swapchain transition to PRESENT_SRC — the one layout transition
 // unified image layouts doesn't cover (the compositor is outside Vulkan).
 @(private)
-record_frame :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  swapchain_image: vk.Image,
-  swapchain_view: vk.ImageView,
-  swapchain_extent: vk.Extent2D,
-  debug_ui_enabled: bool,
-) -> vk.Result {
-  cmd := self.internal.command_buffers[frame_index]
+record_frame :: proc(self: ^Manager, frame_index: u32, debug_ui_enabled: bool) -> vk.Result {
+  cmd := self.command_buffers[frame_index]
+  sc := &self.swapchain
+  swapchain_image, swapchain_view := sc.images[sc.image_index], sc.views[sc.image_index]
   gpu.begin_record(cmd) or_return
   bind_scene_sets(self, cmd, .GRAPHICS, frame_index)
   bind_scene_sets(self, cmd, .COMPUTE, frame_index)
@@ -132,61 +118,37 @@ record_frame :: proc(
 
   main_cam, has_main := cont.get(self.cameras, self.main_camera)
   if has_main {
-    draw_lists_copy_counts(&main_cam.draws, cmd, frame_index, &self.internal.draw_count_readback[frame_index])
+    draw_lists_copy_counts(&main_cam.draws, cmd, frame_index, &self.draw_count_readback[frame_index])
     // The lit image reaches post-processing, which writes the swapchain image.
     gpu.memory_barrier(cmd, {.COLOR_ATTACHMENT_WRITE}, {.SHADER_READ}, {.COLOR_ATTACHMENT_OUTPUT}, {.FRAGMENT_SHADER})
     gpu.image_discard_barrier(
       cmd,
       {swapchain_image, {.COLOR}, {.COLOR_ATTACHMENT_WRITE}, {.COLOR_ATTACHMENT_OUTPUT}},
     )
-    post_process_record(
-      &self.post_process,
-      cmd,
-      frame_index,
-      swapchain_extent,
-      swapchain_view,
-      main_cam,
-      &self.texture_manager,
-      self.internal.scene.layout,
-    )
+    post_process_record(self, frame_index, sc.extent, swapchain_view, main_cam)
     debug_line_record(
-      &self.internal.debug_line_renderer,
-      cmd,
+      self,
       frame_index,
-      self.internal.scene.layout,
       self.main_camera.index,
       swapchain_view,
-      swapchain_extent,
+      sc.extent,
       camera_image(self, main_cam, .DEPTH, frame_index),
     )
   }
-  overlay_record(
-    &self.internal.ui,
-    self.internal.scene.layout,
-    cmd,
-    swapchain_view,
-    swapchain_extent,
-    frame_index,
-    has_main,
-    debug_ui_enabled,
-  )
+  overlay_record(self, cmd, swapchain_view, sc.extent, frame_index, has_main, debug_ui_enabled)
   // Staged commands point into caller memory valid for this frame only.
-  self.internal.ui.commands = nil
+  self.ui.commands = nil
 
   // Simulate after drawing: the next frame draws this frame's particles.
   particles_simulate(self, cmd)
-  // Culling and the depth pyramid, on the async compute queue when there is
-  // one (ordering in gpu.submit_queue_and_present).
-  compute_cmd := cmd
-  if gpu.has_async_compute(&self.gctx) {
-    compute_cmd = self.internal.compute_command_buffers[frame_index]
-    gpu.begin_record(compute_cmd) or_return
-    bind_scene_sets(self, compute_cmd, .COMPUTE, frame_index)
-  }
+  // Culling and the depth pyramid in their own submission, on the async
+  // compute queue when there is one (ordering in
+  // gpu.submit_queue_and_present).
+  compute_cmd := self.compute_command_buffers[frame_index]
+  gpu.begin_record(compute_cmd) or_return
+  bind_scene_sets(self, compute_cmd, .COMPUTE, frame_index)
   record_compute_commands(self, frame_index, compute_cmd)
-  if gpu.has_async_compute(&self.gctx) {
-    gpu.end_record(compute_cmd) or_return
-  }
+  vk.EndCommandBuffer(compute_cmd) or_return
 
   present_barrier := vk.ImageMemoryBarrier2 {
     sType = .IMAGE_MEMORY_BARRIER_2,
@@ -206,7 +168,7 @@ record_frame :: proc(
     pImageMemoryBarriers    = &present_barrier,
   }
   vk.CmdPipelineBarrier2(cmd, &present_dep)
-  gpu.end_record(cmd) or_return
+  vk.EndCommandBuffer(cmd) or_return
   return .SUCCESS
 }
 
@@ -222,19 +184,25 @@ frame :: proc(
   show_stats := false,
 ) -> bool {
   gctx := &self.gctx
+  // the frame-in-flight slot this frame records
+  frame_index := u32(gctx.frame_serial % gpu.FRAMES_IN_FLIGHT)
   // Wait before flushing: flush rewrites this frame slot's per-frame buffers,
   // and the stats panel reads its draw count readback.
-  res := gpu.wait_frame(gctx) if self.internal.level_ready else .SUCCESS
+  res := gpu.wait_frame(gctx) if self.level_ready else .SUCCESS
   if show_stats do stats_panel(self)
   debug_ui_drawn := debug_ui_close(self)
-  if !self.internal.level_ready do return true
+  if !self.level_ready do return true
   if res == .SUCCESS {
     tick_resource_pools(self)
-    res = flush(self, gctx, self.frame_index)
+    res = flush(self, gctx, frame_index)
   }
-  if res == .SUCCESS do res = present(self, debug_ui_drawn)
-  // the slot of the next submission, whether or not presenting succeeded
-  self.frame_index = u32(gctx.frame_serial % gpu.FRAMES_IN_FLIGHT)
+  sc := &self.swapchain
+  if res == .SUCCESS do res = gpu.acquire_next_image(gctx.device, sc, frame_index)
+  if res == .SUCCESS do res = post_process_ensure_images(self, sc.extent, frame_index)
+  if res == .SUCCESS do res = record_frame(self, frame_index, debug_ui_drawn)
+  if res == .SUCCESS {
+    res = gpu.submit_queue_and_present(gctx, sc, self.command_buffers[frame_index], self.compute_command_buffers[frame_index])
+  }
   if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
     res = recreate_swapchain(self, framebuffer_size, dpi_scale)
   }
@@ -243,24 +211,4 @@ frame :: proc(
     return false
   }
   return true
-}
-
-@(private)
-present :: proc(self: ^Manager, debug_ui_enabled: bool) -> vk.Result {
-  gctx := &self.gctx
-  sc := &self.swapchain
-  gpu.acquire_next_image(gctx.device, sc, self.frame_index) or_return
-  post_process_ensure_images(&self.post_process, gctx, &self.texture_manager, sc.extent, self.frame_index) or_return
-  record_frame(
-    self,
-    self.frame_index,
-    sc.images[sc.image_index],
-    sc.views[sc.image_index],
-    sc.extent,
-    debug_ui_enabled,
-  ) or_return
-  graphics_cmd := self.internal.command_buffers[self.frame_index]
-  compute_cmd := self.internal.compute_command_buffers[self.frame_index]
-  gpu.submit_queue_and_present(gctx, sc, &graphics_cmd, &compute_cmd, self.frame_index) or_return
-  return .SUCCESS
 }

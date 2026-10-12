@@ -39,28 +39,6 @@ when ENABLE_VALIDATION_LAYERS {
   VALIDATION_LAYERS :: []cstring{}
 }
 
-@(private)
-SwapchainSupport :: struct {
-  capabilities:  vk.SurfaceCapabilitiesKHR,
-  formats:       []vk.SurfaceFormatKHR, // Owned by this struct if allocated by it
-  present_modes: []vk.PresentModeKHR, // Owned by this struct if allocated by it
-}
-
-@(private)
-swapchain_support_destroy :: proc(support: ^SwapchainSupport) {
-  delete(support.formats)
-  support.formats = nil
-  delete(support.present_modes)
-  support.present_modes = nil
-}
-
-@(private)
-FoundQueueFamilyIndices :: struct {
-  graphics_family: u32,
-  present_family:  u32,
-  compute_family:  u32,
-}
-
 GPUContext :: struct {
   instance:             vk.Instance,
   device:               vk.Device,
@@ -79,8 +57,8 @@ GPUContext :: struct {
   device_properties:    vk.PhysicalDeviceProperties,
   trash:                [dynamic]TrashItem, // loose vk resources awaiting deferred destruction
   uploads:              Uploads, // staged writes for the next command buffer
-  // Async compute only: timeline semaphores signalled with the frame serial
-  // + 1 when that frame's graphics / compute submission completes.
+  // Timeline semaphores signalled with the frame serial + 1 when that
+  // frame's graphics / compute submission completes.
   graphics_timeline:    vk.Semaphore,
   compute_timeline:     vk.Semaphore,
   frame_serial:         u64, // frames submitted so far
@@ -133,7 +111,7 @@ device_init :: proc(self: ^GPUContext) -> vk.Result {
   physical_device_init(self) or_return
   logical_device_init(self) or_return
   command_pool_init(self) or_return
-  if has_async_compute(self) do timelines_init(self) or_return
+  timelines_init(self) or_return
   return .SUCCESS
 }
 
@@ -155,10 +133,9 @@ timelines_init :: proc(self: ^GPUContext) -> vk.Result {
 shutdown :: proc(self: ^GPUContext) {
   vk.DeviceWaitIdle(self.device)
   deferred_flush(self)
-  deferred_destroy(self)
-  if self.descriptor_pool != 0 {
-    vk.DestroyDescriptorPool(self.device, self.descriptor_pool, nil)
-  }
+  delete(self.trash)
+  uploads_destroy(self)
+  vk.DestroyDescriptorPool(self.device, self.descriptor_pool, nil)
   vk.DestroyCommandPool(self.device, self.command_pool, nil)
   vk.DestroyCommandPool(self.device, self.compute_command_pool, nil)
   vk.DestroySemaphore(self.device, self.graphics_timeline, nil)
@@ -184,18 +161,8 @@ debug_callback :: proc "system" (
     message,
     strings.index(message, "\nThe Vulkan spec states:"),
   )
-  switch {
-  case .ERROR in message_severity:
-    log.errorf("Validation: %s", short_msg if verbose else message)
-  case .WARNING in message_severity:
-    log.warnf("Validation: %s", short_msg if verbose else message)
-  case .INFO in message_severity:
-    log.infof("Validation: %s", short_msg if verbose else message)
-  case .VERBOSE in message_severity:
-    log.debugf("Validation: %s", short_msg if verbose else message)
-  case:
-    log.infof("Validation: %s", short_msg if verbose else message)
-  }
+  level: log.Level = .Error if .ERROR in message_severity else .Warning if .WARNING in message_severity else .Info
+  log.logf(level, "Validation: %s", short_msg if verbose else message)
   return false
 }
 
@@ -254,53 +221,26 @@ vulkan_instance_init :: proc(
   return .SUCCESS
 }
 
+// What `surface` supports on `physical_device`; the slices are in the temp
+// allocator.
 @(private)
 query_swapchain_support :: proc(
   physical_device: vk.PhysicalDevice,
   surface: vk.SurfaceKHR,
 ) -> (
-  support: SwapchainSupport,
+  capabilities: vk.SurfaceCapabilitiesKHR,
+  formats: []vk.SurfaceFormatKHR,
+  present_modes: []vk.PresentModeKHR,
   res: vk.Result,
 ) {
-  vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(
-    physical_device,
-    surface,
-    &support.capabilities,
-  ) or_return
+  vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &capabilities) or_return
   count: u32
-  vk.GetPhysicalDeviceSurfaceFormatsKHR(
-    physical_device,
-    surface,
-    &count,
-    nil,
-  ) or_return
-  if count > 0 {
-    support.formats = make([]vk.SurfaceFormatKHR, count)
-    defer if res != .SUCCESS do delete(support.formats)
-    vk.GetPhysicalDeviceSurfaceFormatsKHR(
-      physical_device,
-      surface,
-      &count,
-      raw_data(support.formats),
-    ) or_return
-  }
-  vk.GetPhysicalDeviceSurfacePresentModesKHR(
-    physical_device,
-    surface,
-    &count,
-    nil,
-  ) or_return
-  if count > 0 {
-    support.present_modes = make([]vk.PresentModeKHR, count)
-    defer if res != .SUCCESS do delete(support.present_modes)
-    vk.GetPhysicalDeviceSurfacePresentModesKHR(
-      physical_device,
-      surface,
-      &count,
-      raw_data(support.present_modes),
-    ) or_return
-  }
-  res = .SUCCESS
+  vk.GetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &count, nil) or_return
+  formats = make([]vk.SurfaceFormatKHR, count, context.temp_allocator)
+  vk.GetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &count, raw_data(formats)) or_return
+  vk.GetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &count, nil) or_return
+  present_modes = make([]vk.PresentModeKHR, count, context.temp_allocator)
+  vk.GetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &count, raw_data(present_modes)) or_return
   return
 }
 
@@ -349,13 +289,12 @@ score_physical_device :: proc(
     return 0, .SUCCESS
   }
   log.infof("vulkan: device supports all required extensions")
-  support := query_swapchain_support(device, self.surface) or_return
-  defer swapchain_support_destroy(&support)
-  if len(support.formats) == 0 || len(support.present_modes) == 0 {
+  _, formats, present_modes := query_swapchain_support(device, self.surface) or_return
+  if len(formats) == 0 || len(present_modes) == 0 {
     log.infof("Device %s: inadequate swapchain support.", device_name_cstring)
     return 0, .SUCCESS
   }
-  _, qf_res := find_queue_families(device, self.surface)
+  _, _, _, qf_res := find_queue_families(device, self.surface)
   if qf_res != .SUCCESS {
     log.infof("Device %s: no suitable queue families.", device_name_cstring)
     return 0, .SUCCESS
@@ -418,7 +357,7 @@ find_queue_families :: proc(
   physical_device: vk.PhysicalDevice,
   surface: vk.SurfaceKHR,
 ) -> (
-  indices: FoundQueueFamilyIndices,
+  graphics, present, compute: u32,
   res: vk.Result,
 ) {
   count: u32
@@ -464,8 +403,7 @@ find_queue_families :: proc(
   if g_fam, ok_g := maybe_graphics_family.?; ok_g {
     if p_fam, ok_p := maybe_present_family.?; ok_p {
       // Without a dedicated queue, compute runs on the graphics queue.
-      c_fam := maybe_compute_family.? or_else g_fam
-      return FoundQueueFamilyIndices{g_fam, p_fam, c_fam}, .SUCCESS
+      return g_fam, p_fam, maybe_compute_family.? or_else g_fam, .SUCCESS
     }
   }
   res = .ERROR_FEATURE_NOT_PRESENT
@@ -474,32 +412,20 @@ find_queue_families :: proc(
 
 @(private = "file")
 logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
-  indices := find_queue_families(self.physical_device, self.surface) or_return
-  self.graphics_family = indices.graphics_family
-  self.present_family = indices.present_family
-  self.compute_family = indices.compute_family
-  queue_create_infos_list := make(
-    [dynamic]vk.DeviceQueueCreateInfo,
-    0,
-    3,
-    context.temp_allocator,
-  )
-  unique_queue_families := make(map[u32]struct {
-    }, 3, context.temp_allocator)
-  unique_queue_families[self.graphics_family] = {}
-  unique_queue_families[self.present_family] = {}
-  unique_queue_families[self.compute_family] = {}
+  self.graphics_family, self.present_family, self.compute_family = find_queue_families(self.physical_device, self.surface) or_return
+  // one queue of each distinct family
   queue_priority: f32 = 1.0
-  for family_index in unique_queue_families {
-    append(
-      &queue_create_infos_list,
-      vk.DeviceQueueCreateInfo {
-        sType = .DEVICE_QUEUE_CREATE_INFO,
-        queueFamilyIndex = family_index,
-        queueCount = 1,
-        pQueuePriorities = &queue_priority,
-      },
-    )
+  queue_infos: [3]vk.DeviceQueueCreateInfo
+  queue_count := 0
+  families: for family in ([3]u32{self.graphics_family, self.present_family, self.compute_family}) {
+    for info in queue_infos[:queue_count] do if info.queueFamilyIndex == family do continue families
+    queue_infos[queue_count] = {
+      sType            = .DEVICE_QUEUE_CREATE_INFO,
+      queueFamilyIndex = family,
+      queueCount       = 1,
+      pQueuePriorities = &queue_priority,
+    }
+    queue_count += 1
   }
   unified_layouts_features := PhysicalDeviceUnifiedImageLayoutsFeaturesKHR {
     sType               = vk.StructureType(1000527000),
@@ -538,8 +464,8 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   }
   device_create_info := vk.DeviceCreateInfo {
     sType                   = .DEVICE_CREATE_INFO,
-    queueCreateInfoCount    = u32(len(queue_create_infos_list)),
-    pQueueCreateInfos       = raw_data(queue_create_infos_list),
+    queueCreateInfoCount    = u32(queue_count),
+    pQueueCreateInfos       = raw_data(queue_infos[:]),
     ppEnabledExtensionNames = raw_data(DEVICE_EXTENSIONS),
     enabledExtensionCount   = u32(len(DEVICE_EXTENSIONS)),
     pEnabledFeatures        = &basic_features,
@@ -583,19 +509,7 @@ descriptor_pool_init :: proc(
     pPoolSizes    = raw_data(pool_sizes),
     maxSets       = max_sets,
   }
-  log.infof("Creating descriptor pool with maxSets: %d", pool_info.maxSets)
-  result := vk.CreateDescriptorPool(
-    self.device,
-    &pool_info,
-    nil,
-    &self.descriptor_pool,
-  )
-  if result != .SUCCESS {
-    log.infof("Failed to create descriptor pool with error: %v", result)
-    return result
-  }
-  log.infof("Vulkan descriptor pool created successfully")
-  return .SUCCESS
+  return vk.CreateDescriptorPool(self.device, &pool_info, nil, &self.descriptor_pool)
 }
 
 @(private = "file")
@@ -669,7 +583,7 @@ end_single_time_command :: proc(
   self: ^GPUContext,
   cmd_buffer: ^vk.CommandBuffer,
 ) -> vk.Result {
-  end_record(cmd_buffer^) or_return
+  vk.EndCommandBuffer(cmd_buffer^) or_return
   cmd_info := vk.CommandBufferSubmitInfo {
     sType         = .COMMAND_BUFFER_SUBMIT_INFO,
     commandBuffer = cmd_buffer^,

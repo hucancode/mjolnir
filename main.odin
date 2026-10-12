@@ -14,7 +14,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   render.CameraController,
+  camera:   mjolnir.CameraController,
   input:    input.State,
 }
 
@@ -86,7 +86,7 @@ add_node_clip :: proc(app: ^App, node: world.NodeHandle, clip: animation.Clip) -
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   if !app.input.keyboard_captured {
     it := 0
     for key, pressed in input.next_key_edge(&app.input, &it) do on_key(app, key, pressed)
@@ -123,7 +123,7 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = render.orbit_controller()
+  app.camera = mjolnir.orbit_controller()
   defer for &c in characters do mjolnir.gltf_scene_destroy(&c.scene)
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
@@ -663,10 +663,10 @@ on_key :: proc(app: ^App, key: input.Key, pressed: bool) {
   log.infof("key %v %v", key, "PRESS" if pressed else "RELEASE")
   if !pressed do return
   if key == .TAB {
-    if _, is_free := app.camera.data.(render.FreeCameraData); is_free {
-      app.camera = render.orbit_controller()
+    if _, is_free := app.camera.data.(mjolnir.FreeCameraData); is_free {
+      app.camera = mjolnir.orbit_controller()
     } else {
-      app.camera = render.free_controller()
+      app.camera = mjolnir.free_controller()
     }
   }
 }

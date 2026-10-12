@@ -118,54 +118,29 @@ Material :: struct {
   type:                     MaterialType,
 }
 
-// Internal owns GPU primitives and CPU-side bookkeeping. Private to render.
+// Pipelines with a single variant; the material, light and post-process
+// pipelines are indexed by their own enums.
 @(private)
-Internal :: struct {
-  command_buffers:              [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  compute_command_buffers:      [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  // Set by setup, cleared by teardown; frame renders nothing while false.
-  level_ready:                  bool,
-  // Scene storage buffers, bound together through `scene`: the per-frame
-  // tables in one arena per frame in flight, and the mesh table.
-  frame_arena:                  [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
-  arena_layout:                 ArenaLayout,
-  mesh_data_buffer:             gpu.Buffer,
-  // the main camera's draw counts of each frame, copied back for stats
-  draw_count_readback:          [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
-  scene:                        SceneDescriptors,
-  bone_matrix_slab:             cont.SlabAllocator,
-  bones:                        map[u32]BonePalette,
-  // Pass renderers - never accessed from outside the render package.
-  material_pipelines:           [MaterialType]vk.Pipeline,
-  direct_light:                 DirectLightRenderer,
-  particles:                    ParticlesRenderer,
-  debug_line_renderer:          DebugLineRenderer,
-  ui:                           OverlayRenderer,
-  // Compute / culling / shadow systems.
-  visibility:                   OcclusionSystem,
-  shadow:                       ShadowSystem,
-  // This frame's lights per type, written by collect_lights in type order.
-  light_count:                  [LightType]u32,
-  // holders of the shadow maps, selected by collect_lights
-  shadow_casters:               [MAX_SHADOW_MAPS]Caster,
-  // shadow views, one per atlas layer, the frame's shadow maps take
-  // (pack_lights)
-  shadow_view_count:            u32,
-  shadow_atlas:                 [gpu.FRAMES_IN_FLIGHT]ShadowAtlas,
-  staging:                      Staging,
+PipelineId :: enum {
+  CULL,
+  DEPTH_REDUCE,
+  SHADOW_DEPTH,
+  PARTICLE_EMIT,
+  PARTICLE_SIMULATE,
+  PARTICLE_DRAW,
+  DEBUG_LINE,
+  OVERLAY,
 }
 
-// Public Manager surface. Callers outside the render package use these
-// fields and the public procs.
-//   * meshes / materials / emitters / forcefields: CPU-side
-//     resources. Create and change them through the procs in resources.odin;
-//     changes reach the GPU through staging.
+// Callers outside the render package use the fields listed here and the
+// public procs; every other field is render's own state.
+//   * meshes / materials / emitters / forcefields: resources, stored as the
+//     shaders read them. Create and change them through the procs in
+//     resources.odin; changes reach the GPU through staging.
 //   * instances: per-slot looks (mesh, light, emitter, ...), indexed by
 //     transform slot. A slot is whatever index the caller uses to identify a
 //     transform; the engine uses world node indices.
 //   * cameras: views with their GPU targets. `main_camera` is presented.
-//   * mesh_manager / texture_manager: the bindless mesh arena and texture
-//     arrays.
 //   * builtin_meshes / builtin_materials: builtin primitives and solid
 //     colors, created by init.
 //   * ambient: environment lighting; write ibl_intensity, skybox_blur and
@@ -175,31 +150,71 @@ Internal :: struct {
 // The microui debug context is reached through debug_ui (overlay.odin).
 //
 // Lifecycle, in pairs:
-//   create_instance + init / shutdown: device, swapchain, pipelines, pools.
-//   setup / teardown: level resources (descriptors, cameras, slots, textures).
+//   init / shutdown: device, swapchain, pipelines, pools.
+//   setup / teardown: level resources (cameras, slots, textures).
 // setup and teardown may be called any number of times between init and
 // shutdown, from any point outside frame.
 Manager :: struct {
-  gctx:              gpu.GPUContext,
-  swapchain:         gpu.Swapchain,
-  frame_index:       u32, // frame in flight recorded next: frame_serial % FRAMES_IN_FLIGHT
-  internal:          Internal,
-  meshes:            cont.Pool(MeshData),
-  materials:         cont.Pool(Material),
-  emitters:          cont.Pool(Emitter),
-  forcefields:       cont.Pool(ForceField),
-  instances:         [dynamic]Instance,
-  builtin_materials: [Color]MaterialHandle,
-  builtin_meshes:    [Primitive]MeshHandle,
-  cameras:           cont.Pool(Camera),
-  main_camera:       CameraHandle,
+  gctx:                    gpu.GPUContext,
+  swapchain:               gpu.Swapchain,
+  meshes:                  cont.Pool(MeshData),
+  materials:               cont.Pool(Material),
+  emitters:                cont.Pool(Emitter),
+  forcefields:             cont.Pool(ForceField),
+  instances:               [dynamic]Instance,
+  builtin_materials:       [Color]MaterialHandle,
+  builtin_meshes:          [Primitive]MeshHandle,
+  cameras:                 cont.Pool(Camera),
+  main_camera:             CameraHandle,
   // Single source of truth for active scene node count. Drives compute
   // dispatch sizing across visibility, depth pyramid, and both shadow culls.
-  node_count:        u32,
-  mesh_manager:      MeshManager,
-  texture_manager:   TextureManager,
-  ambient:           AmbientRenderer,
-  post_process:      PostProcessRenderer,
+  node_count:              u32,
+  ambient:                 AmbientRenderer,
+  post_process:            PostProcessRenderer,
+  // ---------- render's own state ----------
+  command_buffers:         [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  compute_command_buffers: [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  // Set by setup, cleared by teardown; frame renders nothing while false.
+  level_ready:             bool,
+  scene:                   SceneDescriptors,
+  pipelines:               [PipelineId]vk.Pipeline,
+  material_pipelines:      [MaterialType]vk.Pipeline,
+  light_pipelines:         [LightType]vk.Pipeline,
+  // bindless arrays: textures (level lifetime) and samplers
+  textures:                cont.Pool(gpu.Image),
+  samplers:                [SamplerType]vk.Sampler,
+  // the mesh arena: shared vertex, index and skinning buffers
+  mesh_buffers:            [MeshStream]gpu.Buffer,
+  mesh_slabs:              [MeshStream]cont.SlabAllocator,
+  // Scene storage buffers, bound together through `scene`: the per-frame
+  // tables in one arena per frame in flight, and the mesh table.
+  frame_arena:             [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
+  arena_layout:            ArenaLayout,
+  mesh_data_buffer:        gpu.Buffer,
+  // the main camera's draw counts of each frame, copied back for stats
+  draw_count_readback:     [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
+  bone_matrix_slab:        cont.SlabAllocator,
+  bones:                   map[u32]BonePalette,
+  // one per pyramid slot: groups done this dispatch; the last one resets it
+  pyramid_counters:        gpu.Buffer,
+  // particles: the ring, the alive list (an indirect draw header followed by
+  // one particle index per vertex) and this frame's simulation inputs
+  particle_buffer:         gpu.Buffer,
+  particle_alive_buffer:   gpu.Buffer,
+  particle_params:         ParticleSystemParams,
+  debug_line_renderer:     DebugLineRenderer,
+  ui:                      OverlayRenderer,
+  // This frame's lights per type, written by collect_lights in type order.
+  light_count:             [LightType]u32,
+  // holders of the shadow maps, selected by collect_lights
+  shadow_casters:          [MAX_SHADOW_MAPS]Caster,
+  // shadow views, one per atlas layer, the frame's shadow maps take
+  // (pack_lights)
+  shadow_view_count:       u32,
+  shadow_atlas:            [gpu.FRAMES_IN_FLIGHT]ShadowAtlas,
+  // the shadow views' shared draw list
+  shadow_draws:            DrawLists,
+  staging:                 Staging,
 }
 
 AttachmentType :: enum {
@@ -211,9 +226,9 @@ AttachmentType :: enum {
   DEPTH              = 5,
 }
 
+// The aspect ratio follows the camera's extent.
 PerspectiveProjection :: struct {
-  fov:          f32,
-  aspect_ratio: f32,
+  fov: f32,
 }
 
 OrthographicProjection :: struct {

@@ -26,7 +26,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   render.CameraController,
+  camera:   mjolnir.CameraController,
   input:    input.State,
 }
 
@@ -44,7 +44,7 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = render.orbit_controller()
+  app.camera = mjolnir.orbit_controller()
 
   cube_body_to_mesh = make(map[physics.BodyHandle]world.NodeHandle)
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
@@ -89,7 +89,7 @@ should_close :: proc(app: ^App) -> bool {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   mouse_click: if input.mouse_pressed(&app.input, .LEFT) && !app.input.mouse_captured {
     ray_origin, ray_dir, ok := render.cursor_ray(&app.renderer, app.input.cursor)
     if !ok do break mouse_click

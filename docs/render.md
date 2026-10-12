@@ -127,8 +127,9 @@ if l, ok := render.attachment(&r, slot, render.LightAttachment); ok {
   (`point_light_attachment`, `directional_light_attachment`,
   `spot_light_attachment` fill in the defaults).
 
-`render.stats(&r)` reports texture, mesh, material and slot counts
-and the main camera's opaque draw count.
+`render.frame(&r, ..., show_stats = true)` shows texture, mesh,
+material and slot counts and the main camera's opaque draw count in the
+debug UI.
 
 ## Staging
 
@@ -177,11 +178,15 @@ before reuse.
 
 Everything else is private to `package render`:
 
+- Render keeps its state as flat fields of `Manager`: one array of
+  pipelines per kind (`pipelines` by `PipelineId`, `material_pipelines`,
+  `light_pipelines`), the bindless texture pool and samplers, the scene
+  buffers. A pass is procs over that state, not a struct of its own.
 - `bindless_*.odin` define render's arrays on top of the `gpu`
   mechanism: the texture array (2D and cube textures share it, the
   shaders aliasing a `textureCube` array onto its binding) and the
-  sampler array (`TextureManager`), the mesh arena (`MeshManager`: shared vertex,
-  index and skinning buffers sub-allocated by the containers slab
+  sampler array, the mesh arena (one buffer per `MeshStream`: vertex,
+  index and skinning, each sub-allocated by a containers slab
   allocator), the scene descriptor set, and the indirect draw lists
   (`DrawLists`) that culling writes and draws consume.
 - One scene descriptor set (set 0, per frame in flight, bindings in
@@ -201,8 +206,7 @@ Everything else is private to `package render`:
 - `pass_*.odin` hold one pass each: `direct_light` (every light type,
   ambient included), `ambient` (environment data) and
   `ambient_precompute` (IBL), `shadow`,
-  `particles` (pipeline and draw) and
-  `particles_compute` (simulation), `occlusion_culling` (depth pyramid
+  `particles_compute` (simulation and draw), `occlusion_culling` (depth pyramid
   + cull), `debug_line`, `post_process`. A pass's record proc takes the
   `Manager` and reads the scene buffers from it.
 
@@ -229,7 +233,9 @@ view's frustum and, when the view has a depth pyramid and the material
 type is occlusion tested, its pyramid. Visible nodes are appended to the
 draw lists the view names, in the list for their material type. A camera
 is one view with one list per material type; the shadow views share one
-list. Every camera slot has a view, empty for a slot without a camera,
+list. A view also carries its matrices, extent, clip planes and, for a
+camera, this frame's G-buffer images: every shader that renders for a
+camera reads it from the view table. Every camera slot has a view, empty for a slot without a camera,
 so one dispatch culls for all cameras. The depth pyramid is built in one
 dispatch per camera: each group reduces a 32×32 tile to mip 5 in shared
 memory, and the last group to finish reduces the rest.
@@ -320,15 +326,8 @@ UI, and is presented to the swapchain. `render.camera_attachment(&r, cam, .FINAL
 returns a bindless handle — feed it to a UI quad or a material for
 minimaps, mirrors and render-to-texture surfaces.
 
-Controllers (`orbit_controller`, `free_controller`,
-`follow_controller`) are plain values that drive the main camera from
-the tick's `input.State` via
-`camera_controller_update(&ctl, &r, &state, dt)`. They ignore devices
-that `state` marks captured. Keys are fixed: WASD + QE to move, shift
-to pan or boost, left drag to orbit. Render does not store
-controllers; the caller owns one. The orbit
-controller reads distance, yaw and pitch from the camera's pose each
-tick, so moving the camera directly never makes it snap back.
+Camera controllers (input → camera pose) live in the `mjolnir`
+package; see the engine docs.
 
 ## UI and debug UI
 

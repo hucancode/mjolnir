@@ -84,7 +84,7 @@ flowchart TB
 
 ### Layer 3
 
-The `mjolnir` package is optional and holds two things:
+The `mjolnir` package is optional and holds three things:
 
 - **A run loop** (`run`): update and render cadence and the optional
   update thread. It drives the application's `update` / `frame`
@@ -92,6 +92,14 @@ The `mjolnir` package is optional and holds two things:
 - **Asset loading** (`load_gltf`): world nodes over the `render/gltf`
   and `animation/gltf` loaders. It stays here because one asset fills
   several modules.
+- **Camera controllers** (`orbit_controller`, `free_controller`,
+  `follow_controller`): plain values that drive render's main camera
+  from the tick's `input.State` via
+  `camera_controller_update(&ctl, &r, &state, dt)`. They ignore
+  devices that `state` marks captured. Keys are fixed: WASD + QE to
+  move, shift to pan or boost, left drag to orbit. The orbit
+  controller reads distance, yaw and pitch from the camera's pose each
+  tick, so moving the camera directly never makes it snap back.
 
 Everything else is the application's:
 
@@ -206,7 +214,7 @@ Following a logical entity is one glue line:
 `render.camera_set_transform(cam, world.world_matrix(&w, player))`.
 Orbit, free and follow controllers are render procs that read the
 per-tick `input.State` with fixed keys; the application runs the
-active one each update tick (`render.camera_controller_update`).
+active one each update tick (`mjolnir.camera_controller_update`).
 
 ---
 

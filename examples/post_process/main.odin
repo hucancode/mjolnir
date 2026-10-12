@@ -12,7 +12,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   render.CameraController,
+  camera:   mjolnir.CameraController,
   input:    input.State,
 }
 
@@ -50,7 +50,7 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = render.orbit_controller()
+  app.camera = mjolnir.orbit_controller()
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -102,14 +102,14 @@ spawn_mesh :: proc(app: ^App, mesh: render.MeshHandle, material: render.Material
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
-  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   clear(&app.renderer.post_process.effect_stack)
   if outline_on    do append(&app.renderer.post_process.effect_stack, render.OutlineEffect{thickness = f32(outline_thickness)})
   if fog_on        do append(&app.renderer.post_process.effect_stack, render.FogEffect{color = {0.55, 0.6, 0.7}, start = f32(fog_start), end = f32(fog_end)})
   if dof_on        do append(&app.renderer.post_process.effect_stack, render.DoFEffect{focus_distance = f32(dof_focus), focus_range = f32(dof_range), blur_strength = f32(dof_blur), bokeh_intensity = 0.5})
   if bloom_on      do append(&app.renderer.post_process.effect_stack, render.BloomEffect{threshold = f32(bloom_threshold), intensity = f32(bloom_intensity), blur_radius = 32.0})
   if blur_on       do append(&app.renderer.post_process.effect_stack, render.BlurEffect{radius = f32(blur_radius), weight_falloff = 1.0})
-  if crosshatch_on do append(&app.renderer.post_process.effect_stack, render.CrossHatchEffect{hatch_offset_y = 5.0, lum_threshold_01 = 0.6, lum_threshold_02 = 0.3, lum_threshold_03 = 0.15, lum_threshold_04 = 0.07})
+  if crosshatch_on do append(&app.renderer.post_process.effect_stack, render.CrossHatchEffect{hatch_offset_y = 5.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
   if grayscale_on  do append(&app.renderer.post_process.effect_stack, render.GrayscaleEffect{strength = f32(grayscale_strength)})
   if tonemap_on    do append(&app.renderer.post_process.effect_stack, render.ToneMapEffect{exposure = f32(tonemap_exposure), gamma = f32(tonemap_gamma)})
   world.update(&app.scene)

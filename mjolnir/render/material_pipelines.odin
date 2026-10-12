@@ -118,8 +118,7 @@ material_masks :: proc() -> (occlusion, shadow: u32) {
   return
 }
 
-material_pipelines_init :: proc(r: ^Manager) -> (ret: vk.Result) {
-  defer if ret != .SUCCESS do material_pipelines_shutdown(r)
+material_pipelines_init :: proc(r: ^Manager) -> vk.Result {
   for desc, type in MATERIAL_PIPELINES {
     pipeline := gpu.GraphicsPipelineDesc {
       vert = desc.vert,
@@ -127,25 +126,14 @@ material_pipelines_init :: proc(r: ^Manager) -> (ret: vk.Result) {
       vertex_bindings = VERTEX_BINDING_DESCRIPTION[:],
       vertex_attributes = VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
       topology = .TRIANGLE_LIST,
-      raster = {
-        polygonMode = desc.polygon_mode,
-        cullMode = desc.cull_mode,
-        frontFace = .COUNTER_CLOCKWISE,
-        lineWidth = 1,
-      },
-      layout = r.internal.scene.layout,
+      polygon_mode = desc.polygon_mode,
+      cull_mode = desc.cull_mode,
+      layout = r.scene.layout,
     }
     material_pass_desc(desc.pass, &pipeline)
-    r.internal.material_pipelines[type] = gpu.create_graphics_pipeline(&r.gctx, pipeline) or_return
+    r.material_pipelines[type] = gpu.create_graphics_pipeline(&r.gctx, pipeline) or_return
   }
   return .SUCCESS
-}
-
-material_pipelines_shutdown :: proc(r: ^Manager) {
-  for &p in r.internal.material_pipelines {
-    vk.DestroyPipeline(r.gctx.device, p, nil)
-    p = 0
-  }
 }
 
 // Record one camera's render scope of `pass`: the forward pass draws the
@@ -159,21 +147,20 @@ material_pass_record :: proc(
   cam: ^Camera,
   pass: MaterialPass,
 ) {
-  cmd := r.internal.command_buffers[frame_index]
+  cmd := r.command_buffers[frame_index]
   t := &MATERIAL_PASS_TARGETS[pass]
   colors := make([]vk.RenderingAttachmentInfo, len(t.colors), context.temp_allocator)
   for a, i in t.colors do colors[i] = gpu.create_color_attachment(camera_image(r, cam, a, frame_index).view, t.load)
   depth := camera_image(r, cam, .DEPTH, frame_index)
   gpu.begin_rendering(cmd, depth.extent, gpu.create_depth_attachment(depth.view, t.load), ..colors)
-  gpu.set_viewport_scissor(cmd, depth.extent)
-  if pass == .FORWARD do particles_draw(r, cmd, cam_index)
+  push := cam_index
+  push_constants(r, cmd, &push)
+  if pass == .FORWARD do particles_draw(r, cmd)
   if r.gctx.frame_serial >= cam.ready_serial {
-    push := cam_index
-    push_constants(r, cmd, &push)
     bind_mesh_buffers(r, cmd)
     for desc, type in MATERIAL_PIPELINES {
       if desc.pass != pass do continue
-      vk.CmdBindPipeline(cmd, .GRAPHICS, r.internal.material_pipelines[type])
+      vk.CmdBindPipeline(cmd, .GRAPHICS, r.material_pipelines[type])
       draw_lists_draw(&cam.draws, cmd, frame_index, u32(type))
     }
   }

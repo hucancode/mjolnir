@@ -40,6 +40,7 @@ FRAME_TABLES := [?]FrameTable {
   {.FORCEFIELDS, size_of(ForceField), MAX_FORCE_FIELDS},
   {.LIGHTS, size_of(LightGPU), MAX_LIGHTS},
   {.VIEWS, size_of(ViewGPU), MAX_VIEWS},
+  {.DEBUG_LINES, size_of(DebugLineSegment), MAX_SEGMENTS},
   {.BONES, size_of(matrix[4, 4]f32), 0},
 }
 
@@ -67,19 +68,20 @@ arena_layout :: proc(alignment: vk.DeviceSize) -> (layout: ArenaLayout) {
 // the arena.
 @(private)
 frame_table :: proc(self: ^Manager, b: SceneBinding, $T: typeid, frame_index: u32) -> []T {
-  arena := &self.internal.frame_arena[frame_index]
-  layout := &self.internal.arena_layout
+  arena := &self.frame_arena[frame_index]
+  layout := &self.arena_layout
   if b == .BONES do return gpu.mapped(arena, T, layout.offset[.BONES])
   return gpu.mapped(arena, T, layout.offset[b], int(layout.range[b]) / size_of(T))
 }
 
 @(private)
 create_frame_arena :: proc(self: ^Manager, bone_capacity: int) -> (gpu.Buffer, vk.Result) {
-  size := self.internal.arena_layout.offset[.BONES] +vk.DeviceSize(bone_capacity * size_of(matrix[4, 4]f32))
+  size := self.arena_layout.offset[.BONES] +vk.DeviceSize(bone_capacity * size_of(matrix[4, 4]f32))
   return gpu.buffer_create(&self.gctx, size, {.STORAGE_BUFFER})
 }
 
-// Allocate the frame arenas, the mesh table and the particle buffers. Paired
+// Allocate the frame arenas, the mesh table, the pyramid counters and the
+// particle buffers. Paired
 // with destroy_scene_buffers. Called once during render.init before
 // scene_descriptors_init binds them.
 @(private)
@@ -90,33 +92,37 @@ init_scene_buffers :: proc(
   ret: vk.Result,
 ) {
   defer if ret != .SUCCESS do destroy_scene_buffers(self, gctx)
-  cont.slab_init(&self.internal.bone_matrix_slab, BONE_SLAB_CONFIG)
-  self.internal.arena_layout = arena_layout(gctx.device_properties.limits.minStorageBufferOffsetAlignment)
-  for &arena in self.internal.frame_arena {
-    arena = create_frame_arena(self, int(self.internal.bone_matrix_slab.capacity)) or_return
+  cont.slab_init(&self.bone_matrix_slab, BONE_SLAB_CONFIG)
+  self.arena_layout = arena_layout(gctx.device_properties.limits.minStorageBufferOffsetAlignment)
+  for &arena in self.frame_arena {
+    arena = create_frame_arena(self, int(self.bone_matrix_slab.capacity)) or_return
   }
-  self.internal.mesh_data_buffer = gpu.buffer_create(
+  self.mesh_data_buffer = gpu.buffer_create(
     gctx,
     MAX_MESHES * size_of(MeshData),
     {.STORAGE_BUFFER},
     host_visible = false,
   ) or_return
-  for &readback in self.internal.draw_count_readback {
+  for &readback in self.draw_count_readback {
     readback = gpu.buffer_create(gctx, DRAW_LIST_HEADER * size_of(u32), {.TRANSFER_DST}) or_return
   }
-  particles_init_buffers(&self.internal.particles, gctx) or_return
-  for &atlas in self.internal.shadow_atlas do shadow_atlas_init(&atlas, gctx, 1) or_return
+  self.pyramid_counters = gpu.buffer_create(gctx, MAX_PYRAMID_SLOTS * size_of(u32), {.STORAGE_BUFFER}, host_visible = false) or_return
+  gpu.queue_buffer_fill(gctx, &self.pyramid_counters)
+  particles_init_buffers(self) or_return
+  for &atlas in self.shadow_atlas do shadow_atlas_init(&atlas, gctx, 1) or_return
   return .SUCCESS
 }
 
 @(private)
 destroy_scene_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  for &arena in self.internal.frame_arena do gpu.buffer_destroy(gctx.device, &arena)
-  gpu.buffer_destroy(gctx.device, &self.internal.mesh_data_buffer)
-  for &readback in self.internal.draw_count_readback do gpu.buffer_destroy(gctx.device, &readback)
-  for &atlas in self.internal.shadow_atlas do shadow_atlas_destroy(&atlas, gctx.device)
-  particles_destroy_buffers(&self.internal.particles, gctx)
-  cont.slab_destroy(&self.internal.bone_matrix_slab)
+  for &arena in self.frame_arena do gpu.buffer_destroy(gctx.device, &arena)
+  gpu.buffer_destroy(gctx.device, &self.mesh_data_buffer)
+  for &readback in self.draw_count_readback do gpu.buffer_destroy(gctx.device, &readback)
+  for &atlas in self.shadow_atlas do shadow_atlas_destroy(&atlas, gctx.device)
+  gpu.buffer_destroy(gctx.device, &self.pyramid_counters)
+  gpu.buffer_destroy(gctx.device, &self.particle_buffer)
+  gpu.buffer_destroy(gctx.device, &self.particle_alive_buffer)
+  cont.slab_destroy(&self.bone_matrix_slab)
 }
 
 // Replace frame `frame_index`'s arena with one whose bone table holds
@@ -126,8 +132,8 @@ destroy_scene_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
 @(private)
 grow_frame_arena :: proc(self: ^Manager, frame_index: u32, bone_capacity: int) -> vk.Result {
   grown := create_frame_arena(self, bone_capacity) or_return
-  arena := &self.internal.frame_arena[frame_index]
-  mem.copy(grown.mapped, arena.mapped, int(self.internal.arena_layout.offset[.BONES]))
+  arena := &self.frame_arena[frame_index]
+  mem.copy(grown.mapped, arena.mapped, int(self.arena_layout.offset[.BONES]))
   gpu.buffer_destroy(self.gctx.device, arena)
   arena^ = grown
   for t in FRAME_TABLES do scene_write_binding(self, t.binding, int(frame_index))

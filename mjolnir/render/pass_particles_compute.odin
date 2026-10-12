@@ -8,7 +8,6 @@
 package render
 
 import "gpu"
-import "core:log"
 import vk "vendor:vulkan"
 
 MAX_PARTICLES :: 65536
@@ -17,8 +16,6 @@ MAX_EMITTERS :: 64
 MAX_FORCE_FIELDS :: 32
 #assert(MAX_PARTICLES % COMPUTE_PARTICLE_BATCH == 0)
 
-SHADER_EMITTER_COMP :: #load("shader/particle/emitter.spv")
-SHADER_PARTICLE_COMP :: #load("shader/particle/compute.spv")
 
 // A slot is dead when life <= 0.
 ParticlesParticle :: struct {
@@ -32,43 +29,6 @@ ParticlesParticle :: struct {
   max_life:      f32,
   weight:        f32,
   texture_index: u32,
-}
-
-// An emitter, stored as the emit shader reads it. std430 rounds the struct to
-// 16 bytes (it holds vec4s); #align(16) keeps the Odin array stride equal to
-// the GLSL one.
-Emitter :: struct #align(16) {
-  initial_velocity:  [3]f32,
-  size_start:        f32,
-  color_start:       [4]f32,
-  color_end:         [4]f32,
-  particle_lifetime: f32,
-  position_spread:   f32,
-  velocity_spread:   f32,
-  // first of this emitter's particles among the frame's new particles;
-  // render writes it every frame
-  emit_first:        u32,
-  size_end:          f32,
-  weight:            f32,
-  weight_spread:     f32,
-  // bindless texture of the particles (texture_index), NO_TEXTURE for none
-  texture_index:     u32,
-  // transform slot the particles spawn from, set by attach
-  node_index:        u32,
-  // particles per second while enabled, accumulated by update
-  emission_rate:     f32,
-  enabled:           b32,
-}
-#assert(size_of(Emitter) == 96)
-
-// A force field, stored as the simulation reads it.
-ForceField :: struct {
-  tangent_strength: f32,
-  strength:         f32,
-  area_of_effect:   f32,
-  // transform slot the field is centered on, set by attach
-  node_index:       u32,
-  enabled:          b32,
 }
 
 ParticleSystemParams :: struct {
@@ -86,20 +46,10 @@ ParticleSystemParams :: struct {
 // followed by one particle index per vertex.
 PARTICLE_ALIVE_HEADER :: size_of(vk.DrawIndirectCommand) / size_of(u32)
 
-ParticlesRenderer :: struct {
-  // this frame's simulation inputs, pushed to both compute passes
-  params:           ParticleSystemParams,
-  alive_buffer:     gpu.Buffer,
-  particle_buffer:  gpu.Buffer,
-  emitter_pipeline: vk.Pipeline,
-  compute_pipeline: vk.Pipeline,
-  render_pipeline:  vk.Pipeline,
-}
-
 // Emit the frame's new particles, then advance every live particle and list
 // it for the next draw.
 particles_simulate :: proc(r: ^Manager, cmd: vk.CommandBuffer) {
-  self := &r.internal.particles
+  params := &r.particle_params
   // The previous simulation and this frame's draws use what gets rewritten.
   gpu.memory_barrier(
     cmd,
@@ -108,11 +58,11 @@ particles_simulate :: proc(r: ^Manager, cmd: vk.CommandBuffer) {
     {.DRAW_INDIRECT, .VERTEX_SHADER, .COMPUTE_SHADER},
     {.COMPUTE_SHADER, .TRANSFER},
   )
-  vk.CmdFillBuffer(cmd, self.alive_buffer.buffer, 0, size_of(u32), 0)
-  push_constants(r, cmd, &self.params)
-  if self.params.emit_total > 0 {
-    vk.CmdBindPipeline(cmd, .COMPUTE, self.emitter_pipeline)
-    vk.CmdDispatch(cmd, (self.params.emit_total + 63) / 64, 1, 1)
+  vk.CmdFillBuffer(cmd, r.particle_alive_buffer.buffer, 0, size_of(u32), 0)
+  push_constants(r, cmd, params)
+  if params.emit_total > 0 {
+    vk.CmdBindPipeline(cmd, .COMPUTE, r.pipelines[.PARTICLE_EMIT])
+    vk.CmdDispatch(cmd, (params.emit_total + 63) / 64, 1, 1)
   }
   gpu.memory_barrier(
     cmd,
@@ -121,58 +71,57 @@ particles_simulate :: proc(r: ^Manager, cmd: vk.CommandBuffer) {
     {.COMPUTE_SHADER, .TRANSFER},
     {.COMPUTE_SHADER},
   )
-  vk.CmdBindPipeline(cmd, .COMPUTE, self.compute_pipeline)
+  vk.CmdBindPipeline(cmd, .COMPUTE, r.pipelines[.PARTICLE_SIMULATE])
   vk.CmdDispatch(cmd, MAX_PARTICLES / COMPUTE_PARTICLE_BATCH, 1, 1)
 }
 
 // Kill every particle and empty the alive list when the next command buffer
 // records its uploads.
-particles_reset :: proc(self: ^ParticlesRenderer, gctx: ^gpu.GPUContext) -> vk.Result {
-  self.params.emit_cursor = 0
-  self.params.emit_total = 0
-  gpu.queue_buffer_fill(gctx, &self.particle_buffer)
+particles_reset :: proc(r: ^Manager) -> vk.Result {
+  r.particle_params.emit_cursor = 0
+  r.particle_params.emit_total = 0
+  gpu.queue_buffer_fill(&r.gctx, &r.particle_buffer)
   header := [1]vk.DrawIndirectCommand{{instanceCount = 1}}
-  return gpu.queue_buffer_write(gctx, &self.alive_buffer, header[:])
+  return gpu.queue_buffer_write(&r.gctx, &r.particle_alive_buffer, header[:])
 }
 
-particles_init_buffers :: proc(self: ^ParticlesRenderer, gctx: ^gpu.GPUContext) -> vk.Result {
-  self.alive_buffer = gpu.buffer_create(
-    gctx,
+// The particle ring and the alive list, emptied.
+particles_init_buffers :: proc(r: ^Manager) -> vk.Result {
+  r.particle_alive_buffer = gpu.buffer_create(
+    &r.gctx,
     (PARTICLE_ALIVE_HEADER + MAX_PARTICLES) * size_of(u32),
     {.STORAGE_BUFFER, .INDIRECT_BUFFER},
     host_visible = false,
   ) or_return
-  self.particle_buffer = gpu.buffer_create(
-    gctx,
+  r.particle_buffer = gpu.buffer_create(
+    &r.gctx,
     MAX_PARTICLES * size_of(ParticlesParticle),
     {.STORAGE_BUFFER},
     host_visible = false,
   ) or_return
-  return particles_reset(self, gctx)
+  return particles_reset(r)
 }
 
-particles_destroy_buffers :: proc(self: ^ParticlesRenderer, gctx: ^gpu.GPUContext) {
-  gpu.buffer_destroy(gctx.device, &self.alive_buffer)
-  gpu.buffer_destroy(gctx.device, &self.particle_buffer)
-}
-
-particles_shutdown :: proc(self: ^ParticlesRenderer, gctx: ^gpu.GPUContext) {
-  vk.DestroyPipeline(gctx.device, self.render_pipeline, nil)
-  vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
-  vk.DestroyPipeline(gctx.device, self.emitter_pipeline, nil)
-  self.render_pipeline = 0
-  self.compute_pipeline = 0
-  self.emitter_pipeline = 0
-}
-
-particles_init :: proc(r: ^Manager) -> (ret: vk.Result) {
-  self := &r.internal.particles
+particles_init :: proc(r: ^Manager) -> vk.Result {
   gctx := &r.gctx
-  log.debugf("Initializing particle renderer")
-  defer if ret != .SUCCESS do particles_shutdown(self, gctx)
-  layout := r.internal.scene.layout
-  self.emitter_pipeline = gpu.create_compute_pipeline(gctx, SHADER_EMITTER_COMP, layout) or_return
-  self.compute_pipeline = gpu.create_compute_pipeline(gctx, SHADER_PARTICLE_COMP, layout) or_return
-  particles_create_render_pipeline(r) or_return
+  layout := r.scene.layout
+  r.pipelines[.PARTICLE_EMIT] = gpu.create_compute_pipeline(gctx, #load("shader/particle/emitter.spv"), layout) or_return
+  r.pipelines[.PARTICLE_SIMULATE] = gpu.create_compute_pipeline(gctx, #load("shader/particle/compute.spv"), layout) or_return
+  desc := gpu.GraphicsPipelineDesc {
+    vert     = #load("shader/particle/vert.spv"),
+    frag     = #load("shader/particle/frag.spv"),
+    topology = .POINT_LIST,
+    layout   = layout,
+  }
+  // drawn in the forward scope
+  material_pass_desc(.FORWARD, &desc)
+  r.pipelines[.PARTICLE_DRAW] = gpu.create_graphics_pipeline(gctx, desc) or_return
   return .SUCCESS
+}
+
+// Draw the live particles listed by the last simulation. Call inside the
+// forward render scope, with the camera's index pushed.
+particles_draw :: proc(r: ^Manager, cmd: vk.CommandBuffer) {
+  vk.CmdBindPipeline(cmd, .GRAPHICS, r.pipelines[.PARTICLE_DRAW])
+  vk.CmdDrawIndirect(cmd, r.particle_alive_buffer.buffer, 0, 1, size_of(vk.DrawIndirectCommand))
 }

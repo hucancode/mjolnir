@@ -1,6 +1,8 @@
-package render
+package mjolnir
 
-import "../input"
+import geom "geometry"
+import "input"
+import "render"
 import "core:math"
 import "core:math/linalg"
 
@@ -86,7 +88,7 @@ follow_controller :: proc(
 orbit_update :: proc(
   self: ^CameraController,
   orbit: ^OrbitCameraData,
-  camera: ^Camera,
+  camera: ^render.Camera,
   s: ^input.State,
   mouse_blocked, keyboard_blocked: bool,
 ) {
@@ -102,7 +104,7 @@ orbit_update :: proc(
   yaw := math.atan2(offset.z, offset.x)
   pitch := math.asin(clamp(offset.y / distance, -1, 1))
   if scroll != 0 {
-    if ortho, is_ortho := &camera.projection.(OrthographicProjection); is_ortho {
+    if ortho, is_ortho := &camera.projection.(render.OrthographicProjection); is_ortho {
       factor := math.exp(-scroll * 0.1)
       ortho.width = max(ortho.width * factor, 0.01)
       ortho.height = max(ortho.height * factor, 0.01)
@@ -130,7 +132,7 @@ orbit_update :: proc(
   cp, sp := math.cos(pitch), math.sin(pitch)
   cy, sy := math.cos(yaw), math.sin(yaw)
   position := orbit.target + distance * [3]f32{cp * cy, sp, cp * sy}
-  camera_look_at(camera, position, orbit.target, {-sp * cy, cp, -sp * sy})
+  render.camera_look_at(camera, position, orbit.target, {-sp * cy, cp, -sp * sy})
 }
 
 // Shift: orbit pans instead of rotating, free moves faster.
@@ -142,16 +144,16 @@ shift_down :: proc(s: ^input.State) -> bool {
 @(private = "file")
 free_update :: proc(
   free: ^FreeCameraData,
-  camera: ^Camera,
+  camera: ^render.Camera,
   s: ^input.State,
   delta_time: f32,
   mouse_blocked, keyboard_blocked: bool,
 ) {
   if !keyboard_blocked {
     move :=
-      camera_right(camera) * input.axis(s, .A, .D) +
+      geom.qx(camera.rotation) * input.axis(s, .A, .D) +
       [3]f32{0, 1, 0} * input.axis(s, .Q, .E) +
-      camera_forward(camera) * input.axis(s, .S, .W)
+      -geom.qz(camera.rotation) * input.axis(s, .S, .W)
     if linalg.length2(move) > 0 {
       speed := free.move_speed * (free.boost_multiplier if shift_down(s) else 1)
       camera.position += linalg.normalize(move) * speed * delta_time
@@ -163,13 +165,13 @@ free_update :: proc(
   camera.rotation =
     linalg.quaternion_angle_axis(-yaw, linalg.VECTOR3F32_Y_AXIS) * camera.rotation
   camera.rotation =
-    linalg.quaternion_angle_axis(-pitch, camera_right(camera)) * camera.rotation
+    linalg.quaternion_angle_axis(-pitch, geom.qx(camera.rotation)) * camera.rotation
 }
 
 @(private = "file")
 follow_update :: proc(
   follow: ^FollowCameraData,
-  camera: ^Camera,
+  camera: ^render.Camera,
   delta_time: f32,
 ) {
   desired := follow.target + follow.offset
@@ -178,7 +180,7 @@ follow_update :: proc(
     desired,
     min(follow.follow_speed * delta_time, 1),
   )
-  camera_look_at(camera, position, follow.target)
+  render.camera_look_at(camera, position, follow.target)
 }
 
 // Drive the main camera with `controller` for one tick of input. Captured
@@ -187,11 +189,11 @@ follow_update :: proc(
 // nothing.
 camera_controller_update :: proc(
   controller: ^CameraController,
-  self: ^Manager,
+  self: ^render.Manager,
   s: ^input.State,
   delta_time: f32,
 ) {
-  camera, ok := main_camera(self)
+  camera, ok := render.main_camera(self)
   if !ok do return
   switch &d in controller.data {
   case OrbitCameraData:
@@ -201,13 +203,4 @@ camera_controller_update :: proc(
   case FollowCameraData:
     follow_update(&d, camera, delta_time)
   }
-}
-
-// ---------- main camera controllers ----------
-
-// Look the main camera at `to` from `from`.
-main_camera_look_at :: proc(self: ^Manager, from, to: [3]f32) {
-  cam := main_camera(self)
-  if cam == nil do return
-  camera_look_at(cam, from, to)
 }

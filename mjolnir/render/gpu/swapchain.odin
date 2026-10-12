@@ -64,23 +64,16 @@ swapchain_init :: proc(
       ),
     }
   }
-  support := query_swapchain_support(
-    gctx.physical_device,
-    gctx.surface,
-  ) or_return
-  defer swapchain_support_destroy(&support) // Clean up since we're not transferring ownership
-  self.format = pick_swapchain_format(support.formats)
+  capabilities, formats, present_modes := query_swapchain_support(gctx.physical_device, gctx.surface) or_return
+  self.format = pick_swapchain_format(formats)
   self.extent = pick_swapchain_extent(
-    support.capabilities,
+    capabilities,
     framebuffer_size.x,
     framebuffer_size.y,
   )
   log.infof("Swapchain format: %v, extent: %v", self.format, self.extent)
-  image_count := support.capabilities.minImageCount + 1
-  if support.capabilities.maxImageCount > 0 &&
-     image_count > support.capabilities.maxImageCount {
-    image_count = support.capabilities.maxImageCount
-  }
+  image_count := capabilities.minImageCount + 1
+  if capabilities.maxImageCount > 0 do image_count = min(image_count, capabilities.maxImageCount)
   create_info := vk.SwapchainCreateInfoKHR {
     sType            = .SWAPCHAIN_CREATE_INFO_KHR,
     surface          = gctx.surface,
@@ -90,9 +83,9 @@ swapchain_init :: proc(
     imageExtent      = self.extent,
     imageArrayLayers = 1,
     imageUsage       = {.COLOR_ATTACHMENT},
-    preTransform     = support.capabilities.currentTransform,
+    preTransform     = capabilities.currentTransform,
     compositeAlpha   = {.OPAQUE},
-    presentMode      = pick_swap_present_mode(support.present_modes),
+    presentMode      = pick_swap_present_mode(present_modes),
     clipped          = true,
   }
   queue_family_indices := [?]u32{gctx.graphics_family, gctx.present_family}
@@ -193,21 +186,11 @@ swapchain_destroy :: proc(self: ^Swapchain, device: vk.Device) {
   self.handle = 0
 }
 
-swapchain_recreate :: proc(
-  gctx: ^GPUContext,
-  self: ^Swapchain,
-  framebuffer_size: [2]u32,
-) -> vk.Result {
-  vk.DeviceWaitIdle(gctx.device)
-  swapchain_destroy(self, gctx.device)
-  swapchain_init(self, gctx, framebuffer_size) or_return
-  return .SUCCESS
-}
 
 // Block until the GPU has finished the submissions that last used the next
 // frame-in-flight slot (frame_serial % FRAMES_IN_FLIGHT), so its per-frame
 // buffers and command buffers may be rewritten. Submission s signals s + 1 on
-// the graphics timeline and, with async compute, on the compute timeline.
+// the graphics and the compute timeline.
 wait_frame :: proc(gctx: ^GPUContext) -> vk.Result {
   if gctx.frame_serial < FRAMES_IN_FLIGHT do return .SUCCESS
   value := gctx.frame_serial - FRAMES_IN_FLIGHT + 1
@@ -215,7 +198,7 @@ wait_frame :: proc(gctx: ^GPUContext) -> vk.Result {
   values := [2]u64{value, value}
   wait_info := vk.SemaphoreWaitInfo {
     sType          = .SEMAPHORE_WAIT_INFO,
-    semaphoreCount = 2 if has_async_compute(gctx) else 1,
+    semaphoreCount = len(semaphores),
     pSemaphores    = &semaphores[0],
     pValues        = &values[0],
   }
@@ -242,9 +225,9 @@ acquire_next_image :: proc(
   return
 }
 
-// Submit this frame's graphics (and with async compute, compute) work, then
-// present. Async compute for frame n culls for frame n+1, so the queues
-// overlap within a frame and chain across frames:
+// Submit this frame's compute and graphics work, then present. Compute for
+// frame n culls for frame n+1, so with a dedicated compute queue the queues
+// overlap within a frame; either way the submissions chain across frames:
 //   compute n waits graphics n-1 (it reads depth n-1 and rewrites the draw
 //   lists graphics n-1 drew from)
 //   graphics n waits compute n-1 (it draws the lists compute n-1 wrote and
@@ -252,11 +235,10 @@ acquire_next_image :: proc(
 submit_queue_and_present :: proc(
   gctx: ^GPUContext,
   self: ^Swapchain,
-  command_buffer: ^vk.CommandBuffer,
-  compute_command_buffer: ^vk.CommandBuffer,
-  frame_index: u32,
+  command_buffer, compute_command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   serial := gctx.frame_serial
+  frame_index := serial % FRAMES_IN_FLIGHT
   wait_infos := [2]vk.SemaphoreSubmitInfo {
     {
       sType = .SEMAPHORE_SUBMIT_INFO,
@@ -283,44 +265,39 @@ submit_queue_and_present :: proc(
       stageMask = {.ALL_COMMANDS},
     },
   }
-  // the compute timeline wait only exists with async compute
-  wait_count: u32 = 1
-  if has_async_compute(gctx) {
-    wait_count = 2
-    compute_cmd_info := vk.CommandBufferSubmitInfo {
-      sType         = .COMMAND_BUFFER_SUBMIT_INFO,
-      commandBuffer = compute_command_buffer^,
-    }
-    compute_wait := vk.SemaphoreSubmitInfo {
-      sType     = .SEMAPHORE_SUBMIT_INFO,
-      semaphore = gctx.graphics_timeline,
-      value     = serial, // graphics n-1 signalled n
-      stageMask = {.ALL_COMMANDS},
-    }
-    compute_signal := vk.SemaphoreSubmitInfo {
-      sType     = .SEMAPHORE_SUBMIT_INFO,
-      semaphore = gctx.compute_timeline,
-      value     = serial + 1,
-      stageMask = {.ALL_COMMANDS},
-    }
-    compute_submit := vk.SubmitInfo2 {
-      sType                    = .SUBMIT_INFO_2,
-      waitSemaphoreInfoCount   = 1,
-      pWaitSemaphoreInfos      = &compute_wait,
-      commandBufferInfoCount   = 1,
-      pCommandBufferInfos      = &compute_cmd_info,
-      signalSemaphoreInfoCount = 1,
-      pSignalSemaphoreInfos    = &compute_signal,
-    }
-    vk.QueueSubmit2(gctx.compute_queue, 1, &compute_submit, 0) or_return
+  compute_cmd_info := vk.CommandBufferSubmitInfo {
+    sType         = .COMMAND_BUFFER_SUBMIT_INFO,
+    commandBuffer = compute_command_buffer,
   }
+  compute_wait := vk.SemaphoreSubmitInfo {
+    sType     = .SEMAPHORE_SUBMIT_INFO,
+    semaphore = gctx.graphics_timeline,
+    value     = serial, // graphics n-1 signalled n
+    stageMask = {.ALL_COMMANDS},
+  }
+  compute_signal := vk.SemaphoreSubmitInfo {
+    sType     = .SEMAPHORE_SUBMIT_INFO,
+    semaphore = gctx.compute_timeline,
+    value     = serial + 1,
+    stageMask = {.ALL_COMMANDS},
+  }
+  compute_submit := vk.SubmitInfo2 {
+    sType                    = .SUBMIT_INFO_2,
+    waitSemaphoreInfoCount   = 1,
+    pWaitSemaphoreInfos      = &compute_wait,
+    commandBufferInfoCount   = 1,
+    pCommandBufferInfos      = &compute_cmd_info,
+    signalSemaphoreInfoCount = 1,
+    pSignalSemaphoreInfos    = &compute_signal,
+  }
+  vk.QueueSubmit2(gctx.compute_queue, 1, &compute_submit, 0) or_return
   gfx_cmd_info := vk.CommandBufferSubmitInfo {
     sType         = .COMMAND_BUFFER_SUBMIT_INFO,
-    commandBuffer = command_buffer^,
+    commandBuffer = command_buffer,
   }
   graphics_submit := vk.SubmitInfo2 {
     sType                    = .SUBMIT_INFO_2,
-    waitSemaphoreInfoCount   = wait_count,
+    waitSemaphoreInfoCount   = len(wait_infos),
     pWaitSemaphoreInfos      = &wait_infos[0],
     commandBufferInfoCount   = 1,
     pCommandBufferInfos      = &gfx_cmd_info,

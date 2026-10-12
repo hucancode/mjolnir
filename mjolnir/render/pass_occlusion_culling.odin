@@ -1,6 +1,7 @@
 #+private
 package render
 
+import cont "../containers"
 import "gpu"
 import vk "vendor:vulkan"
 
@@ -68,16 +69,6 @@ DepthReducePushConstants :: struct {
   slot:        u32,
 }
 
-// Frustum + occlusion culling of nodes against views into the bindless draw
-// lists, and the depth reduction that builds the pyramids it tests against.
-// Both run on the scene layout.
-OcclusionSystem :: struct {
-  cull_pipeline:   vk.Pipeline,
-  reduce_pipeline: vk.Pipeline,
-  // one per pyramid slot: groups done this dispatch; the last one resets it
-  counters:        gpu.Buffer,
-}
-
 // Hierarchical max-depth buffer at half the camera's resolution, with a
 // storage view per mip. The views enter the storage image array at the next
 // flush of the pyramid's frame (occlusion_bind_pyramid), once no frame in
@@ -89,63 +80,35 @@ DepthPyramid :: struct {
   bound:   bool,
 }
 
-occlusion_init :: proc(r: ^Manager) -> (ret: vk.Result) {
-  self := &r.internal.visibility
-  gctx := &r.gctx
-  defer if ret != .SUCCESS do occlusion_shutdown(self, gctx)
-  layout := r.internal.scene.layout
-  self.cull_pipeline = gpu.create_compute_pipeline(gctx, #load("shader/occlusion_culling/cull.spv"), layout) or_return
-  self.reduce_pipeline = gpu.create_compute_pipeline(
-    gctx,
-    #load("shader/occlusion_culling/depth_reduce.spv"),
-    layout,
-  ) or_return
-  self.counters = gpu.buffer_create(
-    gctx,
-    MAX_PYRAMID_SLOTS * size_of(u32),
-    {.STORAGE_BUFFER},
-    host_visible = false,
-  ) or_return
-  gpu.queue_buffer_fill(gctx, &self.counters)
-  gpu.write_descriptor(
-    gctx,
-    r.texture_manager.descriptor_set,
-    BINDING_PYRAMID_COUNTERS,
-    0,
-    .STORAGE_BUFFER,
-    gpu.buffer_info(&self.counters),
-  )
+// Frustum + occlusion culling of nodes against views into the bindless draw
+// lists, and the depth reduction that builds the pyramids it tests against.
+occlusion_init :: proc(r: ^Manager) -> vk.Result {
+  layout := r.scene.layout
+  r.pipelines[.CULL] = gpu.create_compute_pipeline(&r.gctx, #load("shader/occlusion_culling/cull.spv"), layout) or_return
+  r.pipelines[.DEPTH_REDUCE] = gpu.create_compute_pipeline(&r.gctx, #load("shader/occlusion_culling/depth_reduce.spv"), layout) or_return
   return .SUCCESS
-}
-
-occlusion_shutdown :: proc(self: ^OcclusionSystem, gctx: ^gpu.GPUContext) {
-  vk.DestroyPipeline(gctx.device, self.reduce_pipeline, nil)
-  vk.DestroyPipeline(gctx.device, self.cull_pipeline, nil)
-  gpu.buffer_destroy(gctx.device, &self.counters)
-  self^ = {}
 }
 
 // Create the pyramid texture of pyramid slot `slot` for a camera of `extent`
 // and its per-mip views.
 occlusion_setup_pyramid :: proc(
-  gctx: ^gpu.GPUContext,
+  r: ^Manager,
   pyramid: ^DepthPyramid,
-  texture_manager: ^TextureManager,
   extent: vk.Extent2D,
   slot: u32,
 ) -> vk.Result {
+  gctx := &r.gctx
   extent := vk.Extent2D{max(1, extent.width / 2), max(1, extent.height / 2)}
   pyramid.slot = slot
   pyramid.texture = allocate_texture(
-    texture_manager,
-    gctx,
+    r,
     extent,
     .R32_SFLOAT,
     {.SAMPLED, .STORAGE, .TRANSFER_DST},
     gpu.calculate_mip_levels(extent.width, extent.height),
     shared = true,
   ) or_return
-  img := get_texture(texture_manager, pyramid.texture)
+  img := cont.get(r.textures, pyramid.texture)
   assert(img.mip_levels <= MAX_DEPTH_MIPS_LEVEL)
   gpu.queue_image_init(gctx, {img.image, {.COLOR}, {.SHADER_READ, .SHADER_WRITE}, {.COMPUTE_SHADER}})
   for mip in 0 ..< img.mip_levels {
@@ -156,18 +119,14 @@ occlusion_setup_pyramid :: proc(
 
 // Write the pyramid's mip views into its storage image slots. Call when no
 // frame in flight reads the slots: in the flush of the pyramid's frame.
-occlusion_bind_pyramid :: proc(
-  gctx: ^gpu.GPUContext,
-  pyramid: ^DepthPyramid,
-  texture_manager: ^TextureManager,
-) {
+occlusion_bind_pyramid :: proc(r: ^Manager, pyramid: ^DepthPyramid) {
   if pyramid.bound do return
   pyramid.bound = true
   for view, mip in pyramid.views {
     if view == 0 do break
     gpu.write_descriptor(
-      gctx,
-      texture_manager.descriptor_set,
+      &r.gctx,
+      r.scene.bindless_set,
       BINDING_STORAGE_IMAGES,
       pyramid.slot * MAX_DEPTH_MIPS_LEVEL + u32(mip),
       .STORAGE_IMAGE,
@@ -176,13 +135,9 @@ occlusion_bind_pyramid :: proc(
   }
 }
 
-occlusion_destroy_pyramid :: proc(
-  gctx: ^gpu.GPUContext,
-  pyramid: ^DepthPyramid,
-  texture_manager: ^TextureManager,
-) {
-  for view in pyramid.views do if view != 0 do gpu.defer_destroy(gctx, view)
-  if pyramid.texture != {} do free_texture(texture_manager, gctx, pyramid.texture)
+occlusion_destroy_pyramid :: proc(r: ^Manager, pyramid: ^DepthPyramid) {
+  for view in pyramid.views do if view != 0 do gpu.defer_destroy(&r.gctx, view)
+  destroy_texture(r, pyramid.texture)
   pyramid^ = {}
 }
 
@@ -195,7 +150,7 @@ occlusion_build_pyramid :: proc(
   pyramid: ^DepthPyramid,
   depth_index: u32,
 ) {
-  img := get_texture(&r.texture_manager, pyramid.texture)
+  img := cont.get(r.textures, pyramid.texture)
   if img == nil || !pyramid.bound do return
   groups := [2]u32 {
     (img.extent.width + PYRAMID_TILE - 1) / PYRAMID_TILE,
@@ -217,7 +172,7 @@ occlusion_build_pyramid :: proc(
 // before this.
 occlusion_cull :: proc(r: ^Manager, cmd: vk.CommandBuffer, first_view, view_count: u32) {
   if r.node_count == 0 || view_count == 0 do return
-  vk.CmdBindPipeline(cmd, .COMPUTE, r.internal.visibility.cull_pipeline)
+  vk.CmdBindPipeline(cmd, .COMPUTE, r.pipelines[.CULL])
   push := CullPushConstants {
     node_count = r.node_count,
     first_view = first_view,

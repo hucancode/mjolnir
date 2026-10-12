@@ -29,7 +29,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   render.CameraController,
+  camera:   mjolnir.CameraController,
   input:    input.State,
 }
 
@@ -47,7 +47,7 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = render.orbit_controller()
+  app.camera = mjolnir.orbit_controller()
 
   ground := world.spawn(&app.scene, {0, -0.5, 0})
   physics.create_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {40.0, 0.5, 40.0}}, user = world.Handle(ground))
@@ -72,7 +72,7 @@ should_close :: proc(app: ^App) -> bool {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
-  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   time_since_jump += dt
   if mass != last_mass {
     physics.set_mass(&phys, cube_body, f32(mass))

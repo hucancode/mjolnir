@@ -12,10 +12,11 @@ import vk "vendor:vulkan"
 
 @(private)
 camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
+  // the camera looks along its -Z axis, up its Y axis
   return linalg.matrix4_look_at(
     camera.position,
-    camera.position + camera_forward(camera),
-    camera_up(camera),
+    camera.position - geom.qz(camera.rotation),
+    geom.qy(camera.rotation),
   )
 }
 
@@ -25,7 +26,7 @@ camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   case PerspectiveProjection:
     return geom.make_perspective_matrix(
       proj.fov,
-      proj.aspect_ratio,
+      f32(camera.extent[0]) / f32(max(camera.extent[1], 1)),
       camera.near,
       camera.far,
     )
@@ -35,21 +36,6 @@ camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
     return geom.make_ortho_matrix(-hw, hw, -hh, hh, camera.near, camera.far)
   }
   return linalg.MATRIX4F32_IDENTITY
-}
-
-@(private)
-camera_forward :: proc(self: ^Camera) -> [3]f32 {
-  return -geom.qz(self.rotation)
-}
-
-@(private)
-camera_right :: proc(self: ^Camera) -> [3]f32 {
-  return geom.qx(self.rotation)
-}
-
-@(private)
-camera_up :: proc(self: ^Camera) -> [3]f32 {
-  return geom.qy(self.rotation)
 }
 
 // `up` is the desired world-up reference. Pass {0,0,0} (default) to auto-pick
@@ -92,10 +78,7 @@ camera_set_perspective :: proc(
   near: f32 = 0.1,
   far: f32 = 1000.0,
 ) {
-  self.projection = PerspectiveProjection {
-    fov          = fov,
-    aspect_ratio = f32(self.extent[0]) / f32(max(self.extent[1], 1)),
-  }
+  self.projection = PerspectiveProjection{fov = fov}
   self.near = near
   self.far = far
 }
@@ -114,33 +97,17 @@ camera_set_orthographic :: proc(
   self.far = far
 }
 
-// World-space ray through a viewport pixel (framebuffer pixels, origin top-left).
-@(private)
-camera_viewport_to_world_ray :: proc(
-  camera: ^Camera,
-  pixel_x, pixel_y: f32,
-) -> (
-  ray_origin: [3]f32,
-  ray_dir: [3]f32,
-) {
-  ndc_x := (2.0 * pixel_x) / f32(camera.extent[0]) - 1.0
-  ndc_y := (2.0 * pixel_y) / f32(camera.extent[1]) - 1.0
-  inv_proj := linalg.matrix4_inverse(camera_projection_matrix(camera))
-  inv_view := linalg.matrix4_inverse(camera_view_matrix(camera))
-  ray_eye := inv_proj * [4]f32{ndc_x, ndc_y, -1.0, 1.0}
-  ray_eye = {ray_eye.x, ray_eye.y, -1.0, 0.0}
-  ray_dir = linalg.normalize((inv_view * ray_eye).xyz)
-  return camera.position, ray_dir
-}
-
 // World-space ray from the main camera through `cursor`, in window
 // coordinates as input.State reports them; the window DPI scale is applied
 // here.
 cursor_ray :: proc(self: ^Manager, cursor: [2]f32) -> (origin, dir: [3]f32, ok: bool) {
   cam := main_camera(self) or_return
-  p := cursor * self.internal.ui.dpi_scale
-  origin, dir = camera_viewport_to_world_ray(cam, p.x, p.y)
-  return origin, dir, true
+  p := cursor * self.ui.dpi_scale
+  ndc := 2 * p / [2]f32{f32(cam.extent[0]), f32(cam.extent[1])} - 1
+  ray_eye := linalg.matrix4_inverse(camera_projection_matrix(cam)) * [4]f32{ndc.x, ndc.y, -1, 1}
+  ray_eye = {ray_eye.x, ray_eye.y, -1, 0}
+  dir = linalg.normalize((linalg.matrix4_inverse(camera_view_matrix(cam)) * ray_eye).xyz)
+  return cam.position, dir, true
 }
 
 // ---------- camera pool ----------
@@ -177,7 +144,7 @@ create_camera :: proc(
   camera_look_at(cam, position, target)
   slot := handle.index * gpu.FRAMES_IN_FLIGHT
   res := draw_lists_init(&cam.draws, self, CAMERA_DRAW_SLOT_BASE + slot, len(MaterialType), MAX_NODES_IN_SCENE)
-  if res == .SUCCESS do res = create_targets(self, gctx, cam, slot)
+  if res == .SUCCESS do res = create_targets(self, cam, slot)
   if res != .SUCCESS {
     destroy_camera(self, handle)
     return {}, false
@@ -190,7 +157,7 @@ create_camera :: proc(
 destroy_camera :: proc(self: ^Manager, handle: CameraHandle) {
   cam := cont.get(self.cameras, handle)
   if cam == nil do return
-  destroy_targets(self, &self.gctx, cam)
+  destroy_targets(self, cam)
   draw_lists_destroy(&cam.draws, &self.gctx)
   cont.free_deferred(&self.cameras, handle)
   if handle == self.main_camera do self.main_camera = {}
@@ -208,10 +175,11 @@ camera_attachment :: proc(
   ok: bool,
 ) #optional_ok {
   cam := cont.get(self.cameras, handle) or_return
-  return cam.attachments[attachment_type][frame_index.? or_else self.frame_index], true
+  return cam.attachments[attachment_type][frame_index.? or_else u32(self.gctx.frame_serial % gpu.FRAMES_IN_FLIGHT)], true
 }
 
-// Resize a camera's render targets and keep its aspect ratio in sync.
+// Resize a camera's render targets; a perspective projection follows the new
+// aspect ratio.
 resize_camera :: proc(
   self: ^Manager,
   handle: CameraHandle,
@@ -222,11 +190,8 @@ resize_camera :: proc(
   if !ok do return .SUCCESS
   if cam.extent == {width, height} do return .SUCCESS
   cam.extent = {width, height}
-  if p, is_persp := &cam.projection.(PerspectiveProjection); is_persp {
-    p.aspect_ratio = f32(width) / f32(max(height, 1))
-  }
-  destroy_targets(self, gctx, cam)
-  create_targets(self, gctx, cam, handle.index * gpu.FRAMES_IN_FLIGHT) or_return
+  destroy_targets(self, cam)
+  create_targets(self, cam, handle.index * gpu.FRAMES_IN_FLIGHT) or_return
   log.infof("Camera resized to %dx%d", width, height)
   return .SUCCESS
 }
@@ -270,18 +235,16 @@ ATTACHMENTS := [AttachmentType]struct {
 @(private)
 create_targets :: proc(
   self: ^Manager,
-  gctx: ^gpu.GPUContext,
   camera: ^Camera,
   // the camera's first pyramid slot; frame f takes slot + f
   pyramid_slot: u32,
 ) -> vk.Result {
-  texture_manager := &self.texture_manager
+  gctx := &self.gctx
   extent := vk.Extent2D{camera.extent[0], camera.extent[1]}
   for a in AttachmentType {
     for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
       camera.attachments[a][frame] = allocate_texture(
-        texture_manager,
-        gctx,
+        self,
         extent,
         ATTACHMENTS[a].format,
         ATTACHMENTS[a].usage,
@@ -292,35 +255,26 @@ create_targets :: proc(
   // The depth images leave UNDEFINED at the start of the next recorded frame;
   // the compute work of the frame after it is the first to read them.
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    depth := get_texture(texture_manager, camera.attachments[.DEPTH][frame])
+    depth := cont.get(self.textures, camera.attachments[.DEPTH][frame])
     gpu.queue_image_init(gctx, {depth.image, {.DEPTH}, {.DEPTH_STENCIL_ATTACHMENT_READ}, {.EARLY_FRAGMENT_TESTS}})
   }
   camera.ready_serial = gctx.frame_serial + 1
   for &pyramid, frame in camera.depth_pyramid {
-    occlusion_setup_pyramid(gctx, &pyramid, texture_manager, extent, pyramid_slot + u32(frame)) or_return
+    occlusion_setup_pyramid(self, &pyramid, extent, pyramid_slot + u32(frame)) or_return
   }
   return .SUCCESS
 }
 
 @(private)
-destroy_targets :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-  camera: ^Camera,
-) {
-  for attachment_type in AttachmentType {
-    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-      handle := camera.attachments[attachment_type][frame]
-      free_texture(&self.texture_manager, gctx, handle)
-    }
-  }
+destroy_targets :: proc(self: ^Manager, camera: ^Camera) {
+  for frames in camera.attachments do for handle in frames do destroy_texture(self, handle)
   camera.attachments = {}
-  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    occlusion_destroy_pyramid(
-      gctx,
-      &camera.depth_pyramid[frame],
-      &self.texture_manager,
-    )
-  }
-  camera.depth_pyramid = {}
+  for &pyramid in camera.depth_pyramid do occlusion_destroy_pyramid(self, &pyramid)
+}
+
+// Look the main camera at `to` from `from`.
+main_camera_look_at :: proc(self: ^Manager, from, to: [3]f32) {
+  cam := main_camera(self)
+  if cam == nil do return
+  camera_look_at(cam, from, to)
 }

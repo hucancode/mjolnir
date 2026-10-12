@@ -12,7 +12,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Manager,
-  camera:   render.CameraController,
+  camera:   mjolnir.CameraController,
   input:    input.State,
   gltf:     mjolnir.GltfScene,
 }
@@ -29,7 +29,7 @@ main :: proc() {
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
-  app.camera = render.orbit_controller()
+  app.camera = mjolnir.orbit_controller()
 
   render.main_camera_look_at(&app.renderer, {5, 6, 5}, {0, 5, 0})
   app.gltf = mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Duck.glb")
@@ -46,7 +46,7 @@ should_close :: proc(app: ^App) -> bool {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   rot := dt * math.PI * 0.5
   for h in app.gltf.roots do world.rotate_by(&app.scene, h, rot)
   world.update(&app.scene)

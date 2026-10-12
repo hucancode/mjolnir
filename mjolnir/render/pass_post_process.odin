@@ -1,6 +1,7 @@
 #+private
 package render
 
+import cont "../containers"
 import "gpu"
 import "base:intrinsics"
 import "core:log"
@@ -8,15 +9,6 @@ import "core:reflect"
 import vk "vendor:vulkan"
 
 SHADER_POSTPROCESS_VERT :: #load("shader/postprocess/vert.spv")
-SHADER_POSTPROCESS_FRAG :: #load("shader/postprocess/frag.spv")
-SHADER_BLOOM_FRAG :: #load("shader/bloom/frag.spv")
-SHADER_BLUR_FRAG :: #load("shader/blur/frag.spv")
-SHADER_GRAYSCALE_FRAG :: #load("shader/grayscale/frag.spv")
-SHADER_TONEMAP_FRAG :: #load("shader/tonemap/frag.spv")
-SHADER_OUTLINE_FRAG :: #load("shader/outline/frag.spv")
-SHADER_FOG_FRAG :: #load("shader/fog/frag.spv")
-SHADER_CROSSHATCH_FRAG :: #load("shader/crosshatch/frag.spv")
-SHADER_DOF_FRAG :: #load("shader/dof/frag.spv")
 
 // Each effect's fragment shader and pass count, indexed by the
 // PostprocessEffect union tag (0 = nil). A separable effect runs its shader
@@ -26,15 +18,15 @@ EFFECTS := [?]struct {
   frag:   []u8,
   passes: u32,
 } {
-  {SHADER_POSTPROCESS_FRAG, 1},
-  {SHADER_GRAYSCALE_FRAG, 1},
-  {SHADER_TONEMAP_FRAG, 1},
-  {SHADER_BLUR_FRAG, 2},
-  {SHADER_BLOOM_FRAG, 2},
-  {SHADER_OUTLINE_FRAG, 1},
-  {SHADER_FOG_FRAG, 1},
-  {SHADER_CROSSHATCH_FRAG, 1},
-  {SHADER_DOF_FRAG, 1},
+  {#load("shader/postprocess/frag.spv"), 1},
+  {#load("shader/grayscale/frag.spv"), 1},
+  {#load("shader/tonemap/frag.spv"), 1},
+  {#load("shader/blur/frag.spv"), 2},
+  {#load("shader/bloom/frag.spv"), 2},
+  {#load("shader/outline/frag.spv"), 1},
+  {#load("shader/fog/frag.spv"), 1},
+  {#load("shader/crosshatch/frag.spv"), 1},
+  {#load("shader/dof/frag.spv"), 1},
 }
 #assert(len(EFFECTS) == intrinsics.type_union_variant_count(PostprocessEffect) + 1)
 
@@ -71,43 +63,26 @@ PostProcessRenderer :: struct {
   images:          [gpu.FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
 }
 
-post_process_teardown :: proc(
-  self: ^PostProcessRenderer,
-  gctx: ^gpu.GPUContext,
-  texture_manager: ^TextureManager,
-) {
-  post_process_release_images(self, gctx, texture_manager)
-}
-
-post_process_init :: proc(
-  self: ^PostProcessRenderer,
-  gctx: ^gpu.GPUContext,
-  color_format: vk.Format,
-  layout: vk.PipelineLayout,
-) -> (
-  ret: vk.Result,
-) {
+post_process_init :: proc(r: ^Manager) -> vk.Result {
+  self := &r.post_process
   self.effect_stack = make([dynamic]PostprocessEffect)
-  defer if ret != .SUCCESS do delete(self.effect_stack)
-  formats := [2]vk.Format{gpu.HDR_COLOR_FORMAT, color_format}
+  formats := [2]vk.Format{gpu.HDR_COLOR_FORMAT, r.swapchain.format.format}
   blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_OVERRIDE}
   for &pipelines, is_last in self.pipelines {
     for effect, tag in EFFECTS {
       pipelines[tag] = gpu.create_graphics_pipeline(
-        gctx,
+        &r.gctx,
         {
           vert = SHADER_POSTPROCESS_VERT,
           frag = effect.frag,
           topology = .TRIANGLE_LIST,
-          raster = gpu.DOUBLE_SIDED_RASTERIZER,
           blend = blend[:],
           color_formats = formats[is_last:][:1],
-          layout = layout,
+          layout = r.scene.layout,
         },
       ) or_return
     }
   }
-  log.info("Postprocess pipeline initialized successfully")
   return .SUCCESS
 }
 
@@ -124,48 +99,23 @@ post_process_image_count :: proc(effects: []PostprocessEffect) -> int {
 
 // Allocate the ping-pong images the current stack needs and does not have
 // yet. Images are kept until the swapchain is resized or the level torn down.
-post_process_ensure_images :: proc(
-  self: ^PostProcessRenderer,
-  gctx: ^gpu.GPUContext,
-  texture_manager: ^TextureManager,
-  extent: vk.Extent2D,
-  frame_index: u32,
-) -> vk.Result {
+post_process_ensure_images :: proc(r: ^Manager, extent: vk.Extent2D, frame_index: u32) -> vk.Result {
+  self := &r.post_process
   for &handle in self.images[frame_index][:post_process_image_count(self.effect_stack[:])] {
     if handle != {} do continue
-    handle = allocate_texture(
-      texture_manager,
-      gctx,
-      extent,
-      gpu.HDR_COLOR_FORMAT,
-      {.COLOR_ATTACHMENT, .SAMPLED},
-    ) or_return
+    handle = allocate_texture(r, extent, gpu.HDR_COLOR_FORMAT, {.COLOR_ATTACHMENT, .SAMPLED}) or_return
   }
   return .SUCCESS
 }
 
-post_process_release_images :: proc(
-  self: ^PostProcessRenderer,
-  gctx: ^gpu.GPUContext,
-  texture_manager: ^TextureManager,
-) {
-  for &frame in self.images {
+// Free the ring images; the next frame allocates them again at its extent.
+post_process_release_images :: proc(r: ^Manager) {
+  for &frame in r.post_process.images {
     for &handle in frame {
-      if handle == {} do continue
-      free_texture(texture_manager, gctx, handle)
+      destroy_texture(r, handle)
       handle = {}
     }
   }
-}
-
-post_process_shutdown :: proc(self: ^PostProcessRenderer, gctx: ^gpu.GPUContext) {
-  for &pipelines in self.pipelines {
-    for &p in pipelines {
-      vk.DestroyPipeline(gctx.device, p, nil)
-      p = 0
-    }
-  }
-  delete(self.effect_stack)
 }
 
 // post_process_record runs the post-process effect stack into output_view.
@@ -174,15 +124,14 @@ post_process_shutdown :: proc(self: ^PostProcessRenderer, gctx: ^gpu.GPUContext)
 // slot i % POST_PROCESS_RING; the last pass writes output_view. An empty
 // stack copies the final image to output.
 post_process_record :: proc(
-  self: ^PostProcessRenderer,
-  command_buffer: vk.CommandBuffer,
+  r: ^Manager,
   frame_index: u32,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
   cam: ^Camera,
-  texture_manager: ^TextureManager,
-  layout: vk.PipelineLayout,
 ) {
+  self := &r.post_process
+  command_buffer := r.command_buffers[frame_index]
   effects := self.effect_stack[:]
   // with no effect, a single copy (nil effect) brings the input to output
   copy_only := [1]PostprocessEffect{nil}
@@ -191,7 +140,7 @@ post_process_record :: proc(
   discards: [POST_PROCESS_RING]gpu.ImageDiscard
   ring_count := post_process_image_count(effects)
   for &img, slot in ring[:ring_count] {
-    img = get_texture(texture_manager, self.images[frame_index][slot])
+    img = cont.get(r.textures, self.images[frame_index][slot])
     if img == nil {
       log.errorf("Post-process image handle %v not found", self.images[frame_index][slot])
       return
@@ -199,7 +148,6 @@ post_process_record :: proc(
     discards[slot] = gpu.attachment_discard(img)
   }
   gpu.image_discard_barrier(command_buffer, ..discards[:ring_count])
-  gpu.set_viewport_scissor(command_buffer, extent)
   input := cam.attachments[.FINAL_IMAGE][frame_index].index
   original := input
   pass_count := post_process_pass_count(effects)
@@ -240,7 +188,7 @@ post_process_record :: proc(
         pass                 = pass,
         effect               = effect,
       }
-      push_constants(command_buffer, layout, &push)
+      push_constants(r, command_buffer, &push)
       vk.CmdDraw(command_buffer, 3, 1, 0, 0)
       vk.CmdEndRendering(command_buffer)
       if !is_last {

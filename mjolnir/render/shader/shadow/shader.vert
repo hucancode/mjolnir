@@ -78,8 +78,8 @@ layout(set = 0, binding = 5) readonly buffer VertexSkinningBuffer {
 void main() {
     uint node_index = uint(gl_InstanceIndex) & 0xFFFFu;
     View view = views[uint(gl_InstanceIndex) >> 16u];
-    mat4 world = nodes[node_index].world_matrix;
     NodeData node = nodes[node_index];
+    mat4 world = node.world_matrix;
     MeshData mesh = meshes[node.mesh_id];
     vec4 model_position;
     bool is_skinned = (mesh.flags & MESH_FLAG_SKINNED) != 0u &&

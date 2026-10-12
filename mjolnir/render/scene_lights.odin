@@ -180,7 +180,7 @@ collect_lights :: proc(self: ^Manager, frame_index: u32) {
   cameras := views[CAMERA_VIEW_BASE:][:len(self.cameras.entries)]
   casters: [MAX_LIGHTS]Caster
   caster_count := 0
-  it := ba.make_iterator(&self.internal.staging.lights)
+  it := ba.make_iterator(&self.staging.lights)
   for slot in ba.iterate_by_set(&it) {
     if n == MAX_LIGHTS do break
     inst := &self.instances[slot]
@@ -202,14 +202,14 @@ collect_lights :: proc(self: ^Manager, frame_index: u32) {
     caster_count += 1
   }
   slice.sort_by(casters[:caster_count], proc(a, b: Caster) -> bool {return a.score > b.score})
-  maps := &self.internal.shadow_casters
+  maps := &self.shadow_casters
   selected := select_shadow_casters(casters[:caster_count], maps, self.gctx.frame_serial)
   // marks the light shadowed until pack_lights picks its layers
   for c in maps[:selected] do lights[c.light].shadow_map = 0
   dst := frame_table(self, .LIGHTS, LightGPU, frame_index)
-  self.internal.light_count, self.internal.shadow_view_count = pack_lights(lights[:n], dst)
+  self.light_count, self.shadow_view_count = pack_lights(lights[:n], dst)
   _, shadow_mask := material_masks()
-  draws := &self.internal.shadow.draws
+  draws := &self.shadow_draws
   for &l in dst[:n] {
     if l.shadow_map == NO_SHADOW do continue
     for face, f in SHADOW_FACES[l.type] {

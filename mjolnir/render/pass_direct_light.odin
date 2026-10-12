@@ -51,10 +51,6 @@ LightingPushConstants :: struct {
   skybox_blur:      f32,
 }
 
-DirectLightRenderer :: struct {
-  pipelines: [LightType]vk.Pipeline,
-}
-
 // The volume each light type rasterizes, one instance per light, and the
 // fragment shader shading it. Point and spot draw their builtin volume mesh's
 // back faces where the scene lies in front of them; directional and ambient
@@ -74,13 +70,11 @@ DRAW_STATE := [LightType]struct {
   .AMBIENT     = {.ALWAYS, {.BACK}, nil, AMBIENT_SHADER_FRAG},
 }
 
-direct_light_init :: proc(r: ^Manager) -> (ret: vk.Result) {
-  self := &r.internal.direct_light
+direct_light_init :: proc(r: ^Manager) -> vk.Result {
   gctx := &r.gctx
   light_type_entry := vk.SpecializationMapEntry{constantID = 0, size = size_of(LightType)}
   color_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
   blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ADDITIVE}
-  defer if ret != .SUCCESS do direct_light_shutdown(r)
   for type in LightType {
     light_type := type
     specialization := vk.SpecializationInfo {
@@ -89,43 +83,34 @@ direct_light_init :: proc(r: ^Manager) -> (ret: vk.Result) {
       dataSize      = size_of(light_type),
       pData         = &light_type,
     }
-    raster := gpu.STANDARD_RASTERIZER
-    raster.cullMode = DRAW_STATE[type].cull
     depth := gpu.READ_ONLY_DEPTH_STATE
     depth.depthCompareOp = DRAW_STATE[type].depth_compare
-    self.pipelines[type] = gpu.create_graphics_pipeline(
+    r.light_pipelines[type] = gpu.create_graphics_pipeline(
       gctx,
       {
         vert = LIGHTING_SHADER_VERT,
         frag = DRAW_STATE[type].frag,
         specialization = &specialization,
         vertex_bindings = VERTEX_BINDING_DESCRIPTION[:],
-        vertex_attributes = POSITION_ATTRIBUTE_DESCRIPTIONS[:],
+        vertex_attributes = VERTEX_ATTRIBUTE_DESCRIPTIONS[:1],
         topology = .TRIANGLE_LIST,
-        raster = raster,
+        cull_mode = DRAW_STATE[type].cull,
         depth = depth,
         blend = blend[:],
         color_formats = color_formats[:],
         depth_format = ATTACHMENTS[.DEPTH].format,
-        layout = r.internal.scene.layout,
+        layout = r.scene.layout,
       },
     ) or_return
   }
   return .SUCCESS
 }
 
-direct_light_shutdown :: proc(r: ^Manager) {
-  self := &r.internal.direct_light
-  for p in self.pipelines do vk.DestroyPipeline(r.gctx.device, p, nil)
-  self^ = {}
-}
-
 // Record one camera's lighting: every light as one instance of its type's
 // volume, additively over the cleared color image and depth-tested against
 // the G-buffer depth. record_camera_passes orders it with the other passes.
 lighting_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Camera) {
-  self := &r.internal.direct_light
-  cmd := r.internal.command_buffers[frame_index]
+  cmd := r.command_buffers[frame_index]
   final_image := camera_image(r, cam, .FINAL_IMAGE, frame_index)
   depth_texture := camera_image(r, cam, .DEPTH, frame_index)
   gpu.begin_rendering(
@@ -136,13 +121,12 @@ lighting_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Cam
     gpu.create_depth_attachment(depth_texture.view, .LOAD, .NONE),
     gpu.create_color_attachment(final_image.view),
   )
-  gpu.set_viewport_scissor(cmd, depth_texture.extent)
   bind_mesh_buffers(r, cmd)
   ambient := &r.ambient
   push := LightingPushConstants {
     camera_index     = cam_index,
-    irradiance       = texture_index(ambient.ibl.irradiance_cube),
-    prefilter        = texture_index(ambient.ibl.prefilter_cube),
+    irradiance       = texture_index(ambient.irradiance_cube),
+    prefilter        = texture_index(ambient.prefilter_cube),
     brdf_lut         = texture_index(ambient.brdf_lut),
     environment      = texture_index(ambient.environment_map),
     skybox_intensity = ambient.skybox_intensity,
@@ -151,10 +135,10 @@ lighting_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Cam
   push_constants(r, cmd, &push)
   first: u32
   for type in LightType {
-    count := r.internal.light_count[type]
+    count := r.light_count[type]
     defer first += count
     if count == 0 do continue
-    vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipelines[type])
+    vk.CmdBindPipeline(cmd, .GRAPHICS, r.light_pipelines[type])
     if primitive, ok := DRAW_STATE[type].volume.?; ok {
       volume, _ := cont.get(r.meshes, r.builtin_meshes[primitive])
       vk.CmdDrawIndexed(cmd, volume.index_count, count, volume.first_index, volume.vertex_offset, first)

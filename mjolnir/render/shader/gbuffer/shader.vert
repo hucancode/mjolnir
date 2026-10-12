@@ -89,8 +89,8 @@ layout(location = 5) flat out uint outNodeIndex;
 void main() {
     View camera = views[camera_index];
     uint node_index = uint(gl_InstanceIndex);
-    mat4 world = nodes[node_index].world_matrix;
     NodeData node = nodes[node_index];
+    mat4 world = node.world_matrix;
     MeshData mesh = meshes[node.mesh_id];
 
     vec4 modelPosition;

@@ -48,6 +48,8 @@ image_create :: proc(
   array := false,
   // also accessed by the async compute queue
   shared := false,
+  // channel remapping of the view; identity by default
+  components: vk.ComponentMapping = {},
 ) -> (
   img: Image,
   ret: vk.Result,
@@ -87,6 +89,7 @@ image_create :: proc(
     view_type,
     mip_count = mip_levels,
     layer_count = layers,
+    components = components,
   ) or_return
   log.debugf(
     "Created image %v %dx%d (mips=%d, layers=%d) 0x%x",
@@ -97,35 +100,6 @@ image_create :: proc(
     layers,
     img.image,
   )
-  return img, .SUCCESS
-}
-
-// Create a 2D image and queue mip 0's `data` for upload; with mip_levels > 1
-// the rest of the chain is blitted down from it. The image is filled when the
-// next command buffer records its uploads.
-image_create_with_data :: proc(
-  gctx: ^GPUContext,
-  extent: vk.Extent2D,
-  format: vk.Format,
-  usage: vk.ImageUsageFlags,
-  data: rawptr,
-  size: vk.DeviceSize,
-  mip_levels: u32 = 1,
-) -> (
-  img: Image,
-  ret: vk.Result,
-) {
-  img = image_create(
-    gctx,
-    extent,
-    format,
-    usage | {.TRANSFER_DST, .TRANSFER_SRC},
-    mip_levels,
-  ) or_return
-  if ret = queue_image_write(gctx, &img, data, int(size)); ret != .SUCCESS {
-    image_destroy(gctx.device, &img)
-    return {}, ret
-  }
   return img, .SUCCESS
 }
 
