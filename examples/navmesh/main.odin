@@ -35,7 +35,7 @@ navmesh: nav.NavMesh
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
-  renderer: render.Manager,
+  renderer: render.Renderer,
   input:    input.State,
 }
 

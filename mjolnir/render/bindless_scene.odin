@@ -57,30 +57,11 @@ SceneDescriptors :: struct {
   layout:          vk.PipelineLayout,
 }
 
-// The resource behind one scene binding for frame `frame_index`.
-scene_binding_info :: proc(
-  self: ^Manager,
-  b: SceneBinding,
-  frame_index: int,
-) -> gpu.DescriptorInfo {
-  atlas := &self.shadow_atlas[frame_index]
-  #partial switch b {
-  case .MESHES:          return gpu.buffer_info(&self.mesh_data_buffer)
-  case .SKINNING:        return gpu.buffer_info(&self.mesh_buffers[.SKINNING])
-  case .PARTICLES:       return gpu.buffer_info(&self.particle_buffer)
-  case .PARTICLE_ALIVE:  return gpu.buffer_info(&self.particle_alive_buffer)
-  case .BONES:           return gpu.buffer_info(&self.bone_buffers[frame_index])
-  case .SHADOW_MAPS:     return vk.DescriptorImageInfo{imageView = atlas.view, imageLayout = .GENERAL}
-  }
-  // an arena table
-  layout := &self.arena_layout
-  return vk.DescriptorBufferInfo{buffer = self.frame_arena[frame_index].buffer, offset = layout.offset[b], range = layout.range[b]}
-}
 
 // Create the scene set layout, one set per frame in flight pointing at the
 // scene buffers, and the shared pipeline layout. Call after every scene buffer
 // and the bindless set exist.
-scene_descriptors_init :: proc(self: ^Manager) -> (ret: vk.Result) {
+scene_descriptors_init :: proc(self: ^Renderer) -> (ret: vk.Result) {
   gctx := &self.gctx
   scene := &self.scene
   defer if ret != .SUCCESS do scene_descriptors_shutdown(scene, gctx)
@@ -112,20 +93,25 @@ scene_descriptors_shutdown :: proc(self: ^SceneDescriptors, gctx: ^gpu.GPUContex
 
 // Point binding `b` of frame `frame_index`'s scene set at its current buffer.
 // The caller guarantees no submitted work still uses that set.
-scene_write_binding :: proc(self: ^Manager, b: SceneBinding, frame_index: int) {
-  gpu.write_descriptor(
-    &self.gctx,
-    self.scene.sets[frame_index],
-    u32(b),
-    0,
-    SCENE_BINDING_TYPES[b],
-    scene_binding_info(self, b, frame_index),
-  )
+scene_write_binding :: proc(self: ^Renderer, b: SceneBinding, frame_index: int) {
+  atlas := &self.shadow_atlas[frame_index]
+  layout := &self.arena_layout
+  // an arena table, unless a resource of its own backs the binding
+  info: gpu.DescriptorInfo = vk.DescriptorBufferInfo{buffer = self.frame_arena[frame_index].buffer, offset = layout.offset[b], range = layout.range[b]}
+  #partial switch b {
+  case .MESHES:          info = gpu.buffer_info(&self.mesh_data_buffer)
+  case .SKINNING:        info = gpu.buffer_info(&self.mesh_buffers[.SKINNING])
+  case .PARTICLES:       info = gpu.buffer_info(&self.particle_buffer)
+  case .PARTICLE_ALIVE:  info = gpu.buffer_info(&self.particle_alive_buffer)
+  case .BONES:           info = gpu.buffer_info(&self.bone_buffers[frame_index])
+  case .SHADOW_MAPS:     info = vk.DescriptorImageInfo{imageView = atlas.view, imageLayout = .GENERAL}
+  }
+  gpu.write_descriptor(&self.gctx, self.scene.sets[frame_index], u32(b), 0, SCENE_BINDING_TYPES[b], info)
 }
 
 // Bind the scene and bindless sets of `frame_index` to `bind_point`.
 bind_scene_sets :: proc(
-  self: ^Manager,
+  self: ^Renderer,
   cmd: vk.CommandBuffer,
   bind_point: vk.PipelineBindPoint,
   frame_index: u32,
@@ -138,26 +124,16 @@ bind_scene_sets :: proc(
 }
 
 // Push `data` at offset 0 of the push-constant range every pipeline shares.
-push_constants :: proc(self: ^Manager, cmd: vk.CommandBuffer, data: ^$T) {
+push_constants :: proc(self: ^Renderer, cmd: vk.CommandBuffer, data: ^$T) {
   #assert(size_of(T) <= PUSH_CONSTANT_SIZE)
   vk.CmdPushConstants(cmd, self.scene.layout, SCENE_STAGES, 0, size_of(T), data)
 }
 
 // Bind the mesh arena's vertex and index buffers.
-bind_mesh_buffers :: proc(self: ^Manager, cmd: vk.CommandBuffer) {
+bind_mesh_buffers :: proc(self: ^Renderer, cmd: vk.CommandBuffer) {
   gpu.bind_vertex_index_buffers(
     cmd,
     self.mesh_buffers[.VERTEX].buffer,
     self.mesh_buffers[.INDEX].buffer,
   )
-}
-
-// The image behind one of a camera's attachments for one frame.
-camera_image :: proc(
-  self: ^Manager,
-  cam: ^Camera,
-  a: AttachmentType,
-  frame_index: u32,
-) -> ^gpu.Image {
-  return texture_image(self, cam.attachments[a][frame_index])
 }

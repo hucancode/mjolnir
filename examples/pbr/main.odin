@@ -41,7 +41,7 @@ skybox_blur: mu.Real = 0.25
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
-  renderer: render.Manager,
+  renderer: render.Renderer,
   input:    input.State,
 }
 

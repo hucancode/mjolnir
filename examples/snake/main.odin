@@ -43,7 +43,7 @@ g: Game
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
-  renderer: render.Manager,
+  renderer: render.Renderer,
   input:    input.State,
   font:     font.Font,
 }

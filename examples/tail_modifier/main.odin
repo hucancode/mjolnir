@@ -39,7 +39,7 @@ head_offset: [3]f32 // head world pos minus node origin, captured at drag start
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
-  renderer: render.Manager,
+  renderer: render.Renderer,
   input:    input.State,
 }
 

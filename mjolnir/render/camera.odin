@@ -8,6 +8,52 @@ import "core:math"
 import "core:math/linalg"
 import vk "vendor:vulkan"
 
+AttachmentType :: enum {
+  FINAL_IMAGE        = 0,
+  NORMAL             = 1,
+  ALBEDO             = 2,
+  METALLIC_ROUGHNESS = 3,
+  EMISSIVE           = 4,
+  DEPTH              = 5,
+}
+
+// The aspect ratio follows the camera's extent.
+PerspectiveProjection :: struct {
+  fov: f32,
+}
+
+OrthographicProjection :: struct {
+  width:  f32,
+  height: f32,
+}
+
+CameraProjection :: union {
+  PerspectiveProjection,
+  OrthographicProjection,
+}
+
+// A view into the scene: pose + projection, plus the GPU resources it renders
+// into (attachments, indirect draw buffers, depth pyramid, descriptor sets)
+Camera :: struct {
+  position:                     [3]f32,
+  rotation:                     quaternion128,
+  projection:                   CameraProjection,
+  // clip planes, shared by both projections
+  near, far:                    f32,
+  extent:                       [2]u32, // width, height
+  attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]TextureHandle,
+  // One indirect draw list per MaterialType per frame in flight. Frame N's
+  // culling writes the lists frame N+1 draws; frame N draws the lists frame
+  // N-1's culling wrote.
+  draws:                        DrawLists,
+  depth_pyramid:                [gpu.FRAMES_IN_FLIGHT]DepthPyramid,
+  // First frame serial whose compute work may read the camera's depth and
+  // pyramids: the frame before it moved them out of UNDEFINED and rendered
+  // depth. Until then the camera is culled without occlusion, and frames
+  // before it draw none of its lists.
+  ready_serial:                 u64,
+}
+
 // ---------- pose + projection (CPU) ----------
 
 @(private)
@@ -140,7 +186,7 @@ camera_set_orthographic :: proc(
 // World-space ray from the main camera through `cursor`, in window
 // coordinates as input.State reports them; the window DPI scale is applied
 // here.
-cursor_ray :: proc(self: ^Manager, cursor: [2]f32) -> (origin, dir: [3]f32, ok: bool) {
+cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (origin, dir: [3]f32, ok: bool) {
   cam := main_camera(self) or_return
   p := cursor * self.ui.dpi_scale
   ndc := 2 * p / [2]f32{f32(cam.extent[0]), f32(cam.extent[1])} - 1
@@ -152,18 +198,19 @@ cursor_ray :: proc(self: ^Manager, cursor: [2]f32) -> (origin, dir: [3]f32, ok: 
 
 // ---------- camera pool ----------
 
-camera :: proc(self: ^Manager, handle: CameraHandle) -> (^Camera, bool) #optional_ok {
-  return cont.slots_get(&self.camera_slots, self.cameras, handle)
+camera :: proc(self: ^Renderer, handle: CameraHandle) -> (^Camera, bool) #optional_ok {
+  if !cont.slots_live(&self.camera_slots, u32(handle)) do return nil, false
+  return &self.cameras[handle], true
 }
 
-main_camera :: proc(self: ^Manager) -> (^Camera, bool) #optional_ok {
+main_camera :: proc(self: ^Renderer) -> (^Camera, bool) #optional_ok {
   return camera(self, self.main_camera)
 }
 
 // Create a perspective camera with its own render targets. Cameras are drawn
 // every frame; the main camera is presented to the swapchain.
 create_camera :: proc(
-  self: ^Manager,
+  self: ^Renderer,
   width, height: u32,
   position: [3]f32 = {0, 0, 3},
   target: [3]f32 = {0, 0, 0},
@@ -174,38 +221,38 @@ create_camera :: proc(
   handle: CameraHandle,
   ok: bool,
 ) #optional_ok {
-  handle = cont.slots_alloc(&self.camera_slots, CameraHandle) or_return
-  cam := &self.cameras[handle.index]
+  handle = CameraHandle(cont.slots_alloc(&self.camera_slots) or_return)
+  cam := &self.cameras[handle]
   cam^ = {
     extent = {width, height},
   }
   camera_set_perspective(cam, fov, near_plane, far_plane)
   camera_look_at(cam, position, target)
-  slot := handle.index * gpu.FRAMES_IN_FLIGHT
+  slot := u32(handle) * gpu.FRAMES_IN_FLIGHT
   res := draw_lists_init(&cam.draws, self, CAMERA_DRAW_SLOT_BASE + slot, len(MaterialType), MAX_NODES_IN_SCENE)
   if res == .SUCCESS do res = create_targets(self, cam, slot)
   if res != .SUCCESS {
     destroy_camera(self, handle)
-    return {}, false
+    return 0, false
   }
   return handle, true
 }
 
 // The camera's slot is reused only once no frame in flight reads its draw
 // lists and pyramid slots.
-destroy_camera :: proc(self: ^Manager, handle: CameraHandle) {
+destroy_camera :: proc(self: ^Renderer, handle: CameraHandle) {
   cam := camera(self, handle)
   if cam == nil do return
   destroy_targets(self, cam)
   draw_lists_destroy(&cam.draws, &self.gctx)
-  cont.slots_free(&self.camera_slots, handle)
-  if handle == self.main_camera do self.main_camera = {}
+  cont.slots_free(&self.camera_slots, u32(handle))
+  if handle == self.main_camera do self.main_camera = 0
 }
 
 // Look up a camera's attachment texture for `frame_index` (default: the
 // frame recorded next).
 camera_attachment :: proc(
-  self: ^Manager,
+  self: ^Renderer,
   handle: CameraHandle,
   attachment_type: AttachmentType,
   frame_index: Maybe(u32) = nil,
@@ -220,7 +267,7 @@ camera_attachment :: proc(
 // Resize a camera's render targets; a perspective projection follows the new
 // aspect ratio.
 resize_camera :: proc(
-  self: ^Manager,
+  self: ^Renderer,
   handle: CameraHandle,
   width, height: u32,
 ) -> vk.Result {
@@ -229,24 +276,8 @@ resize_camera :: proc(
   if cam.extent == {width, height} do return .SUCCESS
   cam.extent = {width, height}
   destroy_targets(self, cam)
-  create_targets(self, cam, handle.index * gpu.FRAMES_IN_FLIGHT) or_return
+  create_targets(self, cam, u32(handle) * gpu.FRAMES_IN_FLIGHT) or_return
   log.infof("Camera resized to %dx%d", width, height)
-  return .SUCCESS
-}
-
-// Swapchain resize: every camera that rendered at the old swapchain extent
-// follows it to the new one.
-@(private)
-resize_swapchain_cameras :: proc(
-  self: ^Manager,
-  old_extent, new_extent: vk.Extent2D,
-) -> vk.Result {
-  c: u32
-  for i in cont.slots_next(&self.camera_slots, &c) {
-    if self.cameras[i].extent != {old_extent.width, old_extent.height} do continue
-    handle := cont.slots_handle(&self.camera_slots, i, CameraHandle)
-    resize_camera(self, handle, new_extent.width, new_extent.height) or_return
-  }
   return .SUCCESS
 }
 
@@ -273,7 +304,7 @@ ATTACHMENTS := [AttachmentType]struct {
 
 @(private)
 create_targets :: proc(
-  self: ^Manager,
+  self: ^Renderer,
   camera: ^Camera,
   // the camera's first pyramid slot; frame f takes slot + f
   pyramid_slot: u32,
@@ -305,14 +336,14 @@ create_targets :: proc(
 }
 
 @(private)
-destroy_targets :: proc(self: ^Manager, camera: ^Camera) {
+destroy_targets :: proc(self: ^Renderer, camera: ^Camera) {
   for frames in camera.attachments do for handle in frames do destroy_texture(self, handle)
   camera.attachments = {}
   for &pyramid in camera.depth_pyramid do occlusion_destroy_pyramid(self, &pyramid)
 }
 
 // Look the main camera at `to` from `from`.
-main_camera_look_at :: proc(self: ^Manager, from, to: [3]f32) {
+main_camera_look_at :: proc(self: ^Renderer, from, to: [3]f32) {
   cam := main_camera(self)
   if cam == nil do return
   camera_look_at(cam, from, to)

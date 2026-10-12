@@ -14,7 +14,7 @@ import "mjolnir/world"
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
-  renderer: render.Manager,
+  renderer: render.Renderer,
   free_cam: bool,
   input:    input.State,
 }
@@ -693,8 +693,6 @@ on_key :: proc(app: ^App, key: input.Key, pressed: bool) {
 on_post_render :: proc(app: ^App) {
   if material, ok := render.material(&app.renderer, portal_material_handle);
      ok {
-    material.albedo_index = render.texture_index(
-      render.camera_attachment(&app.renderer, portal_camera_handle, .FINAL_IMAGE),
-    )
+    material.albedo_index = render.camera_attachment(&app.renderer, portal_camera_handle, .FINAL_IMAGE)
   }
 }

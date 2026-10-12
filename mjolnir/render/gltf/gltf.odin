@@ -16,7 +16,7 @@ import vk "vendor:vulkan"
 // uses or that failed to upload. Meshes used by a skinned node carry
 // skinning data. `gltf_path` resolves relative texture URIs.
 load_meshes :: proc(
-  r: ^render.Manager,
+  r: ^render.Renderer,
   data: ^cgltf.data,
   gltf_path: string,
   allocator := context.allocator,
@@ -52,7 +52,7 @@ load_meshes :: proc(
 
 @(private = "file")
 load_texture :: proc(
-  r: ^render.Manager,
+  r: ^render.Renderer,
   texture: ^cgltf.texture,
   gltf_path: string,
   cache: ^map[^cgltf.texture]render.TextureHandle,
@@ -87,7 +87,7 @@ load_texture :: proc(
 
 @(private = "file")
 load_material :: proc(
-  r: ^render.Manager,
+  r: ^render.Renderer,
   mat: ^cgltf.material,
   gltf_path: string,
   textures: ^map[^cgltf.texture]render.TextureHandle,

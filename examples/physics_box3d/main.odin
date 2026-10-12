@@ -30,7 +30,7 @@ Piece :: struct {
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
-  renderer: render.Manager,
+  renderer: render.Renderer,
   input:    input.State,
   phys:     b3.WorldId,
   pieces:   [dynamic]Piece,

@@ -134,7 +134,7 @@ const float SHADOW_FLOOR = 0.1;
 // Shadow texels from a lookup to the farthest texel its filter reads: a 3x3
 // grid of 2x2 compare taps.
 const float SHADOW_FILTER_RADIUS = 2.0;
-// Cascades of a directional light's map, SHADOW_CASCADES in scene_lights.odin.
+// Cascades of a directional light's map, SHADOW_CASCADES in scene.odin.
 const uint SHADOW_CASCADES = 4u;
 
 // Texels on a side of a shadow map.

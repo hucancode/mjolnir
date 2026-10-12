@@ -1,4 +1,3 @@
-#+private
 // GPU particles: a ring buffer of MAX_PARTICLES slots. Each frame the CPU
 // hands every emitter a range of the frame's new particles (an exclusive
 // prefix of emit counts) and a ring cursor; the emit pass spawns one particle
@@ -7,17 +6,23 @@
 // the alive list, whose header is the indirect draw of the live particles.
 package render
 
+import "core:sync"
 import "gpu"
+import cont "../containers"
 import vk "vendor:vulkan"
 
+@(private)
 MAX_PARTICLES :: 65536
+@(private)
 COMPUTE_PARTICLE_BATCH :: 256
+@(private)
 MAX_EMITTERS :: 64
+@(private)
 MAX_FORCE_FIELDS :: 32
 #assert(MAX_PARTICLES % COMPUTE_PARTICLE_BATCH == 0)
 
-
 // A slot is dead when life <= 0.
+@(private)
 ParticlesParticle :: struct {
   position:      [3]f32,
   size_start:    f32,
@@ -31,6 +36,7 @@ ParticlesParticle :: struct {
   texture_index: u32,
 }
 
+@(private)
 ParticleSystemParams :: struct {
   emitter_count:    u32,
   forcefield_count: u32,
@@ -44,11 +50,13 @@ ParticleSystemParams :: struct {
 
 // The alive list: an indirect draw whose vertex count the simulation bumps,
 // followed by one particle index per vertex.
+@(private)
 PARTICLE_ALIVE_HEADER :: size_of(vk.DrawIndirectCommand) / size_of(u32)
 
 // Emit the frame's new particles, then advance every live particle and list
 // it for the next draw.
-particles_simulate :: proc(r: ^Manager, cmd: vk.CommandBuffer) {
+@(private)
+particles_simulate :: proc(r: ^Renderer, cmd: vk.CommandBuffer) {
   params := &r.particle_params
   // The previous simulation and this frame's draws use what gets rewritten.
   gpu.memory_barrier(
@@ -77,7 +85,8 @@ particles_simulate :: proc(r: ^Manager, cmd: vk.CommandBuffer) {
 
 // Kill every particle and empty the alive list when the next command buffer
 // records its uploads.
-particles_reset :: proc(r: ^Manager) -> vk.Result {
+@(private)
+particles_reset :: proc(r: ^Renderer) -> vk.Result {
   r.particle_params.emit_cursor = 0
   r.particle_params.emit_total = 0
   gpu.queue_buffer_fill(&r.gctx, &r.particle_buffer)
@@ -86,7 +95,8 @@ particles_reset :: proc(r: ^Manager) -> vk.Result {
 }
 
 // The particle ring and the alive list, emptied.
-particles_init_buffers :: proc(r: ^Manager) -> vk.Result {
+@(private)
+particles_init_buffers :: proc(r: ^Renderer) -> vk.Result {
   r.particle_alive_buffer = gpu.buffer_create(
     &r.gctx,
     (PARTICLE_ALIVE_HEADER + MAX_PARTICLES) * size_of(u32),
@@ -102,7 +112,8 @@ particles_init_buffers :: proc(r: ^Manager) -> vk.Result {
   return particles_reset(r)
 }
 
-particles_init :: proc(r: ^Manager) -> vk.Result {
+@(private)
+particles_init :: proc(r: ^Renderer) -> vk.Result {
   gctx := &r.gctx
   layout := r.scene.layout
   r.pipelines[.PARTICLE_EMIT] = gpu.create_compute_pipeline(gctx, #load("shader/particle/emitter.spv"), layout) or_return
@@ -121,7 +132,141 @@ particles_init :: proc(r: ^Manager) -> vk.Result {
 
 // Draw the live particles listed by the last simulation. Call inside the
 // forward render scope, with the camera's index pushed.
-particles_draw :: proc(r: ^Manager, cmd: vk.CommandBuffer) {
+@(private)
+particles_draw :: proc(r: ^Renderer, cmd: vk.CommandBuffer) {
   vk.CmdBindPipeline(cmd, .GRAPHICS, r.pipelines[.PARTICLE_DRAW])
   vk.CmdDrawIndirect(cmd, r.particle_alive_buffer.buffer, 0, 1, size_of(vk.DrawIndirectCommand))
+}
+
+// An emitter, stored as the emit shader reads it. std430 rounds the struct to
+// 16 bytes (it holds vec4s); #align(16) keeps the Odin array stride equal to
+// the GLSL one.
+Emitter :: struct #align(16) {
+  initial_velocity:  [3]f32,
+  size_start:        f32,
+  color_start:       [4]f32,
+  color_end:         [4]f32,
+  particle_lifetime: f32,
+  position_spread:   f32,
+  velocity_spread:   f32,
+  // first of this emitter's particles among the frame's new particles;
+  // render writes it every frame
+  emit_first:        u32,
+  size_end:          f32,
+  weight:            f32,
+  weight_spread:     f32,
+  // bindless texture of the particles, NO_TEXTURE for none
+  texture_index:     TextureHandle,
+  // transform slot the particles spawn from, set by attach
+  node_index:        u32,
+  // particles per second while enabled
+  emission_rate:     f32,
+  enabled:           b32,
+  // fraction of a particle carried to the next frame; render writes it
+  emit_carry:        f32,
+}
+#assert(size_of(Emitter) == 96)
+
+// A force field, stored as the simulation reads it.
+ForceField :: struct {
+  tangent_strength: f32,
+  strength:         f32,
+  area_of_effect:   f32,
+  // transform slot the field is centered on, set by attach
+  node_index:       u32,
+  enabled:          b32,
+}
+
+// A pointer to an emitter or force field in the table the next frame reads:
+// edit it in place, as with material.
+emitter :: proc(r: ^Renderer, h: EmitterHandle) -> (^Emitter, bool) #optional_ok {
+  if !cont.slots_live(&r.emitter_slots, u32(h)) do return nil, false
+  mark_dirty(r, .EMITTERS, Emitter, int(h))
+  return &write_table(r, .EMITTERS, Emitter)[h], true
+}
+
+forcefield :: proc(r: ^Renderer, h: ForceFieldHandle) -> (^ForceField, bool) #optional_ok {
+  if !cont.slots_live(&r.forcefield_slots, u32(h)) do return nil, false
+  mark_dirty(r, .FORCEFIELDS, ForceField, int(h))
+  return &write_table(r, .FORCEFIELDS, ForceField)[h], true
+}
+
+// ---------- emitters ----------
+
+create_emitter :: proc(
+  self: ^Renderer,
+  texture_handle: TextureHandle = 0,
+  emission_rate: f32 = 50.0,
+  initial_velocity: [3]f32 = {0, 1, 0},
+  velocity_spread: f32 = 0.5,
+  color_start: [4]f32 = {1, 1, 1, 1},
+  color_end: [4]f32 = {1, 1, 1, 0},
+  particle_lifetime: f32 = 2.0,
+  position_spread: f32 = 0.0,
+  size_start: f32 = 100.0,
+  size_end: f32 = 100.0,
+  weight: f32 = 1.0,
+  weight_spread: f32 = 0.0,
+) -> (
+  ret: EmitterHandle,
+  ok: bool,
+) #optional_ok {
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
+  handle := EmitterHandle(cont.slots_alloc(&self.emitter_slots) or_return)
+  emitter(self, handle)^ = {
+    emission_rate     = emission_rate,
+    initial_velocity  = initial_velocity,
+    velocity_spread   = velocity_spread,
+    color_start       = color_start,
+    color_end         = color_end,
+    particle_lifetime = particle_lifetime,
+    position_spread   = position_spread,
+    size_start        = size_start,
+    size_end          = size_end,
+    weight            = weight,
+    weight_spread     = weight_spread,
+    texture_index     = texture_handle,
+    enabled           = true,
+  }
+  return handle, true
+}
+
+destroy_emitter :: proc(self: ^Renderer, handle: EmitterHandle) -> bool {
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
+  cont.slots_free(&self.emitter_slots, u32(handle)) or_return
+  clear_entry(self, .EMITTERS, Emitter, u32(handle))
+  return true
+}
+
+// ---------- force fields ----------
+
+create_forcefield :: proc(
+  self: ^Renderer,
+  area_of_effect: f32 = 5.0,
+  strength: f32 = 1.0,
+  tangent_strength: f32 = 0.0,
+) -> (
+  ret: ForceFieldHandle,
+  ok: bool,
+) #optional_ok {
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
+  handle := ForceFieldHandle(cont.slots_alloc(&self.forcefield_slots) or_return)
+  forcefield(self, handle)^ = {
+    tangent_strength = tangent_strength,
+    strength         = strength,
+    area_of_effect   = area_of_effect,
+    enabled          = true,
+  }
+  return handle, true
+}
+
+destroy_forcefield :: proc(self: ^Renderer, handle: ForceFieldHandle) -> bool {
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
+  cont.slots_free(&self.forcefield_slots, u32(handle)) or_return
+  clear_entry(self, .FORCEFIELDS, ForceField, u32(handle))
+  return true
 }

@@ -37,7 +37,7 @@ gltf_scene_destroy :: proc(self: ^GltfScene) {
 // node, spawned under `parent` (the world root by default).
 load_gltf :: proc(
   w: ^world.World,
-  r: ^render.Manager,
+  r: ^render.Renderer,
   path: string,
   parent: world.NodeHandle = {},
 ) -> (
@@ -52,7 +52,7 @@ load_gltf :: proc(
 @(private = "file")
 load_gltf_file :: proc(
   w: ^world.World,
-  r: ^render.Manager,
+  r: ^render.Renderer,
   path: string,
   parent: world.NodeHandle,
   scene: ^GltfScene,
@@ -85,7 +85,7 @@ load_gltf_file :: proc(
 @(private = "file")
 construct_scene :: proc(
   w: ^world.World,
-  r: ^render.Manager,
+  r: ^render.Renderer,
   gltf_data: ^cgltf.data,
   looks: []Maybe(render.MeshAttachment),
   skin_rigs: []int,

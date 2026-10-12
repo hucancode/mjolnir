@@ -2,7 +2,7 @@
 #extension GL_EXT_nonuniform_qualifier : require
 
 const float PI = 3.14159265359;
-const uint INVALID_TEXTURE = 0xFFFFFFFFu;
+const uint INVALID_TEXTURE = 0u;
 
 const uint SAMPLER_NEAREST_CLAMP = 0u;
 const uint SAMPLER_LINEAR_CLAMP = 1u;

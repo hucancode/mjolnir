@@ -351,28 +351,29 @@ test_slots_alloc_free_reuse :: proc(t: ^testing.T) {
   s: Slots
   slots_init(&s, 4)
   defer slots_destroy(&s)
-  h0 := slots_alloc(&s, Handle)
-  h1 := slots_alloc(&s, Handle)
-  testing.expect_value(t, h0, Handle{0, 1})
-  testing.expect_value(t, h1, Handle{1, 1})
-  testing.expect(t, slots_free(&s, h0))
-  testing.expect(t, !slots_valid(&s, h0), "freed handle is stale")
-  testing.expect(t, !slots_free(&s, h0), "double free is rejected")
-  h2 := slots_alloc(&s, Handle)
-  testing.expect_value(t, h2, Handle{0, 2})
+  i1 := slots_alloc(&s)
+  i2 := slots_alloc(&s)
+  testing.expect_value(t, i1, 1)
+  testing.expect_value(t, i2, 2)
+  testing.expect(t, !slots_live(&s, 0), "index 0 is never handed out")
+  testing.expect(t, slots_free(&s, i1))
+  testing.expect(t, !slots_live(&s, i1), "freed index is not live")
+  testing.expect(t, !slots_free(&s, i1), "double free is rejected")
+  testing.expect_value(t, slots_alloc(&s), i1)
   testing.expect_value(t, s.count, 2)
-  testing.expect_value(t, s.high_water, 2)
+  testing.expect_value(t, s.high_water, 3)
 }
 
 @(test)
 test_slots_capacity :: proc(t: ^testing.T) {
   s: Slots
-  slots_init(&s, 2)
+  slots_init(&s, 3)
   defer slots_destroy(&s)
-  slots_alloc(&s, Handle)
-  slots_alloc(&s, Handle)
-  _, ok := slots_alloc(&s, Handle)
+  slots_alloc(&s)
+  slots_alloc(&s)
+  _, ok := slots_alloc(&s)
   testing.expect(t, !ok, "allocation past capacity fails")
+  testing.expect(t, !slots_live(&s, 1000), "out of range is not live")
 }
 
 @(test)
@@ -380,16 +381,17 @@ test_slots_grace :: proc(t: ^testing.T) {
   s: Slots
   slots_init(&s, 8, grace = 3)
   defer slots_destroy(&s)
-  h := slots_alloc(&s, Handle)
-  slots_free(&s, h)
+  i := slots_alloc(&s)
+  slots_free(&s, i)
   for _ in 0 ..< 2 {
     testing.expect_value(t, len(slots_tick(&s)), 0)
-    testing.expect(t, slots_alloc(&s, Handle).index != h.index, "index held during grace")
+    testing.expect(t, slots_alloc(&s) != i, "index held during grace")
   }
   reclaimed := slots_tick(&s)
   testing.expect_value(t, len(reclaimed), 1)
-  testing.expect_value(t, reclaimed[0], h.index)
-  testing.expect_value(t, slots_alloc(&s, Handle).index, h.index)
+  testing.expect_value(t, reclaimed[0].index, i)
+  testing.expect_value(t, slots_alloc(&s), i)
+  testing.expect_value(t, len(slots_tick(&s)), 0)
 }
 
 @(test)
@@ -397,17 +399,17 @@ test_slots_flush_and_next :: proc(t: ^testing.T) {
   s: Slots
   slots_init(&s, 8, grace = 2)
   defer slots_destroy(&s)
-  a := slots_alloc(&s, Handle)
-  b := slots_alloc(&s, Handle)
-  c := slots_alloc(&s, Handle)
+  a := slots_alloc(&s)
+  b := slots_alloc(&s)
+  c := slots_alloc(&s)
   slots_free(&s, b)
   live: [dynamic]u32
   defer delete(live)
   cursor: u32
   for i in slots_next(&s, &cursor) do append(&live, i)
   testing.expect_value(t, len(live), 2)
-  testing.expect_value(t, live[0], a.index)
-  testing.expect_value(t, live[1], c.index)
+  testing.expect_value(t, live[0], a)
+  testing.expect_value(t, live[1], c)
   testing.expect_value(t, len(slots_flush(&s)), 1)
-  testing.expect_value(t, slots_alloc(&s, Handle).index, b.index)
+  testing.expect_value(t, slots_alloc(&s), b)
 }

@@ -33,7 +33,7 @@ orbit_state :: struct {
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
-  renderer: render.Manager,
+  renderer: render.Renderer,
   orbit:    orbit_state,
   input:    input.State,
 }

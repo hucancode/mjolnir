@@ -33,7 +33,6 @@ BINDLESS_BINDINGS := [?]gpu.DescriptorBinding {
   BINDING_DRAW_LISTS       = {.STORAGE_BUFFER, MAX_DRAW_LIST_SLOTS, {.COMPUTE}},
   BINDING_PYRAMID_COUNTERS = {.STORAGE_BUFFER, 1, {.COMPUTE}},
 }
-TextureHandle :: distinct cont.Handle
 
 // The bindless samplers; shaders index them with these values as literals.
 SamplerType :: enum u32 {
@@ -67,7 +66,7 @@ SAMPLERS := [SamplerType]struct {
 // samplers and the pyramid counters into it. Call once at startup, after the
 // scene buffers and before pipeline layouts are built. Paired with
 // bindless_shutdown.
-bindless_init :: proc(r: ^Manager) -> vk.Result {
+bindless_init :: proc(r: ^Renderer) -> vk.Result {
   gctx := &r.gctx
   d := &r.scene
   d.bindless_layout = gpu.create_descriptor_layout(gctx, ..BINDLESS_BINDINGS[:]) or_return
@@ -103,7 +102,7 @@ bindless_init :: proc(r: ^Manager) -> vk.Result {
 
 // Destroy the samplers and the set layout; the set goes with the descriptor
 // pool.
-bindless_shutdown :: proc(r: ^Manager) {
+bindless_shutdown :: proc(r: ^Renderer) {
   for &sampler in r.samplers {
     vk.DestroySampler(r.gctx.device, sampler, nil)
     sampler = 0
@@ -112,36 +111,11 @@ bindless_shutdown :: proc(r: ^Manager) {
   r.scene.bindless_layout = 0
 }
 
-// Pool retire callback: no frame in flight samples the image any more.
-@(private = "file")
-retire_image :: proc(r: ^Manager, index: u32) {
-  img := &r.textures[index]
-  if img.image != 0 do gpu.image_destroy(r.gctx.device, img)
-}
-
-// Reclaim retired texture slots and destroy their images. Call once per
-// frame, after wait_frame.
-@(private)
-textures_tick :: proc(r: ^Manager) {
-  for i in cont.slots_tick(&r.texture_slots) do retire_image(r, i)
-}
-
-// Destroy every texture and free the slots. The caller has waited for the GPU
-// to go idle, so retired images go at once.
-@(private)
-textures_destroy :: proc(r: ^Manager) {
-  for i in cont.slots_flush(&r.texture_slots) do retire_image(r, i)
-  c: u32
-  for i in cont.slots_next(&r.texture_slots, &c) do retire_image(r, i)
-  cont.slots_destroy(&r.texture_slots)
-  delete(r.textures)
-  r.textures = nil
-}
-
 // The image of a live texture, nil for a stale or empty handle.
 @(private)
-texture_image :: proc(r: ^Manager, handle: TextureHandle) -> ^gpu.Image {
-  return cont.slots_get(&r.texture_slots, r.textures, handle)
+texture_image :: proc(r: ^Renderer, handle: TextureHandle) -> ^gpu.Image {
+  if !cont.slots_live(&r.texture_slots, u32(handle)) do return nil
+  return &r.textures[handle]
 }
 
 // Allocate a texture in the bindless array: 2D, or a cube when `cube` (the
@@ -149,7 +123,7 @@ texture_image :: proc(r: ^Manager, handle: TextureHandle) -> ^gpu.Image {
 // and generates the remaining mip levels.
 @(private)
 allocate_texture :: proc(
-  r: ^Manager,
+  r: ^Renderer,
   extent: vk.Extent2D,
   format: vk.Format,
   usage: vk.ImageUsageFlags,
@@ -175,34 +149,33 @@ allocate_texture :: proc(
       return
     }
   }
-  h, ok := cont.slots_alloc(&r.texture_slots, TextureHandle)
+  h, ok := cont.slots_alloc(&r.texture_slots)
   if !ok {
     gpu.image_destroy(gctx.device, &img)
-    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+    return 0, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  r.textures[h.index] = img
-  gpu.write_descriptor(gctx, r.scene.bindless_set, BINDING_TEXTURES, h.index, .SAMPLED_IMAGE, vk.DescriptorImageInfo{imageView = img.view, imageLayout = .GENERAL})
-  return h, .SUCCESS
+  r.textures[h] = img
+  gpu.write_descriptor(gctx, r.scene.bindless_set, BINDING_TEXTURES, h, .SAMPLED_IMAGE, vk.DescriptorImageInfo{imageView = img.view, imageLayout = .GENERAL})
+  return TextureHandle(h), .SUCCESS
 }
 
 // Free a texture. The handle is invalidated at once; its slot and image are
 // released once no frame in flight samples them. teardown frees every
 // texture.
-destroy_texture :: proc(r: ^Manager, handle: TextureHandle) {
+destroy_texture :: proc(r: ^Renderer, handle: TextureHandle) {
   sync.recursive_mutex_lock(&r.mutex)
   defer sync.recursive_mutex_unlock(&r.mutex)
-  cont.slots_free(&r.texture_slots, handle)
+  cont.slots_free(&r.texture_slots, u32(handle))
 }
 
-// Bindless index shaders read for a texture slot: NO_TEXTURE when empty.
-texture_index :: proc(h: $H) -> u32 {
-  return h.index if h.generation != 0 else NO_TEXTURE
-}
+// A texture handle of none, as materials, emitters and draw2d commands hold
+// it.
+NO_TEXTURE :: 0
 
 // Decode an encoded image (png, jpg, hdr, ...) held in memory into a bindless
 // 2D texture. A float format decodes it as linear HDR.
 create_texture_from_data :: proc(
-  r: ^Manager,
+  r: ^Renderer,
   data: []u8,
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips: bool = false,
@@ -221,7 +194,7 @@ create_texture_from_data :: proc(
   }
   if pixels == nil {
     log.errorf("Failed to decode texture: %s", stbi.failure_reason())
-    return {}, .ERROR_UNKNOWN
+    return 0, .ERROR_UNKNOWN
   }
   defer stbi.image_free(pixels)
   extent := vk.Extent2D{u32(width), u32(height)}
@@ -237,7 +210,7 @@ create_texture_from_data :: proc(
 
 // Load an image file (png, jpg, hdr, ...) into a bindless 2D texture.
 create_texture_from_path :: proc(
-  r: ^Manager,
+  r: ^Renderer,
   path: string,
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips: bool = false,
@@ -248,7 +221,7 @@ create_texture_from_path :: proc(
   data, err := os.read_entire_file(path, context.allocator)
   if err != nil {
     log.errorf("Failed to read texture '%s': %v", path, err)
-    return {}, .ERROR_UNKNOWN
+    return 0, .ERROR_UNKNOWN
   }
   defer delete(data)
   return create_texture_from_data(r, data, format, generate_mips)

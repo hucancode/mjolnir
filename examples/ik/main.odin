@@ -36,7 +36,7 @@ LEG_NAMES := [6]string{"FR", "MR", "BR", "FL", "ML", "BL"}
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
-  renderer: render.Manager,
+  renderer: render.Renderer,
   input:    input.State,
 }
 

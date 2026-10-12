@@ -17,9 +17,6 @@ import vk "vendor:vulkan"
 // Positions are framebuffer pixels. Every command draws inside its `clip`
 // rect (x, y, width, height), the whole framebuffer when it is zero.
 
-// texture_id value meaning "untextured"; the renderer substitutes a white texture.
-NO_TEXTURE :: max(u32)
-
 DrawQuadCommand :: struct {
   position:   [2]f32,
   size:       [2]f32,
@@ -85,9 +82,6 @@ VERTEX2D_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
 OverlayRenderer :: struct {
   vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
   index_buffers:   [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
-  // Mapped buffers of the frame being recorded.
-  vertices:        []Vertex2D,
-  indices:         []u32,
   vertex_count:    u32,
   index_count:     u32,
   batches:         [dynamic]DrawBatch,
@@ -116,7 +110,7 @@ DrawBatch :: struct {
   scissor:     vk.Rect2D,
 }
 
-overlay_init :: proc(r: ^Manager, dpi_scale: f32) -> vk.Result {
+overlay_init :: proc(r: ^Renderer, dpi_scale: f32) -> vk.Result {
   self := &r.ui
   self.batches = make([dynamic]DrawBatch, 0, 64)
   self.dpi_scale = dpi_scale
@@ -143,7 +137,7 @@ overlay_init :: proc(r: ^Manager, dpi_scale: f32) -> vk.Result {
 }
 
 // Level-lifetime overlay textures and buffers. Paired with overlay_teardown.
-overlay_setup :: proc(r: ^Manager) -> vk.Result {
+overlay_setup :: proc(r: ^Renderer) -> vk.Result {
   self := &r.ui
   white_pixel := [4]u8{255, 255, 255, 255}
   self.white_texture = allocate_texture(r, {1, 1}, .R8G8B8A8_UNORM, {.SAMPLED}, data = white_pixel[:]) or_return
@@ -156,26 +150,21 @@ overlay_setup :: proc(r: ^Manager) -> vk.Result {
 }
 
 // The textures go with the level's textures.
-overlay_teardown :: proc(r: ^Manager) {
+overlay_teardown :: proc(r: ^Renderer) {
   self := &r.ui
   for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
     gpu.buffer_destroy(r.gctx.device, &self.vertex_buffers[i])
     gpu.buffer_destroy(r.gctx.device, &self.index_buffers[i])
   }
-  self.white_texture = {}
-  self.font_atlas = {}
-  self.debug_atlas = {}
-}
-
-overlay_shutdown :: proc(self: ^OverlayRenderer) {
-  delete(self.batches)
-  delete(self.atlas_pixels)
+  self.white_texture = 0
+  self.font_atlas = 0
+  self.debug_atlas = 0
 }
 
 // Upload R8 coverage that samples as white with alpha = coverage, so the
 // shader multiplies every texture sample with the vertex color.
 @(private)
-allocate_alpha_texture :: proc(r: ^Manager, pixels: []u8, width, height: u32) -> (TextureHandle, vk.Result) {
+allocate_alpha_texture :: proc(r: ^Renderer, pixels: []u8, width, height: u32) -> (TextureHandle, vk.Result) {
   return allocate_texture(
     r,
     {width, height},
@@ -190,7 +179,7 @@ allocate_alpha_texture :: proc(r: ^Manager, pixels: []u8, width, height: u32) ->
 // the staged draw2d commands when `draw_commands` is set and the debug UI
 // when `draw_debug` is set.
 overlay_record :: proc(
-  r: ^Manager,
+  r: ^Renderer,
   command_buffer: vk.CommandBuffer,
   color_view: vk.ImageView,
   extent: vk.Extent2D,
@@ -199,16 +188,14 @@ overlay_record :: proc(
 ) {
   if !draw_commands && !draw_debug do return
   self := &r.ui
-  self.vertices = gpu.mapped(&self.vertex_buffers[frame_index], Vertex2D)
-  self.indices = gpu.mapped(&self.index_buffers[frame_index], u32)
   self.vertex_count = 0
   self.index_count = 0
   clear(&self.batches)
   full := vk.Rect2D{extent = extent}
-  if draw_commands do batch_commands(self, extent)
+  if draw_commands do batch_commands(self, extent, frame_index)
   if draw_debug {
     begin_batch(self, full)
-    batch_debug_ui(self, extent)
+    batch_debug_ui(self, extent, frame_index)
   }
   end_batch(self)
   if self.index_count == 0 do return
@@ -253,24 +240,26 @@ end_batch :: proc(self: ^OverlayRenderer) {
 @(private)
 push_quad :: proc(
   self: ^OverlayRenderer,
+  frame_index: u32,
   p0, p1, uv0, uv1: [2]f32,
   color: [4]u8,
   texture_id: u32,
 ) {
   if self.vertex_count + 4 > UI_MAX_VERTICES || self.index_count + 6 > UI_MAX_INDICES do return
+  vertices := gpu.mapped(&self.vertex_buffers[frame_index], Vertex2D)
   base := self.vertex_count
-  self.vertices[base + 0] = {p0, uv0, color, texture_id}
-  self.vertices[base + 1] = {{p1.x, p0.y}, {uv1.x, uv0.y}, color, texture_id}
-  self.vertices[base + 2] = {p1, uv1, color, texture_id}
-  self.vertices[base + 3] = {{p0.x, p1.y}, {uv0.x, uv1.y}, color, texture_id}
+  vertices[base + 0] = {p0, uv0, color, texture_id}
+  vertices[base + 1] = {{p1.x, p0.y}, {uv1.x, uv0.y}, color, texture_id}
+  vertices[base + 2] = {p1, uv1, color, texture_id}
+  vertices[base + 3] = {{p0.x, p1.y}, {uv0.x, uv1.y}, color, texture_id}
   quad := [6]u32{base, base + 1, base + 2, base, base + 2, base + 3}
-  copy(self.indices[self.index_count:], quad[:])
+  copy(gpu.mapped(&self.index_buffers[frame_index], u32)[self.index_count:], quad[:])
   self.vertex_count += 4
   self.index_count += 6
 }
 
 @(private)
-batch_commands :: proc(self: ^OverlayRenderer, extent: vk.Extent2D) {
+batch_commands :: proc(self: ^OverlayRenderer, extent: vk.Extent2D, frame_index: u32) {
   CommandSortKey :: struct {
     z_order:   i32,
     cmd_index: int,
@@ -304,13 +293,13 @@ batch_commands :: proc(self: ^OverlayRenderer, extent: vk.Extent2D) {
     }
     switch c in self.commands[key.cmd_index] {
     case DrawQuadCommand:
-      push_quad(self, c.position, c.position + c.size, {0, 0}, {1, 1}, c.color, resolve_texture(self, c.texture_id))
+      push_quad(self, frame_index, c.position, c.position + c.size, {0, 0}, {1, 1}, c.color, resolve_texture(self, c.texture_id))
     case DrawTextCommand:
       for g in c.glyphs {
-        push_quad(self, g.p0, g.p1, g.uv0 / atlas_size, g.uv1 / atlas_size, c.color, self.font_atlas.index)
+        push_quad(self, frame_index, g.p0, g.p1, g.uv0 / atlas_size, g.uv1 / atlas_size, c.color, u32(self.font_atlas))
       }
     case DrawMeshCommand:
-      push_mesh(self, c, resolve_texture(self, c.texture_id))
+      push_mesh(self, frame_index, c, resolve_texture(self, c.texture_id))
     }
   }
 }
@@ -328,22 +317,24 @@ clip_scissor :: proc(clip: [4]f32, extent: vk.Extent2D) -> vk.Rect2D {
 
 @(private)
 resolve_texture :: proc(self: ^OverlayRenderer, texture_id: u32) -> u32 {
-  return self.white_texture.index if texture_id == NO_TEXTURE else texture_id
+  return u32(self.white_texture) if texture_id == NO_TEXTURE else texture_id
 }
 
 @(private)
-push_mesh :: proc(self: ^OverlayRenderer, mesh: DrawMeshCommand, texture_id: u32) {
+push_mesh :: proc(self: ^OverlayRenderer, frame_index: u32, mesh: DrawMeshCommand, texture_id: u32) {
   if self.vertex_count + u32(len(mesh.vertices)) > UI_MAX_VERTICES ||
      self.index_count + u32(len(mesh.indices)) > UI_MAX_INDICES {
     return
   }
+  vertices := gpu.mapped(&self.vertex_buffers[frame_index], Vertex2D)
+  indices := gpu.mapped(&self.index_buffers[frame_index], u32)
   base := self.vertex_count
   for v in mesh.vertices {
-    self.vertices[self.vertex_count] = {mesh.position + v.pos, v.uv, v.color, texture_id}
+    vertices[self.vertex_count] = {mesh.position + v.pos, v.uv, v.color, texture_id}
     self.vertex_count += 1
   }
   for idx in mesh.indices {
-    self.indices[self.index_count] = base + idx
+    indices[self.index_count] = base + idx
     self.index_count += 1
   }
 }
@@ -351,35 +342,35 @@ push_mesh :: proc(self: ^OverlayRenderer, mesh: DrawMeshCommand, texture_id: u32
 // Convert the microui command list to quads in pixels. microui works in
 // window coordinates; positions and clip rects are scaled by dpi_scale.
 @(private)
-batch_debug_ui :: proc(self: ^OverlayRenderer, extent: vk.Extent2D) {
+batch_debug_ui :: proc(self: ^OverlayRenderer, extent: vk.Extent2D, frame_index: u32) {
   atlas_size := [2]f32{mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT}
   scale := self.dpi_scale
-  quad :: proc(self: ^OverlayRenderer, dst, src: mu.Rect, color: mu.Color, atlas_size: [2]f32, scale: f32) {
+  quad :: proc(self: ^OverlayRenderer, frame_index: u32, dst, src: mu.Rect, color: mu.Color, atlas_size: [2]f32, scale: f32) {
     p0 := [2]f32{f32(dst.x), f32(dst.y)} * scale
     p1 := [2]f32{f32(dst.x + dst.w), f32(dst.y + dst.h)} * scale
     uv0 := [2]f32{f32(src.x), f32(src.y)} / atlas_size
     uv1 := [2]f32{f32(src.x + src.w), f32(src.y + src.h)} / atlas_size
-    push_quad(self, p0, p1, uv0, uv1, {color.r, color.g, color.b, color.a}, self.debug_atlas.index)
+    push_quad(self, frame_index, p0, p1, uv0, uv1, {color.r, color.g, color.b, color.a}, u32(self.debug_atlas))
   }
   iter: ^mu.Command
   for variant in mu.next_command_iterator(&self.debug_ctx, &iter) {
     switch c in variant {
     case ^mu.Command_Rect:
-      quad(self, c.rect, mu.default_atlas[mu.DEFAULT_ATLAS_WHITE], c.color, atlas_size, scale)
+      quad(self, frame_index, c.rect, mu.default_atlas[mu.DEFAULT_ATLAS_WHITE], c.color, atlas_size, scale)
     case ^mu.Command_Text:
       dst := mu.Rect{c.pos.x, c.pos.y, 0, 0}
       for ch in c.str {
         if ch & 0xc0 == 0x80 do continue
         src := mu.default_atlas[mu.DEFAULT_ATLAS_FONT + min(int(ch), 127)]
         dst.w, dst.h = src.w, src.h
-        quad(self, dst, src, c.color, atlas_size, scale)
+        quad(self, frame_index, dst, src, c.color, atlas_size, scale)
         dst.x += dst.w
       }
     case ^mu.Command_Icon:
       src := mu.default_atlas[c.id]
       x := c.rect.x + (c.rect.w - src.w) / 2
       y := c.rect.y + (c.rect.h - src.h) / 2
-      quad(self, {x, y, src.w, src.h}, src, c.color, atlas_size, scale)
+      quad(self, frame_index, {x, y, src.w, src.h}, src, c.color, atlas_size, scale)
     case ^mu.Command_Clip:
       begin_batch(self, clip_scissor([4]f32{f32(c.rect.x), f32(c.rect.y), f32(c.rect.w), f32(c.rect.h)} * scale, extent))
     case ^mu.Command_Jump:

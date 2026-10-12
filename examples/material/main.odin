@@ -27,7 +27,7 @@ grid_materials: [GRID][GRID]render.MaterialHandle
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
-  renderer: render.Manager,
+  renderer: render.Renderer,
   input:    input.State,
 }
 

@@ -1,15 +1,17 @@
 package render
 
 import "../input"
+import "core:fmt"
 import "core:math"
 import "core:sync"
+import "gpu"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
 // Submit the 2D overlay for the next frame only; call it every frame the UI
 // should show. The commands must stay valid until that frame is recorded; a
 // non-empty atlas is copied and uploaded on flush.
-stage_overlay :: proc(self: ^Manager, list: DrawList) {
+stage_overlay :: proc(self: ^Renderer, list: DrawList) {
   ui := &self.ui
   ui.commands = list.commands
   if len(list.atlas) == 0 do return
@@ -27,10 +29,10 @@ stage_overlay :: proc(self: ^Manager, list: DrawList) {
 // Upload the staged atlas when it changed, or when the GPU copy is gone
 // (first frame, after setup).
 @(private)
-flush_ui_atlas :: proc(self: ^Manager) -> (ret: vk.Result) {
+flush_ui_atlas :: proc(self: ^Renderer) -> (ret: vk.Result) {
   ui := &self.ui
   if len(ui.atlas_pixels) == 0 do return .SUCCESS
-  if !ui.atlas_dirty && ui.font_atlas != {} do return .SUCCESS
+  if !ui.atlas_dirty && ui.font_atlas != 0 do return .SUCCESS
   ui.atlas_dirty = false
   destroy_texture(self, ui.font_atlas)
   ui.font_atlas, ret = allocate_alpha_texture(self, ui.atlas_pixels, ui.atlas_extent[0], ui.atlas_extent[1])
@@ -40,7 +42,7 @@ flush_ui_atlas :: proc(self: ^Manager) -> (ret: vk.Result) {
 // The microui debug context for this frame. Build widgets on the render
 // thread before frame, which draws and closes it. Frames that never call this
 // draw no debug UI.
-debug_ui :: proc(self: ^Manager) -> ^mu.Context {
+debug_ui :: proc(self: ^Renderer) -> ^mu.Context {
   r := &self.ui
   if !r.debug_open {
     mu.begin(&r.debug_ctx)
@@ -51,7 +53,7 @@ debug_ui :: proc(self: ^Manager) -> ^mu.Context {
 
 // End the debug UI frame if debug_ui opened one; true when there is one to draw.
 @(private)
-debug_ui_close :: proc(self: ^Manager) -> bool {
+debug_ui_close :: proc(self: ^Renderer) -> bool {
   r := &self.ui
   if !r.debug_open do return false
   mu.end(&r.debug_ctx)
@@ -63,7 +65,7 @@ debug_ui_close :: proc(self: ^Manager) -> bool {
 // owns (see input.State). Call first among input consumers on the update tick.
 // With USE_PARALLEL_UPDATE the update thread feeds the microui context that
 // the render thread builds, sharing it across threads.
-debug_ui_input :: proc(self: ^Manager, s: ^input.State) {
+debug_ui_input :: proc(self: ^Renderer, s: ^input.State) {
   r := &self.ui
   ctx := &r.debug_ctx
   hovered := ctx.hover_root != nil
@@ -121,4 +123,23 @@ mu_key :: proc(key: input.Key) -> (mu.Key, bool) {
   case .V:                            return .V, true
   }
   return .SHIFT, false
+}
+
+// Engine stats window in the debug UI: resource counts and the main camera's
+// opaque draws of the last frame recorded in this slot.
+@(private)
+stats_panel :: proc(self: ^Renderer) {
+  ctx := debug_ui(self)
+  draws: u32
+  if _, ok := main_camera(self); ok {
+    draws = gpu.mapped(&self.draw_count_readback[self.gctx.frame_serial % gpu.FRAMES_IN_FLIGHT], u32)[MaterialType.PBR]
+  }
+  // mu.window is scoped: widgets must stay inside the if-block.
+  if mu.window(ctx, "Engine", {40, 40, 200, 200}, {}) {
+    mu.label(ctx, fmt.tprintf("Textures %d", self.texture_slots.count))
+    mu.label(ctx, fmt.tprintf("Materials %d", self.material_slots.count))
+    mu.label(ctx, fmt.tprintf("Meshes %d", self.mesh_slots.count))
+    mu.label(ctx, fmt.tprintf("Render slots %d", len(self.attachments)))
+    mu.label(ctx, fmt.tprintf("Draw count: %d draws", draws))
+  }
 }

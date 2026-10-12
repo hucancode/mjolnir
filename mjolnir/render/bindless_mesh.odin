@@ -1,11 +1,42 @@
 package render
 
 import cont "../containers"
+import "core:log"
+import "core:sync"
 import "gpu"
 import "mesh"
 import vk "vendor:vulkan"
 
-MeshHandle :: distinct cont.Handle
+Primitive :: enum {
+  CUBE,
+  SPHERE,
+  QUAD_XZ,
+  QUAD_XY,
+  CONE,
+  CYLINDER,
+}
+
+@(private)
+MeshFlag :: enum u32 {
+  SKINNED,
+}
+
+@(private)
+MeshFlagSet :: bit_set[MeshFlag;u32]
+
+// A mesh's ranges of the mesh arena and its bounds, as the cull shader reads
+// it from the mesh table.
+@(private)
+MeshData :: struct {
+  aabb_min:        [3]f32,
+  index_count:     u32,
+  aabb_max:        [3]f32,
+  first_index:     u32,
+  vertex_offset:   i32,
+  skinning_offset: u32,
+  flags:           MeshFlagSet,
+  vertex_count:    u32,
+}
 
 // The mesh arena: one buffer per stream, sub-allocated by its slab. Vertices
 // and indices are bound as vertex/index buffers; skinning is a storage
@@ -60,7 +91,7 @@ MESH_STREAMS := [MeshStream]struct {
 // Buffer capacities come from the slab configs, so a slab can never hand out
 // an offset past the end of its buffer.
 @(private)
-mesh_arena_init :: proc(r: ^Manager) -> vk.Result {
+mesh_arena_init :: proc(r: ^Renderer) -> vk.Result {
   for stream, s in MESH_STREAMS {
     cont.slab_init(&r.mesh_slabs[s], stream.slab)
     size := vk.DeviceSize(r.mesh_slabs[s].capacity) * vk.DeviceSize(stream.elem_size)
@@ -70,7 +101,7 @@ mesh_arena_init :: proc(r: ^Manager) -> vk.Result {
 }
 
 @(private)
-mesh_arena_destroy :: proc(r: ^Manager) {
+mesh_arena_destroy :: proc(r: ^Renderer) {
   for &b in r.mesh_buffers do gpu.buffer_destroy(r.gctx.device, &b)
   for &slab in r.mesh_slabs do cont.slab_destroy(&slab)
 }
@@ -78,7 +109,7 @@ mesh_arena_destroy :: proc(r: ^Manager) {
 // Copy `data` into a range of the stream's buffer taken from its slab; its
 // first element index. Empty data takes no range; a failed copy frees its range.
 @(private = "file")
-mesh_arena_upload :: proc(r: ^Manager, stream: MeshStream, data: []$T) -> (offset: u32, ret: vk.Result) {
+mesh_arena_upload :: proc(r: ^Renderer, stream: MeshStream, data: []$T) -> (offset: u32, ret: vk.Result) {
   if len(data) == 0 do return 0, .SUCCESS
   slab := &r.mesh_slabs[stream]
   ok: bool
@@ -91,7 +122,8 @@ mesh_arena_upload :: proc(r: ^Manager, stream: MeshStream, data: []$T) -> (offse
 
 // Free the arena ranges of a mesh: its vertex and index ranges when it has
 // vertices and indices, its skinning range when skinned.
-free_mesh :: proc(r: ^Manager, m: MeshData) {
+@(private)
+free_mesh :: proc(r: ^Renderer, m: MeshData) {
   if m.vertex_count > 0 do cont.slab_free(&r.mesh_slabs[.VERTEX], u32(m.vertex_offset))
   if m.index_count > 0 do cont.slab_free(&r.mesh_slabs[.INDEX], m.first_index)
   if .SKINNED in m.flags do cont.slab_free(&r.mesh_slabs[.SKINNING], m.skinning_offset)
@@ -111,10 +143,10 @@ VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
 
 // Upload a geometry into the mesh arena and describe it in `m` and in
 // mesh_data_buffer at `index`. On failure the ranges taken so far are freed.
-// The ranges are freed by mesh_retire.
+// tick_resource_pools frees the ranges once the mesh is retired.
 @(private)
 upload_mesh :: proc(
-  render: ^Manager,
+  render: ^Renderer,
   gctx: ^gpu.GPUContext,
   index: u32,
   m: ^MeshData,
@@ -135,4 +167,43 @@ upload_mesh :: proc(
   m.skinning_offset = mesh_arena_upload(render, .SKINNING, g.skinnings) or_return
   if len(g.skinnings) > 0 do m.flags |= {.SKINNED}
   return gpu.queue_buffer_write(gctx, &render.mesh_data_buffer, []MeshData{m^}, int(index))
+}
+
+// Creates a mesh. Geometry ownership is transferred: it is uploaded into the
+// mesh arena and deleted.
+create_mesh :: proc(
+  self: ^Renderer,
+  geometry_data: mesh.Geometry,
+) -> (
+  handle: MeshHandle,
+  ok: bool,
+) #optional_ok {
+  defer mesh.delete_geometry(geometry_data)
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
+  handle = MeshHandle(cont.slots_alloc(&self.mesh_slots) or_return)
+  if res := upload_mesh(self, &self.gctx, u32(handle), &self.meshes[handle], geometry_data); res != .SUCCESS {
+    log.errorf("Mesh %d upload failed: %v", handle, res)
+    cont.slots_free(&self.mesh_slots, u32(handle))
+    return 0, false
+  }
+  return handle, true
+}
+
+// The handle is invalid at once; the arena ranges are freed once no frame
+// in flight draws the mesh.
+destroy_mesh :: proc(self: ^Renderer, handle: MeshHandle) {
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
+  cont.slots_free(&self.mesh_slots, u32(handle))
+}
+
+@(private)
+init_builtin_meshes :: proc(self: ^Renderer) {
+  self.builtin_meshes[.CUBE] = create_mesh(self, mesh.make_cube())
+  self.builtin_meshes[.SPHERE] = create_mesh(self, mesh.make_sphere())
+  self.builtin_meshes[.QUAD_XZ] = create_mesh(self, mesh.make_quad())
+  self.builtin_meshes[.QUAD_XY] = create_mesh(self, mesh.make_billboard_quad())
+  self.builtin_meshes[.CONE] = create_mesh(self, mesh.make_cone())
+  self.builtin_meshes[.CYLINDER] = create_mesh(self, mesh.make_cylinder())
 }

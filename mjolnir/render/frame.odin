@@ -8,7 +8,7 @@ import vk "vendor:vulkan"
 
 @(private)
 record_compute_commands :: proc(
-  self: ^Manager,
+  self: ^Renderer,
   frame_index: u32,
   cmd: vk.CommandBuffer,
 ) {
@@ -31,7 +31,7 @@ record_compute_commands :: proc(
       self,
       cmd,
       &cam.depth_pyramid[frame_index],
-      cam.attachments[.DEPTH][prev_frame_index].index,
+      u32(cam.attachments[.DEPTH][prev_frame_index]),
     )
   }
   gpu.memory_barrier(
@@ -49,13 +49,13 @@ record_compute_commands :: proc(
 // forward (particles and transparency). Render scopes cannot hold barriers,
 // so the passes record only their scopes.
 @(private)
-record_camera_passes :: proc(self: ^Manager, frame_index: u32) {
+record_camera_passes :: proc(self: ^Renderer, frame_index: u32) {
   cmd := self.command_buffers[frame_index]
   discards := make([dynamic]gpu.ImageDiscard, context.temp_allocator)
   c: u32
   for i in cont.slots_next(&self.camera_slots, &c) {
     cam := &self.cameras[i]
-    for a in AttachmentType do append(&discards, gpu.attachment_discard(camera_image(self, cam, a, frame_index)))
+    for a in AttachmentType do append(&discards, gpu.attachment_discard(texture_image(self, cam.attachments[a][frame_index])))
   }
   if len(discards) == 0 do return
   // The draw lists written by culling become indirect arguments.
@@ -107,7 +107,7 @@ record_camera_passes :: proc(self: ^Manager, frame_index: u32) {
 // final swapchain transition to PRESENT_SRC — the one layout transition
 // unified image layouts doesn't cover (the compositor is outside Vulkan).
 @(private)
-record_frame :: proc(self: ^Manager, frame_index: u32, debug_ui_enabled: bool) -> vk.Result {
+record_frame :: proc(self: ^Renderer, frame_index: u32, debug_ui_enabled: bool) -> vk.Result {
   cmd := self.command_buffers[frame_index]
   sc := &self.swapchain
   swapchain_image, swapchain_view := sc.images[sc.image_index], sc.views[sc.image_index]
@@ -132,10 +132,10 @@ record_frame :: proc(self: ^Manager, frame_index: u32, debug_ui_enabled: bool) -
     debug_line_record(
       self,
       frame_index,
-      self.main_camera.index,
+      u32(self.main_camera),
       swapchain_view,
       sc.extent,
-      camera_image(self, main_cam, .DEPTH, frame_index),
+      texture_image(self, main_cam.attachments[.DEPTH][frame_index]),
     )
   }
   overlay_record(self, cmd, swapchain_view, sc.extent, frame_index, has_main, debug_ui_enabled)
@@ -184,7 +184,7 @@ record_frame :: proc(self: ^Manager, frame_index: u32, debug_ui_enabled: bool) -
 // `framebuffer_size`. Renders nothing while no level is set up. Returns
 // false on a GPU error.
 frame :: proc(
-  self: ^Manager,
+  self: ^Renderer,
   framebuffer_size: [2]u32,
   dpi_scale: f32,
   show_stats := false,

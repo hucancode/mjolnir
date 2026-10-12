@@ -83,3 +83,11 @@ slab_free :: proc(allocator: ^SlabAllocator, index: u32) {
   }
   // If index doesn't belong to any class, it's from a zero-size allocation (no-op)
 }
+
+// Capacity of the block at `index`; 0 when no class holds it.
+slab_block_size :: proc(allocator: ^SlabAllocator, index: u32) -> u32 {
+  for class in allocator.classes {
+    if index >= class.base && index < class.base + class.block_size * class.block_count do return class.block_size
+  }
+  return 0
+}

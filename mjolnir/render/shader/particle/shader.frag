@@ -5,7 +5,7 @@ const uint SAMPLER_NEAREST_CLAMP = 0u;
 const uint SAMPLER_LINEAR_CLAMP = 1u;
 const uint SAMPLER_NEAREST_REPEAT = 2u;
 const uint SAMPLER_LINEAR_REPEAT = 3u;
-const uint NO_TEXTURE = 0xFFFFFFFFu;
+const uint NO_TEXTURE = 0u;
 
 // textures set = 1
 layout (set = 1, binding = 0) uniform texture2D textures[];

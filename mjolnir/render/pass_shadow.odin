@@ -8,8 +8,8 @@ SHADOW_DEPTH_VERT :: #load("shader/shadow/vert.spv")
 SHADOW_MAP_FORMAT :: vk.Format.D32_SFLOAT
 SHADOW_SLOPE_BIAS :: 1.5
 
-// Node flags of a shadow caster; its material type also needs
-// MATERIAL_PIPELINES[type].shadow.
+// Node flags of a shadow caster; its material type also needs to be in
+// GBUFFER_TYPES.
 SHADOW_CASTER_FLAGS :: NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
 
 // One cull dispatch per frame tests every node against every shadow view
@@ -36,7 +36,7 @@ shadow_atlas_create :: proc(gctx: ^gpu.GPUContext, layers: u32) -> (gpu.Image, v
 // Grow frame `frame_index`'s atlas to hold `layers` layers, doubling up to
 // MAX_SHADOW_VIEWS, and rebind it. Called by flush, after the
 // frame's previous submission is done with it.
-shadow_atlas_reserve :: proc(r: ^Manager, frame_index: u32, layers: u32) -> vk.Result {
+shadow_atlas_reserve :: proc(r: ^Renderer, frame_index: u32, layers: u32) -> vk.Result {
   atlas := &r.shadow_atlas[frame_index]
   if layers <= atlas.layers do return .SUCCESS
   grown := shadow_atlas_create(&r.gctx, max(layers, min(atlas.layers * 2, MAX_SHADOW_VIEWS))) or_return
@@ -46,7 +46,7 @@ shadow_atlas_reserve :: proc(r: ^Manager, frame_index: u32, layers: u32) -> vk.R
   return .SUCCESS
 }
 
-shadow_init :: proc(r: ^Manager) -> vk.Result {
+shadow_init :: proc(r: ^Renderer) -> vk.Result {
   draw_lists_init(&r.shadow_draws, r, SHADOW_DRAW_SLOT_BASE, 1, SHADOW_MAX_DRAWS) or_return
   r.pipelines[.SHADOW_DEPTH] = gpu.create_graphics_pipeline(
     &r.gctx,
@@ -70,7 +70,7 @@ shadow_init :: proc(r: ^Manager) -> vk.Result {
 // view (written by collect_lights) in one dispatch, then draw the combined
 // list into the atlas in one layered draw. The maps are packed from layer 0,
 // so the views cover exactly the layers in use.
-shadow_record :: proc(r: ^Manager, frame_index: u32) {
+shadow_record :: proc(r: ^Renderer, frame_index: u32) {
   cmd := r.command_buffers[frame_index]
   atlas := &r.shadow_atlas[frame_index]
   // Every layer leaves UNDEFINED, including when nothing renders: lighting

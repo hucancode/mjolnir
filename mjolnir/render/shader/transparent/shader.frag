@@ -7,7 +7,7 @@ const uint SAMPLER_NEAREST_REPEAT = 2u;
 const uint SAMPLER_LINEAR_REPEAT = 3u;
 
 // texture index of a material slot without a texture
-const uint NO_TEXTURE = 0xFFFFFFFFu;
+const uint NO_TEXTURE = 0u;
 
 struct View {
     mat4 view;

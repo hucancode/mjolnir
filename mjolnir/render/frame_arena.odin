@@ -81,40 +81,40 @@ arena_layout :: proc(alignment: vk.DeviceSize) -> (layout: ArenaLayout) {
 
 // The frame in flight the CPU writes: the one recorded next.
 @(private)
-write_frame :: #force_inline proc(self: ^Manager) -> u32 {
+write_frame :: #force_inline proc(self: ^Renderer) -> u32 {
   return u32(self.gctx.frame_serial % gpu.FRAMES_IN_FLIGHT)
 }
 
 // Bytes of the bone table: the bone slab's capacity.
 @(private)
-bone_table_size :: proc(self: ^Manager) -> int {
+bone_table_size :: proc(self: ^Renderer) -> int {
   return int(self.bone_matrix_slab.capacity) * size_of(matrix[4, 4]f32)
 }
 
 // Frame `frame_index`'s copy of table `b` as bytes.
 @(private)
-table_bytes :: proc(self: ^Manager, b: SceneBinding, frame_index: u32) -> []u8 {
+table_bytes :: proc(self: ^Renderer, b: SceneBinding, frame_index: u32) -> []u8 {
   if b == .BONES do return self.bone_buffers[frame_index].mapped[:bone_table_size(self)]
   return self.frame_arena[frame_index].mapped[self.arena_layout.offset[b]:][:self.arena_layout.range[b]]
 }
 
 // Frame `frame_index`'s copy of table `b` as `T`s.
 @(private)
-frame_table :: proc(self: ^Manager, b: SceneBinding, $T: typeid, frame_index: u32) -> []T {
+frame_table :: proc(self: ^Renderer, b: SceneBinding, $T: typeid, frame_index: u32) -> []T {
   bytes := table_bytes(self, b, frame_index)
   return ([^]T)(raw_data(bytes))[:len(bytes) / size_of(T)]
 }
 
 // The copy of table `b` the CPU writes. Mark what you change with mark_dirty.
 @(private)
-write_table :: #force_inline proc(self: ^Manager, b: SceneBinding, $T: typeid) -> []T {
+write_table :: #force_inline proc(self: ^Renderer, b: SceneBinding, $T: typeid) -> []T {
   return frame_table(self, b, T, write_frame(self))
 }
 
 // Mark `count` `T`s from `index` of table `b` written, so they reach every
 // other frame in flight.
 @(private)
-mark_dirty :: proc(self: ^Manager, b: SceneBinding, $T: typeid, index: int, count := 1) {
+mark_dirty :: proc(self: ^Renderer, b: SceneBinding, $T: typeid, index: int, count := 1) {
   size := bone_table_size(self) if b == .BONES else int(self.arena_layout.range[b])
   region := (size + REGION_COUNT - 1) / REGION_COUNT
   first := index * size_of(T) / region
@@ -122,18 +122,12 @@ mark_dirty :: proc(self: ^Manager, b: SceneBinding, $T: typeid, index: int, coun
   for r in first ..= last do self.region_debt[b][r] = gpu.FRAMES_IN_FLIGHT - 1
 }
 
-// Mark all of table `b` written.
-@(private)
-mark_table_dirty :: proc(self: ^Manager, b: SceneBinding) {
-  for &d in self.region_debt[b] do d = gpu.FRAMES_IN_FLIGHT - 1
-}
-
 // Make the frame recorded next the write frame: wait until the GPU is done
 // with it, then copy every region in debt from frame `from`, which holds
 // every write so far, and pay off one frame of each debt. Call right after
 // the submission of `from`.
 @(private)
-hand_off :: proc(self: ^Manager, from: u32) -> vk.Result {
+hand_off :: proc(self: ^Renderer, from: u32) -> vk.Result {
   gpu.wait_frame(&self.gctx) or_return
   to := write_frame(self)
   if int(self.bone_buffers[to].size) < bone_table_size(self) {
@@ -155,7 +149,7 @@ hand_off :: proc(self: ^Manager, from: u32) -> vk.Result {
 }
 
 @(private)
-create_bone_buffer :: proc(self: ^Manager) -> (gpu.Buffer, vk.Result) {
+create_bone_buffer :: proc(self: ^Renderer) -> (gpu.Buffer, vk.Result) {
   return gpu.buffer_create(&self.gctx, vk.DeviceSize(bone_table_size(self)), {.STORAGE_BUFFER}, host_cached = true)
 }
 
@@ -163,7 +157,7 @@ create_bone_buffer :: proc(self: ^Manager) -> (gpu.Buffer, vk.Result) {
 // and rebind it. The caller guarantees no submitted work still uses it, and
 // fills it.
 @(private)
-grow_bone_buffer :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
+grow_bone_buffer :: proc(self: ^Renderer, frame_index: u32) -> vk.Result {
   grown := create_bone_buffer(self) or_return
   gpu.buffer_destroy(self.gctx.device, &self.bone_buffers[frame_index])
   self.bone_buffers[frame_index] = grown
@@ -177,7 +171,7 @@ grow_bone_buffer :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
 // scene_descriptors_init binds them.
 @(private)
 init_scene_buffers :: proc(
-  self: ^Manager,
+  self: ^Renderer,
   gctx: ^gpu.GPUContext,
 ) -> (
   ret: vk.Result,
@@ -209,7 +203,7 @@ init_scene_buffers :: proc(
 }
 
 @(private)
-destroy_scene_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
+destroy_scene_buffers :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   for &arena in self.frame_arena do gpu.buffer_destroy(gctx.device, &arena)
   for &bones in self.bone_buffers do gpu.buffer_destroy(gctx.device, &bones)
   gpu.buffer_destroy(gctx.device, &self.mesh_data_buffer)

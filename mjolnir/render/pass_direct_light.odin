@@ -39,7 +39,7 @@ DRAW_STATE := [LightType]struct {
   .AMBIENT     = {.ALWAYS, {.BACK}, nil, AMBIENT_SHADER_FRAG},
 }
 
-direct_light_init :: proc(r: ^Manager) -> vk.Result {
+direct_light_init :: proc(r: ^Renderer) -> vk.Result {
   gctx := &r.gctx
   light_type_entry := vk.SpecializationMapEntry{constantID = 0, size = size_of(u32)}
   color_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
@@ -78,10 +78,10 @@ direct_light_init :: proc(r: ^Manager) -> vk.Result {
 // Record one camera's lighting: every light as one instance of its type's
 // volume, additively over the cleared color image and depth-tested against
 // the G-buffer depth. record_camera_passes orders it with the other passes.
-lighting_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Camera) {
+lighting_record :: proc(r: ^Renderer, frame_index: u32, cam_index: u32, cam: ^Camera) {
   cmd := r.command_buffers[frame_index]
-  final_image := camera_image(r, cam, .FINAL_IMAGE, frame_index)
-  depth_texture := camera_image(r, cam, .DEPTH, frame_index)
+  final_image := texture_image(r, cam.attachments[.FINAL_IMAGE][frame_index])
+  depth_texture := texture_image(r, cam.attachments[.DEPTH][frame_index])
   gpu.begin_rendering(
     cmd,
     depth_texture.extent,
@@ -94,10 +94,10 @@ lighting_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Cam
   ambient := &r.ambient
   push := LightingPushConstants {
     camera_index     = cam_index,
-    irradiance       = texture_index(ambient.irradiance_cube),
-    prefilter        = texture_index(ambient.prefilter_cube),
-    brdf_lut         = texture_index(ambient.brdf_lut),
-    environment      = texture_index(ambient.environment_map),
+    irradiance       = u32(ambient.irradiance_cube),
+    prefilter        = u32(ambient.prefilter_cube),
+    brdf_lut         = u32(ambient.brdf_lut),
+    environment      = u32(ambient.environment_map),
     skybox_intensity = ambient.skybox_intensity,
     skybox_blur      = ambient.skybox_blur,
   }
@@ -109,7 +109,7 @@ lighting_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Cam
     if count == 0 do continue
     vk.CmdBindPipeline(cmd, .GRAPHICS, r.light_pipelines[type])
     if primitive, ok := DRAW_STATE[type].volume.?; ok {
-      volume := &r.meshes[r.builtin_meshes[primitive].index]
+      volume := &r.meshes[r.builtin_meshes[primitive]]
       vk.CmdDrawIndexed(cmd, volume.index_count, count, volume.first_index, volume.vertex_offset, first)
     } else {
       vk.CmdDraw(cmd, 3, count, 0, first)

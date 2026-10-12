@@ -1,18 +1,81 @@
-#+private
 package render
 
-import "gpu"
 import "base:intrinsics"
 import "core:log"
 import "core:reflect"
+import "gpu"
 import vk "vendor:vulkan"
 
+// Effect structs are pushed verbatim right after the base fields of
+// PostProcessPushConstant (offset 32); their layout must match each shader's push block.
+// Append effects to r.post_process.effect_stack; every camera runs the stack
+// in order.
+GrayscaleEffect :: struct {
+  weights:  [3]f32, // zero = Rec. 601 luma
+  strength: f32,
+}
+
+ToneMapEffect :: struct {
+  exposure: f32,
+  gamma:    f32,
+}
+
+BlurEffect :: struct {
+  radius:         f32,
+  weight_falloff: f32, // 0.0 = box blur, 1.0 = gaussian blur
+}
+
+BloomEffect :: struct {
+  threshold:   f32,
+  intensity:   f32,
+  blur_radius: f32,
+}
+
+OutlineEffect :: struct {
+  color:     [3]f32,
+  thickness: f32,
+}
+
+FogEffect :: struct {
+  color: [3]f32,
+  start: f32,
+  end:   f32,
+}
+
+// Below lum_thresholds[i] (tonemapped luminance), stroke family i hatches
+// the pixel: the two diagonals, then both shifted by hatch_offset_y.
+CrossHatchEffect :: struct {
+  hatch_offset_y: f32,
+  lum_thresholds: [4]f32,
+}
+
+DoFEffect :: struct {
+  focus_distance:  f32, // Distance to the focus plane
+  focus_range:     f32, // Range where objects are in focus
+  blur_strength:   f32, // Maximum blur radius
+  bokeh_intensity: f32, // Bokeh effect intensity
+}
+
+// nil is the copy pass that brings the input to the output unchanged
+PostprocessEffect :: union {
+  GrayscaleEffect,
+  ToneMapEffect,
+  BlurEffect,
+  BloomEffect,
+  OutlineEffect,
+  FogEffect,
+  CrossHatchEffect,
+  DoFEffect,
+}
+
+@(private)
 SHADER_POSTPROCESS_VERT :: #load("shader/postprocess/vert.spv")
 
 // Each effect's fragment shader and pass count, indexed by the
 // PostprocessEffect union tag (0 = nil). A separable effect runs its shader
 // once per pass, reading the pass number from the push constant (blur and
 // bloom: 0 horizontal, 1 vertical).
+@(private)
 EFFECTS := [?]struct {
   frag:   []u8,
   passes: u32,
@@ -31,6 +94,7 @@ EFFECTS := [?]struct {
 
 // Odin stores a union's variant bytes at offset 0, so `effect` places the
 // active effect struct at offset 32, followed by the (unread) tag.
+@(private)
 PostProcessPushConstant :: struct {
   // camera clip planes, for effects that linearize depth (fog, dof, outline)
   camera_near:          f32,
@@ -49,8 +113,10 @@ PostProcessPushConstant :: struct {
 }
 #assert(offset_of(PostProcessPushConstant, effect) == 32)
 
+@(private)
 POST_PROCESS_RING :: 3
 
+@(private)
 PostProcessRenderer :: struct {
   // [is_last][tag]: every pass writes an HDR ring image but the last, which
   // writes the swapchain format
@@ -62,7 +128,8 @@ PostProcessRenderer :: struct {
   images:          [gpu.FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
 }
 
-post_process_init :: proc(r: ^Manager) -> vk.Result {
+@(private)
+post_process_init :: proc(r: ^Renderer) -> vk.Result {
   self := &r.post_process
   self.effect_stack = make([dynamic]PostprocessEffect)
   formats := [2]vk.Format{gpu.HDR_COLOR_FORMAT, r.swapchain.format.format}
@@ -86,33 +153,37 @@ post_process_init :: proc(r: ^Manager) -> vk.Result {
 }
 
 // Passes the stack runs: each effect's EFFECTS passes.
+@(private)
 post_process_pass_count :: proc(effects: []PostprocessEffect) -> (count: int) {
   for effect in effects do count += int(EFFECTS[reflect.get_union_variant_raw_tag(effect)].passes)
   return
 }
 
 // Ring images the stack needs: every pass but the last writes one.
+@(private)
 post_process_image_count :: proc(effects: []PostprocessEffect) -> int {
   return min(max(post_process_pass_count(effects) - 1, 0), POST_PROCESS_RING)
 }
 
 // Allocate the ping-pong images the current stack needs and does not have
 // yet. Images are kept until the swapchain is resized or the level torn down.
-post_process_ensure_images :: proc(r: ^Manager, extent: vk.Extent2D, frame_index: u32) -> vk.Result {
+@(private)
+post_process_ensure_images :: proc(r: ^Renderer, extent: vk.Extent2D, frame_index: u32) -> vk.Result {
   self := &r.post_process
   for &handle in self.images[frame_index][:post_process_image_count(self.effect_stack[:])] {
-    if handle != {} do continue
+    if handle != 0 do continue
     handle = allocate_texture(r, extent, gpu.HDR_COLOR_FORMAT, {.COLOR_ATTACHMENT, .SAMPLED}) or_return
   }
   return .SUCCESS
 }
 
 // Free the ring images; the next frame allocates them again at its extent.
-post_process_release_images :: proc(r: ^Manager) {
+@(private)
+post_process_release_images :: proc(r: ^Renderer) {
   for &frame in r.post_process.images {
     for &handle in frame {
       destroy_texture(r, handle)
-      handle = {}
+      handle = 0
     }
   }
 }
@@ -122,8 +193,9 @@ post_process_release_images :: proc(r: ^Manager) {
 // camera's final image standing in before the first pass, and writes ring
 // slot i % POST_PROCESS_RING; the last pass writes output_view. An empty
 // stack copies the final image to output.
+@(private)
 post_process_record :: proc(
-  r: ^Manager,
+  r: ^Renderer,
   frame_index: u32,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
@@ -147,7 +219,7 @@ post_process_record :: proc(
     discards[slot] = gpu.attachment_discard(img)
   }
   gpu.image_discard_barrier(command_buffer, ..discards[:ring_count])
-  input := cam.attachments[.FINAL_IMAGE][frame_index].index
+  input := u32(cam.attachments[.FINAL_IMAGE][frame_index])
   original := input
   pass_count := post_process_pass_count(effects)
   i := 0
@@ -180,8 +252,8 @@ post_process_record :: proc(
       push := PostProcessPushConstant {
         camera_near          = cam.near,
         camera_far           = cam.far,
-        normal_texture_index = cam.attachments[.NORMAL][frame_index].index,
-        depth_texture_index  = cam.attachments[.DEPTH][frame_index].index,
+        normal_texture_index = u32(cam.attachments[.NORMAL][frame_index]),
+        depth_texture_index  = u32(cam.attachments[.DEPTH][frame_index]),
         input_image_index    = input,
         original_image_index = original,
         pass                 = pass,
@@ -192,7 +264,7 @@ post_process_record :: proc(
       vk.CmdEndRendering(command_buffer)
       if !is_last {
         original = input
-        input = self.images[frame_index][i % POST_PROCESS_RING].index
+        input = u32(self.images[frame_index][i % POST_PROCESS_RING])
       }
     }
   }

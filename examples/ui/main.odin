@@ -21,7 +21,7 @@ Look :: struct {
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
-  renderer: render.Manager,
+  renderer: render.Renderer,
   input:    input.State,
   font:     font.Font,
   gui:      ui.UI,
@@ -104,7 +104,7 @@ build_ui :: proc(app: ^App) {
   // an image anchored bottom-right, and a star mesh bottom-left
   if star_texture, ret := render.create_texture_from_path(&app.renderer, "assets/gold-star.png"); ret == .SUCCESS {
     image := ui.create(&app.gui, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, size = {{.FIXED, 128}, {.FIXED, 128}}})
-    app.looks[image] = {{255, 255, 255, 255}, star_texture.index}
+    app.looks[image] = {{255, 255, 255, 255}, u32(star_texture)}
   }
   app.star = ui.create(&app.gui, {position = .ABSOLUTE, anchor = {0, 1}, offset = {16, -16}, size = {{.FIXED, 140}, {.FIXED, 140}}})
 }

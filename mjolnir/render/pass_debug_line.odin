@@ -1,14 +1,17 @@
-#+private
 package render
 
-import "gpu"
+import "core:math"
+import "core:math/linalg"
 import "core:sync"
+import "gpu"
 import vk "vendor:vulkan"
 
+@(private)
 MAX_SEGMENTS :: 65536
 
 // A queued line, and the GPU record the debug line shader pulls its two
 // vertices from. debug_line_add stamps `expiry` and `bypass_depth`.
+@(private)
 DebugLineSegment :: struct {
   a:            [3]f32,
   // render clock time the segment is dropped at; ONE_FRAME_EXPIRY draws it
@@ -21,13 +24,8 @@ DebugLineSegment :: struct {
 }
 #assert(size_of(DebugLineSegment) == 48)
 
-DebugLineRenderer :: struct {
-  segments: [dynamic]DebugLineSegment,
-  now:      f32,
-  mu:       sync.Mutex,
-}
-
-debug_line_init :: proc(r: ^Manager) -> vk.Result {
+@(private)
+debug_line_init :: proc(r: ^Renderer) -> vk.Result {
   // Depth test toggled dynamically per draw to fold overlay variant into the same pipeline.
   dyn_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_TEST_ENABLE}
   color_formats := [?]vk.Format{r.swapchain.format.format}
@@ -46,67 +44,62 @@ debug_line_init :: proc(r: ^Manager) -> vk.Result {
       layout = r.scene.layout,
     },
   ) or_return
-  r.debug_line_renderer.segments = make([dynamic]DebugLineSegment, 0, 1024)
+  r.debug_lines = make([dynamic]DebugLineSegment, 0, 1024)
   return .SUCCESS
 }
 
 // Sentinel for one-frame draws; dropped after the first debug_line_record() packs them.
+@(private)
 ONE_FRAME_EXPIRY :: f32(-1.0)
-
-// Advance the clock that segment lifetimes count against.
-debug_line_advance :: proc(self: ^DebugLineRenderer, delta_time: f32) {
-  sync.mutex_lock(&self.mu)
-  self.now += delta_time
-  sync.mutex_unlock(&self.mu)
-}
 
 // Queue `segs` (a, b and color set) for `life` seconds of the render clock,
 // one frame when zero. The oldest segments make room past MAX_SEGMENTS.
-debug_line_add :: proc(self: ^DebugLineRenderer, life: f32, bypass_depth: bool, segs: ..DebugLineSegment) {
+@(private)
+debug_line_add :: proc(self: ^Renderer, life: f32, bypass_depth: bool, segs: ..DebugLineSegment) {
   if len(segs) == 0 do return
-  sync.mutex_lock(&self.mu)
-  defer sync.mutex_unlock(&self.mu)
-  total := len(self.segments) + len(segs)
+  sync.mutex_lock(&self.debug_mutex)
+  defer sync.mutex_unlock(&self.debug_mutex)
+  total := len(self.debug_lines) + len(segs)
   if total > MAX_SEGMENTS {
     overflow := total - MAX_SEGMENTS
-    if overflow >= len(self.segments) {
-      clear(&self.segments)
+    if overflow >= len(self.debug_lines) {
+      clear(&self.debug_lines)
     } else {
-      copy(self.segments[:len(self.segments) - overflow], self.segments[overflow:])
-      resize(&self.segments, len(self.segments) - overflow)
+      copy(self.debug_lines[:len(self.debug_lines) - overflow], self.debug_lines[overflow:])
+      resize(&self.debug_lines, len(self.debug_lines) - overflow)
     }
   }
-  expiry := ONE_FRAME_EXPIRY if life <= 0 else self.now + life
+  expiry := ONE_FRAME_EXPIRY if life <= 0 else self.debug_time + life
   for seg in segs {
     s := seg
     s.expiry = expiry
     s.bypass_depth = b32(bypass_depth)
-    append(&self.segments, s)
+    append(&self.debug_lines, s)
   }
 }
 
 // Draw the queued segments over the main camera's image `color_view`:
 // depth-tested ones against `depth_image`, then the bypass_depth ones on top.
+@(private)
 debug_line_record :: proc(
-  r: ^Manager,
+  r: ^Renderer,
   frame_index: u32,
   camera_index: u32,
   color_view: vk.ImageView,
   extent: vk.Extent2D,
   depth_image: ^gpu.Image,
 ) {
-  self := &r.debug_line_renderer
   cmd := r.command_buffers[frame_index]
-  sync.mutex_lock(&self.mu)
-  defer sync.mutex_unlock(&self.mu)
-  if len(self.segments) == 0 do return
+  sync.mutex_lock(&r.debug_mutex)
+  defer sync.mutex_unlock(&r.debug_mutex)
+  if len(r.debug_lines) == 0 do return
   table := frame_table(r, .DEBUG_LINES, DebugLineSegment, frame_index)
   // Depth-tested lines pack from the front, overlay lines from the back.
   // Expired and one-frame segments are dropped while compacting in place.
   front, back := 0, MAX_SEGMENTS
   write := 0
-  for seg in self.segments {
-    if seg.expiry > 0 && seg.expiry < self.now do continue
+  for seg in r.debug_lines {
+    if seg.expiry > 0 && seg.expiry < r.debug_time do continue
     if seg.bypass_depth {
       back -= 1
       table[back] = seg
@@ -115,11 +108,11 @@ debug_line_record :: proc(
       front += 1
     }
     if seg.expiry != ONE_FRAME_EXPIRY {
-      self.segments[write] = seg
+      r.debug_lines[write] = seg
       write += 1
     }
   }
-  resize(&self.segments, write)
+  resize(&r.debug_lines, write)
   if front == 0 && back == MAX_SEGMENTS do return
   gpu.begin_rendering(
     cmd,
@@ -140,4 +133,214 @@ debug_line_record :: proc(
     vk.CmdDraw(cmd, u32(2 * (MAX_SEGMENTS - back)), 1, u32(2 * back), 0)
   }
   vk.CmdEndRendering(cmd)
+}
+
+// Debug line colors.
+DEBUG_WHITE :: [4]f32{1, 1, 1, 1}
+DEBUG_BLACK :: [4]f32{0, 0, 0, 1}
+DEBUG_GRAY :: [4]f32{0.5, 0.5, 0.5, 1}
+DEBUG_RED :: [4]f32{1, 0, 0, 1}
+DEBUG_GREEN :: [4]f32{0, 1, 0, 1}
+DEBUG_BLUE :: [4]f32{0, 0.4, 1, 1}
+DEBUG_YELLOW :: [4]f32{1, 1, 0, 1}
+DEBUG_CYAN :: [4]f32{0, 1, 1, 1}
+DEBUG_MAGENTA :: [4]f32{1, 0, 1, 1}
+DEBUG_ORANGE :: [4]f32{1, 0.5, 0, 1}
+
+CIRCLE_SEGMENTS :: 24
+
+// n must be normalized.
+@(private = "file")
+orthonormal_basis :: proc(n: [3]f32) -> (u, v: [3]f32) {
+  tmp := [3]f32{0, 1, 0} if abs(n.y) < 0.9 else [3]f32{1, 0, 0}
+  u = linalg.normalize0(linalg.cross(tmp, n))
+  v = linalg.cross(n, u)
+  return
+}
+
+@(private = "file")
+fill_circle :: proc(
+  segs: []DebugLineSegment,
+  center, u, v: [3]f32,
+  radius: f32,
+  color: [4]f32,
+) {
+  prev := center + u * radius
+  for i in 1 ..= CIRCLE_SEGMENTS {
+    t := f32(i) / f32(CIRCLE_SEGMENTS) * math.TAU
+    p := center + u * (radius * math.cos(t)) + v * (radius * math.sin(t))
+    segs[i - 1] = {a = prev, b = p, color = color}
+    prev = p
+  }
+}
+
+debug_segment :: proc(
+  self: ^Renderer,
+  a, b: [3]f32,
+  color: [4]f32 = DEBUG_WHITE,
+  life: f32 = 0,
+  bypass_depth: bool = false,
+) {
+  debug_line_add(self, life, bypass_depth, {a = a, b = b, color = color})
+}
+
+debug_aabb :: proc(
+  self: ^Renderer,
+  lo, hi: [3]f32,
+  color: [4]f32 = DEBUG_WHITE,
+  life: f32 = 0,
+  bypass_depth: bool = false,
+) {
+  c := [8][3]f32 {
+    {lo.x, lo.y, lo.z},
+    {hi.x, lo.y, lo.z},
+    {hi.x, hi.y, lo.z},
+    {lo.x, hi.y, lo.z},
+    {lo.x, lo.y, hi.z},
+    {hi.x, lo.y, hi.z},
+    {hi.x, hi.y, hi.z},
+    {lo.x, hi.y, hi.z},
+  }
+  push_box_edges(self, c, color, life, bypass_depth)
+}
+
+debug_cube :: proc(
+  self: ^Renderer,
+  center: [3]f32,
+  rotation: quaternion128 = 1,
+  size: [3]f32 = {1, 1, 1},
+  color: [4]f32 = DEBUG_WHITE,
+  life: f32 = 0,
+  bypass_depth: bool = false,
+) {
+  h := size * 0.5
+  base := [8][3]f32 {
+    {-h.x, -h.y, -h.z},
+    { h.x, -h.y, -h.z},
+    { h.x,  h.y, -h.z},
+    {-h.x,  h.y, -h.z},
+    {-h.x, -h.y,  h.z},
+    { h.x, -h.y,  h.z},
+    { h.x,  h.y,  h.z},
+    {-h.x,  h.y,  h.z},
+  }
+  c: [8][3]f32
+  for i in 0 ..< 8 {
+    c[i] = linalg.quaternion_mul_vector3(rotation, base[i]) + center
+  }
+  push_box_edges(self, c, color, life, bypass_depth)
+}
+
+@(private = "file")
+push_box_edges :: proc(
+  self: ^Renderer,
+  c: [8][3]f32,
+  color: [4]f32,
+  life: f32,
+  bypass_depth: bool,
+) {
+  edges := [12][2]int {
+    {0, 1}, {1, 2}, {2, 3}, {3, 0},
+    {4, 5}, {5, 6}, {6, 7}, {7, 4},
+    {0, 4}, {1, 5}, {2, 6}, {3, 7},
+  }
+  segs: [12]DebugLineSegment
+  for e, i in edges {
+    segs[i] = {a = c[e[0]], b = c[e[1]], color = color}
+  }
+  debug_line_add(self, life, bypass_depth, ..segs[:])
+}
+
+debug_circle :: proc(
+  self: ^Renderer,
+  center, normal: [3]f32,
+  radius: f32 = 1,
+  color: [4]f32 = DEBUG_WHITE,
+  life: f32 = 0,
+  bypass_depth: bool = false,
+) {
+  u, v := orthonormal_basis(linalg.normalize0(normal))
+  segs: [CIRCLE_SEGMENTS]DebugLineSegment
+  fill_circle(segs[:], center, u, v, radius, color)
+  debug_line_add(self, life, bypass_depth, ..segs[:])
+}
+
+debug_sphere :: proc(
+  self: ^Renderer,
+  center: [3]f32,
+  radius: f32 = 1,
+  color: [4]f32 = DEBUG_WHITE,
+  life: f32 = 0,
+  bypass_depth: bool = false,
+) {
+  segs: [3 * CIRCLE_SEGMENTS]DebugLineSegment
+  X :: [3]f32{1, 0, 0}
+  Y :: [3]f32{0, 1, 0}
+  Z :: [3]f32{0, 0, 1}
+  fill_circle(segs[0 * CIRCLE_SEGMENTS:1 * CIRCLE_SEGMENTS], center, Y, Z, radius, color)
+  fill_circle(segs[1 * CIRCLE_SEGMENTS:2 * CIRCLE_SEGMENTS], center, X, Z, radius, color)
+  fill_circle(segs[2 * CIRCLE_SEGMENTS:3 * CIRCLE_SEGMENTS], center, X, Y, radius, color)
+  debug_line_add(self, life, bypass_depth, ..segs[:])
+}
+
+debug_arrow :: proc(
+  self: ^Renderer,
+  from, to: [3]f32,
+  color: [4]f32 = DEBUG_WHITE,
+  life: f32 = 0,
+  bypass_depth: bool = false,
+) {
+  dir := to - from
+  length := linalg.length(dir)
+  // a zero-length arrow's head collapses onto `to`
+  d := linalg.normalize0(dir)
+  u, v := orthonormal_basis(d)
+  head_len := min(length * 0.2, 0.5)
+  head_r := head_len * 0.4
+  base := to - d * head_len
+  segs: [5]DebugLineSegment
+  segs[0] = {a = from, b = to, color = color}
+  for i in 0 ..< 4 {
+    t := f32(i) / 4.0 * math.TAU
+    p := base + u * (head_r * math.cos(t)) + v * (head_r * math.sin(t))
+    segs[1 + i] = {a = to, b = p, color = color}
+  }
+  debug_line_add(self, life, bypass_depth, ..segs[:])
+}
+
+debug_axes :: proc(
+  self: ^Renderer,
+  origin: [3]f32,
+  rotation: quaternion128 = 1,
+  scale: f32 = 1,
+  life: f32 = 0,
+  bypass_depth: bool = false,
+) {
+  x := linalg.quaternion_mul_vector3(rotation, [3]f32{scale, 0, 0})
+  y := linalg.quaternion_mul_vector3(rotation, [3]f32{0, scale, 0})
+  z := linalg.quaternion_mul_vector3(rotation, [3]f32{0, 0, scale})
+  // Canonical axis colors (pure RGB) — independent of DEBUG_BLUE, which is tinted.
+  segs := [3]DebugLineSegment {
+    {a = origin, b = origin + x, color = {1, 0, 0, 1}},
+    {a = origin, b = origin + y, color = {0, 1, 0, 1}},
+    {a = origin, b = origin + z, color = {0, 0, 1, 1}},
+  }
+  debug_line_add(self, life, bypass_depth, ..segs[:])
+}
+
+debug_point :: proc(
+  self: ^Renderer,
+  p: [3]f32,
+  size: f32 = 0.1,
+  color: [4]f32 = DEBUG_WHITE,
+  life: f32 = 0,
+  bypass_depth: bool = false,
+) {
+  h := size * 0.5
+  segs := [3]DebugLineSegment {
+    {a = p - {h, 0, 0}, b = p + {h, 0, 0}, color = color},
+    {a = p - {0, h, 0}, b = p + {0, h, 0}, color = color},
+    {a = p - {0, 0, h}, b = p + {0, 0, h}, color = color},
+  }
+  debug_line_add(self, life, bypass_depth, ..segs[:])
 }
