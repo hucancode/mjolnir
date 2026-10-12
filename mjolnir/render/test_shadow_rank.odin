@@ -9,12 +9,11 @@ make_casters :: proc(n: int) -> (casters: [MAX_LIGHTS]Caster) {
 	return
 }
 
-select_frame :: proc(casters: []Caster, maps: ^[MAX_SHADOW_MAPS]ShadowMap, serial: u64) -> int {
-	_, count := select_shadow_casters(casters, maps, serial)
-	return count
+select_frame :: proc(casters: []Caster, maps: ^[MAX_SHADOW_MAPS]Caster, serial: u64) -> int {
+	return select_shadow_casters(casters, maps, serial)
 }
 
-holds_map :: proc(maps: ^[MAX_SHADOW_MAPS]ShadowMap, owner: u32) -> bool {
+holds_map :: proc(maps: ^[MAX_SHADOW_MAPS]Caster, owner: u32) -> bool {
 	for sm in maps do if sm.owner == owner do return true
 	return false
 }
@@ -38,7 +37,7 @@ test_shadow_score_prefers_close_large_bright :: proc(t: ^testing.T) {
 
 @(test)
 test_shadow_selection_caps_ranked :: proc(t: ^testing.T) {
-	maps: [MAX_SHADOW_MAPS]ShadowMap
+	maps: [MAX_SHADOW_MAPS]Caster
 	casters := make_casters(20)
 	count := select_frame(casters[:20], &maps, 100)
 	testing.expect_value(t, count, SHADOW_RANKED_CASTERS)
@@ -49,7 +48,7 @@ test_shadow_selection_caps_ranked :: proc(t: ^testing.T) {
 
 @(test)
 test_shadow_selection_grace :: proc(t: ^testing.T) {
-	maps: [MAX_SHADOW_MAPS]ShadowMap
+	maps: [MAX_SHADOW_MAPS]Caster
 	casters := make_casters(20)
 	serial: u64 = 100
 	select_frame(casters[:20], &maps, serial)
@@ -66,7 +65,7 @@ test_shadow_selection_grace :: proc(t: ^testing.T) {
 
 @(test)
 test_shadow_selection_unseen_evicted :: proc(t: ^testing.T) {
-	maps: [MAX_SHADOW_MAPS]ShadowMap
+	maps: [MAX_SHADOW_MAPS]Caster
 	casters := make_casters(12)
 	select_frame(casters[:12], &maps, 100)
 	testing.expect(t, holds_map(&maps, 12), "visible caster holds a map")
@@ -77,7 +76,7 @@ test_shadow_selection_unseen_evicted :: proc(t: ^testing.T) {
 
 @(test)
 test_shadow_selection_grace_limited :: proc(t: ^testing.T) {
-	maps: [MAX_SHADOW_MAPS]ShadowMap
+	maps: [MAX_SHADOW_MAPS]Caster
 	casters := make_casters(12)
 	select_frame(casters[:12], &maps, 100)
 	// 12 brighter lights (owners 21..32) push owners 1..12 to ranks 13..24
@@ -93,28 +92,23 @@ test_shadow_selection_grace_limited :: proc(t: ^testing.T) {
 
 @(test)
 test_shadow_layers_packed_by_type :: proc(t: ^testing.T) {
-	r := new(Manager)
-	defer free(r)
-	defer delete(r.internal.frame_lights)
-	shadowed := LightGPU{shadow_map = 0}
-	unshadowed := LightGPU{shadow_map = NO_SHADOW}
-	append(
-		&r.internal.frame_lights,
-		FrameLight{type = .SPOT, light = shadowed},
-		FrameLight{type = .POINT, light = unshadowed},
-		FrameLight{type = .DIRECTIONAL, light = shadowed},
-		FrameLight{type = .POINT, light = shadowed},
-	)
-	sort_lights_by_type(r)
-	assign_shadow_layers(r)
-	lights := r.internal.frame_lights[:]
-	testing.expect_value(t, r.internal.light_first, [LightType]u32{.POINT = 0, .SPOT = 2, .DIRECTIONAL = 3, .AMBIENT = 4})
-	testing.expect_value(t, r.internal.light_count, [LightType]u32{.POINT = 2, .SPOT = 1, .DIRECTIONAL = 1, .AMBIENT = 0})
+	lights := [?]LightGPU {
+		{type = .SPOT, shadow_map = 0},
+		{type = .POINT, shadow_map = NO_SHADOW},
+		{type = .DIRECTIONAL, shadow_map = 0},
+		{type = .POINT, shadow_map = 0},
+	}
+	dst: [len(lights)]LightGPU
+	count, layers := pack_lights(lights[:], dst[:])
+	testing.expect_value(t, count, [LightType]u32{.POINT = 2, .SPOT = 1, .DIRECTIONAL = 1, .AMBIENT = 0})
+	testing.expect_value(t, dst[0].type, LightType.POINT)
+	testing.expect_value(t, dst[2].type, LightType.SPOT)
+	testing.expect_value(t, dst[3].type, LightType.DIRECTIONAL)
 	// stable: the unshadowed point light stays ahead of the shadowed one
-	testing.expect_value(t, lights[0].light.shadow_map, NO_SHADOW)
+	testing.expect_value(t, dst[0].shadow_map, NO_SHADOW)
 	// one shadow view per face: the point light's six, then one each
-	testing.expect_value(t, lights[1].light.shadow_map, SHADOW_VIEW_BASE + 0)
-	testing.expect_value(t, lights[2].light.shadow_map, SHADOW_VIEW_BASE + 6)
-	testing.expect_value(t, lights[3].light.shadow_map, SHADOW_VIEW_BASE + 7)
-	testing.expect_value(t, r.internal.shadow_view_count, 8)
+	testing.expect_value(t, dst[1].shadow_map, SHADOW_VIEW_BASE + 0)
+	testing.expect_value(t, dst[2].shadow_map, SHADOW_VIEW_BASE + 6)
+	testing.expect_value(t, dst[3].shadow_map, SHADOW_VIEW_BASE + 7)
+	testing.expect_value(t, layers, 8)
 }

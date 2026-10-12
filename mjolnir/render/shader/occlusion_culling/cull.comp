@@ -12,16 +12,6 @@ const uint SAMPLER_MAX_REDUCE = 5u;
 
 const uint INVALID_ID = 0xFFFFFFFFu;
 
-struct Camera {
-    mat4 view;
-    mat4 projection;
-    vec2 viewport_extent;
-    float near;
-    float far;
-    vec4 position;
-    mat4 inv_view_projection;
-};
-
 struct NodeData {
     mat4 world_matrix;
     uint material_id;
@@ -58,9 +48,16 @@ struct MaterialData {
 };
 
 struct View {
-    vec4 planes[6]; // normalized, pointing inward
+    mat4 view;
+    mat4 projection;
     mat4 view_projection;
-    uint camera_index; // projects the occlusion test
+    mat4 inv_view_projection; // rebuilds world positions from depth
+    vec4 planes[6]; // normalized, pointing inward
+    vec4 position;
+    vec2 extent;
+    float near;
+    float far;
+    uint attachments[6]; // this frame's bindless images, by AttachmentType
     uint pyramid; // bindless depth pyramid
     uint occlusion_mask; // bit t: material type t is tested against the pyramid
     uint list_stride;
@@ -71,7 +68,6 @@ struct View {
     uint draw_list; // bindless draw lists the view appends to
     uint list_capacity; // draws per list
     uint _pad0;
-    uint _pad1;
 };
 
 struct DrawCommand {
@@ -89,10 +85,6 @@ layout(push_constant) uniform PushConstants {
 
 const float DEPTH_BIAS = 0.0001;
 
-layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    Camera cameras[];
-};
-
 layout(set = 0, binding = 1) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
@@ -105,7 +97,7 @@ layout(set = 0, binding = 3) readonly buffer MaterialBuffer {
     MaterialData materials[];
 };
 
-layout(set = 0, binding = 11) readonly buffer ViewBuffer {
+layout(set = 0, binding = 0) readonly buffer ViewBuffer {
     View views[];
 };
 
@@ -166,26 +158,26 @@ bool project_sphere(vec3 center, float radius, mat4 proj, float near, float far,
 }
 
 // return true if the sphere is visible, false if occluded
-bool occlusion_test(vec3 center, float radius, Camera camera, uint pyramid) {
-    vec4 view_center4 = camera.view * vec4(center, 1.0);
+bool occlusion_test(vec3 center, float radius, View view) {
+    vec4 view_center4 = view.view * vec4(center, 1.0);
     vec3 view_center = view_center4.xyz;
 
     vec4 aabb;
-    if (!project_sphere(view_center, radius, camera.projection, camera.near, camera.far, aabb)) {
+    if (!project_sphere(view_center, radius, view.projection, view.near, view.far, aabb)) {
         return true;
     }
 
-    vec2 pyramid_size = vec2(textureSize(sampler2D(textures[pyramid], samplers[SAMPLER_MAX_REDUCE]), 0));
+    vec2 pyramid_size = vec2(textureSize(sampler2D(textures[view.pyramid], samplers[SAMPLER_MAX_REDUCE]), 0));
     float width = (aabb.z - aabb.x) * pyramid_size.x;
     float height = (aabb.w - aabb.y) * pyramid_size.y;
     float level = ceil(log2(max(width, height)));
     level = max(0.0, level);
 
     vec2 sample_uv = (aabb.xy + aabb.zw) * 0.5;
-    float occluder_depth = textureLod(sampler2D(textures[pyramid], samplers[SAMPLER_MAX_REDUCE]), sample_uv, level).r;
+    float occluder_depth = textureLod(sampler2D(textures[view.pyramid], samplers[SAMPLER_MAX_REDUCE]), sample_uv, level).r;
 
     float object_near_z = view_center.z + radius;
-    vec4 clip_pos = camera.projection * vec4(0, 0, object_near_z, 1.0);
+    vec4 clip_pos = view.projection * vec4(0, 0, object_near_z, 1.0);
     float object_depth = clip_pos.z / clip_pos.w;
 
     return object_depth < (occluder_depth + DEPTH_BIAS);
@@ -216,7 +208,7 @@ void main() {
 
     if (!in_view(view, world_center, world_extent)) return;
     if (((view.occlusion_mask >> type) & 1u) != 0u &&
-        !occlusion_test(world_center, length(world_extent), cameras[view.camera_index], view.pyramid)) {
+        !occlusion_test(world_center, length(world_extent), view)) {
         return;
     }
 

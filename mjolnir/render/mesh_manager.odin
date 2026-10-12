@@ -8,17 +8,6 @@ import vk "vendor:vulkan"
 
 MeshHandle :: distinct cont.Handle
 
-BufferAllocation :: struct {
-  offset: u32,
-  count:  u32,
-}
-
-MeshAllocations :: struct {
-  vertices: BufferAllocation,
-  indices:  BufferAllocation,
-  skinning: BufferAllocation,
-}
-
 // Skinning data is a storage buffer read by the vertex shader through the
 // scene set; vertices and indices are bound as vertex/index buffers.
 MeshManager :: struct {
@@ -90,59 +79,33 @@ mesh_manager_shutdown :: proc(manager: ^MeshManager, gctx: ^gpu.GPUContext) {
   cont.slab_destroy(&manager.index_slab)
 }
 
-@(private)
+// Copy `data` into a range of `buffer` taken from `slab`; its first element
+// index. Empty data takes no range; a failed copy frees its range.
+@(private = "file")
 mesh_manager_upload :: proc(
   gctx: ^gpu.GPUContext,
   slab: ^cont.SlabAllocator,
   buffer: ^gpu.Buffer,
   data: []$T,
 ) -> (
-  allocation: BufferAllocation,
+  offset: u32,
   ret: vk.Result,
 ) {
-  if len(data) == 0 do return {}, .SUCCESS
-  count := u32(len(data))
-  offset, ok := cont.slab_alloc(slab, count)
-  if !ok do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  gpu.queue_buffer_write(gctx, buffer, data, int(offset)) or_return
-  return {offset = offset, count = count}, .SUCCESS
+  if len(data) == 0 do return 0, .SUCCESS
+  ok: bool
+  offset, ok = cont.slab_alloc(slab, u32(len(data)))
+  if !ok do return 0, .ERROR_OUT_OF_DEVICE_MEMORY
+  ret = gpu.queue_buffer_write(gctx, buffer, data, int(offset))
+  if ret != .SUCCESS do cont.slab_free(slab, offset)
+  return
 }
 
-// Upload a geometry's vertices, indices and skinning. On failure the
-// allocations made so far are returned for free_mesh.
-allocate_mesh :: proc(
-  manager: ^MeshManager,
-  gctx: ^gpu.GPUContext,
-  geometry_data: mesh.Geometry,
-) -> (
-  allocations: MeshAllocations,
-  ret: vk.Result,
-) {
-  allocations.vertices = mesh_manager_upload(
-    gctx,
-    &manager.vertex_slab,
-    &manager.vertex_buffer,
-    geometry_data.vertices,
-  ) or_return
-  allocations.indices = mesh_manager_upload(
-    gctx,
-    &manager.index_slab,
-    &manager.index_buffer,
-    geometry_data.indices,
-  ) or_return
-  allocations.skinning = mesh_manager_upload(
-    gctx,
-    &manager.vertex_skinning_slab,
-    &manager.vertex_skinning_buffer,
-    geometry_data.skinnings,
-  ) or_return
-  return allocations, .SUCCESS
-}
-
-free_mesh :: proc(manager: ^MeshManager, allocations: MeshAllocations) {
-  if allocations.vertices.count > 0 do cont.slab_free(&manager.vertex_slab, allocations.vertices.offset)
-  if allocations.indices.count > 0 do cont.slab_free(&manager.index_slab, allocations.indices.offset)
-  if allocations.skinning.count > 0 do cont.slab_free(&manager.vertex_skinning_slab, allocations.skinning.offset)
+// Free the arena ranges of a mesh: its vertex and index ranges when it has
+// vertices and indices, its skinning range when skinned.
+free_mesh :: proc(manager: ^MeshManager, m: MeshData) {
+  if m.vertex_count > 0 do cont.slab_free(&manager.vertex_slab, u32(m.vertex_offset))
+  if m.index_count > 0 do cont.slab_free(&manager.index_slab, m.first_index)
+  if .SKINNED in m.flags do cont.slab_free(&manager.vertex_skinning_slab, m.skinning_offset)
 }
 
 VERTEX_BINDING_DESCRIPTION := [?]vk.VertexInputBindingDescription {
@@ -192,28 +155,31 @@ POSITION_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
   },
 }
 
-// Upload a mesh's CPU geometry into the mesh manager and describe it in
-// mesh_data_buffer at `index`. Its allocations are freed by mesh_retire.
+// Upload a geometry into the mesh arena and describe it in `m` and in
+// mesh_data_buffer at `index`. On failure the ranges taken so far are freed.
+// The ranges are freed by mesh_retire.
 @(private)
 upload_mesh :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,
   index: u32,
-  m: ^Mesh,
-  geometry_data: mesh.Geometry,
-) -> vk.Result {
-  res: vk.Result
-  m.allocations, res = allocate_mesh(&render.mesh_manager, gctx, geometry_data)
-  if res != .SUCCESS do return res
-  aabb := mesh.aabb_from_vertices(geometry_data.vertices)
-  data := MeshData {
-    aabb_min        = aabb.min,
-    aabb_max        = aabb.max,
-    index_count     = u32(len(geometry_data.indices)),
-    first_index     = m.allocations.indices.offset,
-    vertex_offset   = i32(m.allocations.vertices.offset),
-    skinning_offset = m.allocations.skinning.offset,
+  m: ^MeshData,
+  g: mesh.Geometry,
+) -> (
+  ret: vk.Result,
+) {
+  manager := &render.mesh_manager
+  aabb := mesh.aabb_from_vertices(g.vertices)
+  m^ = {aabb_min = aabb.min, aabb_max = aabb.max}
+  defer if ret != .SUCCESS {
+    free_mesh(manager, m^)
+    m^ = {}
   }
-  if m.allocations.skinning.count > 0 do data.flags |= {.SKINNED}
-  return gpu.queue_buffer_write(gctx, &render.internal.mesh_data_buffer, []MeshData{data}, int(index))
+  offset := mesh_manager_upload(gctx, &manager.vertex_slab, &manager.vertex_buffer, g.vertices) or_return
+  m.vertex_offset, m.vertex_count = i32(offset), u32(len(g.vertices))
+  m.first_index = mesh_manager_upload(gctx, &manager.index_slab, &manager.index_buffer, g.indices) or_return
+  m.index_count = u32(len(g.indices))
+  m.skinning_offset = mesh_manager_upload(gctx, &manager.vertex_skinning_slab, &manager.vertex_skinning_buffer, g.skinnings) or_return
+  if len(g.skinnings) > 0 do m.flags |= {.SKINNED}
+  return gpu.queue_buffer_write(gctx, &render.internal.mesh_data_buffer, []MeshData{m^}, int(index))
 }

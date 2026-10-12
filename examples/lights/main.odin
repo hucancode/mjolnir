@@ -170,7 +170,7 @@ light_position :: proc(l: MovingLight) -> [3]f32 {
 }
 
 apply_light_settings :: proc(app: ^App) {
-  if l, ok := render.attachment(&app.renderer, dir_light.index, render.DirectionalLightAttachment); ok {
+  if l, ok := render.attachment(&app.renderer, dir_light.index, render.LightAttachment); ok {
     world.set_visible(&app.scene, dir_light, dir_enabled)
     l.color = {1, 1, 1, f32(dir_intensity)}
     render.attach(&app.renderer, dir_light.index, l)
@@ -179,14 +179,14 @@ apply_light_settings :: proc(app: ^App) {
     color := [4]f32{ml.color.r, ml.color.g, ml.color.b, 0}
     switch ml.kind {
     case .POINT:
-      l := render.attachment(&app.renderer, ml.node.index, render.PointLightAttachment) or_continue
+      l := render.attachment(&app.renderer, ml.node.index, render.LightAttachment) or_continue
       world.set_visible(&app.scene, ml.node, point_enabled)
       l.color = color
       l.color.a = f32(point_intensity)
       l.radius = f32(point_radius)
       render.attach(&app.renderer, ml.node.index, l)
     case .SPOT:
-      l := render.attachment(&app.renderer, ml.node.index, render.SpotLightAttachment) or_continue
+      l := render.attachment(&app.renderer, ml.node.index, render.LightAttachment) or_continue
       world.set_visible(&app.scene, ml.node, spot_enabled)
       l.color = color
       l.color.a = f32(spot_intensity)

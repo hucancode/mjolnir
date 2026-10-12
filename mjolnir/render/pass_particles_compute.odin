@@ -34,9 +34,10 @@ ParticlesParticle :: struct {
   texture_index: u32,
 }
 
-// std430 rounds the struct to 16 bytes (it holds vec4s); #align(16) keeps the
-// Odin array stride equal to the GLSL one.
-EmitterData :: struct #align(16) {
+// An emitter, stored as the emit shader reads it. std430 rounds the struct to
+// 16 bytes (it holds vec4s); #align(16) keeps the Odin array stride equal to
+// the GLSL one.
+Emitter :: struct #align(16) {
   initial_velocity:  [3]f32,
   size_start:        f32,
   color_start:       [4]f32,
@@ -44,20 +45,30 @@ EmitterData :: struct #align(16) {
   particle_lifetime: f32,
   position_spread:   f32,
   velocity_spread:   f32,
-  // first of this emitter's particles among the frame's new particles
+  // first of this emitter's particles among the frame's new particles;
+  // render writes it every frame
   emit_first:        u32,
   size_end:          f32,
   weight:            f32,
   weight_spread:     f32,
+  // bindless texture of the particles (texture_index), NO_TEXTURE for none
   texture_index:     u32,
+  // transform slot the particles spawn from, set by attach
   node_index:        u32,
+  // particles per second while enabled, accumulated by update
+  emission_rate:     f32,
+  enabled:           b32,
 }
+#assert(size_of(Emitter) == 96)
 
-ForceFieldData :: struct {
+// A force field, stored as the simulation reads it.
+ForceField :: struct {
   tangent_strength: f32,
   strength:         f32,
   area_of_effect:   f32,
+  // transform slot the field is centered on, set by attach
   node_index:       u32,
+  enabled:          b32,
 }
 
 ParticleSystemParams :: struct {

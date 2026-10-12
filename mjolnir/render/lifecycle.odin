@@ -184,7 +184,6 @@ shutdown :: proc(self: ^Manager) {
   destroy_scene_buffers(self, gctx)
   mesh_manager_shutdown(&self.mesh_manager, gctx)
   cont.destroy(&self.cameras, proc(_: ^Camera) {})
-  destroy_light_state(self, gctx)
   destroy_resource_pools(self)
   staging_destroy(&self.internal.staging)
   for _, p in self.internal.bones do delete(p.matrices)

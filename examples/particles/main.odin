@@ -98,7 +98,7 @@ update :: proc(app: ^App, dt: f32) {
     tex = textures[selected_tex_index].handle
   }
   if em, ok := render.emitter(&app.renderer, emitter_handle); ok {
-    em.texture_handle    = tex
+    em.texture_index     = render.texture_index(tex)
     em.enabled           = b32(enabled)
     em.emission_rate     = f32(emission_rate)
     em.particle_lifetime = f32(lifetime)

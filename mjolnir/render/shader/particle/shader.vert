@@ -21,21 +21,32 @@ out gl_PerVertex {
     float gl_PointSize;
 };
 
-// Camera structure
-struct Camera {
+struct View {
     mat4 view;
     mat4 projection;
-    vec2 viewport_extent;
+    mat4 view_projection;
+    mat4 inv_view_projection; // rebuilds world positions from depth
+    vec4 planes[6]; // normalized, pointing inward
+    vec4 position;
+    vec2 extent;
     float near;
     float far;
-    vec4 position;
-    mat4 inv_view_projection;
+    uint attachments[6]; // this frame's bindless images, by AttachmentType
+    uint pyramid; // bindless depth pyramid
+    uint occlusion_mask; // bit t: material type t is tested against the pyramid
+    uint list_stride;
+    uint type_mask; // bit t: material type t is drawn
+    uint require_flags; // node flags a drawn node has
+    uint instance_tag; // OR-ed into first_instance above the node index
+    uint layer;
+    uint draw_list; // bindless draw lists the view appends to
+    uint list_capacity; // draws per list
+    uint _pad0;
 };
 
-// Bindless camera buffer set = 0
-layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    Camera cameras[];
-} camera_buffer;
+layout(set = 0, binding = 0) readonly buffer ViewBuffer {
+    View views[];
+};
 
 layout(set = 0, binding = 8) readonly buffer ParticleBuffer {
     Particle particles[];
@@ -57,7 +68,7 @@ layout(push_constant) uniform ParticlePushConstants {
 // One vertex per live particle.
 void main() {
     Particle p = particles[alive[gl_VertexIndex]];
-    Camera camera = camera_buffer.cameras[push.camera_index];
+    View camera = views[push.camera_index];
     float ratio = p.life / p.max_life;
     outColor = mix(p.color_end, p.color_start, ratio);
     outTextureIndex = p.texture_index;

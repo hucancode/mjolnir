@@ -14,15 +14,23 @@ PYRAMID_TILE :: 32
 // [slot * MAX_DEPTH_MIPS_LEVEL, (slot + 1) * MAX_DEPTH_MIPS_LEVEL).
 MAX_PYRAMID_SLOTS :: MAX_ACTIVE_CAMERAS * gpu.FRAMES_IN_FLIGHT
 
-// One view the cull shader tests nodes against. A drawn node goes to list
-// type * list_stride of draw lists `draw_list`: a camera keeps one list per
-// material type (stride 1), the shadow views share one list for every type
-// (stride 0) and tell their draws apart by instance_tag.
+// One view of the scene: a camera, or a face of a shadow map. Rendered
+// shaders project with it; the cull shader tests nodes against it. A drawn
+// node goes to list type * list_stride of draw lists `draw_list`: a camera
+// keeps one list per material type (stride 1), the shadow views share one
+// list for every type (stride 0) and tell their draws apart by instance_tag.
 ViewGPU :: struct {
-  planes:          [6][4]f32, // normalized, pointing inward
-  view_projection: matrix[4, 4]f32,
-  // camera whose projection the occlusion test uses
-  camera_index:    u32,
+  view:                matrix[4, 4]f32,
+  projection:          matrix[4, 4]f32,
+  view_projection:     matrix[4, 4]f32,
+  // rebuilds world positions from depth
+  inv_view_projection: matrix[4, 4]f32,
+  planes:              [6][4]f32, // normalized, pointing inward
+  position:            [4]f32,
+  extent:              [2]f32,
+  near, far:           f32,
+  // this frame's bindless images of a camera view
+  attachments:         [AttachmentType]u32,
   // bindless depth pyramid
   pyramid:         u32,
   // bit t: material type t is tested against the pyramid
@@ -39,8 +47,9 @@ ViewGPU :: struct {
   draw_list:       u32,
   // draws per list
   list_capacity:   u32,
-  _pad:            [2]u32,
+  _:               u32,
 }
+#assert(size_of(ViewGPU) == 448)
 
 // View table layout: one view per camera slot, then the shadow views.
 CAMERA_VIEW_BASE :: 0

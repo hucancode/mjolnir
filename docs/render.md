@@ -82,7 +82,7 @@ radius, mesh handle, material, …) and pass it back to `attach`.
 A slot's `visible` flag hides everything it draws, lights included:
 
 ```odin
-if l, ok := render.attachment(&r, slot, render.PointLightAttachment); ok {
+if l, ok := render.attachment(&r, slot, render.LightAttachment); ok {
   l.color = {1, 0, 0, 1}
   render.attach(&r, slot, l)
 }
@@ -94,7 +94,8 @@ if l, ok := render.attachment(&r, slot, render.PointLightAttachment); ok {
   `SkinningData`, `Geometry`), primitive builders (`make_cube`,
   `make_sphere`, `make_capsule`, …) and `from_triangles` for plain
   position + index data.
-  `render.create_mesh(&r, geometry)` uploads one into the mesh arena.
+  `render.create_mesh(&r, geometry)` takes ownership of the geometry;
+  the next frame uploads it into the mesh arena and frees it.
   `r.builtin_meshes[.CUBE]` is a builtin primitive and
   `r.builtin_materials[.RED]` a builtin solid color;
   `primitive(&r, shape, color)` pairs them into a `MeshAttachment`.
@@ -106,6 +107,8 @@ if l, ok := render.attachment(&r, slot, render.PointLightAttachment); ok {
   outlive `teardown`, so destroy a material that samples a texture
   before the level ends; a texture handle from an earlier level points
   at whatever the new level allocates in its place.
+  A `Material` is stored as the shaders read it: its textures are
+  bindless indices (`texture_index(handle)`, `NO_TEXTURE` for none).
   `material(&r, h)` returns a `^Material`; edit it and write it back
   with `set_material(&r, h, m^)` to stage the upload.
 - **Sprites.** `material_sprite(&r, texture, columns, rows, tint)`
@@ -114,13 +117,15 @@ if l, ok := render.attachment(&r, slot, render.PointLightAttachment); ok {
   `set_sprite_frame(&r, material, frame)` shows one cell.
   Animate it by setting the frame as time advances.
 - **Emitters, force fields.** `create_emitter` / `create_forcefield`.
-  `emitter(&r, h)` / `forcefield(&r, h)` return a pointer; write
-  changes back with `set_emitter` / `set_forcefield`, which keep the
-  emission progress and the attached slot. Emitters are uploaded
-  every frame; force field changes are staged.
-- **Lights** have no resource; a light is an attachment
+  Both are stored as the particle shaders read them; `attach` sets
+  their `node_index`. `emitter(&r, h)` / `forcefield(&r, h)` return a
+  pointer; edit it and write it back with `set_emitter` /
+  `set_forcefield`. Emitters are uploaded every frame; force field
+  changes are staged.
+- **Lights** have no resource; a light is a `LightAttachment` whose
+  `type` picks point, spot or directional
   (`point_light_attachment`, `directional_light_attachment`,
-  `spot_light_attachment`).
+  `spot_light_attachment` fill in the defaults).
 
 `render.stats(&r)` reports texture, mesh, material and slot counts
 and the main camera's opaque draw count.

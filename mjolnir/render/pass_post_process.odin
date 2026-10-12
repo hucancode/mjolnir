@@ -179,9 +179,7 @@ post_process_record :: proc(
   frame_index: u32,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
-  final_image_idx: u32,
-  gbuffer: GBuffer,
-  near, far: f32,
+  cam: ^Camera,
   texture_manager: ^TextureManager,
   layout: vk.PipelineLayout,
 ) {
@@ -202,7 +200,8 @@ post_process_record :: proc(
   }
   gpu.image_discard_barrier(command_buffer, ..discards[:ring_count])
   gpu.set_viewport_scissor(command_buffer, extent)
-  input, original := final_image_idx, final_image_idx
+  input := cam.attachments[.FINAL_IMAGE][frame_index].index
+  original := input
   pass_count := post_process_pass_count(effects)
   i := 0
   for effect in effects {
@@ -232,10 +231,10 @@ post_process_record :: proc(
       )
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipelines[int(is_last)][tag])
       push := PostProcessPushConstant {
-        camera_near          = near,
-        camera_far           = far,
-        normal_texture_index = gbuffer.normal,
-        depth_texture_index  = gbuffer.depth,
+        camera_near          = cam.near,
+        camera_far           = cam.far,
+        normal_texture_index = cam.attachments[.NORMAL][frame_index].index,
+        depth_texture_index  = cam.attachments[.DEPTH][frame_index].index,
         input_image_index    = input,
         original_image_index = original,
         pass                 = pass,

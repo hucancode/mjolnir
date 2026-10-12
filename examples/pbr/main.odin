@@ -87,7 +87,7 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
-  if l, ok := render.attachment(&app.renderer, dir_light.index, render.DirectionalLightAttachment); ok {
+  if l, ok := render.attachment(&app.renderer, dir_light.index, render.LightAttachment); ok {
     l.color[3] = f32(dir_intensity)
     render.attach(&app.renderer, dir_light.index, l)
   }

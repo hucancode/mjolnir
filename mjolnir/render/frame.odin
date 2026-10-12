@@ -145,10 +145,7 @@ record_frame :: proc(
       frame_index,
       swapchain_extent,
       swapchain_view,
-      main_cam.attachments[.FINAL_IMAGE][frame_index].index,
-      camera_gbuffer(main_cam, frame_index),
-      main_cam.near,
-      main_cam.far,
+      main_cam,
       &self.texture_manager,
       self.internal.scene.layout,
     )

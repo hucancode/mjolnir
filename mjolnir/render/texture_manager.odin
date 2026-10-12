@@ -204,7 +204,6 @@ get_texture :: proc(self: ^TextureManager, handle: TextureHandle) -> ^gpu.Image 
 }
 
 // Bindless index shaders read for a texture slot: NO_TEXTURE when empty.
-@(private)
 texture_index :: proc(h: $H) -> u32 {
   return h.index if h.generation != 0 else NO_TEXTURE
 }

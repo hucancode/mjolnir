@@ -34,11 +34,10 @@ FrameTable :: struct {
 
 @(private)
 FRAME_TABLES := [?]FrameTable {
-  {.CAMERAS, size_of(CameraGPU), MAX_ACTIVE_CAMERAS},
   {.NODES, size_of(NodeData), MAX_NODES_IN_SCENE},
-  {.MATERIALS, size_of(MaterialData), MAX_MATERIALS},
-  {.EMITTERS, size_of(EmitterData), MAX_EMITTERS},
-  {.FORCEFIELDS, size_of(ForceFieldData), MAX_FORCE_FIELDS},
+  {.MATERIALS, size_of(Material), MAX_MATERIALS},
+  {.EMITTERS, size_of(Emitter), MAX_EMITTERS},
+  {.FORCEFIELDS, size_of(ForceField), MAX_FORCE_FIELDS},
   {.LIGHTS, size_of(LightGPU), MAX_LIGHTS},
   {.VIEWS, size_of(ViewGPU), MAX_VIEWS},
   {.BONES, size_of(matrix[4, 4]f32), 0},

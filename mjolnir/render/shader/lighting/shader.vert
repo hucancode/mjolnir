@@ -15,19 +15,32 @@ const uint LIGHT_AMBIENT = 3u;
 
 layout(location = 0) in vec3 a_position;
 
-struct Camera {
+struct View {
     mat4 view;
     mat4 projection;
-    vec2 viewport_extent;
+    mat4 view_projection;
+    mat4 inv_view_projection; // rebuilds world positions from depth
+    vec4 planes[6]; // normalized, pointing inward
+    vec4 position;
+    vec2 extent;
     float near;
     float far;
-    vec4 position;
-    mat4 inv_view_projection;
+    uint attachments[6]; // this frame's bindless images, by AttachmentType
+    uint pyramid; // bindless depth pyramid
+    uint occlusion_mask; // bit t: material type t is tested against the pyramid
+    uint list_stride;
+    uint type_mask; // bit t: material type t is drawn
+    uint require_flags; // node flags a drawn node has
+    uint instance_tag; // OR-ed into first_instance above the node index
+    uint layer;
+    uint draw_list; // bindless draw lists the view appends to
+    uint list_capacity; // draws per list
+    uint _pad0;
 };
 
-layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    Camera cameras[];
-} camera_buffer;
+layout(set = 0, binding = 0) readonly buffer ViewBuffer {
+    View views[];
+};
 
 struct Light {
     vec4 color;
@@ -47,11 +60,6 @@ layout(set = 0, binding = 10) readonly buffer LightBuffer {
 
 layout(push_constant) uniform PushConstant {
     uint camera_index;
-    uint normal_texture_index;
-    uint albedo_texture_index;
-    uint metallic_texture_index;
-    uint emissive_texture_index;
-    uint depth_texture_index;
     uint irradiance_index;
     uint prefilter_index;
     uint brdf_lut_index;
@@ -65,13 +73,14 @@ layout(location = 0) flat out uint v_light;
 void main() {
     v_light = gl_InstanceIndex;
     if (LIGHT_TYPE == LIGHT_DIRECTIONAL || LIGHT_TYPE == LIGHT_AMBIENT) {
-        // the volume is a clip-space triangle covering the screen on the far
-        // plane: directional lights depth-test it to skip the background
-        gl_Position = vec4(a_position.xy, 1.0, 1.0);
+        // no volume: a clip-space triangle covering the screen on the far
+        // plane, directional lights depth-testing it to skip the background
+        vec2 corner = vec2(gl_VertexIndex == 2 ? 3.0 : -1.0, gl_VertexIndex == 1 ? 3.0 : -1.0);
+        gl_Position = vec4(corner, 1.0, 1.0);
         return;
     }
     Light light = lights[gl_InstanceIndex];
-    Camera camera = camera_buffer.cameras[camera_index];
+    View camera = views[camera_index];
     vec3 world_position;
     if (LIGHT_TYPE == LIGHT_POINT) {
         // Unit sphere scaled to the light radius

@@ -30,6 +30,8 @@ struct Emitter {
   float weight_spread;
   uint texture_index;
   uint node_index;
+  float emission_rate; // CPU side only
+  uint enabled; // CPU side only
 };
 
 layout(set = 0, binding = 6) buffer EmitterBuffer {

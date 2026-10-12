@@ -94,7 +94,7 @@ setup :: proc(app: ^App) {
   }
   col_meshes: [GRID]render.MeshHandle
   for geom, col in primitives {
-    m, ok := render.create_mesh(&app.renderer, geom, true)
+    m, ok := render.create_mesh(&app.renderer, geom)
     if !ok do continue
     col_meshes[col] = m
     append(&example_meshes, m)

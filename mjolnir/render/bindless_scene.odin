@@ -7,7 +7,7 @@ import vk "vendor:vulkan"
 // Bindings of the scene set (set 0), one descriptor each of the type in
 // SCENE_BINDING_TYPES. Shaders repeat these numbers as literals.
 SceneBinding :: enum u32 {
-  CAMERAS,
+  VIEWS,
   NODES,
   MESHES,
   MATERIALS,
@@ -18,13 +18,12 @@ SceneBinding :: enum u32 {
   PARTICLES,
   PARTICLE_ALIVE,
   LIGHTS,
-  VIEWS,
   // the shadow atlas
   SHADOW_MAPS,
 }
 
 SCENE_BINDING_TYPES := [SceneBinding]vk.DescriptorType {
-  .CAMERAS         = .STORAGE_BUFFER,
+  .VIEWS           = .STORAGE_BUFFER,
   .NODES           = .STORAGE_BUFFER,
   .MESHES          = .STORAGE_BUFFER,
   .MATERIALS       = .STORAGE_BUFFER,
@@ -35,7 +34,6 @@ SCENE_BINDING_TYPES := [SceneBinding]vk.DescriptorType {
   .PARTICLES       = .STORAGE_BUFFER,
   .PARTICLE_ALIVE  = .STORAGE_BUFFER,
   .LIGHTS          = .STORAGE_BUFFER,
-  .VIEWS           = .STORAGE_BUFFER,
   .SHADOW_MAPS     = .SAMPLED_IMAGE,
 }
 
@@ -153,25 +151,6 @@ bind_mesh_buffers :: proc(self: ^Manager, cmd: vk.CommandBuffer) {
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
   )
-}
-
-// Bindless 2D texture indices of one camera's G-buffer for one frame.
-GBuffer :: struct {
-  normal:             u32,
-  albedo:             u32,
-  metallic_roughness: u32,
-  emissive:           u32,
-  depth:              u32,
-}
-
-camera_gbuffer :: proc(cam: ^Camera, frame_index: u32) -> GBuffer {
-  return {
-    normal             = cam.attachments[.NORMAL][frame_index].index,
-    albedo             = cam.attachments[.ALBEDO][frame_index].index,
-    metallic_roughness = cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-    emissive           = cam.attachments[.EMISSIVE][frame_index].index,
-    depth              = cam.attachments[.DEPTH][frame_index].index,
-  }
 }
 
 // The image behind one of a camera's attachments for one frame.

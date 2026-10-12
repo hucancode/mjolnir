@@ -96,12 +96,12 @@ MeshData :: struct {
   vertex_offset:   i32,
   skinning_offset: u32,
   flags:           MeshFlagSet,
-  padding:         u32,
+  vertex_count:    u32,
 }
 
-// A texture index of NO_TEXTURE leaves that texture out.
-@(private)
-MaterialData :: struct {
+// A material, stored as the shaders read it. A texture index (texture_index)
+// of NO_TEXTURE leaves that texture out.
+Material :: struct {
   albedo_index:             u32,
   metallic_roughness_index: u32,
   normal_index:             u32,
@@ -111,24 +111,11 @@ MaterialData :: struct {
   emissive_value:           f32,
   _:                        u32,
   base_color_factor:        [4]f32,
+  // .SPRITE: sheet size in cells and the cell shown, row-major
   frame_columns:            u32,
   frame_rows:               u32,
   frame_index:              u32,
   type:                     MaterialType,
-}
-
-// CameraGPU is the per-camera layout of the frame's camera table; rendered
-// shaders read it.
-@(private)
-CameraGPU :: struct {
-  view:            matrix[4, 4]f32,
-  projection:      matrix[4, 4]f32,
-  viewport_extent: [2]f32,
-  near:            f32,
-  far:             f32,
-  position:        [4]f32,
-  // rebuilds world positions from G-buffer depth
-  inv_view_projection: matrix[4, 4]f32,
 }
 
 // Internal owns GPU primitives and CPU-side bookkeeping. Private to render.
@@ -157,14 +144,12 @@ Internal :: struct {
   // Compute / culling / shadow systems.
   visibility:                   OcclusionSystem,
   shadow:                       ShadowSystem,
-  // This frame's lights, rebuilt by collect_lights on flush, grouped by
-  // type: type t's lights are frame_lights[light_first[t]:][:light_count[t]].
-  frame_lights:                 [dynamic]FrameLight,
-  light_first:                  [LightType]u32,
+  // This frame's lights per type, written by collect_lights in type order.
   light_count:                  [LightType]u32,
-  shadow_maps:                  [MAX_SHADOW_MAPS]ShadowMap,
+  // holders of the shadow maps, selected by collect_lights
+  shadow_casters:               [MAX_SHADOW_MAPS]Caster,
   // shadow views, one per atlas layer, the frame's shadow maps take
-  // (assign_shadow_layers)
+  // (pack_lights)
   shadow_view_count:            u32,
   shadow_atlas:                 [gpu.FRAMES_IN_FLIGHT]ShadowAtlas,
   staging:                      Staging,
@@ -199,7 +184,7 @@ Manager :: struct {
   swapchain:         gpu.Swapchain,
   frame_index:       u32, // frame in flight recorded next: frame_serial % FRAMES_IN_FLIGHT
   internal:          Internal,
-  meshes:            cont.Pool(Mesh),
+  meshes:            cont.Pool(MeshData),
   materials:         cont.Pool(Material),
   emitters:          cont.Pool(Emitter),
   forcefields:       cont.Pool(ForceField),

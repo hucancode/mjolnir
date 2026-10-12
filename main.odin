@@ -419,7 +419,8 @@ setup :: proc(app: ^App) {
           spawn(
             app,
             parent = lights_root_handle,
-            attachment = render.SpotLightAttachment{
+            attachment = render.LightAttachment{
+              type        = .SPOT,
               color       = color,
               radius      = 14.0,
               angle_inner = math.PI * 0.25 * 0.8,
@@ -445,7 +446,7 @@ setup :: proc(app: ^App) {
           spawn(
             app,
             parent = lights_root_handle,
-            attachment = render.PointLightAttachment{color = color, radius = 14.0, cast_shadow = true},
+            attachment = render.LightAttachment{type = .POINT, color = color, radius = 14.0, cast_shadow = true},
           ) or_continue
           world.translate(
             &app.scene,
@@ -673,10 +674,8 @@ on_key :: proc(app: ^App, key: input.Key, pressed: bool) {
 on_post_render :: proc(app: ^App) {
   if material, ok := render.material(&app.renderer, portal_material_handle);
      ok {
-    material.albedo = render.camera_attachment(
-      &app.renderer,
-      portal_camera_handle,
-      .FINAL_IMAGE,
+    material.albedo_index = render.texture_index(
+      render.camera_attachment(&app.renderer, portal_camera_handle, .FINAL_IMAGE),
     )
     render.set_material(&app.renderer, portal_material_handle, material^)
   }

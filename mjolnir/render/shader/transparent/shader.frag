@@ -9,14 +9,27 @@ const uint SAMPLER_LINEAR_REPEAT = 3u;
 // texture index of a material slot without a texture
 const uint NO_TEXTURE = 0xFFFFFFFFu;
 
-struct Camera {
+struct View {
     mat4 view;
     mat4 projection;
-    vec2 viewport_extent;
+    mat4 view_projection;
+    mat4 inv_view_projection; // rebuilds world positions from depth
+    vec4 planes[6]; // normalized, pointing inward
+    vec4 position;
+    vec2 extent;
     float near;
     float far;
-    vec4 position;
-    mat4 inv_view_projection;
+    uint attachments[6]; // this frame's bindless images, by AttachmentType
+    uint pyramid; // bindless depth pyramid
+    uint occlusion_mask; // bit t: material type t is tested against the pyramid
+    uint list_stride;
+    uint type_mask; // bit t: material type t is drawn
+    uint require_flags; // node flags a drawn node has
+    uint instance_tag; // OR-ed into first_instance above the node index
+    uint layer;
+    uint draw_list; // bindless draw lists the view appends to
+    uint list_capacity; // draws per list
+    uint _pad0;
 };
 
 struct MaterialData {
@@ -35,9 +48,9 @@ struct MaterialData {
     uint _pad0;
 };
 
-layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    Camera cameras[];
-} camera_buffer;
+layout(set = 0, binding = 0) readonly buffer ViewBuffer {
+    View views[];
+};
 
 layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
@@ -139,7 +152,7 @@ void main() {
         N = normalize(mat3(T, B, N) * normalSample);
     }
 
-    Camera camera = camera_buffer.cameras[camera_index];
+    View camera = views[camera_index];
     mat4 invView = inverse(camera.view);
     vec3 cameraPos = invView[3].xyz;
     vec3 V = normalize(cameraPos - inWorldPos);

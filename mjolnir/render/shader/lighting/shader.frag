@@ -17,20 +17,7 @@ const uint NO_SHADOW = 0xFFFFFFFFu;
 
 layout(location = 0) out vec4 outColor;
 
-struct Camera {
-    mat4 view;
-    mat4 projection;
-    vec2 viewport_extent;
-    float near;
-    float far;
-    vec4 position;
-    mat4 inv_view_projection;
-};
-
-layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    Camera cameras[];
-} camera_buffer;
-layout(set = 0, binding = 12) uniform texture2DArray shadow_maps;
+layout(set = 0, binding = 11) uniform texture2DArray shadow_maps;
 layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
 
@@ -46,24 +33,37 @@ struct Light {
     uint _pad0;
 };
 
+// View.attachments indices (AttachmentType)
+const uint ATTACHMENT_NORMAL = 1u;
+const uint ATTACHMENT_ALBEDO = 2u;
+const uint ATTACHMENT_METALLIC_ROUGHNESS = 3u;
+const uint ATTACHMENT_EMISSIVE = 4u;
+const uint ATTACHMENT_DEPTH = 5u;
+
 struct View {
-    vec4 planes[6];
+    mat4 view;
+    mat4 projection;
     mat4 view_projection;
-    uint camera_index;
-    uint pyramid;
-    uint occlusion_mask;
+    mat4 inv_view_projection; // rebuilds world positions from depth
+    vec4 planes[6]; // normalized, pointing inward
+    vec4 position;
+    vec2 extent;
+    float near;
+    float far;
+    uint attachments[6]; // this frame's bindless images, by AttachmentType
+    uint pyramid; // bindless depth pyramid
+    uint occlusion_mask; // bit t: material type t is tested against the pyramid
     uint list_stride;
-    uint type_mask;
-    uint require_flags;
-    uint instance_tag;
+    uint type_mask; // bit t: material type t is drawn
+    uint require_flags; // node flags a drawn node has
+    uint instance_tag; // OR-ed into first_instance above the node index
     uint layer;
-    uint draw_list;
-    uint list_capacity;
+    uint draw_list; // bindless draw lists the view appends to
+    uint list_capacity; // draws per list
     uint _pad0;
-    uint _pad1;
 };
 
-layout(set = 0, binding = 11) readonly buffer ViewBuffer {
+layout(set = 0, binding = 0) readonly buffer ViewBuffer {
     View views[];
 };
 
@@ -73,11 +73,6 @@ layout(set = 0, binding = 10) readonly buffer LightBuffer {
 
 layout(push_constant) uniform PushConstant {
     uint camera_index;
-    uint normal_texture_index;
-    uint albedo_texture_index;
-    uint metallic_texture_index;
-    uint emissive_texture_index;
-    uint depth_texture_index;
     uint irradiance_index;
     uint prefilter_index;
     uint brdf_lut_index;
@@ -90,7 +85,7 @@ layout(location = 0) flat in uint v_light;
 
 // World position of the G-buffer texel at framebuffer uv, rebuilt from its
 // depth. Clip-space y points down, so ndc follows uv on both axes.
-vec3 worldPosition(Camera camera, vec2 uv, float depth) {
+vec3 worldPosition(View camera, vec2 uv, float depth) {
     vec4 p = camera.inv_view_projection * vec4(uv * 2.0 - 1.0, depth, 1.0);
     return p.xyz / p.w;
 }
@@ -198,14 +193,14 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
 
 void main() {
     light = lights[v_light];
-    Camera camera = camera_buffer.cameras[camera_index];
-    vec2 uv = gl_FragCoord.xy / camera.viewport_extent;
+    View camera = views[camera_index];
+    vec2 uv = gl_FragCoord.xy / camera.extent;
 
-    float depth = texelFetch(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), ivec2(gl_FragCoord.xy), 0).r;
+    float depth = texelFetch(sampler2D(textures[camera.attachments[ATTACHMENT_DEPTH]], samplers[SAMPLER_NEAREST_CLAMP]), ivec2(gl_FragCoord.xy), 0).r;
     vec3 fragPos = worldPosition(camera, uv, depth);
-    vec3 normal = normalize(texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz * 2.0 - 1.0);
-    vec3 albedo = texture(sampler2D(textures[albedo_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rgb;
-    vec2 mr = texture(sampler2D(textures[metallic_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rg;
+    vec3 normal = normalize(texture(sampler2D(textures[camera.attachments[ATTACHMENT_NORMAL]], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz * 2.0 - 1.0);
+    vec3 albedo = texture(sampler2D(textures[camera.attachments[ATTACHMENT_ALBEDO]], samplers[SAMPLER_LINEAR_CLAMP]), uv).rgb;
+    vec2 mr = texture(sampler2D(textures[camera.attachments[ATTACHMENT_METALLIC_ROUGHNESS]], samplers[SAMPLER_LINEAR_CLAMP]), uv).rg;
 
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.08, 1.0);

@@ -7,22 +7,6 @@ const uint SAMPLER_NEAREST_REPEAT = 2u;
 const uint SAMPLER_LINEAR_REPEAT = 3u;
 const uint NO_TEXTURE = 0xFFFFFFFFu;
 
-// Camera structure
-struct Camera {
-    mat4 view;
-    mat4 projection;
-    vec2 viewport_extent;
-    float near;
-    float far;
-    vec4 position;
-    mat4 inv_view_projection;
-};
-
-// Bindless camera buffer set = 0
-layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    Camera cameras[];
-} camera_buffer;
-
 // textures set = 1
 layout (set = 1, binding = 0) uniform texture2D textures[];
 layout (set = 1, binding = 1) uniform sampler samplers[];

@@ -45,12 +45,12 @@ init :: proc(pool: ^Pool($T), capacity: u32 = 0, grace: u64 = 0) {
   pool.capacity = capacity
 }
 
-// destroy calls destroy_proc on every active item, frees the pool's memory
+// destroy calls destroy_proc (when given) on every active item, frees the pool's memory
 // and leaves the pool zeroed.
-destroy :: proc(pool: ^Pool($T), destroy_proc: proc(_: ^T)) {
+destroy :: proc(pool: ^Pool($T), destroy_proc: proc(_: ^T) = nil) {
   for &entry in pool.entries {
     // Only deinit entries that are still active
-    if entry.generation > 0 && entry.active {
+    if destroy_proc != nil && entry.generation > 0 && entry.active {
       destroy_proc(&entry.item)
     }
   }

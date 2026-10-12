@@ -1,10 +1,7 @@
 #+private
 package render
 
-import geom "../geometry"
 import "gpu"
-import "core:math"
-import "core:math/linalg"
 import vk "vendor:vulkan"
 
 SHADOW_DEPTH_VERT :: #load("shader/shadow/vert.spv")
@@ -65,52 +62,6 @@ shadow_atlas_reserve :: proc(r: ^Manager, frame_index: u32, layers: u32) -> vk.R
   atlas^ = grown
   scene_write_binding(r, .SHADOW_MAPS, int(frame_index))
   return .SUCCESS
-}
-
-shadow_safe_normalize :: proc(v: [3]f32, fallback: [3]f32) -> [3]f32 {
-  len_sq := linalg.dot(v, v)
-  if len_sq < 1e-6 do return fallback
-  return linalg.normalize(v)
-}
-
-// View from `position` along the normalized `direction`.
-shadow_make_light_view :: proc(position, direction: [3]f32) -> matrix[4, 4]f32 {
-  up := [3]f32{0, 1, 0}
-  if math.abs(linalg.dot(direction, up)) > 0.95 {
-    up = {0, 0, 1}
-  }
-  return linalg.matrix4_look_at(position, position + direction, up)
-}
-
-// Square perspective projection of a spot light's cone or a point light's
-// cube face, reaching `radius`.
-shadow_projection_perspective :: proc(fovy, radius: f32) -> matrix[4, 4]f32 {
-  near :: 0.1
-  return geom.make_perspective_matrix(max(fovy, 0.001), 1.0, near, max(near + 0.1, radius))
-}
-
-// World size of a texel of shadow_projection_perspective(fovy, _) per unit of
-// view depth.
-shadow_texel_perspective :: proc(fovy: f32) -> f32 {
-  return 2 * math.tan(0.5 * max(fovy, 0.001)) / SHADOW_MAP_SIZE
-}
-
-// Half extent of a directional light's shadow box.
-shadow_radius_directional :: proc(shadow_radius: f32) -> f32 {
-  return max(shadow_radius, 0.5)
-}
-
-// Orthographic shadow of the box of half extent `radius` centered on
-// `position`, looking along the normalized `direction`.
-shadow_matrices_directional :: proc(
-  position, direction: [3]f32,
-  radius: f32,
-) -> (
-  view, projection: matrix[4, 4]f32,
-) {
-  view = shadow_make_light_view(position - direction * radius, direction)
-  projection = geom.make_ortho_matrix(-radius, radius, -radius, radius, 0, 2 * radius)
-  return
 }
 
 shadow_init :: proc(r: ^Manager) -> (ret: vk.Result) {

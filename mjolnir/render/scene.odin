@@ -6,6 +6,7 @@ import cont "../containers"
 import ba "core:container/bit_array"
 import "core:log"
 import "gpu"
+import "mesh"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
@@ -16,24 +17,16 @@ import vk "vendor:vulkan"
 // region with full intensity; outer cone is the falloff edge.
 SPOT_LIGHT_INNER_RATIO :: f32(0.75)
 
-PointLightAttachment :: struct {
+// A light at the slot's transform, shining along the transform's forward
+// axis. AMBIENT is the environment light render adds itself.
+LightAttachment :: struct {
+  type:        LightType,
   color:       [4]f32, // RGB + intensity
-  radius:      f32, // range
-  cast_shadow: bool,
-}
-
-DirectionalLightAttachment :: struct {
-  color:       [4]f32, // RGB + intensity
-  // half extent of the shadow box centered on the light
-  shadow_radius: f32,
-  cast_shadow:   bool,
-}
-
-SpotLightAttachment :: struct {
-  color:       [4]f32, // RGB + intensity
-  radius:      f32, // range
-  angle_inner: f32, // inner cone angle
-  angle_outer: f32, // outer cone angle
+  // range of a point or spot light; half extent of a directional light's
+  // shadow box centered on the light
+  radius:      f32,
+  angle_inner: f32, // spot cone angles
+  angle_outer: f32,
   cast_shadow: bool,
 }
 
@@ -52,9 +45,7 @@ ForceFieldAttachment :: struct {
 }
 
 Attachment :: union {
-  PointLightAttachment,
-  DirectionalLightAttachment,
-  SpotLightAttachment,
+  LightAttachment,
   MeshAttachment,
   EmitterAttachment,
   ForceFieldAttachment,
@@ -93,13 +84,19 @@ NO_BONES :: 0xFFFFFFFF
 Staging :: struct {
   nodes:       [gpu.FRAMES_IN_FLIGHT]ba.Bit_Array,
   bones:       [gpu.FRAMES_IN_FLIGHT]ba.Bit_Array,
-  meshes:      ba.Bit_Array,
   materials:   [gpu.FRAMES_IN_FLIGHT]ba.Bit_Array,
   forcefields: [gpu.FRAMES_IN_FLIGHT]ba.Bit_Array,
   // slots whose attachment is a light; not drained
   lights:      ba.Bit_Array,
+  // created meshes and their geometry, uploaded and deleted by flush
+  mesh_handles:  [dynamic]MeshHandle,
+  mesh_geometry: [dynamic]mesh.Geometry,
   // simulation seconds advanced by update since the last frame
   particle_time: f32,
+  // per emitter: fractional emissions carried over, and whole particles
+  // accumulated by update and not yet handed to a frame
+  emit_accumulator: [MAX_EMITTERS]f32,
+  emit_pending:     [MAX_EMITTERS]u32,
   mutex:       sync.Mutex,
 }
 
@@ -111,7 +108,6 @@ staging_init :: proc(s: ^Staging) {
     ba.init(&s.materials[f], MAX_MATERIALS)
     ba.init(&s.forcefields[f], MAX_FORCE_FIELDS)
   }
-  ba.init(&s.meshes, MAX_MESHES)
   ba.init(&s.lights, MAX_NODES_IN_SCENE)
 }
 
@@ -123,7 +119,9 @@ staging_destroy :: proc(s: ^Staging) {
     ba.destroy(&s.materials[f])
     ba.destroy(&s.forcefields[f])
   }
-  ba.destroy(&s.meshes)
+  for g in s.mesh_geometry do mesh.delete_geometry(g)
+  delete(s.mesh_handles)
+  delete(s.mesh_geometry)
   ba.destroy(&s.lights)
 }
 
@@ -167,15 +165,6 @@ ensure_slot :: proc(self: ^Manager, slot: u32) -> ^Instance {
 @(private = "file")
 slot_empty :: proc(inst: ^Instance) -> bool {
   return inst.attachment == nil && inst.world_matrix == {} && !inst.visible
-}
-
-@(private)
-is_light :: proc(a: Attachment) -> bool {
-  #partial switch _ in a {
-  case PointLightAttachment, DirectionalLightAttachment, SpotLightAttachment:
-    return true
-  }
-  return false
 }
 
 // ---------- slot boundary: what the transform owner pushes in ----------
@@ -313,15 +302,16 @@ attach :: proc(self: ^Manager, slot: u32, attachment: Attachment) {
   inst.attachment = attachment
   #partial switch a in attachment {
   case EmitterAttachment:
-    if em, ok := cont.get(self.emitters, a.handle); ok do em.slot = slot
+    if em, ok := cont.get(self.emitters, a.handle); ok do em.node_index = slot
   case ForceFieldAttachment:
     if ff, ok := cont.get(self.forcefields, a.handle); ok {
-      ff.slot = slot
+      ff.node_index = slot
       stage_per_frame(&staging.forcefields, a.handle.index)
     }
   }
   stage_per_frame(&staging.nodes, slot)
-  ba.set(&staging.lights, slot, is_light(attachment))
+  _, is_light := attachment.(LightAttachment)
+  ba.set(&staging.lights, slot, is_light)
 }
 
 // A copy of the attachment of type T at `slot`, e.g.
@@ -344,16 +334,16 @@ point_light_attachment :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   cast_shadow: bool = true,
-) -> PointLightAttachment {
-  return {color = color, radius = radius, cast_shadow = cast_shadow}
+) -> LightAttachment {
+  return {type = .POINT, color = color, radius = radius, cast_shadow = cast_shadow}
 }
 
 directional_light_attachment :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   shadow_radius: f32 = 10.0,
   cast_shadow: bool = false,
-) -> DirectionalLightAttachment {
-  return {color = color, shadow_radius = shadow_radius, cast_shadow = cast_shadow}
+) -> LightAttachment {
+  return {type = .DIRECTIONAL, color = color, radius = shadow_radius, cast_shadow = cast_shadow}
 }
 
 spot_light_attachment :: proc(
@@ -361,8 +351,9 @@ spot_light_attachment :: proc(
   radius: f32 = 10.0,
   angle: f32 = math.PI * 0.2,
   cast_shadow: bool = true,
-) -> SpotLightAttachment {
+) -> LightAttachment {
   return {
+    type        = .SPOT,
     color       = color,
     radius      = radius,
     angle_inner = angle * SPOT_LIGHT_INNER_RATIO,
@@ -407,21 +398,21 @@ flush_nodes :: proc(self: ^Manager, frame_index: u32) {
   ba.clear(staged)
 }
 
-// Upload staged meshes. Destroyed meshes free their GPU allocations in
-// mesh_retire, once no frame in flight can draw them.
+// Upload created meshes and delete their geometry. Destroyed meshes free
+// their GPU allocations in mesh_retire, once no frame in flight can draw them.
 @(private = "file")
 flush_meshes :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  it := ba.make_iterator(&self.internal.staging.meshes)
-  for index in ba.iterate_by_set(&it) {
-    m := live_at(&self.meshes, index) or_continue
-    g := m.cpu_geometry.? or_continue
-    if res := upload_mesh(self, gctx, u32(index), m, g); res != .SUCCESS {
-      log.errorf("Mesh %d upload failed: %v", index, res)
-      continue
+  staging := &self.internal.staging
+  for h, i in staging.mesh_handles {
+    g := staging.mesh_geometry[i]
+    defer mesh.delete_geometry(g)
+    m := cont.get(self.meshes, h) or_continue
+    if res := upload_mesh(self, gctx, h.index, m, g); res != .SUCCESS {
+      log.errorf("Mesh %d upload failed: %v", h.index, res)
     }
-    if m.auto_purge_cpu_geometry do mesh_release_memory(m)
   }
-  ba.clear(&self.internal.staging.meshes)
+  clear(&staging.mesh_handles)
+  clear(&staging.mesh_geometry)
 }
 
 // Live pool item at a staged slot index; staging is keyed by index alone.
@@ -433,58 +424,15 @@ live_at :: proc(pool: ^cont.Pool($T), index: int) -> (^T, bool) {
 }
 
 // Write every staged pool slot into its GPU buffer. Slots no longer live are
-// zeroed so the GPU stops using them (a freed emitter stops emitting).
+// zeroed so the GPU stops using them.
 @(private = "file")
-flush_pool :: proc(
-  staged: ^ba.Bit_Array,
-  pool: ^cont.Pool($T),
-  table: []$G,
-  to_gpu: proc(item: ^T) -> G,
-) {
+flush_pool :: proc(staged: ^ba.Bit_Array, pool: ^cont.Pool($T), table: []T) {
   it := ba.make_iterator(staged)
   for index in ba.iterate_by_set(&it) {
-    data: G
-    if item, live := live_at(pool, index); live do data = to_gpu(item)
-    table[index] = data
+    item, live := live_at(pool, index)
+    table[index] = item^ if live else {}
   }
   ba.clear(staged)
-}
-
-@(private = "file")
-material_gpu :: proc(m: ^Material) -> MaterialData {
-  return {
-    albedo_index = texture_index(m.albedo),
-    metallic_roughness_index = texture_index(m.metallic_roughness),
-    normal_index = texture_index(m.normal),
-    emissive_index = texture_index(m.emissive),
-    metallic_value = m.metallic_value,
-    roughness_value = m.roughness_value,
-    emissive_value = m.emissive_value,
-    base_color_factor = m.base_color_factor,
-    frame_columns = m.frame_columns,
-    frame_rows = m.frame_rows,
-    frame_index = m.frame_index,
-    type = m.type,
-  }
-}
-
-@(private = "file")
-emitter_gpu :: proc(em: ^Emitter, emit_first: u32) -> EmitterData {
-  return {
-    initial_velocity = em.initial_velocity,
-    size_start = em.size_start,
-    color_start = em.color_start,
-    color_end = em.color_end,
-    particle_lifetime = em.particle_lifetime,
-    position_spread = em.position_spread,
-    velocity_spread = em.velocity_spread,
-    emit_first = emit_first,
-    size_end = em.size_end,
-    weight = em.weight,
-    weight_spread = em.weight_spread,
-    texture_index = texture_index(em.texture_handle),
-    node_index = em.slot,
-  }
 }
 
 // Hand the emissions and simulation time accumulated by update to this
@@ -493,39 +441,26 @@ emitter_gpu :: proc(em: ^Emitter, emit_first: u32) -> EmitterData {
 // particles, which take consecutive ring slots after the previous frame's.
 @(private = "file")
 flush_particles :: proc(self: ^Manager, frame_index: u32) {
-  emitters := frame_table(self, .EMITTERS, EmitterData, frame_index)
+  emitters := frame_table(self, .EMITTERS, Emitter, frame_index)
+  staging := &self.internal.staging
   emitter_count := min(len(self.emitters.entries), MAX_EMITTERS)
   p := &self.internal.particles.params
   p.emit_cursor = (p.emit_cursor + p.emit_total) % MAX_PARTICLES
   total: u32
   for index in 0 ..< emitter_count {
-    data := EmitterData {
-      emit_first = total,
-    }
-    if em, live := live_at(&self.emitters, index); live {
-      data = emitter_gpu(em, total)
-      total += em.pending_emit
-      em.pending_emit = 0
-    }
-    emitters[index] = data
+    em, live := live_at(&self.emitters, index)
+    emitters[index] = em^ if live else {}
+    emitters[index].emit_first = total
+    if live do total += staging.emit_pending[index]
+    staging.emit_pending[index] = 0
   }
   // A ring slot takes at most one new particle per frame.
   p.emit_total = min(total, MAX_PARTICLES)
   p.emitter_count = u32(emitter_count)
   p.forcefield_count = u32(min(len(self.forcefields.entries), MAX_FORCE_FIELDS))
-  p.delta_time = self.internal.staging.particle_time
+  p.delta_time = staging.particle_time
   p.frame_counter += 1
-  self.internal.staging.particle_time = 0
-}
-
-@(private = "file")
-forcefield_gpu :: proc(ff: ^ForceField) -> ForceFieldData {
-  return {
-    tangent_strength = ff.tangent_strength if ff.enabled else 0,
-    strength = ff.strength if ff.enabled else 0,
-    area_of_effect = ff.area_of_effect,
-    node_index = ff.slot,
-  }
+  staging.particle_time = 0
 }
 
 @(private = "file")
@@ -548,7 +483,6 @@ flush_bones :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
 
 @(private = "file")
 flush_cameras :: proc(self: ^Manager, frame_index: u32) {
-  cameras := frame_table(self, .CAMERAS, CameraGPU, frame_index)
   views := frame_table(self, .VIEWS, ViewGPU, frame_index)
   // This frame's cull writes the lists of the next frame. A slot without a
   // camera keeps an empty view that draws no type.
@@ -560,30 +494,29 @@ flush_cameras :: proc(self: ^Manager, frame_index: u32) {
   it := cont.iterator(&self.cameras)
   for cam, handle in cont.next(&it, CameraHandle) {
     occlusion_bind_pyramid(&self.gctx, &cam.depth_pyramid[frame_index], &self.texture_manager)
-    data := CameraGPU {
-      view            = camera_view_matrix(cam),
-      projection      = camera_projection_matrix(cam),
-      viewport_extent = {f32(cam.extent[0]), f32(cam.extent[1])},
-      near            = cam.near,
-      far             = cam.far,
-      position        = {cam.position.x, cam.position.y, cam.position.z, 1},
+    view := camera_view_matrix(cam)
+    projection := camera_projection_matrix(cam)
+    view_projection := projection * view
+    v := &views[CAMERA_VIEW_BASE + handle.index]
+    v^ = {
+      view                = view,
+      projection          = projection,
+      view_projection     = view_projection,
+      inv_view_projection = linalg.inverse(view_projection),
+      planes              = geom.make_frustum(view_projection).planes,
+      position            = {cam.position.x, cam.position.y, cam.position.z, 1},
+      extent              = {f32(cam.extent[0]), f32(cam.extent[1])},
+      near                = cam.near,
+      far                 = cam.far,
+      pyramid             = cam.depth_pyramid[frame_index].texture.index,
+      occlusion_mask      = occlusion_mask if self.gctx.frame_serial >= cam.ready_serial else 0,
+      list_stride         = 1,
+      type_mask           = all_types,
+      require_flags       = {.VISIBLE},
+      draw_list           = cam.draws.slot + next_frame_index,
+      list_capacity       = cam.draws.capacity,
     }
-    view_projection := data.projection * data.view
-    data.inv_view_projection = linalg.inverse(view_projection)
-    cameras[handle.index] = data
-    pyramid := cam.depth_pyramid[frame_index].texture
-    views[CAMERA_VIEW_BASE + handle.index] = {
-      planes          = geom.make_frustum(view_projection).planes,
-      view_projection = view_projection,
-      camera_index    = handle.index,
-      pyramid         = pyramid.index,
-      occlusion_mask  = occlusion_mask if self.gctx.frame_serial >= cam.ready_serial else 0,
-      list_stride     = 1,
-      type_mask       = all_types,
-      require_flags   = {.VISIBLE},
-      draw_list       = cam.draws.slot + next_frame_index,
-      list_capacity   = cam.draws.capacity,
-    }
+    for a in AttachmentType do v.attachments[a] = cam.attachments[a][frame_index].index
   }
 }
 
@@ -595,6 +528,8 @@ flush :: proc(
   gctx: ^gpu.GPUContext,
   frame_index: u32,
 ) -> vk.Result {
+  // before the lights: shadow casters are ranked by the camera views
+  flush_cameras(self, frame_index)
   {
     sync.mutex_lock(&self.internal.staging.mutex)
     defer sync.mutex_unlock(&self.internal.staging.mutex)
@@ -602,11 +537,10 @@ flush :: proc(
     flush_nodes(self, frame_index)
     flush_meshes(self, gctx)
     flush_bones(self, frame_index) or_return
-    flush_pool(&staging.materials[frame_index], &self.materials, frame_table(self, .MATERIALS, MaterialData, frame_index), material_gpu)
+    flush_pool(&staging.materials[frame_index], &self.materials, frame_table(self, .MATERIALS, Material, frame_index))
     flush_particles(self, frame_index)
-    flush_pool(&staging.forcefields[frame_index], &self.forcefields, frame_table(self, .FORCEFIELDS, ForceFieldData, frame_index), forcefield_gpu)
-    collect_lights(self, gctx)
-    upload_lights(self, frame_index)
+    flush_pool(&staging.forcefields[frame_index], &self.forcefields, frame_table(self, .FORCEFIELDS, ForceField, frame_index))
+    collect_lights(self, frame_index)
     shadow_atlas_reserve(self, frame_index, self.internal.shadow_view_count) or_return
     // Culling dispatches cover the slots up to the last occupied one.
     for n := len(self.instances); n > 0 && slot_empty(&self.instances[n - 1]); n -= 1 {
@@ -614,7 +548,6 @@ flush :: proc(
     }
     self.node_count = min(u32(len(self.instances)), MAX_NODES_IN_SCENE)
   }
-  flush_cameras(self, frame_index)
   flush_ui_atlas(self, gctx) or_return
   return .SUCCESS
 }

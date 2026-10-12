@@ -43,7 +43,7 @@ load_meshes :: proc(
     }
     geometry := load_geometry(&gltf_mesh, skinned[i])
     log.infof("Processed mesh with %d vertices, %d indices", len(geometry.vertices), len(geometry.indices))
-    handle := render.create_mesh(r, geometry, true) or_continue
+    handle := render.create_mesh(r, geometry) or_continue
     looks[i] = render.MeshAttachment{handle = handle, material = material, cast_shadow = true}
   }
   log.infof("glTF looks: %d textures, %d materials", len(textures), len(materials))

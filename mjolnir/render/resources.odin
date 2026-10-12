@@ -6,63 +6,6 @@ import "gpu"
 import "mesh"
 import vk "vendor:vulkan"
 
-// CPU-side mesh. flush uploads cpu_geometry into the mesh manager and
-// describes it in mesh_data_buffer at the same index.
-@(private)
-Mesh :: struct {
-  cpu_geometry:            Maybe(mesh.Geometry),
-  auto_purge_cpu_geometry: bool,
-  allocations:             MeshAllocations,
-}
-
-// A texture left empty is not sampled.
-Material :: struct {
-  base_color_factor:  [4]f32,
-  metallic_value:     f32,
-  roughness_value:    f32,
-  emissive_value:     f32,
-  type:               MaterialType,
-  albedo:             TextureHandle,
-  metallic_roughness: TextureHandle,
-  normal:             TextureHandle,
-  emissive:           TextureHandle,
-  // .SPRITE: sheet size in cells and the cell shown, row-major
-  frame_columns:      u32,
-  frame_rows:         u32,
-  frame_index:        u32,
-}
-
-Emitter :: struct {
-  initial_velocity:  [3]f32,
-  size_start:        f32,
-  color_start:       [4]f32,
-  color_end:         [4]f32,
-  emission_rate:     f32,
-  particle_lifetime: f32,
-  position_spread:   f32,
-  velocity_spread:   f32,
-  size_end:          f32,
-  weight:            f32,
-  weight_spread:     f32,
-  // Fractional carryover of emissions, advanced each tick by update.
-  time_accumulator:  f32,
-  // Whole particles accumulated by update and not yet handed to a frame.
-  pending_emit:      u32,
-  enabled:           b32,
-  texture_handle:    TextureHandle,
-  // Transform slot the particles spawn from. Set by attach.
-  slot:              u32,
-}
-
-ForceField :: struct {
-  tangent_strength: f32,
-  strength:         f32,
-  area_of_effect:   f32,
-  enabled:          b32,
-  // Transform slot the field is centered on. Set by attach.
-  slot:             u32,
-}
-
 @(private)
 init_resource_pools :: proc(self: ^Manager) {
   cont.init(&self.meshes, MAX_MESHES, gpu.RETIRE_GRACE)
@@ -75,13 +18,10 @@ init_resource_pools :: proc(self: ^Manager) {
 
 @(private)
 destroy_resource_pools :: proc(self: ^Manager) {
-  // the mesh manager is already gone: release CPU memory only
-  cont.flush(&self.meshes, nil, mesh_retire)
-  cont.flush(&self.materials, nil, nil)
-  cont.destroy(&self.meshes, mesh_release_memory)
-  cont.destroy(&self.materials, proc(_: ^Material) {})
-  cont.destroy(&self.emitters, proc(_: ^Emitter) {})
-  cont.destroy(&self.forcefields, proc(_: ^ForceField) {})
+  cont.destroy(&self.meshes)
+  cont.destroy(&self.materials)
+  cont.destroy(&self.emitters)
+  cont.destroy(&self.forcefields)
 }
 
 // Advance deferred destruction by one frame: pool slots, textures and loose
@@ -121,50 +61,44 @@ set_material :: proc(r: ^Manager, h: MaterialHandle, value: Material) -> bool {
   return true
 }
 
-// Replace an emitter's settings. Its emission progress and the slot it is
-// attached to are kept.
+// Replace an emitter's settings; emitters are uploaded every frame. Edit the
+// value emitter returns so node_index, set by attach, is kept.
 set_emitter :: proc(r: ^Manager, h: EmitterHandle, value: Emitter) -> bool {
   em := cont.get(r.emitters, h) or_return
-  v := value
-  v.time_accumulator = em.time_accumulator
-  v.pending_emit = em.pending_emit
-  v.slot = em.slot
-  em^ = v
+  em^ = value
   return true
 }
 
-// Replace a force field's settings. The slot it is attached to is kept.
+// Replace a force field's settings and stage the change. Edit the value
+// forcefield returns so node_index, set by attach, is kept.
 set_forcefield :: proc(r: ^Manager, h: ForceFieldHandle, value: ForceField) -> bool {
   ff := cont.get(r.forcefields, h) or_return
-  v := value
-  v.slot = ff.slot
-  ff^ = v
+  ff^ = value
   stage_frames(r, &r.internal.staging.forcefields, h.index)
   return true
 }
 
 // ---------- meshes ----------
 
-// Creates a mesh. Geometry ownership is transferred to the mesh; the GPU copy
-// is uploaded by flush. With auto_purge the CPU geometry is released right
-// after that upload.
+// Creates a mesh. Geometry ownership is transferred: flush uploads it into
+// the mesh arena, then deletes it.
 create_mesh :: proc(
   self: ^Manager,
   geometry_data: mesh.Geometry,
-  auto_purge: bool = false,
 ) -> (
   handle: MeshHandle,
   ok: bool,
 ) #optional_ok {
-  m: ^Mesh
-  handle, m, ok = cont.alloc(&self.meshes, MeshHandle)
+  handle, _, ok = cont.alloc(&self.meshes, MeshHandle)
   if !ok {
     mesh.delete_geometry(geometry_data)
     return
   }
-  m.cpu_geometry = geometry_data
-  m.auto_purge_cpu_geometry = auto_purge
-  stage(self, &self.internal.staging.meshes, handle.index)
+  staging := &self.internal.staging
+  sync.mutex_lock(&staging.mutex)
+  append(&staging.mesh_handles, handle)
+  append(&staging.mesh_geometry, geometry_data)
+  sync.mutex_unlock(&staging.mutex)
   return handle, true
 }
 
@@ -172,22 +106,10 @@ destroy_mesh :: proc(self: ^Manager, handle: MeshHandle) {
   cont.free_deferred(&self.meshes, handle)
 }
 
+// Pool retire callback: no frame in flight reads the mesh any more.
 @(private)
-mesh_release_memory :: proc(self: ^Mesh) {
-  g, has_geom := self.cpu_geometry.?
-  if !has_geom do return
-  mesh.delete_geometry(g)
-  self.cpu_geometry = nil
-}
-
-// Pool retire callback: no frame in flight reads the mesh any more. `user` is
-// the Manager, or nil once the mesh manager is destroyed.
-@(private)
-mesh_retire :: proc(item: ^Mesh, user: rawptr) {
-  if self := (^Manager)(user); self != nil {
-    free_mesh(&self.mesh_manager, item.allocations)
-  }
-  mesh_release_memory(item)
+mesh_retire :: proc(item: ^MeshData, user: rawptr) {
+  free_mesh(&(^Manager)(user).mesh_manager, item^)
 }
 
 // ---------- textures ----------
@@ -249,17 +171,17 @@ create_material :: proc(
   mat: ^Material
   handle, mat = cont.alloc(&self.materials, MaterialHandle) or_return
   mat^ = {
-    type               = type,
-    albedo             = albedo_handle,
-    metallic_roughness = metallic_roughness_handle,
-    normal             = normal_handle,
-    emissive           = emissive_handle,
-    metallic_value     = metallic_value,
-    roughness_value    = roughness_value,
-    emissive_value     = emissive_value,
-    base_color_factor  = base_color_factor,
-    frame_columns      = max(frame_columns, 1),
-    frame_rows         = max(frame_rows, 1),
+    type                     = type,
+    albedo_index             = texture_index(albedo_handle),
+    metallic_roughness_index = texture_index(metallic_roughness_handle),
+    normal_index             = texture_index(normal_handle),
+    emissive_index           = texture_index(emissive_handle),
+    metallic_value           = metallic_value,
+    roughness_value          = roughness_value,
+    emissive_value           = emissive_value,
+    base_color_factor        = base_color_factor,
+    frame_columns            = max(frame_columns, 1),
+    frame_rows               = max(frame_rows, 1),
   }
   stage_frames(self, &self.internal.staging.materials, handle.index)
   return handle, true
@@ -367,12 +289,12 @@ init_builtin_materials :: proc(self: ^Manager) {
 
 @(private)
 init_builtin_meshes :: proc(self: ^Manager) {
-  self.builtin_meshes[.CUBE] = create_mesh(self, mesh.make_cube(), true)
-  self.builtin_meshes[.SPHERE] = create_mesh(self, mesh.make_sphere(), true)
-  self.builtin_meshes[.QUAD_XZ] = create_mesh(self, mesh.make_quad(), true)
-  self.builtin_meshes[.QUAD_XY] = create_mesh(self, mesh.make_billboard_quad(), true)
-  self.builtin_meshes[.CONE] = create_mesh(self, mesh.make_cone(), true)
-  self.builtin_meshes[.CYLINDER] = create_mesh(self, mesh.make_cylinder(), true)
+  self.builtin_meshes[.CUBE] = create_mesh(self, mesh.make_cube())
+  self.builtin_meshes[.SPHERE] = create_mesh(self, mesh.make_sphere())
+  self.builtin_meshes[.QUAD_XZ] = create_mesh(self, mesh.make_quad())
+  self.builtin_meshes[.QUAD_XY] = create_mesh(self, mesh.make_billboard_quad())
+  self.builtin_meshes[.CONE] = create_mesh(self, mesh.make_cone())
+  self.builtin_meshes[.CYLINDER] = create_mesh(self, mesh.make_cylinder())
 }
 
 // ---------- emitters ----------
@@ -396,6 +318,11 @@ create_emitter :: proc(
   ok: bool,
 ) #optional_ok {
   handle, em := cont.alloc(&self.emitters, EmitterHandle) or_return
+  staging := &self.internal.staging
+  sync.mutex_lock(&staging.mutex)
+  staging.emit_accumulator[handle.index] = 0
+  staging.emit_pending[handle.index] = 0
+  sync.mutex_unlock(&staging.mutex)
   em^ = {
     emission_rate     = emission_rate,
     initial_velocity  = initial_velocity,
@@ -408,7 +335,7 @@ create_emitter :: proc(
     size_end          = size_end,
     weight            = weight,
     weight_spread     = weight_spread,
-    texture_handle    = texture_handle,
+    texture_index     = texture_index(texture_handle),
     enabled           = true,
   }
   return handle, true
@@ -455,16 +382,13 @@ update :: proc(self: ^Manager, delta_time: f32) {
   sync.mutex_lock(&self.internal.staging.mutex)
   defer sync.mutex_unlock(&self.internal.staging.mutex)
   self.internal.staging.particle_time += delta_time
+  staging := &self.internal.staging
   it := cont.iterator(&self.emitters)
-  for em in cont.next(&it, EmitterHandle) {
-    if !bool(em.enabled) {
-      em.time_accumulator = 0
-      em.pending_emit = 0
-      continue
-    }
-    em.time_accumulator += em.emission_rate * delta_time
-    emit := u32(em.time_accumulator)
-    em.time_accumulator -= f32(emit)
-    em.pending_emit += emit
+  for em, h in cont.next(&it, EmitterHandle) {
+    accum := &staging.emit_accumulator[h.index]
+    accum^ += em.emission_rate * delta_time if em.enabled else 0
+    emit := u32(accum^)
+    accum^ -= f32(emit)
+    staging.emit_pending[h.index] += emit
   }
 }
