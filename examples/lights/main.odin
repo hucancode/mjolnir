@@ -171,7 +171,7 @@ light_position :: proc(l: MovingLight) -> [3]f32 {
 
 apply_light_settings :: proc(app: ^App) {
   if l, ok := render.attachment(&app.renderer, dir_light.index, render.DirectionalLightAttachment); ok {
-    l.disabled = !dir_enabled
+    world.set_visible(&app.scene, dir_light, dir_enabled)
     l.color = {1, 1, 1, f32(dir_intensity)}
     render.attach(&app.renderer, dir_light.index, l)
   }
@@ -180,14 +180,14 @@ apply_light_settings :: proc(app: ^App) {
     switch ml.kind {
     case .POINT:
       l := render.attachment(&app.renderer, ml.node.index, render.PointLightAttachment) or_continue
-      l.disabled = !point_enabled
+      world.set_visible(&app.scene, ml.node, point_enabled)
       l.color = color
       l.color.a = f32(point_intensity)
       l.radius = f32(point_radius)
       render.attach(&app.renderer, ml.node.index, l)
     case .SPOT:
       l := render.attachment(&app.renderer, ml.node.index, render.SpotLightAttachment) or_continue
-      l.disabled = !spot_enabled
+      world.set_visible(&app.scene, ml.node, spot_enabled)
       l.color = color
       l.color.a = f32(spot_intensity)
       l.radius = f32(spot_radius)
@@ -218,7 +218,7 @@ update :: proc(app: ^App, dt: f32) {
   apply_light_settings(app)
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
   render.update(&app.renderer, dt)
 }
 

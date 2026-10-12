@@ -19,14 +19,12 @@ MeshAllocations :: struct {
   skinning: BufferAllocation,
 }
 
-// Skinning data is a storage buffer read by the vertex shader through
-// skinning_set; vertices and indices are bound as vertex/index buffers.
+// Skinning data is a storage buffer read by the vertex shader through the
+// scene set; vertices and indices are bound as vertex/index buffers.
 MeshManager :: struct {
-  vertex_skinning_buffer: gpu.ImmutableBuffer(mesh.SkinningData),
-  skinning_set_layout:    vk.DescriptorSetLayout,
-  skinning_set:           vk.DescriptorSet,
-  vertex_buffer:          gpu.ImmutableBuffer(mesh.Vertex),
-  index_buffer:           gpu.ImmutableBuffer(u32),
+  vertex_skinning_buffer: gpu.Buffer,
+  vertex_buffer:          gpu.Buffer,
+  index_buffer:           gpu.Buffer,
   vertex_skinning_slab:   cont.SlabAllocator,
   vertex_slab:            cont.SlabAllocator,
   index_slab:             cont.SlabAllocator,
@@ -72,33 +70,12 @@ mesh_manager_init :: proc(
   cont.slab_init(&manager.vertex_slab, VERTEX_SLAB_CONFIG)
   cont.slab_init(&manager.index_slab, INDEX_SLAB_CONFIG)
   defer if ret != .SUCCESS do mesh_manager_shutdown(manager, gctx)
-  manager.vertex_skinning_buffer = gpu.malloc_buffer(
-    gctx,
-    mesh.SkinningData,
-    int(manager.vertex_skinning_slab.capacity),
-    {.STORAGE_BUFFER},
-  ) or_return
-  manager.skinning_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX}},
-  ) or_return
-  manager.skinning_set = gpu.create_descriptor_set(
-    gctx,
-    &manager.skinning_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&manager.vertex_skinning_buffer)},
-  ) or_return
-  manager.vertex_buffer = gpu.malloc_buffer(
-    gctx,
-    mesh.Vertex,
-    int(manager.vertex_slab.capacity),
-    {.VERTEX_BUFFER},
-  ) or_return
-  manager.index_buffer = gpu.malloc_buffer(
-    gctx,
-    u32,
-    int(manager.index_slab.capacity),
-    {.INDEX_BUFFER},
-  ) or_return
+  device_local :: proc(gctx: ^gpu.GPUContext, $T: typeid, count: u32, usage: vk.BufferUsageFlags) -> (gpu.Buffer, vk.Result) {
+    return gpu.buffer_create(gctx, vk.DeviceSize(count) * size_of(T), usage, host_visible = false)
+  }
+  manager.vertex_skinning_buffer = device_local(gctx, mesh.SkinningData, manager.vertex_skinning_slab.capacity, {.STORAGE_BUFFER}) or_return
+  manager.vertex_buffer = device_local(gctx, mesh.Vertex, manager.vertex_slab.capacity, {.VERTEX_BUFFER}) or_return
+  manager.index_buffer = device_local(gctx, u32, manager.index_slab.capacity, {.INDEX_BUFFER}) or_return
   log.info("Vertex buffer capacity:", manager.vertex_slab.capacity, "vertices")
   log.info("Index buffer capacity:", manager.index_slab.capacity, "indices")
   return .SUCCESS
@@ -106,8 +83,6 @@ mesh_manager_init :: proc(
 
 mesh_manager_shutdown :: proc(manager: ^MeshManager, gctx: ^gpu.GPUContext) {
   cont.slab_destroy(&manager.vertex_skinning_slab)
-  gpu.free_descriptor_sets(gctx, manager.skinning_set)
-  vk.DestroyDescriptorSetLayout(gctx.device, manager.skinning_set_layout, nil)
   gpu.buffer_destroy(gctx.device, &manager.vertex_skinning_buffer)
   gpu.buffer_destroy(gctx.device, &manager.vertex_buffer)
   gpu.buffer_destroy(gctx.device, &manager.index_buffer)
@@ -119,7 +94,7 @@ mesh_manager_shutdown :: proc(manager: ^MeshManager, gctx: ^gpu.GPUContext) {
 mesh_manager_upload :: proc(
   gctx: ^gpu.GPUContext,
   slab: ^cont.SlabAllocator,
-  buffer: ^$B,
+  buffer: ^gpu.Buffer,
   data: []$T,
 ) -> (
   allocation: BufferAllocation,
@@ -215,4 +190,30 @@ POSITION_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
     format = .R32G32B32_SFLOAT,
     offset = u32(offset_of(mesh.Vertex, position)),
   },
+}
+
+// Upload a mesh's CPU geometry into the mesh manager and describe it in
+// mesh_data_buffer at `index`. Its allocations are freed by mesh_retire.
+@(private)
+upload_mesh :: proc(
+  render: ^Manager,
+  gctx: ^gpu.GPUContext,
+  index: u32,
+  m: ^Mesh,
+  geometry_data: mesh.Geometry,
+) -> vk.Result {
+  res: vk.Result
+  m.allocations, res = allocate_mesh(&render.mesh_manager, gctx, geometry_data)
+  if res != .SUCCESS do return res
+  aabb := mesh.aabb_from_vertices(geometry_data.vertices)
+  data := MeshData {
+    aabb_min        = aabb.min,
+    aabb_max        = aabb.max,
+    index_count     = u32(len(geometry_data.indices)),
+    first_index     = m.allocations.indices.offset,
+    vertex_offset   = i32(m.allocations.vertices.offset),
+    skinning_offset = m.allocations.skinning.offset,
+  }
+  if m.allocations.skinning.count > 0 do data.flags |= {.SKINNED}
+  return gpu.queue_buffer_write(gctx, &render.internal.mesh_data_buffer, []MeshData{data}, int(index))
 }

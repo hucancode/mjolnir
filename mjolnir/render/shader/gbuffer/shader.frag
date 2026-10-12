@@ -1,17 +1,13 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
 
-layout(constant_id = 0) const uint MAX_TEXTURES = 1u;
-layout(constant_id = 1) const uint MAX_CUBE_TEXTURES = 1u;
-layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
-layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
-layout(constant_id = 4) const uint SAMPLER_NEAREST_REPEAT = 2u;
-layout(constant_id = 5) const uint SAMPLER_LINEAR_REPEAT = 3u;
+const uint SAMPLER_NEAREST_CLAMP = 0u;
+const uint SAMPLER_LINEAR_CLAMP = 1u;
+const uint SAMPLER_NEAREST_REPEAT = 2u;
+const uint SAMPLER_LINEAR_REPEAT = 3u;
 
-const uint FEATURE_ALBEDO_TEXTURE = 1u << 0;
-const uint FEATURE_METALLIC_ROUGHNESS_TEXTURE = 1u << 1;
-const uint FEATURE_NORMAL_TEXTURE = 1u << 2;
-const uint FEATURE_EMISSIVE_TEXTURE = 1u << 3;
+// texture index of a material slot without a texture
+const uint NO_TEXTURE = 0xFFFFFFFFu;
 
 struct MaterialData {
     uint albedo_index;
@@ -21,7 +17,7 @@ struct MaterialData {
     float metallic_value;
     float roughness_value;
     float emissive_value;
-    uint features;
+    uint _pad;
     vec4 base_color_factor;
     uint frame_columns;
     uint frame_rows;
@@ -32,9 +28,8 @@ struct MaterialData {
 // textures and samplers set = 1
 layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
-layout(set = 1, binding = 2) uniform textureCube cube_textures[];
 
-layout(set = 3, binding = 0) readonly buffer MaterialBuffer {
+layout(set = 0, binding = 3) readonly buffer MaterialBuffer {
     MaterialData materials[];
 };
 
@@ -46,7 +41,7 @@ struct NodeData {
     uint flags;
 };
 
-layout(set = 4, binding = 0) readonly buffer NodeBuffer {
+layout(set = 0, binding = 1) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 
@@ -69,10 +64,10 @@ layout(location = 3) out vec4 outEmissive;
 void main() {
     NodeData node = nodes[node_index];
     MaterialData material = materials[node.material_id];
-    bool has_normal = (material.features & FEATURE_NORMAL_TEXTURE) != 0u;
-    bool has_albedo = (material.features & FEATURE_ALBEDO_TEXTURE) != 0u;
-    bool has_mr = (material.features & FEATURE_METALLIC_ROUGHNESS_TEXTURE) != 0u;
-    bool has_emissive = (material.features & FEATURE_EMISSIVE_TEXTURE) != 0u;
+    bool has_normal = material.normal_index != NO_TEXTURE;
+    bool has_albedo = material.albedo_index != NO_TEXTURE;
+    bool has_mr = material.metallic_roughness_index != NO_TEXTURE;
+    bool has_emissive = material.emissive_index != NO_TEXTURE;
 
     vec3 N = normalize(normal);
     if (has_normal) {

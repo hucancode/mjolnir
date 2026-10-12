@@ -20,12 +20,8 @@ SHADOW_GRACE_FRAMES :: 30
 #assert(SHADOW_RANKED_CASTERS <= MAX_SHADOW_MAPS)
 // A cube map renders six views, any other map one.
 MAX_SHADOW_VIEWS :: MAX_SHADOW_MAPS * 6
-// Draw list capacity of one shadow view.
-SHADOW_VIEW_MAX_DRAWS :: 4096
-// Frames a freed CPU resource slot stays reserved before reuse, so in-flight
-// frames never see a recycled index.
-@(private)
-RETIRE_GRACE :: gpu.FRAMES_IN_FLIGHT + 1
+// Draw list capacity of all shadow views together.
+SHADOW_MAX_DRAWS :: 4096 * MAX_SHADOW_VIEWS
 
 Handle :: cont.Handle
 MaterialHandle :: distinct Handle
@@ -54,10 +50,12 @@ Color :: enum {
   MAGENTA,
 }
 
-MaterialType :: enum {
+// How a material is drawn; MATERIAL_PIPELINES holds each type's pipeline.
+// Every camera has one draw list per type, drawn in this order.
+MaterialType :: enum u32 {
   PBR,
-  WIREFRAME,
   TRANSPARENT,
+  WIREFRAME,
   RANDOM_COLOR,
   // camera-facing billboard showing one cell of the albedo sprite sheet
   SPRITE,
@@ -71,23 +69,9 @@ MeshFlag :: enum u32 {
 @(private)
 MeshFlagSet :: bit_set[MeshFlag;u32]
 
-ShaderFeature :: enum {
-  ALBEDO_TEXTURE             = 0,
-  METALLIC_ROUGHNESS_TEXTURE = 1,
-  NORMAL_TEXTURE             = 2,
-  EMISSIVE_TEXTURE           = 3,
-}
-
-ShaderFeatureSet :: bit_set[ShaderFeature;u32]
-
 @(private)
 NodeFlag :: enum u32 {
   VISIBLE,
-  CULLING_ENABLED,
-  MATERIAL_TRANSPARENT,
-  MATERIAL_WIREFRAME,
-  MATERIAL_SPRITE,
-  MATERIAL_RANDOM_COLOR,
   CASTS_SHADOW,
 }
 
@@ -115,6 +99,7 @@ MeshData :: struct {
   padding:         u32,
 }
 
+// A texture index of NO_TEXTURE leaves that texture out.
 @(private)
 MaterialData :: struct {
   albedo_index:             u32,
@@ -124,17 +109,16 @@ MaterialData :: struct {
   metallic_value:           f32,
   roughness_value:          f32,
   emissive_value:           f32,
-  features:                 ShaderFeatureSet,
+  _:                        u32,
   base_color_factor:        [4]f32,
   frame_columns:            u32,
   frame_rows:               u32,
   frame_index:              u32,
-  _:                        u32,
+  type:                     MaterialType,
 }
 
-// CameraGPU is the SSBO layout uploaded each frame to camera_buffer; rendered
-// shaders read it. `frustum_planes` is derived from `projection * view`; kept
-// here so the GPU-side culling pass need not recompute it per node.
+// CameraGPU is the per-camera layout of the frame's camera table; rendered
+// shaders read it.
 @(private)
 CameraGPU :: struct {
   view:            matrix[4, 4]f32,
@@ -143,7 +127,6 @@ CameraGPU :: struct {
   near:            f32,
   far:             f32,
   position:        [4]f32,
-  frustum_planes:  [6][4]f32,
   // rebuilds world positions from G-buffer depth
   inv_view_projection: matrix[4, 4]f32,
 }
@@ -155,28 +138,35 @@ Internal :: struct {
   compute_command_buffers:      [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Set by setup, cleared by teardown; frame renders nothing while false.
   level_ready:                  bool,
-  bone_buffer:                  gpu.PerFrameBindlessBuffer(matrix[4, 4]f32),
-  camera_buffer:                gpu.PerFrameBindlessBuffer(CameraGPU),
-  material_buffer:              gpu.PerFrameBindlessBuffer(MaterialData),
-  node_data_buffer:             gpu.PerFrameBindlessBuffer(NodeData),
-  mesh_data_buffer:             gpu.BindlessBuffer(MeshData),
-  emitter_buffer:               gpu.PerFrameBindlessBuffer(EmitterData),
-  forcefield_buffer:            gpu.PerFrameBindlessBuffer(ForceFieldData),
+  // Scene storage buffers, bound together through `scene`: the per-frame
+  // tables in one arena per frame in flight, and the mesh table.
+  frame_arena:                  [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
+  arena_layout:                 ArenaLayout,
+  mesh_data_buffer:             gpu.Buffer,
+  // the main camera's draw counts of each frame, copied back for stats
+  draw_count_readback:          [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
+  scene:                        SceneDescriptors,
   bone_matrix_slab:             cont.SlabAllocator,
   bones:                        map[u32]BonePalette,
   // Pass renderers - never accessed from outside the render package.
-  geometry:                     GBufferRenderer,
+  material_pipelines:           [MaterialType]vk.Pipeline,
   direct_light:                 DirectLightRenderer,
-  forward:                      ForwardRenderer,
   particles:                    ParticlesRenderer,
   debug_line_renderer:          DebugLineRenderer,
   ui:                           OverlayRenderer,
   // Compute / culling / shadow systems.
   visibility:                   OcclusionSystem,
   shadow:                       ShadowSystem,
-  // This frame's lights, rebuilt by collect_lights on flush.
+  // This frame's lights, rebuilt by collect_lights on flush, grouped by
+  // type: type t's lights are frame_lights[light_first[t]:][:light_count[t]].
   frame_lights:                 [dynamic]FrameLight,
+  light_first:                  [LightType]u32,
+  light_count:                  [LightType]u32,
   shadow_maps:                  [MAX_SHADOW_MAPS]ShadowMap,
+  // shadow views, one per atlas layer, the frame's shadow maps take
+  // (assign_shadow_layers)
+  shadow_view_count:            u32,
+  shadow_atlas:                 [gpu.FRAMES_IN_FLIGHT]ShadowAtlas,
   staging:                      Staging,
 }
 
@@ -193,9 +183,9 @@ Internal :: struct {
 //     arrays.
 //   * builtin_meshes / builtin_materials: builtin primitives and solid
 //     colors, created by init.
-//   * ambient: environment lighting; write ibl_intensity, skybox_enabled,
-//     skybox_blur and skybox_intensity directly.
-//   * post_process: the effect stack; append through add_effect, empty with
+//   * ambient: environment lighting; write ibl_intensity, skybox_blur and
+//     skybox_intensity (0 hides the skybox) directly.
+//   * post_process: the effect stack; append to effect_stack, empty with
 //     clear(&r.post_process.effect_stack).
 // The microui debug context is reached through debug_ui (overlay.odin).
 //
@@ -207,7 +197,7 @@ Internal :: struct {
 Manager :: struct {
   gctx:              gpu.GPUContext,
   swapchain:         gpu.Swapchain,
-  frame_index:       u32, // frame in flight recorded next
+  frame_index:       u32, // frame in flight recorded next: frame_serial % FRAMES_IN_FLIGHT
   internal:          Internal,
   meshes:            cont.Pool(Mesh),
   materials:         cont.Pool(Material),
@@ -260,12 +250,15 @@ Camera :: struct {
   // clip planes, shared by both projections
   near, far:                    f32,
   extent:                       [2]u32, // width, height
-  attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]Texture2DHandle,
-  // One indirect draw list per DrawPipeline per frame in flight. Frame N's
+  attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]TextureHandle,
+  // One indirect draw list per MaterialType per frame in flight. Frame N's
   // culling writes the lists frame N+1 draws; frame N draws the lists frame
   // N-1's culling wrote.
-  draws:                        DrawBuffers,
+  draws:                        DrawLists,
   depth_pyramid:                [gpu.FRAMES_IN_FLIGHT]DepthPyramid,
-  descriptor_set:               [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  depth_reduce_descriptor_sets: [gpu.FRAMES_IN_FLIGHT][MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
+  // First frame serial whose compute work may read the camera's depth and
+  // pyramids: the frame before it moved them out of UNDEFINED and rendered
+  // depth. Until then the camera is culled without occlusion, and frames
+  // before it draw none of its lists.
+  ready_serial:                 u64,
 }

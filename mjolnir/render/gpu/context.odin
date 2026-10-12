@@ -77,8 +77,8 @@ GPUContext :: struct {
   command_pool:         vk.CommandPool,
   compute_command_pool: vk.CommandPool,
   device_properties:    vk.PhysicalDeviceProperties,
-  trash:                DeferredTrash, // loose vk resources awaiting deferred destruction
-  uploads:              [dynamic]PendingCopy, // buffer copies for the next frame
+  trash:                [dynamic]TrashItem, // loose vk resources awaiting deferred destruction
+  uploads:              Uploads, // staged writes for the next command buffer
   // Async compute only: timeline semaphores signalled with the frame serial
   // + 1 when that frame's graphics / compute submission completes.
   graphics_timeline:    vk.Semaphore,
@@ -518,6 +518,10 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
     fillModeNonSolid          = true, // Required for VK_POLYGON_MODE_LINE wireframe rendering
     wideLines                 = true, // Required for lineWidth > 1.0
+    // depth pyramid mips indexed by loop counter
+    shaderStorageImageArrayDynamicIndexing = true,
+    // draw list buffers indexed by view
+    shaderStorageBufferArrayDynamicIndexing = true,
   }
   vulkan_12_features := vk.PhysicalDeviceVulkan12Features {
     sType                                     = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
@@ -527,7 +531,10 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     runtimeDescriptorArray                    = true,
     descriptorBindingPartiallyBound           = true,
     descriptorBindingVariableDescriptorCount  = true,
+    // bindless slots are written while other slots are in use
+    descriptorBindingUpdateUnusedWhilePending = true,
     timelineSemaphore                         = true, // async compute sync
+    shaderOutputLayer                         = true, // layered shadow rendering
     pNext                                     = &vulkan_13_features,
   }
   device_create_info := vk.DeviceCreateInfo {
@@ -564,8 +571,8 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
 }
 
 // Create the shared descriptor pool that allocate_descriptor_set draws
-// from, sized by the caller (the renderer knows its budget). Sets are
-// freed individually with free_descriptor_sets.
+// from, sized by the caller (the renderer knows its sets). Sets live as long
+// as the pool.
 descriptor_pool_init :: proc(
   self: ^GPUContext,
   pool_sizes: []vk.DescriptorPoolSize,
@@ -573,7 +580,6 @@ descriptor_pool_init :: proc(
 ) -> vk.Result {
   pool_info := vk.DescriptorPoolCreateInfo {
     sType         = .DESCRIPTOR_POOL_CREATE_INFO,
-    flags         = {.FREE_DESCRIPTOR_SET},
     poolSizeCount = u32(len(pool_sizes)),
     pPoolSizes    = raw_data(pool_sizes),
     maxSets       = max_sets,
@@ -639,6 +645,9 @@ create_shader_module :: proc(
   return
 }
 
+// A one-off command buffer, submitted and waited for by
+// end_single_time_command. It starts with every queued upload, so the
+// recorded work sees them.
 begin_single_time_command :: proc(
   self: ^GPUContext,
 ) -> (
@@ -653,6 +662,7 @@ begin_single_time_command :: proc(
   }
   vk.AllocateCommandBuffers(self.device, &alloc_info, &cmd_buffer) or_return
   begin_record(cmd_buffer) or_return
+  record_uploads(self, cmd_buffer)
   return cmd_buffer, .SUCCESS
 }
 

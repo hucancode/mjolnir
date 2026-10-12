@@ -33,9 +33,8 @@ DebugLineQueued :: struct {
 }
 
 DebugLineRenderer :: struct {
-  pipeline_layout: vk.PipelineLayout,
   pipeline:        vk.Pipeline,
-  vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(DebugLineVertex),
+  vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
   segments:        [dynamic]DebugLineQueued,
   now:             f32,
   mu:              sync.Mutex,
@@ -44,25 +43,14 @@ DebugLineRenderer :: struct {
 debug_line_init :: proc(
   self: ^DebugLineRenderer,
   gctx: ^gpu.GPUContext,
-  camera_set_layout: vk.DescriptorSetLayout,
+  layout: vk.PipelineLayout,
   color_format: vk.Format,
 ) -> (
   ret: vk.Result,
 ) {
   for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    self.vertex_buffers[i] = gpu.create_mutable_buffer(
-      gctx,
-      DebugLineVertex,
-      MAX_VERTICES,
-      {.VERTEX_BUFFER},
-    ) or_return
+    self.vertex_buffers[i] = gpu.buffer_create(gctx, MAX_VERTICES * size_of(DebugLineVertex), {.VERTEX_BUFFER}) or_return
   }
-
-  self.pipeline_layout = gpu.create_pipeline_layout(
-    gctx,
-    vk.PushConstantRange{stageFlags = {.VERTEX}, size = size_of(u32)},
-    camera_set_layout,
-  ) or_return
 
 
   bindings := [?]vk.VertexInputBindingDescription {
@@ -88,9 +76,9 @@ debug_line_init :: proc(
       depth = gpu.READ_ONLY_DEPTH_STATE,
       blend = blend[:],
       color_formats = color_formats[:],
-      depth_format = .D32_SFLOAT,
+      depth_format = ATTACHMENTS[.DEPTH].format,
       dynamic_states = dyn_states[:],
-      layout = self.pipeline_layout,
+      layout = layout,
     },
   ) or_return
 
@@ -102,12 +90,10 @@ debug_line_init :: proc(
 debug_line_shutdown :: proc(self: ^DebugLineRenderer, gctx: ^gpu.GPUContext) {
   delete(self.segments)
   for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[i])
+    gpu.buffer_destroy(gctx.device, &self.vertex_buffers[i])
   }
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
-  vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   self.pipeline = 0
-  self.pipeline_layout = 0
 }
 
 // Sentinel for one-frame draws; dropped after the first debug_line_record() packs them.
@@ -144,7 +130,7 @@ debug_line_record :: proc(
   self: ^DebugLineRenderer,
   cmd: vk.CommandBuffer,
   frame_index: u32,
-  camera_set: vk.DescriptorSet,
+  layout: vk.PipelineLayout,
   camera_index: u32,
   color_view: vk.ImageView,
   extent: vk.Extent2D,
@@ -156,7 +142,7 @@ debug_line_record :: proc(
   if len(self.segments) == 0 do return
 
   vbuf := &self.vertex_buffers[frame_index]
-  mapped := gpu.get_all(vbuf)
+  mapped := gpu.mapped(vbuf, DebugLineVertex)
   now := self.now
 
   // Depth-tested lines pack from the front, overlay lines from the back.
@@ -200,9 +186,7 @@ debug_line_record :: proc(
   offset := vk.DeviceSize(0)
   vbuf_h := vbuf.buffer
   vk.CmdBindVertexBuffers(cmd, 0, 1, &vbuf_h, &offset)
-  descs := [?]vk.DescriptorSet{camera_set}
-  vk.CmdBindDescriptorSets(cmd, .GRAPHICS, self.pipeline_layout, 0, 1, raw_data(descs[:]), 0, nil)
-  vk.CmdPushConstants(cmd, self.pipeline_layout, {.VERTEX}, 0, size_of(u32), &camera_index)
+  push_constants(cmd, layout, &camera_index)
 
   vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipeline)
   if front > 0 {

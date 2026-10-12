@@ -2,21 +2,17 @@ package gpu
 
 import "core:log"
 import "core:math"
-import "core:mem"
 import vk "vendor:vulkan"
 
 // A device-local, optimal-tiling 2D or cube image with a view over every mip
-// and layer. A cube image used as an attachment also gets one 2D view per
-// face (+X, -X, +Y, -Y, +Z, -Z) to render into.
+// and layer.
 Image :: struct {
   image:      vk.Image,
   memory:     vk.DeviceMemory,
   view:       vk.ImageView,
-  face_views: [6]vk.ImageView,
   extent:     vk.Extent2D,
   format:     vk.Format,
   mip_levels: u32,
-  cube:       bool,
 }
 
 @(private)
@@ -44,7 +40,12 @@ image_create :: proc(
   format: vk.Format,
   usage: vk.ImageUsageFlags,
   mip_levels: u32 = 1,
+  // six layers viewed as a cube
   cube := false,
+  // 2D layer count
+  layers: u32 = 1,
+  // view the 2D layers as an array, even when there is one
+  array := false,
   // also accessed by the async compute queue
   shared := false,
 ) -> (
@@ -55,9 +56,11 @@ image_create :: proc(
     extent     = extent,
     format     = format,
     mip_levels = mip_levels,
-    cube       = cube,
   }
-  layers: u32 = 6 if cube else 1
+  assert(!cube || (layers == 1 && !array))
+  assert(array || layers == 1)
+  layers := u32(6) if cube else layers
+  view_type: vk.ImageViewType = .CUBE if cube else .D2_ARRAY if array else .D2
   create_info := vk.ImageCreateInfo {
     sType         = .IMAGE_CREATE_INFO,
     flags         = vk.ImageCreateFlags{.CUBE_COMPATIBLE} if cube else {},
@@ -81,15 +84,10 @@ image_create :: proc(
   img.view = image_create_view(
     gctx.device,
     &img,
-    .CUBE if cube else .D2,
+    view_type,
     mip_count = mip_levels,
     layer_count = layers,
   ) or_return
-  if cube && usage & {.COLOR_ATTACHMENT, .DEPTH_STENCIL_ATTACHMENT} != {} {
-    for &face_view, face in img.face_views {
-      face_view = image_create_view(gctx.device, &img, .D2, base_layer = u32(face)) or_return
-    }
-  }
   log.debugf(
     "Created image %v %dx%d (mips=%d, layers=%d) 0x%x",
     format,
@@ -102,8 +100,9 @@ image_create :: proc(
   return img, .SUCCESS
 }
 
-// Create a 2D image and fill mip 0 with `data`; with mip_levels > 1 the rest
-// of the chain is blitted down from it.
+// Create a 2D image and queue mip 0's `data` for upload; with mip_levels > 1
+// the rest of the chain is blitted down from it. The image is filled when the
+// next command buffer records its uploads.
 image_create_with_data :: proc(
   gctx: ^GPUContext,
   extent: vk.Extent2D,
@@ -123,40 +122,10 @@ image_create_with_data :: proc(
     usage | {.TRANSFER_DST, .TRANSFER_SRC},
     mip_levels,
   ) or_return
-  staging := create_mutable_buffer(gctx, u8, int(size), {.TRANSFER_SRC}) or_return
-  defer mutable_buffer_destroy(gctx.device, &staging)
-  mem.copy(staging.mapped, data, int(size))
-  aspect := infer_aspect_mask(format)
-  cmd := begin_single_time_command(gctx) or_return
-  image_discard_barrier(
-    cmd,
-    img.image,
-    {.TRANSFER_WRITE},
-    {.TRANSFER},
-    aspect,
-    level_count = mip_levels,
-  )
-  region := vk.BufferImageCopy {
-    imageSubresource = {aspectMask = aspect, layerCount = 1},
-    imageExtent = {extent.width, extent.height, 1},
+  if ret = queue_image_write(gctx, &img, data, int(size)); ret != .SUCCESS {
+    image_destroy(gctx.device, &img)
+    return {}, ret
   }
-  vk.CmdCopyBufferToImage(cmd, staging.buffer, img.image, .GENERAL, 1, &region)
-  w, h := i32(extent.width), i32(extent.height)
-  for i in 1 ..< mip_levels {
-    // Previous mip's writes must land before this blit reads it
-    memory_barrier(cmd, {.TRANSFER_WRITE}, {.TRANSFER_READ}, {.TRANSFER}, {.TRANSFER})
-    blit := vk.ImageBlit {
-      srcOffsets = {{0, 0, 0}, {w, h, 1}},
-      srcSubresource = {aspectMask = aspect, mipLevel = i - 1, layerCount = 1},
-      dstOffsets = {{0, 0, 0}, {max(w / 2, 1), max(h / 2, 1), 1}},
-      dstSubresource = {aspectMask = aspect, mipLevel = i, layerCount = 1},
-    }
-    vk.CmdBlitImage(cmd, img.image, .GENERAL, img.image, .GENERAL, 1, &blit, .LINEAR)
-    w, h = max(w / 2, 1), max(h / 2, 1)
-  }
-  // Make all mip writes visible to shader sampling
-  memory_barrier(cmd, {.TRANSFER_WRITE}, {.SHADER_READ}, {.TRANSFER}, {.FRAGMENT_SHADER})
-  end_single_time_command(gctx, &cmd) or_return
   return img, .SUCCESS
 }
 
@@ -192,7 +161,6 @@ image_create_view :: proc(
 }
 
 image_destroy :: proc(device: vk.Device, img: ^Image) {
-  for face_view in img.face_views do vk.DestroyImageView(device, face_view, nil)
   vk.DestroyImageView(device, img.view, nil)
   vk.DestroyImage(device, img.image, nil)
   vk.FreeMemory(device, img.memory, nil)

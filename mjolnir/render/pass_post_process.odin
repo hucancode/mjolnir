@@ -18,19 +18,25 @@ SHADER_FOG_FRAG :: #load("shader/fog/frag.spv")
 SHADER_CROSSHATCH_FRAG :: #load("shader/crosshatch/frag.spv")
 SHADER_DOF_FRAG :: #load("shader/dof/frag.spv")
 
-// Fragment shaders indexed by the PostprocessEffect union tag (0 = nil).
-FRAG_SHADERS := [?][]u8 {
-  SHADER_POSTPROCESS_FRAG,
-  SHADER_GRAYSCALE_FRAG,
-  SHADER_TONEMAP_FRAG,
-  SHADER_BLUR_FRAG,
-  SHADER_BLOOM_FRAG,
-  SHADER_OUTLINE_FRAG,
-  SHADER_FOG_FRAG,
-  SHADER_CROSSHATCH_FRAG,
-  SHADER_DOF_FRAG,
+// Each effect's fragment shader and pass count, indexed by the
+// PostprocessEffect union tag (0 = nil). A separable effect runs its shader
+// once per pass, reading the pass number from the push constant (blur and
+// bloom: 0 horizontal, 1 vertical).
+EFFECTS := [?]struct {
+  frag:   []u8,
+  passes: u32,
+} {
+  {SHADER_POSTPROCESS_FRAG, 1},
+  {SHADER_GRAYSCALE_FRAG, 1},
+  {SHADER_TONEMAP_FRAG, 1},
+  {SHADER_BLUR_FRAG, 2},
+  {SHADER_BLOOM_FRAG, 2},
+  {SHADER_OUTLINE_FRAG, 1},
+  {SHADER_FOG_FRAG, 1},
+  {SHADER_CROSSHATCH_FRAG, 1},
+  {SHADER_DOF_FRAG, 1},
 }
-#assert(len(FRAG_SHADERS) == intrinsics.type_union_variant_count(PostprocessEffect) + 1)
+#assert(len(EFFECTS) == intrinsics.type_union_variant_count(PostprocessEffect) + 1)
 
 // Odin stores a union's variant bytes at offset 0, so `effect` places the
 // active effect struct at offset 32, followed by the (unread) tag.
@@ -40,24 +46,29 @@ PostProcessPushConstant :: struct {
   camera_far:           f32,
   normal_texture_index: u32,
   depth_texture_index:  u32,
+  // the previous pass's output
   input_image_index:    u32,
-  // bloom: the scene as it entered bloom, composited by the V pass
+  // the output of the pass before that: the previous pass's input (bloom V
+  // composites over the scene as it entered bloom H)
   original_image_index: u32,
-  _:                    [2]u32,
+  // this pass of the effect, below EFFECTS[tag].passes
+  pass:                 u32,
+  _:                    u32,
   effect:               PostprocessEffect,
 }
 #assert(offset_of(PostProcessPushConstant, effect) == 32)
-#assert(size_of(PostProcessPushConstant) <= 128)
+
+POST_PROCESS_RING :: 3
 
 PostProcessRenderer :: struct {
-  pipelines_hdr:   [len(FRAG_SHADERS)]vk.Pipeline,
-  pipelines_ldr:   [len(FRAG_SHADERS)]vk.Pipeline,
-  pipeline_layout: vk.PipelineLayout,
+  // [is_last][tag]: every pass writes an HDR ring image but the last, which
+  // writes the swapchain format
+  pipelines:       [2][len(EFFECTS)]vk.Pipeline,
   effect_stack:    [dynamic]PostprocessEffect,
-  // Up to 3 ping-pong buffers per frame in flight, allocated as the stack
-  // needs them: a bloom V pass reads the H output and the pre-bloom scene
-  // while writing a third.
-  images:          [gpu.FRAMES_IN_FLIGHT][3]Texture2DHandle,
+  // Ring of up to POST_PROCESS_RING images per frame in flight, allocated as
+  // the stack needs them: pass i writes slot i % POST_PROCESS_RING while its
+  // input and original are the two slots before it.
+  images:          [gpu.FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
 }
 
 post_process_teardown :: proc(
@@ -72,46 +83,43 @@ post_process_init :: proc(
   self: ^PostProcessRenderer,
   gctx: ^gpu.GPUContext,
   color_format: vk.Format,
-  textures_set_layout: vk.DescriptorSetLayout,
+  layout: vk.PipelineLayout,
 ) -> (
   ret: vk.Result,
 ) {
   self.effect_stack = make([dynamic]PostprocessEffect)
   defer if ret != .SUCCESS do delete(self.effect_stack)
-  self.pipeline_layout = gpu.create_pipeline_layout(
-    gctx,
-    vk.PushConstantRange{stageFlags = {.FRAGMENT}, size = size_of(PostProcessPushConstant)},
-    textures_set_layout,
-  ) or_return
-  hdr_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
-  ldr_formats := [?]vk.Format{color_format}
+  formats := [2]vk.Format{gpu.HDR_COLOR_FORMAT, color_format}
   blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_OVERRIDE}
-  for shader_code, i in FRAG_SHADERS {
-    desc := gpu.GraphicsPipelineDesc {
-      vert = SHADER_POSTPROCESS_VERT,
-      frag = shader_code,
-      specialization = &SHADER_SPEC_CONSTANTS,
-      topology = .TRIANGLE_LIST,
-      raster = gpu.DOUBLE_SIDED_RASTERIZER,
-      blend = blend[:],
-      color_formats = hdr_formats[:],
-      layout = self.pipeline_layout,
+  for &pipelines, is_last in self.pipelines {
+    for effect, tag in EFFECTS {
+      pipelines[tag] = gpu.create_graphics_pipeline(
+        gctx,
+        {
+          vert = SHADER_POSTPROCESS_VERT,
+          frag = effect.frag,
+          topology = .TRIANGLE_LIST,
+          raster = gpu.DOUBLE_SIDED_RASTERIZER,
+          blend = blend[:],
+          color_formats = formats[is_last:][:1],
+          layout = layout,
+        },
+      ) or_return
     }
-    self.pipelines_hdr[i] = gpu.create_graphics_pipeline(gctx, desc) or_return
-    desc.color_formats = ldr_formats[:]
-    self.pipelines_ldr[i] = gpu.create_graphics_pipeline(gctx, desc) or_return
   }
   log.info("Postprocess pipeline initialized successfully")
   return .SUCCESS
 }
 
-// Ping-pong images the stack needs: none when a single effect writes the
-// output directly, two to alternate, a third when a bloom V pass must keep
-// its composite source.
+// Passes the stack runs: each effect's EFFECTS passes.
+post_process_pass_count :: proc(effects: []PostprocessEffect) -> (count: int) {
+  for effect in effects do count += int(EFFECTS[reflect.get_union_variant_raw_tag(effect)].passes)
+  return
+}
+
+// Ring images the stack needs: every pass but the last writes one.
 post_process_image_count :: proc(effects: []PostprocessEffect) -> int {
-  if len(effects) <= 1 do return 0
-  for e in effects do if _, ok := e.(BloomEffect); ok do return min(len(effects) - 1, 3)
-  return min(len(effects) - 1, 2)
+  return min(max(post_process_pass_count(effects) - 1, 0), POST_PROCESS_RING)
 }
 
 // Allocate the ping-pong images the current stack needs and does not have
@@ -125,7 +133,7 @@ post_process_ensure_images :: proc(
 ) -> vk.Result {
   for &handle in self.images[frame_index][:post_process_image_count(self.effect_stack[:])] {
     if handle != {} do continue
-    handle = allocate_texture_2d(
+    handle = allocate_texture(
       texture_manager,
       gctx,
       extent,
@@ -144,28 +152,27 @@ post_process_release_images :: proc(
   for &frame in self.images {
     for &handle in frame {
       if handle == {} do continue
-      free_texture_2d(texture_manager, gctx, handle)
+      free_texture(texture_manager, gctx, handle)
       handle = {}
     }
   }
 }
 
 post_process_shutdown :: proc(self: ^PostProcessRenderer, gctx: ^gpu.GPUContext) {
-  for &p in self.pipelines_hdr {
-    vk.DestroyPipeline(gctx.device, p, nil)
-    p = 0
+  for &pipelines in self.pipelines {
+    for &p in pipelines {
+      vk.DestroyPipeline(gctx.device, p, nil)
+      p = 0
+    }
   }
-  for &p in self.pipelines_ldr {
-    vk.DestroyPipeline(gctx.device, p, nil)
-    p = 0
-  }
-  vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
-  self.pipeline_layout = 0
   delete(self.effect_stack)
 }
 
-// post_process_record runs the post-process effect stack into output_view. An empty stack
-// copies the input to output.
+// post_process_record runs the post-process effect stack into output_view.
+// Pass i reads the output of passes i-1 (input) and i-2 (original), the
+// camera's final image standing in before the first pass, and writes ring
+// slot i % POST_PROCESS_RING; the last pass writes output_view. An empty
+// stack copies the final image to output.
 post_process_record :: proc(
   self: ^PostProcessRenderer,
   command_buffer: vk.CommandBuffer,
@@ -176,132 +183,71 @@ post_process_record :: proc(
   gbuffer: GBuffer,
   near, far: f32,
   texture_manager: ^TextureManager,
+  layout: vk.PipelineLayout,
 ) {
-  images := &self.images[frame_index]
   effects := self.effect_stack[:]
   // with no effect, a single copy (nil effect) brings the input to output
   copy_only := [1]PostprocessEffect{nil}
   if len(effects) == 0 do effects = copy_only[:]
-  gpu.set_viewport_scissor(command_buffer, extent, flip_y = false)
-  // Slot tracking for 3-buffer ping-pong.
-  //   current_input_slot == -1 means current input is `final_image_idx`
-  //   (external, not one of the ping-pong images), so no transition required.
-  //   bloom_h_input_slot is set when an H pass runs and consumed by the V pass
-  //   that follows, so V can composite against the scene as it entered bloom.
-  current_input_slot := -1
-  current_input_image_idx := final_image_idx
-  bloom_h_input_slot := -1
-  bloom_h_input_image_idx: u32 = 0
-  pick_dst_slot :: proc(forbidden_a, forbidden_b: int) -> int {
-    for s in 0 ..< 3 {
-      if s == forbidden_a do continue
-      if s == forbidden_b do continue
-      return s
+  ring: [POST_PROCESS_RING]^gpu.Image
+  discards: [POST_PROCESS_RING]gpu.ImageDiscard
+  ring_count := post_process_image_count(effects)
+  for &img, slot in ring[:ring_count] {
+    img = get_texture(texture_manager, self.images[frame_index][slot])
+    if img == nil {
+      log.errorf("Post-process image handle %v not found", self.images[frame_index][slot])
+      return
     }
-    return 0
+    discards[slot] = gpu.attachment_discard(img)
   }
-  for effect, i in effects {
-    is_last := i == len(effects) - 1
-    is_bloom_h := false
-    is_bloom_v := false
-    if e, ok := effect.(BloomEffect); ok {
-      if e.direction < 0.5 do is_bloom_h = true
-      else do is_bloom_v = true
-    }
-    dst_slot: int
-    if !is_last {
-      // V pass must not overwrite its composite source (bloom_h_input).
-      forbidden_b := bloom_h_input_slot if is_bloom_v else -1
-      dst_slot = pick_dst_slot(current_input_slot, forbidden_b)
-    }
-    dst_view := output_view
-    if !is_last {
-      dst_texture := get_texture_2d(
-        texture_manager,
-        images[dst_slot],
-      )
-      if dst_texture == nil {
-        log.errorf(
-          "Post-process image handle %v not found",
-          images[dst_slot],
-        )
-        continue
-      }
-      gpu.image_discard_barrier(
-        command_buffer,
-        dst_texture.image,
-        {.COLOR_ATTACHMENT_WRITE},
-        {.COLOR_ATTACHMENT_OUTPUT},
-        {.COLOR},
-      )
-      dst_view = dst_texture.view
-    }
-    if current_input_slot >= 0 {
-      src_texture := get_texture_2d(
-        texture_manager,
-        images[current_input_slot],
-      )
-      if src_texture == nil {
-        log.errorf(
-          "Post-process source image handle %v not found",
-          images[current_input_slot],
-        )
-        continue
-      }
-      gpu.memory_barrier(
-        command_buffer,
-        {.COLOR_ATTACHMENT_WRITE},
-        {.SHADER_READ},
-        {.COLOR_ATTACHMENT_OUTPUT},
-        {.FRAGMENT_SHADER},
-      )
-    }
-    input_image_index := current_input_image_idx
-    gpu.begin_rendering(
-      command_buffer,
-      extent,
-      nil,
-      // the fullscreen triangle overwrites every pixel
-      gpu.create_color_attachment(dst_view, .DONT_CARE, .STORE),
-    )
+  gpu.image_discard_barrier(command_buffer, ..discards[:ring_count])
+  gpu.set_viewport_scissor(command_buffer, extent)
+  input, original := final_image_idx, final_image_idx
+  pass_count := post_process_pass_count(effects)
+  i := 0
+  for effect in effects {
     tag := reflect.get_union_variant_raw_tag(effect)
-    pipeline := self.pipelines_ldr[tag] if is_last else self.pipelines_hdr[tag]
-    gpu.bind_pipeline(
-      command_buffer,
-      .GRAPHICS,
-      pipeline,
-      self.pipeline_layout,
-      texture_manager.descriptor_set,
-    )
-    push := PostProcessPushConstant {
-      camera_near          = near,
-      camera_far           = far,
-      normal_texture_index = gbuffer.normal,
-      depth_texture_index  = gbuffer.depth,
-      input_image_index    = input_image_index,
-      original_image_index = input_image_index if is_bloom_h else bloom_h_input_image_idx,
-      effect               = effect,
-    }
-    vk.CmdPushConstants(
-      command_buffer,
-      self.pipeline_layout,
-      {.FRAGMENT},
-      0,
-      size_of(PostProcessPushConstant),
-      &push,
-    )
-    vk.CmdDraw(command_buffer, 3, 1, 0, 0)
-    vk.CmdEndRendering(command_buffer)
-    if is_bloom_h {
-      bloom_h_input_slot = current_input_slot
-      bloom_h_input_image_idx = current_input_image_idx
-    } else if is_bloom_v {
-      bloom_h_input_slot = -1
-      bloom_h_input_image_idx = 0
-    }
-    if !is_last {
-      current_input_slot = dst_slot
-      current_input_image_idx = images[dst_slot].index
+    for pass in 0 ..< EFFECTS[tag].passes {
+      defer i += 1
+      is_last := i == pass_count - 1
+      if i > 0 {
+        // The previous pass's output is read here; the slot written here was
+        // read by the two passes before.
+        gpu.memory_barrier(
+          command_buffer,
+          {.COLOR_ATTACHMENT_WRITE},
+          {.SHADER_READ, .COLOR_ATTACHMENT_WRITE},
+          {.COLOR_ATTACHMENT_OUTPUT, .FRAGMENT_SHADER},
+          {.FRAGMENT_SHADER, .COLOR_ATTACHMENT_OUTPUT},
+        )
+      }
+      dst_view := output_view
+      if !is_last do dst_view = ring[i % POST_PROCESS_RING].view
+      gpu.begin_rendering(
+        command_buffer,
+        extent,
+        nil,
+        // the fullscreen triangle overwrites every pixel
+        gpu.create_color_attachment(dst_view, .DONT_CARE, .STORE),
+      )
+      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipelines[int(is_last)][tag])
+      push := PostProcessPushConstant {
+        camera_near          = near,
+        camera_far           = far,
+        normal_texture_index = gbuffer.normal,
+        depth_texture_index  = gbuffer.depth,
+        input_image_index    = input,
+        original_image_index = original,
+        pass                 = pass,
+        effect               = effect,
+      }
+      push_constants(command_buffer, layout, &push)
+      vk.CmdDraw(command_buffer, 3, 1, 0, 0)
+      vk.CmdEndRendering(command_buffer)
+      if !is_last {
+        original = input
+        input = self.images[frame_index][i % POST_PROCESS_RING].index
+      }
     }
   }
 }

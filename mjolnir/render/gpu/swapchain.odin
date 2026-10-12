@@ -12,7 +12,6 @@ Swapchain :: struct {
   images:                      []vk.Image,
   views:                       []vk.ImageView,
   image_index:                 u32,
-  in_flight_fences:            [FRAMES_IN_FLIGHT]vk.Fence,
   image_available_semaphores:  [FRAMES_IN_FLIGHT]vk.Semaphore, // Per frame-in-flight
   render_finished_semaphores:  []vk.Semaphore, // Per swapchain image (for presentation sync)
 }
@@ -167,16 +166,6 @@ swapchain_init :: proc(
       nil,
       &self.image_available_semaphores[i],
     ) or_return
-    fence_info := vk.FenceCreateInfo {
-      sType = .FENCE_CREATE_INFO,
-      flags = {.SIGNALED},
-    }
-    vk.CreateFence(
-      gctx.device,
-      &fence_info,
-      nil,
-      &self.in_flight_fences[i],
-    ) or_return
   }
   ret = .SUCCESS
   return
@@ -200,9 +189,6 @@ swapchain_destroy :: proc(self: ^Swapchain, device: vk.Device) {
   for semaphore in self.image_available_semaphores {
     vk.DestroySemaphore(device, semaphore, nil)
   }
-  for fence in self.in_flight_fences {
-    vk.DestroyFence(device, fence, nil)
-  }
   vk.DestroySwapchainKHR(device, self.handle, nil)
   self.handle = 0
 }
@@ -218,20 +204,20 @@ swapchain_recreate :: proc(
   return .SUCCESS
 }
 
-// Block until the GPU has finished the last submission that used this
-// frame-in-flight slot, so its per-frame buffers may be rewritten.
-wait_frame :: proc(gctx: ^GPUContext, self: ^Swapchain, frame_index: u32) -> vk.Result {
-  vk.WaitForFences(gctx.device, 1, &self.in_flight_fences[frame_index], true, math.max(u64)) or_return
-  if !has_async_compute(gctx) || gctx.frame_serial < FRAMES_IN_FLIGHT do return .SUCCESS
-  // The compute submission that last used this slot runs independently of
-  // the fenced graphics one; it still owns the slot's command buffer and
-  // reads its node and camera buffers.
+// Block until the GPU has finished the submissions that last used the next
+// frame-in-flight slot (frame_serial % FRAMES_IN_FLIGHT), so its per-frame
+// buffers and command buffers may be rewritten. Submission s signals s + 1 on
+// the graphics timeline and, with async compute, on the compute timeline.
+wait_frame :: proc(gctx: ^GPUContext) -> vk.Result {
+  if gctx.frame_serial < FRAMES_IN_FLIGHT do return .SUCCESS
   value := gctx.frame_serial - FRAMES_IN_FLIGHT + 1
+  semaphores := [2]vk.Semaphore{gctx.graphics_timeline, gctx.compute_timeline}
+  values := [2]u64{value, value}
   wait_info := vk.SemaphoreWaitInfo {
     sType          = .SEMAPHORE_WAIT_INFO,
-    semaphoreCount = 1,
-    pSemaphores    = &gctx.compute_timeline,
-    pValues        = &value,
+    semaphoreCount = 2 if has_async_compute(gctx) else 1,
+    pSemaphores    = &semaphores[0],
+    pValues        = &values[0],
   }
   return vk.WaitSemaphores(gctx.device, &wait_info, math.max(u64))
 }
@@ -252,8 +238,6 @@ acquire_next_image :: proc(
     0,
     &self.image_index,
   ) or_return
-  // Reset fence for this frame
-  vk.ResetFences(device, 1, &self.in_flight_fences[frame_index]) or_return
   result = .SUCCESS
   return
 }
@@ -299,9 +283,10 @@ submit_queue_and_present :: proc(
       stageMask = {.ALL_COMMANDS},
     },
   }
-  sync_count: u32 = 1
+  // the compute timeline wait only exists with async compute
+  wait_count: u32 = 1
   if has_async_compute(gctx) {
-    sync_count = 2
+    wait_count = 2
     compute_cmd_info := vk.CommandBufferSubmitInfo {
       sType         = .COMMAND_BUFFER_SUBMIT_INFO,
       commandBuffer = compute_command_buffer^,
@@ -335,19 +320,14 @@ submit_queue_and_present :: proc(
   }
   graphics_submit := vk.SubmitInfo2 {
     sType                    = .SUBMIT_INFO_2,
-    waitSemaphoreInfoCount   = sync_count,
+    waitSemaphoreInfoCount   = wait_count,
     pWaitSemaphoreInfos      = &wait_infos[0],
     commandBufferInfoCount   = 1,
     pCommandBufferInfos      = &gfx_cmd_info,
-    signalSemaphoreInfoCount = sync_count,
+    signalSemaphoreInfoCount = len(signal_infos),
     pSignalSemaphoreInfos    = &signal_infos[0],
   }
-  vk.QueueSubmit2(
-    gctx.graphics_queue,
-    1,
-    &graphics_submit,
-    self.in_flight_fences[frame_index],
-  ) or_return
+  vk.QueueSubmit2(gctx.graphics_queue, 1, &graphics_submit, 0) or_return
   gctx.frame_serial += 1
   image_indices := [?]u32{self.image_index}
   present_info := vk.PresentInfoKHR {

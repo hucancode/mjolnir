@@ -1,12 +1,33 @@
 #version 450
+#extension GL_ARB_shader_viewport_layer_array : require
+
+// Draws one node into one shadow view's atlas layer. The cull tags each draw:
+// first_instance = node | view << 16.
 
 layout(location = 0) in vec3 inPosition;
 
-layout(push_constant) uniform PushConstants {
+struct View {
+    vec4 planes[6];
     mat4 view_projection;
+    uint camera_index;
+    uint pyramid;
+    uint occlusion_mask;
+    uint list_stride;
+    uint type_mask;
+    uint require_flags;
+    uint instance_tag;
+    uint layer;
+    uint draw_list;
+    uint list_capacity;
+    uint _pad0;
+    uint _pad1;
 };
 
-layout(set = 1, binding = 0) readonly buffer BoneMatrices {
+layout(set = 0, binding = 11) readonly buffer ViewBuffer {
+    View views[];
+};
+
+layout(set = 0, binding = 4) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 
@@ -18,7 +39,7 @@ struct NodeData {
     uint flags;
 };
 
-layout(set = 3, binding = 0) readonly buffer NodeBuffer {
+layout(set = 0, binding = 1) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 
@@ -35,7 +56,7 @@ struct MeshData {
     uint _padding;
 };
 
-layout(set = 4, binding = 0) readonly buffer MeshBuffer {
+layout(set = 0, binding = 2) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
@@ -44,12 +65,13 @@ struct VertexSkinningData {
     vec4 weights;
 };
 
-layout(set = 5, binding = 0) readonly buffer VertexSkinningBuffer {
+layout(set = 0, binding = 5) readonly buffer VertexSkinningBuffer {
     VertexSkinningData vertex_skinning[];
 };
 
 void main() {
-    uint node_index = uint(gl_InstanceIndex);
+    uint node_index = uint(gl_InstanceIndex) & 0xFFFFu;
+    View view = views[uint(gl_InstanceIndex) >> 16u];
     mat4 world = nodes[node_index].world_matrix;
     NodeData node = nodes[node_index];
     MeshData mesh = meshes[node.mesh_id];
@@ -71,5 +93,6 @@ void main() {
         model_position = vec4(inPosition, 1.0);
     }
     vec4 world_position = world * model_position;
-    gl_Position = view_projection * world_position;
+    gl_Position = view.view_projection * world_position;
+    gl_Layer = int(view.layer);
 }

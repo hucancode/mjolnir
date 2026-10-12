@@ -3,65 +3,60 @@ package gpu
 import vk "vendor:vulkan"
 
 // Deferred GPU-resource destruction. A resource freed at runtime may still be
-// read by frames already submitted to the GPU (up to FRAMES_IN_FLIGHT-1 of
-// them), so destroying its vk handles inline is a use-after-free. Instead enqueue
-// the raw handles with a ready frame; deferred_tick() destroys them once enough
-// frames have been presented that no in-flight frame can reference them.
+// read by frames already submitted to the GPU, so destroying its vk handles
+// inline is a use-after-free. Instead enqueue the handles; deferred_tick
+// destroys them RETIRE_GRACE frames later.
 //
 // Pool-managed resources (textures, meshes) defer through their pool's
-// retirement grace instead. This queue is for loose resources with no owning
-// pool, e.g. a camera's or shadow slot's draw buffers.
+// retirement grace, which also holds back their bindless index. This queue is
+// for resources with no owning pool.
+
+// Frames (submissions, counted by frame_serial) a freed GPU resource or pool
+// slot waits before it is destroyed or reused: the frames in flight, plus one
+// because async compute culls a frame ahead (graphics n+1 draws the lists
+// compute n built).
+RETIRE_GRACE :: FRAMES_IN_FLIGHT + 1
+
+Trash :: union {
+  Buffer,
+  Image,
+  vk.ImageView,
+}
 
 @(private)
 TrashItem :: struct {
-  ready:  u64,
-  buffer: vk.Buffer,
-  memory: vk.DeviceMemory,
+  ready: u64,
+  trash: Trash,
 }
 
-DeferredTrash :: struct {
-  items: [dynamic]TrashItem,
-  frame: u64,
-}
-
-@(private)
-enqueue :: proc(gctx: ^GPUContext, buffer: vk.Buffer, memory: vk.DeviceMemory) {
-  append(&gctx.trash.items, TrashItem{gctx.trash.frame + FRAMES_IN_FLIGHT, buffer, memory})
-}
-
-// defer_destroy_mutable_buffer unmaps now (the CPU mapping is never read by the
-// GPU, so it is safe to drop immediately) and queues the buffer + memory for
-// destruction once it is no longer referenced by any in-flight frame. The
-// passed buffer is zeroed so it cannot be destroyed twice.
-defer_destroy_mutable_buffer :: proc(gctx: ^GPUContext, buffer: ^MutableBuffer($T)) {
-  if buffer.buffer == 0 do return
-  if buffer.mapped != nil {
-    vk.UnmapMemory(gctx.device, buffer.memory)
-    buffer.mapped = nil
-  }
-  enqueue(gctx, buffer.buffer, buffer.memory)
-  buffer^ = {}
+// Queue `trash` for destruction once no frame in flight can use it.
+defer_destroy :: proc(gctx: ^GPUContext, trash: Trash) {
+  append(&gctx.trash, TrashItem{gctx.frame_serial + RETIRE_GRACE, trash})
 }
 
 @(private = "file")
-destroy_item :: proc(device: vk.Device, item: TrashItem) {
-  vk.DestroyBuffer(device, item.buffer, nil)
-  vk.FreeMemory(device, item.memory, nil)
+destroy_item :: proc(device: vk.Device, item: ^TrashItem) {
+  switch &t in item.trash {
+  case Buffer:
+    buffer_destroy(device, &t)
+  case Image:
+    image_destroy(device, &t)
+  case vk.ImageView:
+    vk.DestroyImageView(device, t, nil)
+  }
 }
 
-// deferred_tick advances the frame counter and destroys every queued resource
-// whose grace has elapsed. Call once per presented frame.
+// deferred_tick destroys every queued resource whose grace has elapsed. Call
+// once per frame, after wait_frame.
 deferred_tick :: proc(gctx: ^GPUContext) {
-  d := &gctx.trash
-  d.frame += 1
   i := 0
-  for i < len(d.items) {
-    if d.items[i].ready > d.frame {
+  for i < len(gctx.trash) {
+    if gctx.trash[i].ready > gctx.frame_serial {
       i += 1
       continue
     }
-    destroy_item(gctx.device, d.items[i])
-    unordered_remove(&d.items, i)
+    destroy_item(gctx.device, &gctx.trash[i])
+    unordered_remove(&gctx.trash, i)
   }
 }
 
@@ -69,16 +64,13 @@ deferred_tick :: proc(gctx: ^GPUContext) {
 // after vkDeviceWaitIdle (teardown/shutdown), where no frame is in flight.
 deferred_flush :: proc(gctx: ^GPUContext) {
   discard_uploads(gctx)
-  for item in gctx.trash.items {
-    destroy_item(gctx.device, item)
-  }
-  clear(&gctx.trash.items)
+  for &item in gctx.trash do destroy_item(gctx.device, &item)
+  clear(&gctx.trash)
 }
 
 @(private)
 deferred_destroy :: proc(gctx: ^GPUContext) {
-  delete(gctx.trash.items)
+  delete(gctx.trash)
   gctx.trash = {}
-  delete(gctx.uploads)
-  gctx.uploads = nil
+  uploads_destroy(gctx)
 }

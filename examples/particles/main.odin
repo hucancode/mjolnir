@@ -20,7 +20,7 @@ App :: struct {
 
 TextureEntry :: struct {
   name:   string,
-  handle: render.Texture2DHandle,
+  handle: render.TextureHandle,
 }
 
 TEXTURE_FILES := [?]string{
@@ -68,7 +68,7 @@ main :: proc() {
   app.camera = render.orbit_controller()
 
   render.main_camera_look_at(&app.renderer, {0, 5, 10}, {0, 2, 0})
-  app.renderer.ambient.skybox_enabled = false
+  app.renderer.ambient.skybox_intensity = 0
 
   for name in TEXTURE_FILES {
     path := fmt.tprintf("assets/particles/%s.png", name)
@@ -93,7 +93,7 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
-  tex: render.Texture2DHandle
+  tex: render.TextureHandle
   if len(textures) > 0 && int(selected_tex_index) < len(textures) {
     tex = textures[selected_tex_index].handle
   }
@@ -115,7 +115,7 @@ update :: proc(app: ^App, dt: f32) {
   }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
   render.update(&app.renderer, dt)
 }
 

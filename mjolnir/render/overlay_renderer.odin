@@ -90,10 +90,9 @@ VERTEX2D_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
 }
 
 OverlayRenderer :: struct {
-  pipeline_layout: vk.PipelineLayout,
   pipeline:        vk.Pipeline,
-  vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex2D),
-  index_buffers:   [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
+  index_buffers:   [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
   // Mapped buffers of the frame being recorded.
   vertices:        []Vertex2D,
   indices:         []u32,
@@ -102,8 +101,8 @@ OverlayRenderer :: struct {
   batches:         [dynamic]DrawBatch,
   // Staged draw2d commands, owned by the caller until the frame is recorded.
   commands:        []RenderCommand,
-  white_texture:   Texture2DHandle, // drawn for NO_TEXTURE
-  font_atlas:      Texture2DHandle, // sampled by text commands
+  white_texture:   TextureHandle, // drawn for NO_TEXTURE
+  font_atlas:      TextureHandle, // sampled by text commands
   // CPU copy of the font atlas, uploaded by flush when dirty
   atlas_pixels:    []u8,
   atlas_extent:    [2]u32,
@@ -112,7 +111,7 @@ OverlayRenderer :: struct {
   debug_open:      bool, // mu.begin ran this frame; frame closes it
   // Mouse buttons pressed over the debug UI, owned by it through release.
   debug_buttons:   bit_set[0 ..< 32],
-  debug_atlas:     Texture2DHandle, // microui's builtin atlas
+  debug_atlas:     TextureHandle, // microui's builtin atlas
   dpi_scale:       f32,
 }
 
@@ -128,7 +127,7 @@ DrawBatch :: struct {
 overlay_init :: proc(
   self: ^OverlayRenderer,
   gctx: ^gpu.GPUContext,
-  textures_set_layout: vk.DescriptorSetLayout,
+  layout: vk.PipelineLayout,
   format: vk.Format,
   dpi_scale: f32,
 ) -> vk.Result {
@@ -138,15 +137,7 @@ overlay_init :: proc(
   mu.init(&self.debug_ctx)
   self.debug_ctx.text_width = mu.default_atlas_text_width
   self.debug_ctx.text_height = mu.default_atlas_text_height
-  self.pipeline_layout = gpu.create_pipeline_layout(
-    gctx,
-    vk.PushConstantRange {
-      stageFlags = {.VERTEX},
-      size = size_of(matrix[4, 4]f32),
-    },
-    textures_set_layout,
-  ) or_return
-  create_pipeline(self, gctx, format) or_return
+  create_pipeline(self, gctx, layout, format) or_return
   log.info("UI renderer pipeline initialized successfully")
   return .SUCCESS
 }
@@ -158,14 +149,13 @@ overlay_setup :: proc(
 ) -> vk.Result {
   log.info("Setting up UI renderer buffers...")
   white_pixel := [4]u8{255, 255, 255, 255}
-  self.white_texture = allocate_texture_2d_with_data(
+  self.white_texture = allocate_texture(
     texture_manager,
     gctx,
-    raw_data(white_pixel[:]),
-    vk.DeviceSize(len(white_pixel)),
     vk.Extent2D{1, 1},
     .R8G8B8A8_UNORM,
     {.SAMPLED},
+    data = white_pixel[:],
   ) or_return
   self.debug_atlas = allocate_alpha_texture(
     texture_manager,
@@ -175,18 +165,8 @@ overlay_setup :: proc(
     mu.DEFAULT_ATLAS_HEIGHT,
   ) or_return
   for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    self.vertex_buffers[i] = gpu.create_mutable_buffer(
-      gctx,
-      Vertex2D,
-      UI_MAX_VERTICES,
-      {.VERTEX_BUFFER},
-    ) or_return
-    self.index_buffers[i] = gpu.create_mutable_buffer(
-      gctx,
-      u32,
-      UI_MAX_INDICES,
-      {.INDEX_BUFFER},
-    ) or_return
+    self.vertex_buffers[i] = gpu.buffer_create(gctx, UI_MAX_VERTICES * size_of(Vertex2D), {.VERTEX_BUFFER}) or_return
+    self.index_buffers[i] = gpu.buffer_create(gctx, UI_MAX_INDICES * size_of(u32), {.INDEX_BUFFER}) or_return
   }
   log.info("UI renderer buffers set up successfully")
   return .SUCCESS
@@ -195,8 +175,8 @@ overlay_setup :: proc(
 // Textures are destroyed with the texture manager's teardown.
 overlay_teardown :: proc(self: ^OverlayRenderer, gctx: ^gpu.GPUContext) {
   for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[i])
-    gpu.mutable_buffer_destroy(gctx.device, &self.index_buffers[i])
+    gpu.buffer_destroy(gctx.device, &self.vertex_buffers[i])
+    gpu.buffer_destroy(gctx.device, &self.index_buffers[i])
   }
   self.white_texture = {}
   self.font_atlas = {}
@@ -210,7 +190,7 @@ overlay_upload_font_atlas :: proc(
   texture_manager: ^TextureManager,
 ) -> vk.Result {
   if self.font_atlas != {} {
-    free_texture_2d(texture_manager, gctx, self.font_atlas)
+    free_texture(texture_manager, gctx, self.font_atlas)
     self.font_atlas = {}
   }
   self.font_atlas = allocate_alpha_texture(
@@ -232,17 +212,16 @@ allocate_alpha_texture :: proc(
   pixels: []u8,
   width, height: u32,
 ) -> (
-  Texture2DHandle,
+  TextureHandle,
   vk.Result,
 ) {
-  return allocate_texture_2d_with_data(
+  return allocate_texture(
     texture_manager,
     gctx,
-    raw_data(pixels),
-    vk.DeviceSize(len(pixels)),
     vk.Extent2D{width, height},
     .R8_UNORM,
     {.SAMPLED},
+    data = pixels,
     swizzle = {r = .ONE, g = .ONE, b = .ONE, a = .R},
   )
 }
@@ -251,6 +230,7 @@ allocate_alpha_texture :: proc(
 create_pipeline :: proc(
   self: ^OverlayRenderer,
   gctx: ^gpu.GPUContext,
+  layout: vk.PipelineLayout,
   format: vk.Format,
 ) -> vk.Result {
   vert_code := #load("shader/ui/vert.spv")
@@ -263,14 +243,13 @@ create_pipeline :: proc(
     {
       vert = vert_code,
       frag = frag_code,
-      specialization = &SHADER_SPEC_CONSTANTS,
       vertex_bindings = bindings[:],
       vertex_attributes = VERTEX2D_ATTRIBUTE_DESCRIPTIONS[:],
       topology = .TRIANGLE_LIST,
       raster = gpu.DOUBLE_SIDED_RASTERIZER,
       blend = blend[:],
       color_formats = color_formats[:],
-      layout = self.pipeline_layout,
+      layout = layout,
     },
   ) or_return
   log.info("UI pipeline created successfully")
@@ -279,7 +258,6 @@ create_pipeline :: proc(
 
 overlay_shutdown :: proc(self: ^OverlayRenderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
-  vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   delete(self.batches)
   delete(self.atlas_pixels)
 }
@@ -289,7 +267,7 @@ overlay_shutdown :: proc(self: ^OverlayRenderer, gctx: ^gpu.GPUContext) {
 // when `draw_debug` is set.
 overlay_record :: proc(
   self: ^OverlayRenderer,
-  texture_manager: ^TextureManager,
+  layout: vk.PipelineLayout,
   command_buffer: vk.CommandBuffer,
   color_view: vk.ImageView,
   extent: vk.Extent2D,
@@ -297,8 +275,8 @@ overlay_record :: proc(
   draw_commands, draw_debug: bool,
 ) {
   if !draw_commands && !draw_debug do return
-  self.vertices = gpu.get_all(&self.vertex_buffers[frame_index])
-  self.indices = gpu.get_all(&self.index_buffers[frame_index])
+  self.vertices = gpu.mapped(&self.vertex_buffers[frame_index], Vertex2D)
+  self.indices = gpu.mapped(&self.index_buffers[frame_index], u32)
   self.vertex_count = 0
   self.index_count = 0
   clear(&self.batches)
@@ -320,29 +298,11 @@ overlay_record :: proc(
     nil,
     gpu.create_color_attachment(color_view, .LOAD, .STORE),
   )
-  gpu.bind_pipeline(
-    command_buffer,
-    .GRAPHICS,
-    self.pipeline,
-    self.pipeline_layout,
-    texture_manager.descriptor_set,
-  )
-  projection := linalg.matrix_ortho3d_f32(0, f32(extent.width), f32(extent.height), 0, -1, 1)
-  vk.CmdPushConstants(
-    command_buffer,
-    self.pipeline_layout,
-    {.VERTEX},
-    0,
-    size_of(matrix[4, 4]f32),
-    &projection,
-  )
-  viewport := vk.Viewport {
-    y        = f32(extent.height),
-    width    = f32(extent.width),
-    height   = -f32(extent.height),
-    maxDepth = 1,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
+  // pixel y grows down, as clip-space y does
+  projection := linalg.matrix_ortho3d_f32(0, f32(extent.width), 0, f32(extent.height), -1, 1)
+  push_constants(command_buffer, layout, &projection)
+  gpu.set_viewport_scissor(command_buffer, extent)
   gpu.bind_vertex_index_buffers(
     command_buffer,
     self.vertex_buffers[frame_index].buffer,

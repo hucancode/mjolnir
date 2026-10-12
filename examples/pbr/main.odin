@@ -92,7 +92,7 @@ update :: proc(app: ^App, dt: f32) {
     render.attach(&app.renderer, dir_light.index, l)
   }
   app.renderer.ambient.ibl_intensity = f32(ibl_intensity)
-  app.renderer.ambient.skybox_enabled = skybox_on
+  app.renderer.ambient.skybox_intensity = skybox_on ? 1 : 0
   app.renderer.ambient.skybox_blur = f32(skybox_blur)
   if spinning {
     rotation_phase += dt * f32(rotate_speed)
@@ -106,7 +106,7 @@ update :: proc(app: ^App, dt: f32) {
   }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
   render.update(&app.renderer, dt)
 }
 

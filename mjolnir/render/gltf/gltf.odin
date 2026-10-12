@@ -32,7 +32,7 @@ load_meshes :: proc(
     used[i] = true
     if node.skin != nil do skinned[i] = true
   }
-  textures := make(map[^cgltf.texture]render.Texture2DHandle, context.temp_allocator)
+  textures := make(map[^cgltf.texture]render.TextureHandle, context.temp_allocator)
   materials := make(map[^cgltf.material]render.MaterialHandle, context.temp_allocator)
   for &gltf_mesh, i in data.meshes do if used[i] {
     if len(gltf_mesh.primitives) == 0 do return looks, false
@@ -55,10 +55,10 @@ load_texture :: proc(
   r: ^render.Manager,
   texture: ^cgltf.texture,
   gltf_path: string,
-  cache: ^map[^cgltf.texture]render.Texture2DHandle,
+  cache: ^map[^cgltf.texture]render.TextureHandle,
   format: vk.Format = .R8G8B8A8_SRGB,
 ) -> (
-  handle: render.Texture2DHandle,
+  handle: render.TextureHandle,
   ok: bool,
 ) {
   if handle, ok = cache[texture]; ok do return
@@ -90,15 +90,14 @@ load_material :: proc(
   r: ^render.Manager,
   mat: ^cgltf.material,
   gltf_path: string,
-  textures: ^map[^cgltf.texture]render.Texture2DHandle,
+  textures: ^map[^cgltf.texture]render.TextureHandle,
   cache: ^map[^cgltf.material]render.MaterialHandle,
 ) -> (
   handle: render.MaterialHandle,
   ok: bool,
 ) {
   if handle, ok = cache[mat]; ok do return
-  albedo, metallic_roughness, normal, emissive: render.Texture2DHandle
-  features: render.ShaderFeatureSet
+  albedo, metallic_roughness, normal, emissive: render.TextureHandle
   base_color := [4]f32{1, 1, 1, 1}
   metallic, roughness: f32 = 0, 1
   if mat.has_pbr_metallic_roughness {
@@ -107,27 +106,22 @@ load_material :: proc(
     roughness = mat.pbr_metallic_roughness.roughness_factor
     if tex := mat.pbr_metallic_roughness.metallic_roughness_texture.texture; tex != nil {
       metallic_roughness = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_UNORM) or_return
-      features |= {.METALLIC_ROUGHNESS_TEXTURE}
     }
   }
   if tex := mat.pbr_metallic_roughness.base_color_texture.texture; tex != nil {
     albedo = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_SRGB) or_return
-    features |= {.ALBEDO_TEXTURE}
   }
   if tex := mat.normal_texture.texture; tex != nil {
     normal = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_UNORM) or_return
-    features |= {.NORMAL_TEXTURE}
   }
   if tex := mat.emissive_texture.texture; tex != nil {
     emissive = load_texture(r, tex, gltf_path, textures, .R8G8B8A8_SRGB) or_return
-    features |= {.EMISSIVE_TEXTURE}
   }
   // render keeps one emissive scale; take the brightest factor channel
   emissive_value := max(mat.emissive_factor[0], mat.emissive_factor[1], mat.emissive_factor[2])
   if mat.has_emissive_strength do emissive_value *= mat.emissive_strength.emissive_strength
   handle = render.create_material(
     r,
-    features,
     .PBR,
     albedo,
     metallic_roughness,

@@ -23,7 +23,7 @@ struct ForceField {
     uint node_index;
 };
 
-layout(set = 0, binding = 0) buffer ParticleBuffer {
+layout(set = 0, binding = 8) buffer ParticleBuffer {
     Particle particles[];
 };
 
@@ -32,9 +32,20 @@ layout(push_constant) uniform Params {
     uint forcefield_count;
     float delta_time;
     uint frame_counter;
+    uint emit_total;
+    uint emit_cursor;
 };
 
-layout(set = 1, binding = 0) readonly buffer ForceFieldBuffer {
+// Indirect draw of the live particles, then their indices.
+layout(set = 0, binding = 9) buffer AliveBuffer {
+    uint vertex_count;
+    uint instance_count;
+    uint first_vertex;
+    uint first_instance;
+    uint alive[];
+};
+
+layout(set = 0, binding = 7) readonly buffer ForceFieldBuffer {
     ForceField forcefields[];
 };
 
@@ -46,7 +57,7 @@ struct NodeData {
     uint flags;
 };
 
-layout(set = 2, binding = 0) readonly buffer NodeDataBuffer {
+layout(set = 0, binding = 1) readonly buffer NodeDataBuffer {
     NodeData nodes[];
 };
 
@@ -54,9 +65,8 @@ layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 const vec3 GRAVITY = vec3(0.0, -9.8, 0.0);
 
-void main() {
-    uint i = gl_GlobalInvocationID.x;
-    if (i >= MAX_PARTICLES || particles[i].life <= 0.0) return;
+// Advance live particle i; returns whether it is still alive.
+bool simulate(uint i) {
     vec3 p = particles[i].position;
     vec3 v = particles[i].velocity;
     uint n = min(forcefield_count, MAX_FORCE_FIELDS);
@@ -82,5 +92,28 @@ void main() {
     v *= min(speed, 5.0) / max(speed, 1e-6);
     particles[i].velocity = v;
     particles[i].position = p + v * delta_time;
-    particles[i].life -= delta_time;
+    float life = particles[i].life - delta_time;
+    particles[i].life = life;
+    return life > 0.0;
+}
+
+// Live particles of this group, appended to the alive list with one global
+// atomic per group.
+shared uint group_alive;
+shared uint group_first;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (gl_LocalInvocationIndex == 0u) group_alive = 0u;
+    barrier();
+    bool live = i < MAX_PARTICLES && particles[i].life > 0.0;
+    uint slot = 0u;
+    if (live) {
+        live = simulate(i);
+        if (live) slot = atomicAdd(group_alive, 1u);
+    }
+    barrier();
+    if (gl_LocalInvocationIndex == 0u) group_first = atomicAdd(vertex_count, group_alive);
+    barrier();
+    if (live) alive[group_first + slot] = i;
 }

@@ -2,8 +2,6 @@
 package render
 
 import "core:testing"
-import "gpu"
-import vk "vendor:vulkan"
 
 // Casters with descending scores, owners 1..n.
 make_casters :: proc(n: int) -> (casters: [MAX_LIGHTS]Caster) {
@@ -11,19 +9,8 @@ make_casters :: proc(n: int) -> (casters: [MAX_LIGHTS]Caster) {
 	return
 }
 
-// Run selection for one frame and hand out maps the way collect_lights does.
 select_frame :: proc(casters: []Caster, maps: ^[MAX_SHADOW_MAPS]ShadowMap, serial: u64) -> int {
-	selected, count := select_shadow_casters(casters, maps, serial)
-	claimed: [MAX_SHADOW_MAPS]bool
-	for c in selected[:count] do if c.shadow_map >= 0 do claimed[c.shadow_map] = true
-	for &sm, m in maps do if !claimed[m] do sm.owner = 0
-	for c in selected[:count] {
-		m := c.shadow_map
-		if m < 0 do for _, free in maps do if !claimed[free] {m = free; break}
-		claimed[m] = true
-		maps[m].owner = c.owner
-		maps[m].last_ranked = c.last_ranked
-	}
+	_, count := select_shadow_casters(casters, maps, serial)
 	return count
 }
 
@@ -105,25 +92,29 @@ test_shadow_selection_grace_limited :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_shadow_views_per_light :: proc(t: ^testing.T) {
-	depth := gpu.Image {
-		view       = vk.ImageView(1),
-		face_views = {vk.ImageView(10), vk.ImageView(11), vk.ImageView(12), vk.ImageView(13), vk.ImageView(14), vk.ImageView(15)},
-	}
-	cube := ShadowMap{cube = true}
-	flat := ShadowMap{}
-	point := FrameLight{shadow_map = &cube}
-	spot := FrameLight{shadow_map = &flat}
-	testing.expect_value(t, shadow_view_count(&cube), 6)
-	testing.expect_value(t, shadow_view_count(&flat), 1)
-	for face in 0 ..< 6 {
-		v := shadow_view(&point, &depth, face)
-		testing.expect_value(t, v.target, depth.face_views[face])
-		testing.expect_value(t, v.flip_y, false)
-		testing.expect_value(t, v.front_face, vk.FrontFace.CLOCKWISE)
-	}
-	v := shadow_view(&spot, &depth, 0)
-	testing.expect_value(t, v.target, depth.view)
-	testing.expect_value(t, v.flip_y, true)
-	testing.expect_value(t, v.front_face, vk.FrontFace.COUNTER_CLOCKWISE)
+test_shadow_layers_packed_by_type :: proc(t: ^testing.T) {
+	r := new(Manager)
+	defer free(r)
+	defer delete(r.internal.frame_lights)
+	shadowed := LightGPU{shadow_map = 0}
+	unshadowed := LightGPU{shadow_map = NO_SHADOW}
+	append(
+		&r.internal.frame_lights,
+		FrameLight{type = .SPOT, light = shadowed},
+		FrameLight{type = .POINT, light = unshadowed},
+		FrameLight{type = .DIRECTIONAL, light = shadowed},
+		FrameLight{type = .POINT, light = shadowed},
+	)
+	sort_lights_by_type(r)
+	assign_shadow_layers(r)
+	lights := r.internal.frame_lights[:]
+	testing.expect_value(t, r.internal.light_first, [LightType]u32{.POINT = 0, .SPOT = 2, .DIRECTIONAL = 3, .AMBIENT = 4})
+	testing.expect_value(t, r.internal.light_count, [LightType]u32{.POINT = 2, .SPOT = 1, .DIRECTIONAL = 1, .AMBIENT = 0})
+	// stable: the unshadowed point light stays ahead of the shadowed one
+	testing.expect_value(t, lights[0].light.shadow_map, NO_SHADOW)
+	// one shadow view per face: the point light's six, then one each
+	testing.expect_value(t, lights[1].light.shadow_map, SHADOW_VIEW_BASE + 0)
+	testing.expect_value(t, lights[2].light.shadow_map, SHADOW_VIEW_BASE + 6)
+	testing.expect_value(t, lights[3].light.shadow_map, SHADOW_VIEW_BASE + 7)
+	testing.expect_value(t, r.internal.shadow_view_count, 8)
 }

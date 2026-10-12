@@ -1,43 +1,121 @@
 #version 450
+#extension GL_EXT_nonuniform_qualifier : require
 
-// Depth pyramid generation shader - MAX reduction for forward-Z
-// This computes the farthest depth value in 2x2 blocks to build the depth hierarchy
+// Builds every mip of a max-depth pyramid in one dispatch. Mip 0 is half the
+// depth image's size; each texel holds the farthest depth of the 2x2 texels
+// below it. A group reduces a 32x32 tile of mip 0 down to mip 5 in shared
+// memory; the last group to finish, found with a global counter, reduces the
+// remaining mips from mip 5. Pyramid slot params.slot owns storage images
+// [slot * MAX_MIPS, slot * MAX_MIPS + mip_count) and counter slot.
 
-layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+const uint SAMPLER_MAX_REDUCE = 5u;
+
+const uint MAX_MIPS = 16u;
+const uint TILE = 32u; // mip 0 texels per tile side
+const uint TILE_MIPS = 6u; // mips 0..5 come from the tile
 
 layout(push_constant) uniform PushConstants {
-    uint current_mip;
+    uint depth_index; // bindless depth image
+    uint mip_count;
+    uint group_count;
+    uint slot;
 } params;
 
-layout(set = 0, binding = 0) uniform sampler2D source_depth;
-layout(set = 0, binding = 1, r32f) uniform writeonly image2D dest_depth;
+layout(set = 1, binding = 0) uniform texture2D textures[];
+layout(set = 1, binding = 1) uniform sampler samplers[];
+
+layout(set = 1, binding = 2, r32f) uniform coherent image2D storage_images[];
+// groups done this dispatch, per pyramid slot; the last group resets it
+layout(set = 1, binding = 4) coherent buffer Counters {
+    uint finished_groups[];
+};
+
+#define mips(mip) storage_images[params.slot * MAX_MIPS + (mip)]
+
+shared float tile[TILE / 2][TILE / 2];
+shared bool is_last_group;
+
+// Farthest depth of mip 0 texel p: the 2x2 depth texels below it, one fetch
+// through the max-reduce sampler at the corner they share. Clamp-to-edge
+// repeats the last row and column of an odd-sized image.
+float mip0_value(ivec2 p, vec2 texel) {
+    return textureLod(sampler2D(textures[params.depth_index], samplers[SAMPLER_MAX_REDUCE]), vec2(p * 2 + 1) * texel, 0.0).r;
+}
+
+void store(uint mip, ivec2 p, float value) {
+    if (mip >= params.mip_count) return;
+    if (any(greaterThanEqual(p, imageSize(mips(mip))))) return;
+    imageStore(mips(mip), p, vec4(value));
+}
 
 void main() {
-    uvec2 pos = gl_GlobalInvocationID.xy;
-    ivec2 dest_size = imageSize(dest_depth);
+    uint tid = gl_LocalInvocationIndex;
+    vec2 texel = 1.0 / vec2(textureSize(sampler2D(textures[params.depth_index], samplers[SAMPLER_MAX_REDUCE]), 0));
+    ivec2 tile_origin = ivec2(gl_WorkGroupID.xy) * int(TILE);
 
-    // Bounds check
-    if (pos.x >= dest_size.x || pos.y >= dest_size.y) return;
+    // Mips 0 and 1: each thread owns a 2x2 block of mip 0, one mip 1 texel.
+    ivec2 local = ivec2(tid % (TILE / 2), tid / (TILE / 2));
+    ivec2 p0 = tile_origin + local * 2;
+    float a = mip0_value(p0, texel);
+    float b = mip0_value(p0 + ivec2(1, 0), texel);
+    float c = mip0_value(p0 + ivec2(0, 1), texel);
+    float d = mip0_value(p0 + ivec2(1, 1), texel);
+    store(0u, p0, a);
+    store(0u, p0 + ivec2(1, 0), b);
+    store(0u, p0 + ivec2(0, 1), c);
+    store(0u, p0 + ivec2(1, 1), d);
+    float m1 = max(max(a, b), max(c, d));
+    store(1u, tile_origin / 2 + local, m1);
+    tile[local.y][local.x] = m1;
+    barrier();
 
-    float max_depth = 0.0; // Start with near plane (closest)
-
-    if (params.current_mip == 0) {
-        // For mip 0: Read from depth texture using texelFetch (no filtering)
-        // Sample a 2x2 block from the source depth texture and take MAX
-        ivec2 src_pos = ivec2(pos) * 2;
-        for (int y = 0; y < 2; y++) {
-            for (int x = 0; x < 2; x++) {
-                float d = texelFetch(source_depth, src_pos + ivec2(x, y), 0).r;
-                max_depth = max(max_depth, d);
-            }
+    // Mips 2..5 from shared memory, halving the live threads each step.
+    uint side = TILE / 2;
+    for (uint mip = 2u; mip < TILE_MIPS; ++mip) {
+        side /= 2u;
+        float value = 0.0;
+        ivec2 q = ivec2(tid % side, tid / side);
+        bool live = tid < side * side;
+        if (live) {
+            ivec2 s = q * 2;
+            value = max(max(tile[s.y][s.x], tile[s.y][s.x + 1]),
+                        max(tile[s.y + 1][s.x], tile[s.y + 1][s.x + 1]));
+            store(mip, (tile_origin >> mip) + q, value);
         }
-    } else {
-        // For other mips: Use filtered sampling with MAX reduction sampler
-        // The sampler is configured with MAX reduction, so texture() returns max of 2x2
-        vec2 uv = (vec2(pos) + 0.5) / vec2(dest_size);
-        max_depth = texture(source_depth, uv).r;
+        barrier();
+        if (live) tile[q.y][q.x] = value;
+        barrier();
     }
 
-    // Store the maximum depth value (farthest occluder for forward-Z)
-    imageStore(dest_depth, ivec2(pos), vec4(max_depth, 0, 0, 0));
+    if (params.mip_count <= TILE_MIPS) return;
+
+    // Publish this group's mip 5 texel, then let the last group finish.
+    memoryBarrierImage();
+    barrier();
+    if (tid == 0u) {
+        is_last_group = atomicAdd(finished_groups[params.slot], 1u) == params.group_count - 1u;
+    }
+    barrier();
+    if (!is_last_group) return;
+    memoryBarrierImage();
+
+    for (uint mip = TILE_MIPS; mip < params.mip_count; ++mip) {
+        ivec2 size = imageSize(mips(mip));
+        ivec2 prev_max = imageSize(mips(mip - 1u)) - 1;
+        for (uint i = tid; i < uint(size.x * size.y); i += gl_WorkGroupSize.x) {
+            ivec2 q = ivec2(int(i) % size.x, int(i) / size.x);
+            ivec2 s = q * 2;
+            float value = max(
+                max(imageLoad(mips(mip - 1u), min(s, prev_max)).r,
+                    imageLoad(mips(mip - 1u), min(s + ivec2(1, 0), prev_max)).r),
+                max(imageLoad(mips(mip - 1u), min(s + ivec2(0, 1), prev_max)).r,
+                    imageLoad(mips(mip - 1u), min(s + ivec2(1, 1), prev_max)).r));
+            imageStore(mips(mip), q, vec4(value));
+        }
+        memoryBarrierImage();
+        barrier();
+    }
+    if (tid == 0u) finished_groups[params.slot] = 0u;
 }

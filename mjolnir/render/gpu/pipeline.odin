@@ -17,6 +17,7 @@ STANDARD_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
   polygonMode = .FILL,
   cullMode    = {.BACK},
   frontFace   = .COUNTER_CLOCKWISE,
+  lineWidth   = 1.0,
 }
 
 DOUBLE_SIDED_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
@@ -196,15 +197,6 @@ allocate_descriptor_set :: proc(
   )
 }
 
-// Return sets to the descriptor pool. Null handles are ignored.
-free_descriptor_sets :: proc(gctx: ^GPUContext, sets: ..vk.DescriptorSet) {
-  for set in sets {
-    if set == 0 do continue
-    s := set
-    vk.FreeDescriptorSets(gctx.device, gctx.descriptor_pool, 1, &s)
-  }
-}
-
 // Allocate primary command buffers from `pool` (default: the graphics pool).
 allocate_command_buffer :: proc(
   gctx: ^GPUContext,
@@ -237,100 +229,26 @@ free_command_buffer :: proc(
   )
 }
 
-update_descriptor_set :: proc(
-  gctx: ^GPUContext,
-  dst: vk.DescriptorSet,
-  buffers: ..struct {
-    type: vk.DescriptorType,
-    info: union {
-      vk.DescriptorBufferInfo,
-      vk.DescriptorImageInfo,
-    },
-  },
-) {
-  writes := make([]vk.WriteDescriptorSet, len(buffers))
-  defer delete(writes)
-  for &b, i in buffers {
-    writes[i] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = dst,
-      dstBinding      = u32(i),
-      descriptorType  = b.type,
-      descriptorCount = 1,
-    }
-    switch &v in b.info {
-    case vk.DescriptorBufferInfo:
-      writes[i].pBufferInfo = &v
-    case vk.DescriptorImageInfo:
-      writes[i].pImageInfo = &v
-    }
-  }
-  vk.UpdateDescriptorSets(
-    gctx.device,
-    u32(len(writes)),
-    raw_data(writes),
-    0,
-    nil,
-  )
+// The resource one descriptor points at.
+DescriptorInfo :: union {
+  vk.DescriptorBufferInfo,
+  vk.DescriptorImageInfo,
 }
 
-create_descriptor_set :: proc(
-  gctx: ^GPUContext,
-  layout: ^vk.DescriptorSetLayout,
-  buffers: ..struct {
-    type: vk.DescriptorType,
-    info: union {
-      vk.DescriptorBufferInfo,
-      vk.DescriptorImageInfo,
-    },
-  },
-) -> (
-  dst: vk.DescriptorSet,
-  ret: vk.Result,
-) {
-  allocate_descriptor_set(gctx, &dst, layout) or_return
-  update_descriptor_set(gctx, dst, ..buffers)
-  return dst, .SUCCESS
+// One binding of a descriptor set layout: `count` descriptors of `type`.
+DescriptorBinding :: struct {
+  type:   vk.DescriptorType,
+  count:  u32,
+  stages: vk.ShaderStageFlags,
 }
 
-create_descriptor_set_layout :: proc(gctx: ^GPUContext, bindings: ..struct {
-    type:  vk.DescriptorType,
-    flags: vk.ShaderStageFlags,
-  }) -> (layout: vk.DescriptorSetLayout, ret: vk.Result) {
-  vk_bindings := make([]vk.DescriptorSetLayoutBinding, len(bindings))
-  defer delete(vk_bindings)
-  for &b, i in bindings {
-    vk_bindings[i] = {
-      binding         = u32(i),
-      descriptorType  = b.type,
-      descriptorCount = 1,
-      stageFlags      = b.flags,
-    }
-  }
-  vk.CreateDescriptorSetLayout(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = u32(len(vk_bindings)),
-      pBindings = raw_data(vk_bindings),
-    },
-    nil,
-    &layout,
-  ) or_return
-  ret = .SUCCESS
-  return
-}
-
-// Layout for bindless descriptor arrays: binding i holds `count` descriptors
-// and is PARTIALLY_BOUND, so slots never written stay legal as long as shaders
-// do not read them. Fill slots with write_descriptor_array_element.
-create_descriptor_array_layout :: proc(
+// Layout whose binding i is bindings[i]. Every binding is PARTIALLY_BOUND,
+// so slots never written stay legal as long as shaders do not read them, and
+// UPDATE_UNUSED_WHILE_PENDING, so a slot no submitted work uses may be
+// written while the set is in use. Fill slots with write_descriptor.
+create_descriptor_layout :: proc(
   gctx: ^GPUContext,
-  bindings: ..struct {
-    type:  vk.DescriptorType,
-    count: u32,
-    flags: vk.ShaderStageFlags,
-  },
+  bindings: ..DescriptorBinding,
 ) -> (
   layout: vk.DescriptorSetLayout,
   ret: vk.Result,
@@ -342,9 +260,9 @@ create_descriptor_array_layout :: proc(
       binding         = u32(i),
       descriptorType  = b.type,
       descriptorCount = b.count,
-      stageFlags      = b.flags,
+      stageFlags      = b.stages,
     }
-    binding_flags[i] = {.PARTIALLY_BOUND}
+    binding_flags[i] = {.PARTIALLY_BOUND, .UPDATE_UNUSED_WHILE_PENDING}
   }
   flags_info := vk.DescriptorSetLayoutBindingFlagsCreateInfo {
     sType         = .DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
@@ -366,13 +284,13 @@ create_descriptor_array_layout :: proc(
   return
 }
 
-// Write one image descriptor into slot `index` of array binding `binding`.
-write_descriptor_array_element :: proc(
+// Point slot `index` of binding `binding` of `set` at `info`.
+write_descriptor :: proc(
   gctx: ^GPUContext,
   set: vk.DescriptorSet,
   binding, index: u32,
   type: vk.DescriptorType,
-  info: vk.DescriptorImageInfo,
+  info: DescriptorInfo,
 ) {
   if set == 0 do return
   info := info
@@ -383,7 +301,12 @@ write_descriptor_array_element :: proc(
     dstArrayElement = index,
     descriptorType  = type,
     descriptorCount = 1,
-    pImageInfo      = &info,
+  }
+  switch &v in info {
+  case vk.DescriptorBufferInfo:
+    write.pBufferInfo = &v
+  case vk.DescriptorImageInfo:
+    write.pImageInfo = &v
   }
   vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
 }
@@ -413,55 +336,47 @@ create_pipeline_layout :: proc(
   return
 }
 
-bind_pipeline :: proc(
-  command_buffer: vk.CommandBuffer,
-  bind_point: vk.PipelineBindPoint,
-  pipeline: vk.Pipeline,
-  layout: vk.PipelineLayout,
-  ds: ..vk.DescriptorSet,
-) {
-  vk.CmdBindPipeline(command_buffer, bind_point, pipeline)
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    bind_point,
-    layout,
-    0,
-    u32(len(ds)),
-    raw_data(ds),
-    0,
-    nil,
-  )
+// Discard of one image, all mips and layers: UNDEFINED → GENERAL, ready for
+// `access` at `stage`.
+ImageDiscard :: struct {
+  image:  vk.Image,
+  aspect: vk.ImageAspectFlags,
+  access: vk.AccessFlags2,
+  stage:  vk.PipelineStageFlags2,
 }
 
-image_discard_barrier :: proc(
-  command_buffer: vk.CommandBuffer,
-  image: vk.Image,
-  dst_access: vk.AccessFlags2,
-  dst_stage: vk.PipelineStageFlags2,
-  aspect_mask: vk.ImageAspectFlags,
-  level_count: u32 = 1,
-  layer_count: u32 = 1,
-) {
-  barrier := vk.ImageMemoryBarrier2 {
-    sType = .IMAGE_MEMORY_BARRIER_2,
-    srcStageMask = {.TOP_OF_PIPE},
-    dstStageMask = dst_stage,
-    dstAccessMask = dst_access,
-    oldLayout = .UNDEFINED,
-    newLayout = .GENERAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = image,
-    subresourceRange = {
-      aspectMask = aspect_mask,
-      levelCount = level_count,
-      layerCount = layer_count,
-    },
+// Discard of an attachment image, ready for its color or depth writes.
+attachment_discard :: proc(img: ^Image) -> ImageDiscard {
+  aspect := infer_aspect_mask(img.format)
+  if .COLOR in aspect do return {img.image, aspect, {.COLOR_ATTACHMENT_WRITE}, {.COLOR_ATTACHMENT_OUTPUT}}
+  return {img.image, aspect, {.DEPTH_STENCIL_ATTACHMENT_WRITE}, {.EARLY_FRAGMENT_TESTS}}
+}
+
+// Discard every image of `discards` in one dependency.
+image_discard_barrier :: proc(command_buffer: vk.CommandBuffer, discards: ..ImageDiscard) {
+  barriers := make([]vk.ImageMemoryBarrier2, len(discards), context.temp_allocator)
+  for d, i in discards {
+    barriers[i] = {
+      sType = .IMAGE_MEMORY_BARRIER_2,
+      srcStageMask = {.TOP_OF_PIPE},
+      dstStageMask = d.stage,
+      dstAccessMask = d.access,
+      oldLayout = .UNDEFINED,
+      newLayout = .GENERAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = d.image,
+      subresourceRange = {
+        aspectMask = d.aspect,
+        levelCount = vk.REMAINING_MIP_LEVELS,
+        layerCount = vk.REMAINING_ARRAY_LAYERS,
+      },
+    }
   }
   dep := vk.DependencyInfo {
     sType                   = .DEPENDENCY_INFO,
-    imageMemoryBarrierCount = 1,
-    pImageMemoryBarriers    = &barrier,
+    imageMemoryBarrierCount = u32(len(barriers)),
+    pImageMemoryBarriers    = raw_data(barriers),
   }
   vk.CmdPipelineBarrier2(command_buffer, &dep)
 }
@@ -484,36 +399,6 @@ memory_barrier :: proc(
     sType              = .DEPENDENCY_INFO,
     memoryBarrierCount = 1,
     pMemoryBarriers    = &barrier,
-  }
-  vk.CmdPipelineBarrier2(command_buffer, &dep)
-}
-
-buffer_barrier :: proc(
-  command_buffer: vk.CommandBuffer,
-  buffer: vk.Buffer,
-  size: vk.DeviceSize,
-  src_access: vk.AccessFlags2,
-  dst_access: vk.AccessFlags2,
-  src_stage: vk.PipelineStageFlags2,
-  dst_stage: vk.PipelineStageFlags2,
-  offset: vk.DeviceSize = 0,
-) {
-  barrier := vk.BufferMemoryBarrier2 {
-    sType               = .BUFFER_MEMORY_BARRIER_2,
-    srcStageMask        = src_stage,
-    srcAccessMask       = src_access,
-    dstStageMask        = dst_stage,
-    dstAccessMask       = dst_access,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer              = buffer,
-    offset              = offset,
-    size                = size,
-  }
-  dep := vk.DependencyInfo {
-    sType                    = .DEPENDENCY_INFO,
-    bufferMemoryBarrierCount = 1,
-    pBufferMemoryBarriers    = &barrier,
   }
   vk.CmdPipelineBarrier2(command_buffer, &dep)
 }
@@ -565,18 +450,12 @@ bind_vertex_index_buffers :: proc(
   vk.CmdBindIndexBuffer(command_buffer, index_buffer, index_offset, index_type)
 }
 
-set_viewport_scissor :: proc(
-  command_buffer: vk.CommandBuffer,
-  extent: vk.Extent2D,
-  flip_x: bool = false,
-  flip_y: bool = true,
-) {
+// Viewport and scissor covering `extent`. Clip-space y points down, as the
+// projections in geometry build it.
+set_viewport_scissor :: proc(command_buffer: vk.CommandBuffer, extent: vk.Extent2D) {
   viewport := vk.Viewport {
-    x        = flip_x ? f32(extent.width) : 0,
-    y        = flip_y ? f32(extent.height) : 0,
-    width    = flip_x ? -f32(extent.width) : f32(extent.width),
-    height   = flip_y ? -f32(extent.height) : f32(extent.height),
-    minDepth = 0.0,
+    width    = f32(extent.width),
+    height   = f32(extent.height),
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {

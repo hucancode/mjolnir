@@ -64,7 +64,7 @@ setup :: proc(app: ^App) {
   render.attach(&app.renderer, light.index, render.point_light_attachment({1.0, 0.6, 0.3, 1.0}, 12.0, false))
 
   rtt_camera_handle = render.create_camera(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
-  rtt_material_handle = render.create_material(&app.renderer, {.ALBEDO_TEXTURE})
+  rtt_material_handle = render.create_material(&app.renderer)
 
   display_mesh := app.renderer.builtin_meshes[.QUAD_XY]
   display_handle := world.spawn(&app.scene, {0, 2.5, -3.5})
@@ -79,7 +79,7 @@ update :: proc(app: ^App, dt: f32) {
   world.rotate(&app.scene, spinner_handle, app.time, linalg.VECTOR3F32_Y_AXIS)
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
   render.update(&app.renderer, dt)
 }
 

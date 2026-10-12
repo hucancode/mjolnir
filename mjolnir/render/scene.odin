@@ -8,6 +8,7 @@ import "core:log"
 import "gpu"
 import "core:math"
 import "core:math/linalg"
+import "core:slice"
 import "core:sync"
 import vk "vendor:vulkan"
 
@@ -19,14 +20,12 @@ PointLightAttachment :: struct {
   color:       [4]f32, // RGB + intensity
   radius:      f32, // range
   cast_shadow: bool,
-  disabled:    bool, // zero-default = enabled; toggle to skip GPU upload without losing color/radius
 }
 
 DirectionalLightAttachment :: struct {
   color:       [4]f32, // RGB + intensity
   radius:      f32, // shadow projection radius
   cast_shadow: bool,
-  disabled:    bool,
 }
 
 SpotLightAttachment :: struct {
@@ -35,7 +34,6 @@ SpotLightAttachment :: struct {
   angle_inner: f32, // inner cone angle
   angle_outer: f32, // outer cone angle
   cast_shadow: bool,
-  disabled:    bool,
 }
 
 MeshAttachment :: struct {
@@ -63,7 +61,7 @@ Attachment :: union {
 
 // What render draws at one transform slot. The transform itself is owned by
 // whoever drives the slot (normally the world module) and pushed in with
-// stage_transform.
+// stage_transforms.
 @(private)
 Instance :: struct {
   world_matrix: matrix[4, 4]f32,
@@ -181,19 +179,18 @@ is_light :: proc(a: Attachment) -> bool {
 
 // ---------- slot boundary: what the transform owner pushes in ----------
 
-// Set the world transform and effective visibility of a slot.
-stage_transform :: proc(
-  self: ^Manager,
-  slot: u32,
-  world_matrix: matrix[4, 4]f32,
-  visible: bool,
-) {
+// Set the world transform and effective visibility of every slot in
+// `changes`: any struct with `index` (the slot), `world_matrix` and `visible`
+// fields, such as world.NodeChange.
+stage_transforms :: proc(self: ^Manager, changes: []$T) {
   sync.mutex_lock(&self.internal.staging.mutex)
   defer sync.mutex_unlock(&self.internal.staging.mutex)
-  inst := ensure_slot(self, slot)
-  inst.world_matrix = world_matrix
-  inst.visible = visible
-  stage_per_frame(&self.internal.staging.nodes, slot)
+  for &c in changes {
+    inst := ensure_slot(self, c.index)
+    inst.world_matrix = c.world_matrix
+    inst.visible = c.visible
+    stage_per_frame(&self.internal.staging.nodes, c.index)
+  }
 }
 
 // Forget everything drawn at a slot. Emitters and force fields owned
@@ -383,20 +380,8 @@ INVALID_NODE :: NodeData {
 }
 
 @(private = "file")
-material_type_flags :: proc(t: MaterialType) -> NodeFlagSet {
-  switch t {
-  case .TRANSPARENT:  return {.MATERIAL_TRANSPARENT}
-  case .WIREFRAME:    return {.MATERIAL_WIREFRAME}
-  case .RANDOM_COLOR: return {.MATERIAL_RANDOM_COLOR}
-  case .SPRITE:       return {.MATERIAL_SPRITE}
-  case .PBR:          return {}
-  }
-  return {}
-}
-
-@(private = "file")
 flush_nodes :: proc(self: ^Manager, frame_index: u32) {
-  buffer := &self.internal.node_data_buffer.buffers[frame_index]
+  nodes := frame_table(self, .NODES, NodeData, frame_index)
   staged := &self.internal.staging.nodes[frame_index]
   it := ba.make_iterator(staged)
   // Slots trimmed off the end are still cleared, in case the list grows back
@@ -406,8 +391,6 @@ flush_nodes :: proc(self: ^Manager, frame_index: u32) {
     inst := &self.instances[slot] if slot < len(self.instances) else &empty
     nd := INVALID_NODE
     nd.world_matrix = inst.world_matrix
-    material_handle: MaterialHandle
-    has_material := false
     #partial switch att in inst.attachment {
     case MeshAttachment:
       if p, skinned := self.internal.bones[u32(slot)]; skinned {
@@ -415,17 +398,10 @@ flush_nodes :: proc(self: ^Manager, frame_index: u32) {
       }
       nd.material_id = att.material.index
       nd.mesh_id = att.handle.index
-      nd.flags |= {.CULLING_ENABLED}
       if att.cast_shadow do nd.flags |= {.CASTS_SHADOW}
-      material_handle, has_material = att.material, true
-    }
-    if has_material {
       if inst.visible do nd.flags |= {.VISIBLE}
-      if mat, ok := cont.get(self.materials, material_handle); ok {
-        nd.flags |= material_type_flags(mat.type)
-      }
     }
-    gpu.write(buffer, &nd, slot)
+    nodes[slot] = nd
   }
   ba.clear(staged)
 }
@@ -461,14 +437,14 @@ live_at :: proc(pool: ^cont.Pool($T), index: int) -> (^T, bool) {
 flush_pool :: proc(
   staged: ^ba.Bit_Array,
   pool: ^cont.Pool($T),
-  buffer: ^gpu.MutableBuffer($G),
+  table: []$G,
   to_gpu: proc(item: ^T) -> G,
 ) {
   it := ba.make_iterator(staged)
   for index in ba.iterate_by_set(&it) {
     data: G
     if item, live := live_at(pool, index); live do data = to_gpu(item)
-    gpu.write(buffer, &data, index)
+    table[index] = data
   }
   ba.clear(staged)
 }
@@ -476,11 +452,10 @@ flush_pool :: proc(
 @(private = "file")
 material_gpu :: proc(m: ^Material) -> MaterialData {
   return {
-    albedo_index = m.albedo.index,
-    metallic_roughness_index = m.metallic_roughness.index,
-    normal_index = m.normal.index,
-    emissive_index = m.emissive.index,
-    features = m.features,
+    albedo_index = texture_index(m.albedo),
+    metallic_roughness_index = texture_index(m.metallic_roughness),
+    normal_index = texture_index(m.normal),
+    emissive_index = texture_index(m.emissive),
     metallic_value = m.metallic_value,
     roughness_value = m.roughness_value,
     emissive_value = m.emissive_value,
@@ -488,11 +463,12 @@ material_gpu :: proc(m: ^Material) -> MaterialData {
     frame_columns = m.frame_columns,
     frame_rows = m.frame_rows,
     frame_index = m.frame_index,
+    type = m.type,
   }
 }
 
 @(private = "file")
-emitter_gpu :: proc(em: ^Emitter) -> EmitterData {
+emitter_gpu :: proc(em: ^Emitter, emit_first: u32) -> EmitterData {
   return {
     initial_velocity = em.initial_velocity,
     size_start = em.size_start,
@@ -501,7 +477,7 @@ emitter_gpu :: proc(em: ^Emitter) -> EmitterData {
     particle_lifetime = em.particle_lifetime,
     position_spread = em.position_spread,
     velocity_spread = em.velocity_spread,
-    emit_count = em.pending_emit,
+    emit_first = emit_first,
     size_end = em.size_end,
     weight = em.weight,
     weight_spread = em.weight_spread,
@@ -512,20 +488,28 @@ emitter_gpu :: proc(em: ^Emitter) -> EmitterData {
 
 // Hand the emissions and simulation time accumulated by update to this
 // frame. Every emitter is written: the buffer is per frame and emit counts
-// change every frame.
+// change every frame. Emitters take consecutive ranges of the frame's new
+// particles, which take consecutive ring slots after the previous frame's.
 @(private = "file")
 flush_particles :: proc(self: ^Manager, frame_index: u32) {
-  buffer := &self.internal.emitter_buffer.buffers[frame_index]
+  emitters := frame_table(self, .EMITTERS, EmitterData, frame_index)
   emitter_count := min(len(self.emitters.entries), MAX_EMITTERS)
+  p := &self.internal.particles.params
+  p.emit_cursor = (p.emit_cursor + p.emit_total) % MAX_PARTICLES
+  total: u32
   for index in 0 ..< emitter_count {
-    data: EmitterData
+    data := EmitterData {
+      emit_first = total,
+    }
     if em, live := live_at(&self.emitters, index); live {
-      data = emitter_gpu(em)
+      data = emitter_gpu(em, total)
+      total += em.pending_emit
       em.pending_emit = 0
     }
-    gpu.write(buffer, &data, index)
+    emitters[index] = data
   }
-  p := &self.internal.particles.params
+  // A ring slot takes at most one new particle per frame.
+  p.emit_total = min(total, MAX_PARTICLES)
   p.emitter_count = u32(emitter_count)
   p.forcefield_count = u32(min(len(self.forcefields.entries), MAX_FORCE_FIELDS))
   p.delta_time = self.internal.staging.particle_time
@@ -545,16 +529,17 @@ forcefield_gpu :: proc(ff: ^ForceField) -> ForceFieldData {
 
 @(private = "file")
 flush_bones :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
-  // This frame's fence has signaled, so its buffer is free to replace.
+  // wait_frame has returned, so this frame's arena is free to replace.
   capacity := int(self.internal.bone_matrix_slab.capacity)
-  if len(gpu.get_all(&self.internal.bone_buffer.buffers[frame_index])) < capacity {
-    gpu.per_frame_bindless_buffer_resize(&self.internal.bone_buffer, &self.gctx, frame_index, capacity) or_return
+  if len(frame_table(self, .BONES, matrix[4, 4]f32, frame_index)) < capacity {
+    grow_frame_arena(self, frame_index, capacity) or_return
   }
+  bones := frame_table(self, .BONES, matrix[4, 4]f32, frame_index)
   staged := &self.internal.staging.bones[frame_index]
   it := ba.make_iterator(staged)
   for slot in ba.iterate_by_set(&it) {
     p := self.internal.bones[u32(slot)] or_continue
-    if p.offset != NO_BONES do upload_bone_matrices(self, frame_index, p.offset, p.matrices)
+    if p.offset != NO_BONES do copy(bones[p.offset:][:len(p.matrices)], p.matrices)
   }
   ba.clear(staged)
   return .SUCCESS
@@ -562,9 +547,18 @@ flush_bones :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
 
 @(private = "file")
 flush_cameras :: proc(self: ^Manager, frame_index: u32) {
+  cameras := frame_table(self, .CAMERAS, CameraGPU, frame_index)
+  views := frame_table(self, .VIEWS, ViewGPU, frame_index)
+  // This frame's cull writes the lists of the next frame. A slot without a
+  // camera keeps an empty view that draws no type.
+  next_frame_index := (frame_index + 1) % gpu.FRAMES_IN_FLIGHT
+  slot_count := len(self.cameras.entries)
+  slice.zero(views[CAMERA_VIEW_BASE:][:slot_count])
+  all_types := u32(1 << len(MaterialType) - 1)
+  occlusion_mask, _ := material_masks()
   it := cont.iterator(&self.cameras)
-  buffer := &self.internal.camera_buffer.buffers[frame_index]
   for cam, handle in cont.next(&it, CameraHandle) {
+    occlusion_bind_pyramid(&self.gctx, &cam.depth_pyramid[frame_index], &self.texture_manager)
     data := CameraGPU {
       view            = camera_view_matrix(cam),
       projection      = camera_projection_matrix(cam),
@@ -574,9 +568,21 @@ flush_cameras :: proc(self: ^Manager, frame_index: u32) {
       position        = {cam.position.x, cam.position.y, cam.position.z, 1},
     }
     view_projection := data.projection * data.view
-    data.frustum_planes = geom.make_frustum(view_projection).planes
     data.inv_view_projection = linalg.inverse(view_projection)
-    gpu.write(buffer, &data, int(handle.index))
+    cameras[handle.index] = data
+    pyramid := cam.depth_pyramid[frame_index].texture
+    views[CAMERA_VIEW_BASE + handle.index] = {
+      planes          = geom.make_frustum(view_projection).planes,
+      view_projection = view_projection,
+      camera_index    = handle.index,
+      pyramid         = pyramid.index,
+      occlusion_mask  = occlusion_mask if self.gctx.frame_serial >= cam.ready_serial else 0,
+      list_stride     = 1,
+      type_mask       = all_types,
+      require_flags   = {.VISIBLE},
+      draw_list       = cam.draws.slot + next_frame_index,
+      list_capacity   = cam.draws.capacity,
+    }
   }
 }
 
@@ -595,15 +601,17 @@ flush :: proc(
     flush_nodes(self, frame_index)
     flush_meshes(self, gctx)
     flush_bones(self, frame_index) or_return
-    flush_pool(&staging.materials[frame_index], &self.materials, &self.internal.material_buffer.buffers[frame_index], material_gpu)
+    flush_pool(&staging.materials[frame_index], &self.materials, frame_table(self, .MATERIALS, MaterialData, frame_index), material_gpu)
     flush_particles(self, frame_index)
-    flush_pool(&staging.forcefields[frame_index], &self.forcefields, &self.internal.forcefield_buffer.buffers[frame_index], forcefield_gpu)
+    flush_pool(&staging.forcefields[frame_index], &self.forcefields, frame_table(self, .FORCEFIELDS, ForceFieldData, frame_index), forcefield_gpu)
     collect_lights(self, gctx)
+    upload_lights(self, frame_index)
+    shadow_atlas_reserve(self, frame_index, self.internal.shadow_view_count) or_return
     // Culling dispatches cover the slots up to the last occupied one.
     for n := len(self.instances); n > 0 && slot_empty(&self.instances[n - 1]); n -= 1 {
       pop(&self.instances)
     }
-    self.node_count = min(u32(len(self.instances)), self.internal.visibility.max_draws)
+    self.node_count = min(u32(len(self.instances)), MAX_NODES_IN_SCENE)
   }
   flush_cameras(self, frame_index)
   flush_ui_atlas(self, gctx) or_return

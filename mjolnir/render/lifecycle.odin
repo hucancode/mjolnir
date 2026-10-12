@@ -13,50 +13,15 @@ init_subsystems :: proc(
   swapchain_format: vk.Format,
   dpi_scale: f32,
 ) -> vk.Result {
-  occlusion_init(&self.internal.visibility, gctx, MAX_NODES_IN_SCENE) or_return
+  layout := self.internal.scene.layout
+  occlusion_init(self) or_return
   shadow_init(self) or_return
-  ambient_init(
-    &self.ambient,
-    gctx,
-    self.internal.camera_buffer.set_layout,
-    self.texture_manager.set_layout,
-  ) or_return
-  direct_light_init(
-    &self.internal.direct_light,
-    gctx,
-    self.internal.camera_buffer.set_layout,
-    self.texture_manager.set_layout,
-  ) or_return
-  gbuffer_init(self) or_return
-  particles_init(
-    &self.internal.particles,
-    gctx,
-    self.internal.emitter_buffer.set_layout,
-    self.internal.forcefield_buffer.set_layout,
-    self.internal.node_data_buffer.set_layout,
-    self.internal.camera_buffer.set_layout,
-    self.texture_manager.set_layout,
-  ) or_return
-  forward_init(self) or_return
-  post_process_init(
-    &self.post_process,
-    gctx,
-    swapchain_format,
-    self.texture_manager.set_layout,
-  ) or_return
-  debug_line_init(
-    &self.internal.debug_line_renderer,
-    gctx,
-    self.internal.camera_buffer.set_layout,
-    swapchain_format,
-  ) or_return
-  overlay_init(
-    &self.internal.ui,
-    gctx,
-    self.texture_manager.set_layout,
-    swapchain_format,
-    dpi_scale,
-  ) or_return
+  direct_light_init(self) or_return
+  material_pipelines_init(self) or_return
+  particles_init(self) or_return
+  post_process_init(&self.post_process, gctx, swapchain_format, layout) or_return
+  debug_line_init(&self.internal.debug_line_renderer, gctx, layout, swapchain_format) or_return
+  overlay_init(&self.internal.ui, gctx, layout, swapchain_format, dpi_scale) or_return
   return .SUCCESS
 }
 
@@ -113,8 +78,8 @@ init_vulkan :: proc(
   gpu.device_init(gctx) or_return
   gpu.swapchain_init(&self.swapchain, gctx, framebuffer_size) or_return
   swapchain_format := self.swapchain.format.format
-  gpu.descriptor_pool_init(gctx, DESCRIPTOR_POOL_SIZES[:], DESCRIPTOR_POOL_MAX_SETS) or_return
-  cont.init(&self.cameras, MAX_ACTIVE_CAMERAS)
+  init_descriptor_pool(gctx) or_return
+  cont.init(&self.cameras, MAX_ACTIVE_CAMERAS, gpu.RETIRE_GRACE)
   init_instances(self)
   init_resource_pools(self)
   gpu.allocate_command_buffer(gctx, self.internal.command_buffers[:]) or_return
@@ -128,6 +93,7 @@ init_vulkan :: proc(
   mesh_manager_init(&self.mesh_manager, gctx) or_return
   init_scene_buffers(self, gctx) or_return
   texture_manager_init(&self.texture_manager, gctx) or_return
+  scene_descriptors_init(self) or_return
   init_subsystems(self, gctx, swapchain_format, dpi_scale) or_return
   return .SUCCESS
 }
@@ -151,7 +117,7 @@ setup_level :: proc(self: ^Manager) -> (ret: vk.Result) {
   defer if ret != .SUCCESS do teardown(self)
   texture_manager_setup(&self.texture_manager)
   ambient_setup(&self.ambient, gctx, &self.texture_manager) or_return
-  particles_reset(&self.internal.particles)
+  particles_reset(&self.internal.particles, gctx) or_return
   overlay_setup(&self.internal.ui, gctx, &self.texture_manager) or_return
   if _, ok := main_camera(self); !ok {
     cam, created := create_camera(
@@ -178,8 +144,7 @@ teardown :: proc(self: ^Manager) {
   clear_slots(self)
   it := cont.iterator(&self.cameras)
   for _, handle in cont.next(&it, CameraHandle) do destroy_camera(self, handle)
-  // texture_manager_teardown destroys the shadow textures
-  for &sm in self.internal.shadow_maps do sm.textures = {}
+  cont.flush(&self.cameras, nil, nil)
   overlay_teardown(&self.internal.ui, gctx)
   post_process_teardown(&self.post_process, gctx, &self.texture_manager)
   ambient_teardown(&self.ambient, gctx, &self.texture_manager)
@@ -192,37 +157,9 @@ teardown :: proc(self: ^Manager) {
 // and precompute image-based lighting from it. Level-lifetime: call after
 // setup; teardown frees it. Without one, IBL and the skybox are black.
 load_environment_map :: proc(self: ^Manager, path: string) -> bool {
-  res := ambient_load_environment(&self.ambient, &self.gctx, &self.texture_manager, path)
+  res := ambient_load_environment(&self.ambient, &self.gctx, &self.texture_manager, self.internal.scene.layout, path)
   if res != .SUCCESS do log.warnf("Failed to load environment map %s: %v", path, res)
   return res == .SUCCESS
-}
-
-// Append a post-process effect to the stack every camera runs. Blur and
-// bloom run as two separable passes (horizontal then vertical); their
-// `direction` is set here. A grayscale effect with zero weights uses
-// Rec. 601 luma weights.
-add_effect :: proc(self: ^Manager, effect: PostprocessEffect) {
-  stack := &self.post_process.effect_stack
-  #partial switch e in effect {
-  case BlurEffect:
-    pass := e
-    pass.direction = 0
-    append(stack, pass)
-    pass.direction = 1
-    append(stack, pass)
-  case BloomEffect:
-    pass := e
-    pass.direction = 0
-    append(stack, pass)
-    pass.direction = 1
-    append(stack, pass)
-  case GrayscaleEffect:
-    g := e
-    if g.weights == {} do g.weights = {0.299, 0.587, 0.114}
-    append(stack, g)
-  case:
-    append(stack, effect)
-  }
 }
 
 // Destroy everything init created; tears the level down first if needed.
@@ -238,12 +175,11 @@ shutdown :: proc(self: ^Manager) {
   debug_line_shutdown(&self.internal.debug_line_renderer, gctx)
   post_process_shutdown(&self.post_process, gctx)
   particles_shutdown(&self.internal.particles, gctx)
-  forward_shutdown(&self.internal.forward, gctx)
-  ambient_shutdown(&self.ambient, gctx)
-  direct_light_shutdown(&self.internal.direct_light, gctx)
+  direct_light_shutdown(self)
   shadow_shutdown(&self.internal.shadow, gctx)
-  gbuffer_shutdown(&self.internal.geometry, gctx)
+  material_pipelines_shutdown(self)
   occlusion_shutdown(&self.internal.visibility, gctx)
+  scene_descriptors_shutdown(&self.internal.scene, gctx)
   texture_manager_shutdown(&self.texture_manager, gctx)
   destroy_scene_buffers(self, gctx)
   mesh_manager_shutdown(&self.mesh_manager, gctx)
@@ -273,26 +209,16 @@ recreate_swapchain :: proc(self: ^Manager, framebuffer_size: [2]u32, dpi_scale: 
   return .SUCCESS
 }
 
+// Create the descriptor pool sized for exactly render's sets: one scene set
+// per frame in flight and the bindless set.
 @(private = "file")
-MAX_DEPTH_PYRAMID_MIPS :: 16
-// One storage image per depth-pyramid mip, per frame, per camera.
-@(private = "file")
-STORAGE_IMAGE_COUNT :: MAX_ACTIVE_CAMERAS * gpu.FRAMES_IN_FLIGHT * MAX_DEPTH_PYRAMID_MIPS
-@(private = "file")
-MATERIAL_BUDGET :: 1000
-@(private = "file")
-SAMPLER_BUDGET :: MATERIAL_BUDGET * 3
-
-@(private = "file")
-DESCRIPTOR_POOL_SIZES := [?]vk.DescriptorPoolSize {
-  {.COMBINED_IMAGE_SAMPLER, SAMPLER_BUDGET},
-  {.SAMPLED_IMAGE, SAMPLER_BUDGET},
-  {.SAMPLER, SAMPLER_BUDGET},
-  {.UNIFORM_BUFFER, 128},
-  {.UNIFORM_BUFFER_DYNAMIC, 128},
-  {.STORAGE_BUFFER, MATERIAL_BUDGET},
-  {.STORAGE_IMAGE, STORAGE_IMAGE_COUNT},
+init_descriptor_pool :: proc(gctx: ^gpu.GPUContext) -> vk.Result {
+  sizes := make([dynamic]vk.DescriptorPoolSize, context.temp_allocator)
+  add :: proc(sizes: ^[dynamic]vk.DescriptorPoolSize, type: vk.DescriptorType, count: u32) {
+    for &s in sizes do if s.type == type {s.descriptorCount += count; return}
+    append(sizes, vk.DescriptorPoolSize{type, count})
+  }
+  for type in SCENE_BINDING_TYPES do add(&sizes, type, gpu.FRAMES_IN_FLIGHT)
+  for b in BINDLESS_BINDINGS do add(&sizes, b.type, b.count)
+  return gpu.descriptor_pool_init(gctx, sizes[:], gpu.FRAMES_IN_FLIGHT + 1)
 }
-
-@(private = "file")
-DESCRIPTOR_POOL_MAX_SETS :: gpu.FRAMES_IN_FLIGHT + MATERIAL_BUDGET + STORAGE_IMAGE_COUNT

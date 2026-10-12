@@ -24,7 +24,7 @@ struct Emitter {
   float particle_lifetime;
   float position_spread;
   float velocity_spread;
-  uint emit_count;
+  uint emit_first;
   float size_end;
   float weight;
   float weight_spread;
@@ -32,18 +32,12 @@ struct Emitter {
   uint node_index;
 };
 
-layout(set = 0, binding = 0) buffer EmitterBuffer {
+layout(set = 0, binding = 6) buffer EmitterBuffer {
     Emitter emitters[];
 };
 
-layout(set = 1, binding = 0) buffer ParticleBuffer {
+layout(set = 0, binding = 8) buffer ParticleBuffer {
     Particle particles[];
-};
-
-// Next ring slot to write; wraps modulo MAX_PARTICLES so new particles
-// overwrite the oldest ones once the ring is full.
-layout(set = 1, binding = 1) buffer ParticleCursor {
-    uint cursor;
 };
 
 layout(push_constant) uniform Params {
@@ -51,6 +45,8 @@ layout(push_constant) uniform Params {
     uint forcefield_count;
     float delta_time;
     uint frame_counter;
+    uint emit_total; // new particles this frame
+    uint emit_cursor; // ring slot of the first one
 };
 
 struct NodeData {
@@ -61,7 +57,7 @@ struct NodeData {
     uint flags;
 };
 
-layout(set = 2, binding = 0) readonly buffer WorldMatrixBuffer {
+layout(set = 0, binding = 1) readonly buffer WorldMatrixBuffer {
     NodeData nodes[];
 };
 
@@ -98,50 +94,55 @@ vec3 random_in_sphere(float radius, uint seed) {
     );
 }
 
+// The emitter whose range [emit_first, next emitter's emit_first) holds new
+// particle `id`: the last emitter with emit_first <= id. Emitters with no new
+// particles share their successor's emit_first and are never picked.
+uint find_emitter(uint id) {
+    uint lo = 0u;
+    uint hi = emitter_count;
+    while (lo < hi) {
+        uint mid = (lo + hi) / 2u;
+        if (emitters[mid].emit_first <= id) lo = mid + 1u;
+        else hi = mid;
+    }
+    return lo - 1u;
+}
+
+// One thread per new particle, written to the ring slot after the previous
+// one; once the ring is full new particles overwrite the oldest.
 void main() {
-    uint emitter_idx = gl_GlobalInvocationID.x;
-    if (emitter_idx >= emitter_count) return;
-    uint node_index = emitters[emitter_idx].node_index;
-    if (node_index >= nodes.length()) {
-        return;
-    }
-    // emit_count is accumulated CPU-side and handed to one frame (see flush_particles)
-    // so per-frame restages don't clobber the fractional accumulator.
-    uint emit_count = emitters[emitter_idx].emit_count;
-    for (uint i = 0; i < emit_count; ++i) {
-        uint idx = atomicAdd(cursor, 1u) % uint(MAX_PARTICLES);
-        // Per-particle seed that varies across frames, emitters, and particles.
-        // Without frame_counter every emission with the same idx/emitter would
-        // hash to identical randomness, so low-rate emitters always spawned at
-        // the same point.
-        uint seed = pcg_hash(idx
-                             ^ (frame_counter * 2654435761u)
-                             ^ (emitter_idx * 374761393u)
-                             ^ (i * 2246822519u));
-        mat4 world = nodes[node_index].world_matrix;
-        mat3 world_rotation = mat3(world);
-        // Position: emitter position + random spread (local spread rotated into world space)
-        vec4 base_pos = world * vec4(0.0, 0.0, 0.0, 1.0);
-        vec3 pos_spread = random_in_sphere(emitters[emitter_idx].position_spread, seed);
-        vec3 world_offset = world_rotation * pos_spread;
-        vec4 position = base_pos + vec4(world_offset, 0.0);
-        // Velocity: initial_velocity + random spread (expressed in local space)
-        vec3 base_vel = world_rotation * emitters[emitter_idx].initial_velocity.xyz;
-        vec3 vel_spread = world_rotation * random_in_sphere(emitters[emitter_idx].velocity_spread, seed + 7u);
-        vec4 velocity = vec4(base_vel + vel_spread, 0.0);
-        float lifetime = emitters[emitter_idx].particle_lifetime;
-        float weight = emitters[emitter_idx].weight + (rand_unit(seed + 13u) - 0.5) * emitters[emitter_idx].weight_spread;
-        particles[idx] = Particle(
-            position.xyz,
-            emitters[emitter_idx].size_start,
-            velocity.xyz,
-            emitters[emitter_idx].size_end,
-            emitters[emitter_idx].color_start,
-            emitters[emitter_idx].color_end,
-            lifetime,
-            lifetime,
-            weight,
-            emitters[emitter_idx].texture_index
-        );
-    }
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= emit_total) return;
+    uint emitter_idx = find_emitter(id);
+    Emitter emitter = emitters[emitter_idx];
+    if (emitter.node_index >= nodes.length()) return;
+    uint idx = (emit_cursor + id) % uint(MAX_PARTICLES);
+    // Varies across frames, emitters and particles: without frame_counter
+    // low-rate emitters would spawn at the same point every frame.
+    uint seed = pcg_hash(idx
+                         ^ (frame_counter * 2654435761u)
+                         ^ (emitter_idx * 374761393u)
+                         ^ ((id - emitter.emit_first) * 2246822519u));
+    mat4 world = nodes[emitter.node_index].world_matrix;
+    mat3 world_rotation = mat3(world);
+    // Position: emitter position + random spread (local spread rotated into world space)
+    vec3 pos_spread = random_in_sphere(emitter.position_spread, seed);
+    vec3 position = world[3].xyz + world_rotation * pos_spread;
+    // Velocity: initial_velocity + random spread (expressed in local space)
+    vec3 vel_spread = random_in_sphere(emitter.velocity_spread, seed + 7u);
+    vec3 velocity = world_rotation * (emitter.initial_velocity + vel_spread);
+    float lifetime = emitter.particle_lifetime;
+    float weight = emitter.weight + (rand_unit(seed + 13u) - 0.5) * emitter.weight_spread;
+    particles[idx] = Particle(
+        position,
+        emitter.size_start,
+        velocity,
+        emitter.size_end,
+        emitter.color_start,
+        emitter.color_end,
+        lifetime,
+        lifetime,
+        weight,
+        emitter.texture_index
+    );
 }

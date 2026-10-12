@@ -124,7 +124,7 @@ camera_viewport_to_world_ray :: proc(
   ray_dir: [3]f32,
 ) {
   ndc_x := (2.0 * pixel_x) / f32(camera.extent[0]) - 1.0
-  ndc_y := 1.0 - (2.0 * pixel_y) / f32(camera.extent[1])
+  ndc_y := (2.0 * pixel_y) / f32(camera.extent[1]) - 1.0
   inv_proj := linalg.matrix4_inverse(camera_projection_matrix(camera))
   inv_view := linalg.matrix4_inverse(camera_view_matrix(camera))
   ray_eye := inv_proj * [4]f32{ndc_x, ndc_y, -1.0, 1.0}
@@ -175,19 +175,24 @@ create_camera :: proc(
   }
   camera_set_perspective(cam, fov, near_plane, far_plane)
   camera_look_at(cam, position, target)
-  if create_targets(self, gctx, cam) != .SUCCESS {
-    destroy_targets(self, gctx, cam)
-    cont.free(&self.cameras, handle)
+  slot := handle.index * gpu.FRAMES_IN_FLIGHT
+  res := draw_lists_init(&cam.draws, self, CAMERA_DRAW_SLOT_BASE + slot, len(MaterialType), MAX_NODES_IN_SCENE)
+  if res == .SUCCESS do res = create_targets(self, gctx, cam, slot)
+  if res != .SUCCESS {
+    destroy_camera(self, handle)
     return {}, false
   }
   return handle, true
 }
 
+// The camera's slot is reused only once no frame in flight reads its draw
+// lists and pyramid slots.
 destroy_camera :: proc(self: ^Manager, handle: CameraHandle) {
   cam := cont.get(self.cameras, handle)
   if cam == nil do return
   destroy_targets(self, &self.gctx, cam)
-  cont.free(&self.cameras, handle)
+  draw_lists_destroy(&cam.draws, &self.gctx)
+  cont.free_deferred(&self.cameras, handle)
   if handle == self.main_camera do self.main_camera = {}
 }
 
@@ -199,7 +204,7 @@ camera_attachment :: proc(
   attachment_type: AttachmentType,
   frame_index: Maybe(u32) = nil,
 ) -> (
-  texture: Texture2DHandle,
+  texture: TextureHandle,
   ok: bool,
 ) #optional_ok {
   cam := cont.get(self.cameras, handle) or_return
@@ -221,7 +226,7 @@ resize_camera :: proc(
     p.aspect_ratio = f32(width) / f32(max(height, 1))
   }
   destroy_targets(self, gctx, cam)
-  create_targets(self, gctx, cam) or_return
+  create_targets(self, gctx, cam, handle.index * gpu.FRAMES_IN_FLIGHT) or_return
   log.infof("Camera resized to %dx%d", width, height)
   return .SUCCESS
 }
@@ -243,80 +248,57 @@ resize_swapchain_cameras :: proc(
 
 // ---------- GPU targets ----------
 
+// The image behind each camera attachment. Pipelines drawing into an
+// attachment take its format from here.
+@(private)
+ATTACHMENTS := [AttachmentType]struct {
+  format: vk.Format,
+  usage:  vk.ImageUsageFlags,
+  // also accessed by the async compute queue
+  shared: bool,
+} {
+  .FINAL_IMAGE        = {gpu.HDR_COLOR_FORMAT, {.COLOR_ATTACHMENT, .SAMPLED}, false},
+  .NORMAL             = {.R8G8B8A8_UNORM, {.COLOR_ATTACHMENT, .SAMPLED}, false},
+  .ALBEDO             = {.R8G8B8A8_UNORM, {.COLOR_ATTACHMENT, .SAMPLED}, false},
+  .METALLIC_ROUGHNESS = {.R8G8B8A8_UNORM, {.COLOR_ATTACHMENT, .SAMPLED}, false},
+  // HDR, feeds bloom
+  .EMISSIVE           = {.R16G16B16A16_SFLOAT, {.COLOR_ATTACHMENT, .SAMPLED}, false},
+  // the depth pyramid build reads it
+  .DEPTH              = {.D32_SFLOAT, {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED}, true},
+}
+
 @(private)
 create_targets :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
   camera: ^Camera,
+  // the camera's first pyramid slot; frame f takes slot + f
+  pyramid_slot: u32,
 ) -> vk.Result {
   texture_manager := &self.texture_manager
   extent := vk.Extent2D{camera.extent[0], camera.extent[1]}
-  Target :: struct {
-    type:   AttachmentType,
-    format: vk.Format,
-  }
-  gbuffer := [?]Target {
-    {.NORMAL, .R8G8B8A8_UNORM},
-    {.ALBEDO, .R8G8B8A8_UNORM},
-    {.METALLIC_ROUGHNESS, .R8G8B8A8_UNORM},
-    {.EMISSIVE, .R16G16B16A16_SFLOAT},
-  }
-  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    camera.attachments[.FINAL_IMAGE][frame] = allocate_texture_2d(
-      texture_manager,
-      gctx,
-      extent,
-      gpu.HDR_COLOR_FORMAT,
-      {.COLOR_ATTACHMENT, .SAMPLED},
-    ) or_return
-    for t in gbuffer {
-      camera.attachments[t.type][frame] = allocate_texture_2d(
+  for a in AttachmentType {
+    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
+      camera.attachments[a][frame] = allocate_texture(
         texture_manager,
         gctx,
         extent,
-        t.format,
-        {.COLOR_ATTACHMENT, .SAMPLED},
+        ATTACHMENTS[a].format,
+        ATTACHMENTS[a].usage,
+        shared = ATTACHMENTS[a].shared,
       ) or_return
     }
-    camera.attachments[.DEPTH][frame] = allocate_texture_2d(
-      texture_manager,
-      gctx,
-      extent,
-      .D32_SFLOAT,
-      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      shared = true, // the depth pyramid build reads it
-    ) or_return
   }
-  // Move the fresh depth images out of UNDEFINED so first-frame sampling is
-  // valid.
-  cmd_buf := gpu.begin_single_time_command(gctx) or_return
+  // The depth images leave UNDEFINED at the start of the next recorded frame;
+  // the compute work of the frame after it is the first to read them.
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    depth := get_texture_2d(texture_manager, camera.attachments[.DEPTH][frame])
-    if depth == nil do continue
-    gpu.image_discard_barrier(
-      cmd_buf,
-      depth.image,
-      {.DEPTH_STENCIL_ATTACHMENT_READ},
-      {.EARLY_FRAGMENT_TESTS},
-      {.DEPTH},
-    )
+    depth := get_texture(texture_manager, camera.attachments[.DEPTH][frame])
+    gpu.queue_image_init(gctx, {depth.image, {.DEPTH}, {.DEPTH_STENCIL_ATTACHMENT_READ}, {.EARLY_FRAGMENT_TESTS}})
   }
-  gpu.end_single_time_command(gctx, &cmd_buf) or_return
-  draw_buffers_init(
-    &camera.draws,
-    gctx,
-    MAX_NODES_IN_SCENE,
-    len(DrawPipeline),
-  ) or_return
-  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    occlusion_setup_pyramid(
-      gctx,
-      &camera.depth_pyramid[frame],
-      texture_manager,
-      extent,
-    ) or_return
+  camera.ready_serial = gctx.frame_serial + 1
+  for &pyramid, frame in camera.depth_pyramid {
+    occlusion_setup_pyramid(gctx, &pyramid, texture_manager, extent, pyramid_slot + u32(frame)) or_return
   }
-  allocate_descriptors(self, gctx, camera) or_return
   return .SUCCESS
 }
 
@@ -330,7 +312,7 @@ destroy_targets :: proc(
     for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
       handle := camera.attachments[attachment_type][frame]
       if handle.index == 0 do continue
-      free_texture_2d(&self.texture_manager, gctx, handle)
+      free_texture(&self.texture_manager, gctx, handle)
     }
   }
   camera.attachments = {}
@@ -342,89 +324,4 @@ destroy_targets :: proc(
     )
   }
   camera.depth_pyramid = {}
-  draw_buffers_destroy(&camera.draws, gctx)
-  camera.draws = {}
-  gpu.free_descriptor_sets(gctx, ..camera.descriptor_set[:])
-  for &sets in camera.depth_reduce_descriptor_sets {
-    gpu.free_descriptor_sets(gctx, ..sets[:])
-  }
-  camera.descriptor_set = {}
-  camera.depth_reduce_descriptor_sets = {}
-}
-
-// Descriptor sets for the culling + depth-reduce pipelines.
-@(private = "file")
-allocate_descriptors :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-  camera: ^Camera,
-) -> vk.Result {
-  texture_manager := &self.texture_manager
-  visibility := &self.internal.visibility
-  node_data_buffer := &self.internal.node_data_buffer
-  mesh_data_buffer := &self.internal.mesh_data_buffer
-  camera_buffer := &self.internal.camera_buffer
-  for frame_index in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    prev_frame_index := (frame_index + gpu.FRAMES_IN_FLIGHT - 1) % gpu.FRAMES_IN_FLIGHT
-    pyramid := &camera.depth_pyramid[frame_index]
-    prev_pyramid := &camera.depth_pyramid[prev_frame_index]
-    prev_depth := get_texture_2d(
-      texture_manager,
-      camera.attachments[.DEPTH][prev_frame_index],
-    )
-    pyramid_image := get_texture_2d(texture_manager, pyramid.texture)
-    prev_pyramid_image := get_texture_2d(texture_manager, prev_pyramid.texture)
-    writes: [BINDING_COUNT]struct {
-      type: vk.DescriptorType,
-      info: union {
-        vk.DescriptorBufferInfo,
-        vk.DescriptorImageInfo,
-      },
-    }
-    // set[k] is bound while recording frame k-1, which flushed node and
-    // camera data into the previous frame's copies
-    writes[0] = {
-      .STORAGE_BUFFER,
-      gpu.buffer_info(&node_data_buffer.buffers[prev_frame_index]),
-    }
-    writes[1] = {.STORAGE_BUFFER, gpu.buffer_info(&mesh_data_buffer.buffer)}
-    writes[2] = {
-      .STORAGE_BUFFER,
-      gpu.buffer_info(&camera_buffer.buffers[prev_frame_index]),
-    }
-    writes[3] = {.STORAGE_BUFFER, gpu.buffer_info(&camera.draws.count[frame_index])}
-    writes[4] = {.STORAGE_BUFFER, gpu.buffer_info(&camera.draws.commands[frame_index])}
-    writes[5] = {
-      .COMBINED_IMAGE_SAMPLER,
-      vk.DescriptorImageInfo {
-        sampler = visibility.sampler,
-        imageView = prev_pyramid_image.view,
-        imageLayout = .GENERAL,
-      },
-    }
-    camera.descriptor_set[frame_index] = gpu.create_descriptor_set(
-      gctx,
-      &visibility.cull_set_layout,
-      ..writes[:],
-    ) or_return
-    for mip in 0 ..< pyramid_image.mip_levels {
-      source_info := vk.DescriptorImageInfo {
-        sampler     = visibility.sampler,
-        imageView   = prev_depth.view if mip == 0 else pyramid.views[mip - 1],
-        imageLayout = .GENERAL,
-      }
-      dest_info := vk.DescriptorImageInfo {
-        imageView   = pyramid.views[mip],
-        imageLayout = .GENERAL,
-      }
-      camera.depth_reduce_descriptor_sets[frame_index][mip] =
-        gpu.create_descriptor_set(
-          gctx,
-          &visibility.reduce_set_layout,
-          {.COMBINED_IMAGE_SAMPLER, source_info},
-          {.STORAGE_IMAGE, dest_info},
-        ) or_return
-    }
-  }
-  return .SUCCESS
 }

@@ -104,7 +104,7 @@ update :: proc(app: ^App, dt: f32) {
   render.set_sprite_frame(&app.renderer, warrior_sprite, u32(warrior_time * 24) % 99)
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
   for &c in characters {
     for s, i in c.scene.skinned do render.stage_bones(&app.renderer, s.node.index, c.animators[i].palette)
   }
@@ -223,7 +223,6 @@ setup :: proc(app: ^App) {
     if brick_albedo_ret == .SUCCESS {
       brick_wall_mat_handle, brick_wall_mat_ok = render.create_material(
         &app.renderer,
-        {.ALBEDO_TEXTURE},
         albedo_handle = brick_albedo_handle,
       )
     }
@@ -476,7 +475,7 @@ setup :: proc(app: ^App) {
   }
   when false {
     log.info("Setting up bloom...")
-    render.add_effect(&app.renderer, render.BloomEffect{threshold = 0.8, intensity = 0.5, blur_radius = 16.0})
+    append(&app.renderer.post_process.effect_stack, render.BloomEffect{threshold = 0.8, intensity = 0.5, blur_radius = 16.0})
     // A bright white ball to test the bloom effect
     if emissive_handle, emissive_ok := render.create_material(&app.renderer, emissive_value = 30.0); emissive_ok {
       bright_ball := spawn(
@@ -504,7 +503,6 @@ setup :: proc(app: ^App) {
     if goldstar_texture_ok {
       goldstar_material_handle, goldstar_material_ok = render.create_material(
         &app.renderer,
-        {.ALBEDO_TEXTURE},
         type = .TRANSPARENT,
         albedo_handle = goldstar_texture_handle,
       )
@@ -591,14 +589,14 @@ setup :: proc(app: ^App) {
     render.debug_arrow(&app.renderer, {0, 0, 0}, {3, 3, 0}, render.DEBUG_YELLOW, life = 5)
     render.debug_axes(&app.renderer, {0, 0, 0}, scale = 2)
   }
-  // render.add_effect(&app.renderer, render.FogEffect{color = {0.4, 0.0, 0.8}, density = 0.02, start = 5.0, end = 20.0})
-  // render.add_effect(&app.renderer, render.BloomEffect{threshold = 0.2, intensity = 1.0, blur_radius = 4.0})
-  // render.add_effect(&app.renderer, render.CrossHatchEffect{hatch_offset_y = 5.0, lum_threshold_01 = 0.6, lum_threshold_02 = 0.3, lum_threshold_03 = 0.15, lum_threshold_04 = 0.07})
-  // render.add_effect(&app.renderer, render.BlurEffect{radius = 18.0, weight_falloff = 1.0})
-  // render.add_effect(&app.renderer, render.ToneMapEffect{exposure = 1.5, gamma = 1.3})
-  // render.add_effect(&app.renderer, render.DoFEffect{focus_distance = 3.0, focus_range = 2.0, blur_strength = 20.0, bokeh_intensity = 0.5})
-  // render.add_effect(&app.renderer, render.GrayscaleEffect{strength = 0.9})
-  // render.add_effect(&app.renderer, render.OutlineEffect{thickness = 2.0, color = {1.0, 0.0, 0.0}})
+  // append(&app.renderer.post_process.effect_stack, render.FogEffect{color = {0.4, 0.0, 0.8}, density = 0.02, start = 5.0, end = 20.0})
+  // append(&app.renderer.post_process.effect_stack, render.BloomEffect{threshold = 0.2, intensity = 1.0, blur_radius = 4.0})
+  // append(&app.renderer.post_process.effect_stack, render.CrossHatchEffect{hatch_offset_y = 5.0, lum_threshold_01 = 0.6, lum_threshold_02 = 0.3, lum_threshold_03 = 0.15, lum_threshold_04 = 0.07})
+  // append(&app.renderer.post_process.effect_stack, render.BlurEffect{radius = 18.0, weight_falloff = 1.0})
+  // append(&app.renderer.post_process.effect_stack, render.ToneMapEffect{exposure = 1.5, gamma = 1.3})
+  // append(&app.renderer.post_process.effect_stack, render.DoFEffect{focus_distance = 3.0, focus_range = 2.0, blur_strength = 20.0, bokeh_intensity = 0.5})
+  // append(&app.renderer.post_process.effect_stack, render.GrayscaleEffect{strength = 0.9})
+  // append(&app.renderer.post_process.effect_stack, render.OutlineEffect{thickness = 2.0, color = {1.0, 0.0, 0.0}})
   when true {
     portal_camera_handle = render.create_camera(
       &app.renderer,
@@ -613,7 +611,6 @@ setup :: proc(app: ^App) {
     portal_material_ok: bool
     portal_material_handle, portal_material_ok = render.create_material(
       &app.renderer,
-      {.ALBEDO_TEXTURE},
     )
     portal_quad_handle := app.renderer.builtin_meshes[render.Primitive.QUAD_XY]
     portal_mesh_ok := true

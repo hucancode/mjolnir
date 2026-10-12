@@ -111,7 +111,7 @@ update :: proc(app: ^App, dt: f32) {
   if rig != nil do anim.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, snake_child_node))
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
   if rig != nil do render.stage_bones(&app.renderer, snake_child_node.index, animator.palette)
   render.update(&app.renderer, dt)
 }

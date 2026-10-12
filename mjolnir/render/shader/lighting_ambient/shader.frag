@@ -4,14 +4,12 @@
 const float PI = 3.14159265359;
 const uint INVALID_TEXTURE = 0xFFFFFFFFu;
 
-layout(constant_id = 0) const uint MAX_TEXTURES = 1u;
-layout(constant_id = 1) const uint MAX_CUBE_TEXTURES = 1u;
-layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
-layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
-layout(constant_id = 4) const uint SAMPLER_NEAREST_REPEAT = 2u;
-layout(constant_id = 5) const uint SAMPLER_LINEAR_REPEAT = 3u;
+const uint SAMPLER_NEAREST_CLAMP = 0u;
+const uint SAMPLER_LINEAR_CLAMP = 1u;
+const uint SAMPLER_NEAREST_REPEAT = 2u;
+const uint SAMPLER_LINEAR_REPEAT = 3u;
 
-layout(location = 0) in vec2 v_uv;
+layout(location = 0) flat in uint v_light;
 layout(location = 0) out vec4 outColor;
 
 struct Camera {
@@ -21,7 +19,6 @@ struct Camera {
     float near;
     float far;
     vec4 position;
-    vec4 frustum_planes[6];
     mat4 inv_view_projection;
 };
 
@@ -31,23 +28,37 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
 
 layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
-layout(set = 1, binding = 2) uniform textureCube cube_textures[];
+layout(set = 1, binding = 0) uniform textureCube cube_textures[]; // aliases textures
 
-layout(push_constant) uniform AmbientPushConstant {
+struct Light {
+    vec4 color;
+    vec3 position;
+    float radius;
+    vec3 direction;
+    float angle_inner;
+    float angle_outer;
+    uint shadow_map;
+    float shadow_bias;
+    uint _pad0;
+};
+
+layout(set = 0, binding = 10) readonly buffer LightBuffer {
+    Light lights[];
+};
+
+layout(push_constant) uniform PushConstant {
     uint camera_index;
-    uint irradiance_index;
-    uint prefilter_index;
-    uint brdf_lut_index;
-    uint environment_index;
-    uint depth_texture_index;
     uint normal_texture_index;
     uint albedo_texture_index;
     uint metallic_texture_index;
     uint emissive_texture_index;
-    float ibl_intensity;
+    uint depth_texture_index;
+    uint irradiance_index;
+    uint prefilter_index;
+    uint brdf_lut_index;
+    uint environment_index;
     float skybox_intensity;
     float skybox_blur;
-    uint skybox_enabled;
 };
 
 float prefilter_max_lod() {
@@ -61,14 +72,14 @@ vec3 fresnel_schlick_roughness(float cos_theta, vec3 F0, float roughness) {
 
 vec2 dirToEquirectUv(vec3 dir) {
     float u = atan(dir.z, dir.x) / (2.0 * PI) + 0.5;
-    float v = acos(clamp(-dir.y, -1.0, 1.0)) / PI;
+    float v = acos(clamp(dir.y, -1.0, 1.0)) / PI;
     return vec2(u, v);
 }
 
 // World position of the G-buffer texel at framebuffer uv, rebuilt from its
-// depth. The G-buffer pass flips the viewport, so ndc.y runs against uv.y.
+// depth. Clip-space y points down, so ndc follows uv on both axes.
 vec3 worldPosition(Camera camera, vec2 uv, float depth) {
-    vec4 p = camera.inv_view_projection * vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
+    vec4 p = camera.inv_view_projection * vec4(uv * 2.0 - 1.0, depth, 1.0);
     return p.xyz / p.w;
 }
 
@@ -87,15 +98,16 @@ vec3 sample_skybox(Camera camera, vec2 uv) {
 
 void main() {
     Camera camera = camera_buffer.cameras[camera_index];
-    vec2 uv = v_uv;
+    float ibl_intensity = lights[v_light].color.a;
+    vec2 uv = gl_FragCoord.xy / camera.viewport_extent;
     float depth = texelFetch(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), ivec2(gl_FragCoord.xy), 0).r;
 
-    // Background (depth left at the far clear value): draw skybox if
-    // enabled, else discard.
+    // Background (depth left at the far clear value): the skybox, if any.
+    // Alpha 0 keeps the cleared alpha under the additive blend.
     if (depth >= 1.0) {
-        if (skybox_enabled != 0u && environment_index != INVALID_TEXTURE) {
+        if (skybox_intensity > 0.0 && environment_index != INVALID_TEXTURE) {
             vec3 sky = sample_skybox(camera, uv) * skybox_intensity;
-            outColor = vec4(sky, 1.0);
+            outColor = vec4(sky, 0.0);
             return;
         }
         discard;
@@ -136,5 +148,5 @@ void main() {
         ambient = (kD * diffuse + specular) * ibl_intensity;
     }
 
-    outColor = vec4(ambient + emissive, 1.0);
+    outColor = vec4(ambient + emissive, 0.0);
 }

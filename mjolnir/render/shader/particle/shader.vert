@@ -29,7 +29,6 @@ struct Camera {
     float near;
     float far;
     vec4 position;
-    vec4 frustum_planes[6];
     mat4 inv_view_projection;
 };
 
@@ -38,24 +37,26 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
 } camera_buffer;
 
-layout(set = 2, binding = 0) readonly buffer ParticleBuffer {
+layout(set = 0, binding = 8) readonly buffer ParticleBuffer {
     Particle particles[];
+};
+
+// Indirect draw of the live particles, then their indices.
+layout(set = 0, binding = 9) readonly buffer AliveBuffer {
+    uint vertex_count;
+    uint instance_count;
+    uint first_vertex;
+    uint first_instance;
+    uint alive[];
 };
 
 layout(push_constant) uniform ParticlePushConstants {
     uint camera_index;
 } push;
 
-// One vertex per ring slot; dead slots land outside the clip volume.
+// One vertex per live particle.
 void main() {
-    Particle p = particles[gl_VertexIndex];
-    if (p.life <= 0.0) {
-        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-        gl_PointSize = 1.0;
-        outColor = vec4(0.0);
-        outTextureIndex = 0;
-        return;
-    }
+    Particle p = particles[alive[gl_VertexIndex]];
     Camera camera = camera_buffer.cameras[push.camera_index];
     float ratio = p.life / p.max_life;
     outColor = mix(p.color_end, p.color_start, ratio);

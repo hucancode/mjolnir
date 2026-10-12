@@ -2,8 +2,10 @@ package render
 
 // Effect structs are pushed verbatim right after the base fields of
 // PostProcessPushConstant (offset 32); their layout must match each shader's push block.
+// Append effects to r.post_process.effect_stack; every camera runs the stack
+// in order.
 GrayscaleEffect :: struct {
-  weights:  [3]f32, // zero = Rec. 601 luma, filled by render.add_effect
+  weights:  [3]f32, // zero = Rec. 601 luma
   strength: f32,
 }
 
@@ -14,7 +16,6 @@ ToneMapEffect :: struct {
 
 BlurEffect :: struct {
   radius:         f32,
-  direction:      f32, // 0.0 = horizontal, 1.0 = vertical; set by render.add_effect
   weight_falloff: f32, // 0.0 = box blur, 1.0 = gaussian blur
 }
 
@@ -22,7 +23,6 @@ BloomEffect :: struct {
   threshold:   f32,
   intensity:   f32,
   blur_radius: f32,
-  direction:   f32, // 0.0 = horizontal, 1.0 = vertical; set by render.add_effect
 }
 
 OutlineEffect :: struct {

@@ -1,12 +1,10 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
 
-layout(constant_id = 0) const uint MAX_TEXTURES = 1u;
-layout(constant_id = 1) const uint MAX_CUBE_TEXTURES = 1u;
-layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
-layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
-layout(constant_id = 4) const uint SAMPLER_NEAREST_REPEAT = 2u;
-layout(constant_id = 5) const uint SAMPLER_LINEAR_REPEAT = 3u;
+const uint SAMPLER_NEAREST_CLAMP = 0u;
+const uint SAMPLER_LINEAR_CLAMP = 1u;
+const uint SAMPLER_NEAREST_REPEAT = 2u;
+const uint SAMPLER_LINEAR_REPEAT = 3u;
 
 // Camera structure
 struct Camera {
@@ -16,7 +14,6 @@ struct Camera {
     float near;
     float far;
     vec4 position;
-    vec4 frustum_planes[6];
     mat4 inv_view_projection;
 };
 

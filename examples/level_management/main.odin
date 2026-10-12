@@ -266,7 +266,7 @@ update :: proc(app: ^App, delta_time: f32) {
   }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
   for s, i in character.skinned do render.stage_bones(&app.renderer, s.node.index, animators[i].palette)
   render.update(&app.renderer, delta_time)
 }

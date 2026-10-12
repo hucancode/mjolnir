@@ -1,16 +1,15 @@
 #version 450
+#extension GL_EXT_nonuniform_qualifier : require
 
-// Multi-pass culling - generates all draw lists in one dispatch.
+// Culls every node against a range of views in one dispatch: x covers nodes,
+// y the views from params.first_view. A visible node is appended to list
+// type * view.list_stride of the bindless draw lists view.draw_list; list l
+// keeps its count at counts[l] and its commands from l * view.list_capacity.
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-const uint NODE_FLAG_VISIBLE = 1u << 0;
-const uint NODE_FLAG_CULLING_ENABLED = 1u << 1;
-const uint NODE_FLAG_MATERIAL_TRANSPARENT = 1u << 2;
-const uint NODE_FLAG_MATERIAL_WIREFRAME = 1u << 3;
-const uint NODE_FLAG_MATERIAL_SPRITE = 1u << 4;
-const uint NODE_FLAG_MATERIAL_RANDOM_COLOR = 1u << 5;
-const uint NODE_FLAG_CASTS_SHADOW = 1u << 6;
+const uint SAMPLER_MAX_REDUCE = 5u;
+
 const uint INVALID_ID = 0xFFFFFFFFu;
 
 struct Camera {
@@ -20,7 +19,6 @@ struct Camera {
     float near;
     float far;
     vec4 position;
-    vec4 frustum_planes[6];
     mat4 inv_view_projection;
 };
 
@@ -43,6 +41,39 @@ struct MeshData {
     uint _padding;
 };
 
+struct MaterialData {
+    uint albedo_index;
+    uint metallic_roughness_index;
+    uint normal_index;
+    uint emissive_index;
+    float metallic_value;
+    float roughness_value;
+    float emissive_value;
+    uint _pad;
+    vec4 base_color_factor;
+    uint frame_columns;
+    uint frame_rows;
+    uint frame_index;
+    uint type; // MaterialType
+};
+
+struct View {
+    vec4 planes[6]; // normalized, pointing inward
+    mat4 view_projection;
+    uint camera_index; // projects the occlusion test
+    uint pyramid; // bindless depth pyramid
+    uint occlusion_mask; // bit t: material type t is tested against the pyramid
+    uint list_stride;
+    uint type_mask; // bit t: material type t is drawn
+    uint require_flags; // node flags a drawn node has
+    uint instance_tag; // OR-ed into first_instance above the node index
+    uint layer;
+    uint draw_list; // bindless draw lists the view appends to
+    uint list_capacity; // draws per list
+    uint _pad0;
+    uint _pad1;
+};
+
 struct DrawCommand {
     uint index_count;
     uint instance_count;
@@ -52,60 +83,52 @@ struct DrawCommand {
 };
 
 layout(push_constant) uniform PushConstants {
-    uint camera_index;
     uint node_count;
-    uint max_draws;
+    uint first_view;
 } params;
 
 const float DEPTH_BIAS = 0.0001;
 
-// bindless.DrawPipeline
-const uint PIPE_OPAQUE = 0u;
-const uint PIPE_TRANSPARENT = 1u;
-const uint PIPE_SPRITE = 2u;
-const uint PIPE_WIREFRAME = 3u;
-const uint PIPE_RANDOM_COLOR = 4u;
-
-layout(set = 0, binding = 0) readonly buffer NodeBuffer {
-    NodeData nodes[];
-};
-
-layout(set = 0, binding = 1) readonly buffer MeshBuffer {
-    MeshData meshes[];
-};
-
-layout(set = 0, binding = 2) readonly buffer CameraBuffer {
+layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
 };
 
-// One count per draw list, in bindless.DrawPipeline order
-layout(set = 0, binding = 3) buffer DrawCountBuffer {
-    uint draw_counts[];
+layout(set = 0, binding = 1) readonly buffer NodeBuffer {
+    NodeData nodes[];
 };
 
-// max_draws commands per draw list, lists back to back
-layout(set = 0, binding = 4) buffer DrawCommandBuffer {
+layout(set = 0, binding = 2) readonly buffer MeshBuffer {
+    MeshData meshes[];
+};
+
+layout(set = 0, binding = 3) readonly buffer MaterialBuffer {
+    MaterialData materials[];
+};
+
+layout(set = 0, binding = 11) readonly buffer ViewBuffer {
+    View views[];
+};
+
+layout(set = 1, binding = 0) uniform texture2D textures[];
+layout(set = 1, binding = 1) uniform sampler samplers[];
+
+const uint DRAW_LIST_HEADER = 8u;
+
+layout(set = 1, binding = 3) buffer DrawLists {
+    uint counts[DRAW_LIST_HEADER];
     DrawCommand commands[];
-};
+} draw_lists[];
 
-layout(set = 0, binding = 5) uniform sampler2D depth_pyramid;
-
-// return true if aabb is visible, false if outside frustum
-bool frustum_cull(vec3 center, vec3 extent, Camera camera) {
+bool in_view(View view, vec3 center, vec3 extent) {
     for (int i = 0; i < 6; ++i) {
-        vec4 plane_raw = camera.frustum_planes[i];
-        float denom = length(plane_raw.xyz);
-        if (denom <= 1e-6) continue;
-
-        vec3 normal = plane_raw.xyz / denom;
-        float distance = dot(normal, center) + plane_raw.w / denom;
-        float radius = dot(abs(normal), extent);
-
+        vec4 plane = view.planes[i];
+        float distance = dot(plane.xyz, center) + plane.w;
+        float radius = dot(abs(plane.xyz), extent);
         if (distance + radius < 0.0) {
-            return false; // Outside frustum
+            return false;
         }
     }
-    return true; // Inside frustum
+    return true;
 }
 
 // 2D Polyhedral Bounds of a Clipped, Perspective-Projected 3D Sphere
@@ -122,7 +145,7 @@ bool project_sphere(vec3 center, float radius, mat4 proj, float near, float far,
     }
 
     float P00 = proj[0][0];
-    float P11 = proj[1][1];
+    float P11 = abs(proj[1][1]);
 
     vec3 cr = c * r;
     float czr2 = c.z * c.z - r * r;
@@ -143,7 +166,7 @@ bool project_sphere(vec3 center, float radius, mat4 proj, float near, float far,
 }
 
 // return true if the sphere is visible, false if occluded
-bool occlusion_test(vec3 center, float radius, Camera camera) {
+bool occlusion_test(vec3 center, float radius, Camera camera, uint pyramid) {
     vec4 view_center4 = camera.view * vec4(center, 1.0);
     vec3 view_center = view_center4.xyz;
 
@@ -152,14 +175,14 @@ bool occlusion_test(vec3 center, float radius, Camera camera) {
         return true;
     }
 
-    vec2 pyramid_size = vec2(textureSize(depth_pyramid, 0));
+    vec2 pyramid_size = vec2(textureSize(sampler2D(textures[pyramid], samplers[SAMPLER_MAX_REDUCE]), 0));
     float width = (aabb.z - aabb.x) * pyramid_size.x;
     float height = (aabb.w - aabb.y) * pyramid_size.y;
     float level = ceil(log2(max(width, height)));
     level = max(0.0, level);
 
     vec2 sample_uv = (aabb.xy + aabb.zw) * 0.5;
-    float occluder_depth = textureLod(depth_pyramid, sample_uv, level).r;
+    float occluder_depth = textureLod(sampler2D(textures[pyramid], samplers[SAMPLER_MAX_REDUCE]), sample_uv, level).r;
 
     float object_near_z = view_center.z + radius;
     vec4 clip_pos = camera.projection * vec4(0, 0, object_near_z, 1.0);
@@ -171,66 +194,42 @@ bool occlusion_test(vec3 center, float radius, Camera camera) {
 void main() {
     uint node_id = gl_GlobalInvocationID.x;
     if (node_id >= params.node_count) return;
+    View view = views[params.first_view + gl_WorkGroupID.y];
+    // empty view (free camera slot): accepts nothing
+    if (view.type_mask == 0u) return;
 
     NodeData node = nodes[node_id];
-    if (node.mesh_id == INVALID_ID || (node.flags & NODE_FLAG_VISIBLE) == 0u) {
-        return;
-    }
+    if (node.mesh_id == INVALID_ID || node.material_id == INVALID_ID) return;
+    if ((node.flags & view.require_flags) != view.require_flags) return;
+    uint type = materials[node.material_id].type;
+    if (((view.type_mask >> type) & 1u) == 0u) return;
 
     MeshData mesh = meshes[node.mesh_id];
-    Camera camera = cameras[params.camera_index];
-    mat4 world = nodes[node_id].world_matrix;
-
-    // Transform AABB to world space
-    vec3 local_min = mesh.aabb_min;
-    vec3 local_max = mesh.aabb_max;
-    vec3 local_center = 0.5 * (local_min + local_max);
-    vec3 local_extent = 0.5 * (local_max - local_min);
-
+    mat4 world = node.world_matrix;
+    vec3 local_center = 0.5 * (mesh.aabb_min + mesh.aabb_max);
+    vec3 local_extent = 0.5 * (mesh.aabb_max - mesh.aabb_min);
     vec4 world_center4 = world * vec4(local_center, 1.0);
     vec3 world_center = world_center4.xyz / max(world_center4.w, 1e-6);
-
     mat3 world3 = mat3(world);
     mat3 abs_world3 = mat3(abs(world3[0]), abs(world3[1]), abs(world3[2]));
     vec3 world_extent = abs_world3 * local_extent;
 
-    float radius = length(world_extent);
-
-    bool visible = true;
-
-    // Frustum culling
-    if ((node.flags & NODE_FLAG_CULLING_ENABLED) != 0u) {
-        visible = frustum_cull(world_center, world_extent, camera);
+    if (!in_view(view, world_center, world_extent)) return;
+    if (((view.occlusion_mask >> type) & 1u) != 0u &&
+        !occlusion_test(world_center, length(world_extent), cameras[view.camera_index], view.pyramid)) {
+        return;
     }
 
-    // Occlusion culling (only for opaque objects)
-    bool is_transparent = (node.flags & NODE_FLAG_MATERIAL_TRANSPARENT) != 0u;
-    bool is_wireframe = (node.flags & NODE_FLAG_MATERIAL_WIREFRAME) != 0u;
-    bool is_random_color = (node.flags & NODE_FLAG_MATERIAL_RANDOM_COLOR) != 0u;
-    bool is_sprite = (node.flags & NODE_FLAG_MATERIAL_SPRITE) != 0u;
-    bool is_non_opaque = is_transparent || is_wireframe || is_random_color || is_sprite;
-
-    if (visible && !is_non_opaque) {
-        visible = occlusion_test(world_center, radius, camera);
-    }
-
-    if (!visible) return;
-
-    // Create draw command
     DrawCommand cmd;
     cmd.index_count = mesh.index_count;
     cmd.instance_count = 1u;
     cmd.first_index = mesh.first_index;
     cmd.vertex_offset = mesh.vertex_offset;
-    cmd.first_instance = node_id;
+    cmd.first_instance = node_id | view.instance_tag;
 
-    uint pipe = is_sprite ? PIPE_SPRITE
-              : is_transparent ? PIPE_TRANSPARENT
-              : is_wireframe ? PIPE_WIREFRAME
-              : is_random_color ? PIPE_RANDOM_COLOR
-              : PIPE_OPAQUE;
-    uint draw_index = atomicAdd(draw_counts[pipe], 1);
-    if (draw_index < params.max_draws) {
-        commands[pipe * params.max_draws + draw_index] = cmd;
+    uint list = type * view.list_stride;
+    uint draw_index = atomicAdd(draw_lists[view.draw_list].counts[list], 1u);
+    if (draw_index < view.list_capacity) {
+        draw_lists[view.draw_list].commands[list * view.list_capacity + draw_index] = cmd;
     }
 }

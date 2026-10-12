@@ -13,7 +13,6 @@ struct Camera {
     float near;
     float far;
     vec4 position;
-    vec4 frustum_planes[6];
     mat4 inv_view_projection;
 };
 
@@ -29,7 +28,7 @@ struct MaterialData {
     float metallic_value;
     float roughness_value;
     float emissive_value;
-    uint features;
+    uint _pad;
     vec4 base_color_factor;
     uint frame_columns;
     uint frame_rows;
@@ -37,7 +36,7 @@ struct MaterialData {
     uint _pad0;
 };
 
-layout(set = 2, binding = 0) readonly buffer MaterialBuffer {
+layout(set = 0, binding = 3) readonly buffer MaterialBuffer {
     MaterialData materials[];
 };
 
@@ -49,7 +48,7 @@ struct NodeData {
     uint flags;
 };
 
-layout(set = 3, binding = 0) readonly buffer NodeBuffer {
+layout(set = 0, binding = 1) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 

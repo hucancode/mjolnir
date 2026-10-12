@@ -62,7 +62,7 @@ flowchart TB
   deferred destruction and the bindless descriptor-array mechanism).
   `render/mesh` holds the vertex format, primitive builders and OBJ
   loader, and `render/gltf` the glTF loader. The passes and render's
-  own descriptor arrays (textures, samplers, cube maps, the mesh arena,
+  own descriptor arrays (textures 2D and cube, samplers, the mesh arena,
   the scene sets, the indirect draw lists) are private files of
   `package render`. Shaders (`render/shader`)
   and embedded assets (`render/assets`) live inside the module, so
@@ -136,7 +136,7 @@ needs scheduling or locking. The world → render hop, for example:
 ```odin
 world.update(&app.scene)
 for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
 ```
 
 These lines live in the application's `update` callback, next to the
@@ -175,7 +175,7 @@ point.
 
 ## Render-owned staging
 
-Mutating a look (`attach`, `stage_transform`, `set_material`,
+Mutating a look (`attach`, `stage_transforms`, `set_material`,
 `create_mesh`, …) writes CPU state and marks the slot dirty in a
 mutex-guarded staging set. `render.frame` uploads dirty entries once
 per frame on the render thread.

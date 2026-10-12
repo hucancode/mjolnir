@@ -1,70 +1,255 @@
 package gpu
 
+import "core:mem"
+import "core:slice"
 import vk "vendor:vulkan"
 
-// Buffer copies queued by queue_buffer_write and recorded at the start of the
-// next frame's command buffer by record_uploads, so uploading never waits on
-// the GPU.
+// Uploads are written into host-visible staging blocks and recorded in bulk at
+// the start of the next command buffer by record_uploads, so uploading never
+// allocates per upload nor waits on the GPU. A block keeps taking uploads
+// until a recording drains it, then rests until no frame in flight can still
+// read it.
+STAGING_BLOCK_SIZE :: 8 * 1024 * 1024
+// Satisfies the buffer-to-image offset rule of every color format.
+@(private = "file")
+STAGING_ALIGNMENT :: 16
+
 @(private)
-PendingCopy :: struct {
-  staging: vk.Buffer,
-  memory:  vk.DeviceMemory,
-  dst:     vk.Buffer,
-  region:  vk.BufferCopy,
+StagingBlock :: struct {
+  buffer: Buffer,
+  used:   int,
+  // frame_serial from which a drained block may be rewritten
+  ready:  u64,
 }
 
-// Stage `data` for `buffer` at element `index`. The copy lands when the next
-// frame records its uploads.
+@(private)
+PendingCopy :: struct {
+  src, dst: vk.Buffer,
+  region:   vk.BufferCopy,
+}
+
+// Mip 0 of `image` comes from `src` at `offset`; the other mips are blitted
+// down from it.
+@(private)
+PendingImage :: struct {
+  src:        vk.Buffer,
+  offset:     vk.DeviceSize,
+  image:      vk.Image,
+  extent:     vk.Extent2D,
+  aspect:     vk.ImageAspectFlags,
+  mip_levels: u32,
+}
+
+@(private)
+PendingFill :: struct {
+  dst:          vk.Buffer,
+  offset, size: vk.DeviceSize,
+  value:        u32,
+}
+
+Uploads :: struct {
+  blocks: [dynamic]StagingBlock,
+  copies: [dynamic]PendingCopy,
+  fills:  [dynamic]PendingFill,
+  images: [dynamic]PendingImage,
+  // fresh images to move out of UNDEFINED
+  inits:  [dynamic]ImageDiscard,
+}
+
+// `size` bytes of staging memory for the next recording.
+@(private = "file")
+staging_alloc :: proc(
+  gctx: ^GPUContext,
+  size: int,
+) -> (
+  src: vk.Buffer,
+  offset: int,
+  ptr: rawptr,
+  ret: vk.Result,
+) {
+  u := &gctx.uploads
+  for &b in u.blocks {
+    if b.used == 0 && b.ready > gctx.frame_serial do continue
+    at := mem.align_forward_int(b.used, STAGING_ALIGNMENT)
+    if at + size > int(b.buffer.size) do continue
+    b.used = at + size
+    return b.buffer.buffer, at, &b.buffer.mapped[at], .SUCCESS
+  }
+  block := StagingBlock {
+    buffer = buffer_create(gctx, vk.DeviceSize(max(size, STAGING_BLOCK_SIZE)), {.TRANSFER_SRC}) or_return,
+    used   = size,
+  }
+  append(&u.blocks, block)
+  return block.buffer.buffer, 0, block.buffer.mapped, .SUCCESS
+}
+
+// Stage `data` for `buffer` at element `index` (in elements of T). The copy lands when the next
+// command buffer records its uploads.
 queue_buffer_write :: proc(
   gctx: ^GPUContext,
-  buffer: ^ImmutableBuffer($T),
-  data: []T,
+  buffer: ^Buffer,
+  data: []$T,
   index: int = 0,
 ) -> vk.Result {
-  staging := create_mutable_buffer(gctx, T, len(data), {.TRANSFER_SRC}) or_return
-  copy(get_all(&staging), data)
-  vk.UnmapMemory(gctx.device, staging.memory)
+  size := len(data) * size_of(T)
+  if size == 0 do return .SUCCESS
+  src, offset, ptr := staging_alloc(gctx, size) or_return
+  mem.copy(ptr, raw_data(data), size)
   append(
-    &gctx.uploads,
+    &gctx.uploads.copies,
     PendingCopy {
-      staging = staging.buffer,
-      memory = staging.memory,
+      src = src,
       dst = buffer.buffer,
       region = {
+        srcOffset = vk.DeviceSize(offset),
         dstOffset = vk.DeviceSize(index * size_of(T)),
-        size = vk.DeviceSize(staging.bytes_count),
+        size = vk.DeviceSize(size),
       },
     },
   )
   return .SUCCESS
 }
 
-// Record every queued copy, then make them visible to vertex input and
-// vertex-shader storage reads. Staging buffers are released once this
-// frame can no longer be in flight.
+// Fill `size` bytes of `buffer` from byte `offset` with the u32 `value` on the
+// GPU when the next command buffer records its uploads. The range must not
+// overlap a queued write to the same buffer.
+queue_buffer_fill :: proc(
+  gctx: ^GPUContext,
+  buffer: ^Buffer,
+  offset: vk.DeviceSize = 0,
+  size := vk.DeviceSize(vk.WHOLE_SIZE),
+  value: u32 = 0,
+) {
+  append(&gctx.uploads.fills, PendingFill{buffer.buffer, offset, size, value})
+}
+
+// Stage `size` bytes of `data` as mip 0 of `img` and the rest of its mip
+// chain blitted down from it. The image is written when the next command
+// buffer records its uploads.
+queue_image_write :: proc(
+  gctx: ^GPUContext,
+  img: ^Image,
+  data: rawptr,
+  size: int,
+) -> vk.Result {
+  src, offset, ptr := staging_alloc(gctx, size) or_return
+  mem.copy(ptr, data, size)
+  append(
+    &gctx.uploads.images,
+    PendingImage {
+      src = src,
+      offset = vk.DeviceSize(offset),
+      image = img.image,
+      extent = img.extent,
+      aspect = infer_aspect_mask(img.format),
+      mip_levels = img.mip_levels,
+    },
+  )
+  return .SUCCESS
+}
+
+// Move a fresh image out of UNDEFINED, ready for `init.access` at
+// `init.stage`, when the next command buffer records its uploads.
+queue_image_init :: proc(gctx: ^GPUContext, init: ImageDiscard) {
+  append(&gctx.uploads.inits, init)
+}
+
+// Record every queued image init, then every queued upload: the fills, one
+// copy command per staging block and destination buffer, one copy per image,
+// then each mip level of every image in one batch. Everything is made visible
+// to vertex input, indirect reads and shader access.
 record_uploads :: proc(gctx: ^GPUContext, cmd: vk.CommandBuffer) {
-  if len(gctx.uploads) == 0 do return
-  for &c in gctx.uploads {
-    vk.CmdCopyBuffer(cmd, c.staging, c.dst, 1, &c.region)
-    enqueue(gctx, c.staging, c.memory)
+  u := &gctx.uploads
+  if len(u.inits) > 0 {
+    image_discard_barrier(cmd, ..u.inits[:])
+    clear(&u.inits)
   }
-  clear(&gctx.uploads)
+  if len(u.copies) == 0 && len(u.fills) == 0 && len(u.images) == 0 do return
+  for f in u.fills do vk.CmdFillBuffer(cmd, f.dst, f.offset, f.size, f.value)
+  slice.sort_by(u.copies[:], proc(a, b: PendingCopy) -> bool {
+    if a.src != b.src do return a.src < b.src
+    return a.dst < b.dst
+  })
+  regions := make([]vk.BufferCopy, len(u.copies), context.temp_allocator)
+  for c, i in u.copies do regions[i] = c.region
+  for start := 0; start < len(u.copies); {
+    end := start + 1
+    for end < len(u.copies) && u.copies[end].src == u.copies[start].src && u.copies[end].dst == u.copies[start].dst {
+      end += 1
+    }
+    vk.CmdCopyBuffer(cmd, u.copies[start].src, u.copies[start].dst, u32(end - start), &regions[start])
+    start = end
+  }
+  if len(u.images) > 0 do record_image_uploads(cmd, u.images[:])
+  clear(&u.copies)
+  clear(&u.fills)
+  clear(&u.images)
+  for &b in u.blocks do if b.used > 0 {
+    b.used = 0
+    b.ready = gctx.frame_serial + RETIRE_GRACE
+  }
   memory_barrier(
     cmd,
     {.TRANSFER_WRITE},
-    {.VERTEX_ATTRIBUTE_READ, .INDEX_READ, .SHADER_STORAGE_READ},
-    {.COPY},
-    {.VERTEX_ATTRIBUTE_INPUT, .INDEX_INPUT, .VERTEX_SHADER},
+    {.VERTEX_ATTRIBUTE_READ, .INDEX_READ, .INDIRECT_COMMAND_READ, .SHADER_STORAGE_READ, .SHADER_STORAGE_WRITE, .SHADER_SAMPLED_READ},
+    {.TRANSFER},
+    {.VERTEX_ATTRIBUTE_INPUT, .INDEX_INPUT, .DRAW_INDIRECT, .VERTEX_SHADER, .FRAGMENT_SHADER, .COMPUTE_SHADER},
   )
 }
 
-// Drop queued copies that were never recorded. Use only when no frame is
-// in flight.
+@(private = "file")
+record_image_uploads :: proc(cmd: vk.CommandBuffer, images: []PendingImage) {
+  discards := make([]ImageDiscard, len(images), context.temp_allocator)
+  max_mips: u32 = 1
+  for img, i in images {
+    discards[i] = {img.image, img.aspect, {.TRANSFER_WRITE}, {.TRANSFER}}
+    max_mips = max(max_mips, img.mip_levels)
+  }
+  image_discard_barrier(cmd, ..discards)
+  for img in images {
+    region := vk.BufferImageCopy {
+      bufferOffset = img.offset,
+      imageSubresource = {aspectMask = img.aspect, layerCount = 1},
+      imageExtent = {img.extent.width, img.extent.height, 1},
+    }
+    vk.CmdCopyBufferToImage(cmd, img.src, img.image, .GENERAL, 1, &region)
+  }
+  for level in 1 ..< max_mips {
+    // The previous level's writes land before this level's blits read them.
+    memory_barrier(cmd, {.TRANSFER_WRITE}, {.TRANSFER_READ}, {.TRANSFER}, {.TRANSFER})
+    for img in images {
+      if level >= img.mip_levels do continue
+      src := [2]i32{max(i32(img.extent.width >> (level - 1)), 1), max(i32(img.extent.height >> (level - 1)), 1)}
+      dst := [2]i32{max(src.x / 2, 1), max(src.y / 2, 1)}
+      blit := vk.ImageBlit {
+        srcOffsets = {{0, 0, 0}, {src.x, src.y, 1}},
+        srcSubresource = {aspectMask = img.aspect, mipLevel = level - 1, layerCount = 1},
+        dstOffsets = {{0, 0, 0}, {dst.x, dst.y, 1}},
+        dstSubresource = {aspectMask = img.aspect, mipLevel = level, layerCount = 1},
+      }
+      vk.CmdBlitImage(cmd, img.image, .GENERAL, img.image, .GENERAL, 1, &blit, .LINEAR)
+    }
+  }
+}
+
+// Drop queued uploads that were never recorded. Use only when no frame is in
+// flight.
 @(private)
 discard_uploads :: proc(gctx: ^GPUContext) {
-  for c in gctx.uploads {
-    vk.DestroyBuffer(gctx.device, c.staging, nil)
-    vk.FreeMemory(gctx.device, c.memory, nil)
-  }
-  clear(&gctx.uploads)
+  clear(&gctx.uploads.copies)
+  clear(&gctx.uploads.fills)
+  clear(&gctx.uploads.images)
+  clear(&gctx.uploads.inits)
+  for &b in gctx.uploads.blocks do b.used, b.ready = 0, 0
+}
+
+@(private)
+uploads_destroy :: proc(gctx: ^GPUContext) {
+  for &b in gctx.uploads.blocks do buffer_destroy(gctx.device, &b.buffer)
+  delete(gctx.uploads.blocks)
+  delete(gctx.uploads.copies)
+  delete(gctx.uploads.fills)
+  delete(gctx.uploads.images)
+  delete(gctx.uploads.inits)
+  gctx.uploads = {}
 }

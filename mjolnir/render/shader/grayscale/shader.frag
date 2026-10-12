@@ -4,16 +4,13 @@
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(constant_id = 0) const uint MAX_TEXTURES = 1u;
-layout(constant_id = 1) const uint MAX_CUBE_TEXTURES = 1u;
-layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
-layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
-layout(constant_id = 4) const uint SAMPLER_NEAREST_REPEAT = 2u;
-layout(constant_id = 5) const uint SAMPLER_LINEAR_REPEAT = 3u;
+const uint SAMPLER_NEAREST_CLAMP = 0u;
+const uint SAMPLER_LINEAR_CLAMP = 1u;
+const uint SAMPLER_NEAREST_REPEAT = 2u;
+const uint SAMPLER_LINEAR_REPEAT = 3u;
 
-layout(set = 0, binding = 0) uniform texture2D textures[];
-layout(set = 0, binding = 1) uniform sampler samplers[];
-layout(set = 0, binding = 2) uniform textureCube textures_cube[];
+layout(set = 1, binding = 0) uniform texture2D textures[];
+layout(set = 1, binding = 1) uniform sampler samplers[];
 
 layout(push_constant) uniform PostProcessPushConstant {
     float camera_near;
@@ -24,12 +21,13 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint _pad0;
     uint _pad1;
     uint _pad2;
-    vec3 weights;
+    vec3 weights; // zero = Rec. 601 luma
     float strength;
 };
 
 void main() {
     vec4 color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
-    float gray = dot(color.rgb, weights);
+    vec3 w = all(equal(weights, vec3(0.0))) ? vec3(0.299, 0.587, 0.114) : weights;
+    float gray = dot(color.rgb, w);
     out_color = mix(color, vec4(gray, gray, gray, color.a), strength);
 }

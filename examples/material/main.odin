@@ -52,7 +52,7 @@ main :: proc() {
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
   plane_mesh := app.renderer.builtin_meshes[.QUAD_XZ]
   ground_albedo, _ := render.create_texture_from_data(&app.renderer, #load("statue-1275469_1280.jpg"), generate_mips = true)
-  plane_material := render.create_material(&app.renderer, {.ALBEDO_TEXTURE}, .PBR,
+  plane_material := render.create_material(&app.renderer, .PBR,
     albedo_handle = ground_albedo, roughness_value = 0.7, metallic_value = 0.0,
   )
 
@@ -105,7 +105,7 @@ update :: proc(app: ^App, dt: f32) {
     render.attach(&app.renderer, sun_light.index, l)
   }
   app.renderer.ambient.ibl_intensity = f32(ibl_intensity)
-  app.renderer.ambient.skybox_enabled = skybox_on
+  app.renderer.ambient.skybox_intensity = skybox_on ? 1 : 0
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
     mat := render.material(&app.renderer, grid_materials[row][col]) or_continue
@@ -115,7 +115,7 @@ update :: proc(app: ^App, dt: f32) {
   }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
   render.update(&app.renderer, dt)
 }
 

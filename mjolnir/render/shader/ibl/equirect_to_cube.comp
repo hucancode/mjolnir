@@ -1,16 +1,25 @@
 #version 450
 
 // Converts an equirectangular HDR map into a cubemap.
-// Input: equirect 2D texture (combined sampler).
-// Output: cubemap viewed as 2D-array (6 layers).
+// Input: equirect 2D texture. Output: cubemap viewed as 2D-array (6 layers).
+#extension GL_EXT_nonuniform_qualifier : require
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0) uniform sampler2D u_equirect;
-layout(set = 0, binding = 1, rgba16f) writeonly uniform image2DArray u_cube;
+const uint SAMPLER_LINEAR_REPEAT = 3u;
+
+layout(set = 1, binding = 0) uniform texture2D textures[];
+layout(set = 1, binding = 0) uniform textureCube cube_textures[]; // aliases textures
+layout(set = 1, binding = 1) uniform sampler samplers[];
+// aliases the depth pyramid's storage images
+layout(set = 1, binding = 2, rgba16f) writeonly uniform image2DArray storage_cubes[];
 
 layout(push_constant) uniform Push {
-    uint face_size; // edge length of output cube face
+    uint src;          // source texture
+    uint dst;          // destination storage image: one cube level as 6 layers
+    uint face_size;    // edge length of the destination level
+    float value;       // unused
+    uint sample_count; // unused
 };
 
 const float PI = 3.14159265359;
@@ -32,7 +41,7 @@ vec3 face_dir(uint face, vec2 uv) {
 
 vec2 dir_to_equirect_uv(vec3 dir) {
     float u = atan(dir.z, dir.x) / (2.0 * PI) + 0.5;
-    float v = acos(clamp(-dir.y, -1.0, 1.0)) / PI;
+    float v = acos(clamp(dir.y, -1.0, 1.0)) / PI;
     return vec2(u, v);
 }
 
@@ -41,6 +50,6 @@ void main() {
     if (gid.x >= face_size || gid.y >= face_size || gid.z >= 6u) return;
     vec2 uv = (vec2(gid.xy) + 0.5) / float(face_size) * 2.0 - 1.0;
     vec3 dir = face_dir(gid.z, uv);
-    vec3 color = textureLod(u_equirect, dir_to_equirect_uv(dir), 0.0).rgb;
-    imageStore(u_cube, ivec3(gid), vec4(color, 1.0));
+    vec3 color = textureLod(sampler2D(textures[src], samplers[SAMPLER_LINEAR_REPEAT]), dir_to_equirect_uv(dir), 0.0).rgb;
+    imageStore(storage_cubes[dst], ivec3(gid), vec4(color, 1.0));
 }

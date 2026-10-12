@@ -1,11 +1,11 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
 
-layout(binding = 0, set = 0) uniform texture2D textures[];
-layout(binding = 1, set = 0) uniform sampler samplers[];
+layout(binding = 0, set = 1) uniform texture2D textures[];
+layout(binding = 1, set = 1) uniform sampler samplers[];
 
-layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
-layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
+const uint SAMPLER_NEAREST_CLAMP = 0u;
+const uint SAMPLER_LINEAR_CLAMP = 1u;
 
 layout(location = 0) in vec4 color;
 layout(location = 1) in vec2 uv;

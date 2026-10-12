@@ -80,7 +80,7 @@ spawn_field :: proc(
 
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 12, 3}, {0, 2, 0})
-  app.renderer.ambient.skybox_enabled = false
+  app.renderer.ambient.skybox_intensity = 0
 
   // Particle source at center, large position spread
   if tex, ret := render.create_texture_from_path(&app.renderer, "assets/particles/star_09.png"); ret == .SUCCESS {
@@ -146,7 +146,7 @@ update :: proc(app: ^App, dt: f32) {
   draw_ff_marker(app, &attract)
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
   render.update(&app.renderer, dt)
 }
 

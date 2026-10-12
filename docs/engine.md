@@ -52,7 +52,7 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
   render.update(&app.renderer, dt)
 }
 
@@ -102,7 +102,7 @@ update :: proc(app: ^App, dt: f32) {
   for &a, i in app.animators do anim.animator_update(&a, &app.model.rigs[app.model.skinned[i].rig], dt, world.world_matrix(&app.scene, app.model.skinned[i].node))
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
   for s, i in app.model.skinned do render.stage_bones(&app.renderer, s.node.index, app.animators[i].palette)
   render.update(&app.renderer, dt)
 }
@@ -137,7 +137,7 @@ and DPI scale. Neither module imports the other.
 | Feed | Item | Render call |
 |---|---|---|
 | `world.removed_nodes` | node index | `render.stage_slot_removal` |
-| `world.changed_nodes` | `{index, world_matrix, visible}` | `render.stage_transform` |
+| `world.changed_nodes` | `{index, world_matrix, visible}` | `render.stage_transforms` |
 
 Run `world.update` after every write to the scene graph for the tick
 (physics poses, sockets, gameplay), then the two loops.

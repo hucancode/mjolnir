@@ -15,17 +15,17 @@ Mesh :: struct {
   allocations:             MeshAllocations,
 }
 
+// A texture left empty is not sampled.
 Material :: struct {
-  features:           ShaderFeatureSet,
   base_color_factor:  [4]f32,
   metallic_value:     f32,
   roughness_value:    f32,
   emissive_value:     f32,
   type:               MaterialType,
-  albedo:             Texture2DHandle,
-  metallic_roughness: Texture2DHandle,
-  normal:             Texture2DHandle,
-  emissive:           Texture2DHandle,
+  albedo:             TextureHandle,
+  metallic_roughness: TextureHandle,
+  normal:             TextureHandle,
+  emissive:           TextureHandle,
   // .SPRITE: sheet size in cells and the cell shown, row-major
   frame_columns:      u32,
   frame_rows:         u32,
@@ -49,7 +49,7 @@ Emitter :: struct {
   // Whole particles accumulated by update and not yet handed to a frame.
   pending_emit:      u32,
   enabled:           b32,
-  texture_handle:    Texture2DHandle,
+  texture_handle:    TextureHandle,
   // Transform slot the particles spawn from. Set by attach.
   slot:              u32,
 }
@@ -65,10 +65,10 @@ ForceField :: struct {
 
 @(private)
 init_resource_pools :: proc(self: ^Manager) {
-  cont.init(&self.meshes, MAX_MESHES, RETIRE_GRACE)
-  cont.init(&self.materials, MAX_MATERIALS, RETIRE_GRACE)
-  cont.init(&self.emitters, MAX_EMITTERS, RETIRE_GRACE)
-  cont.init(&self.forcefields, MAX_FORCE_FIELDS, RETIRE_GRACE)
+  cont.init(&self.meshes, MAX_MESHES, gpu.RETIRE_GRACE)
+  cont.init(&self.materials, MAX_MATERIALS, gpu.RETIRE_GRACE)
+  cont.init(&self.emitters, MAX_EMITTERS, gpu.RETIRE_GRACE)
+  cont.init(&self.forcefields, MAX_FORCE_FIELDS, gpu.RETIRE_GRACE)
   init_builtin_materials(self)
   init_builtin_meshes(self)
 }
@@ -85,8 +85,9 @@ destroy_resource_pools :: proc(self: ^Manager) {
 }
 
 // Advance deferred destruction by one frame: pool slots, textures and loose
-// GPU buffers freed RETIRE_GRACE frames ago are reclaimed. The only place
-// retirement advances; frame calls it once, after waiting on its fence.
+// GPU buffers freed gpu.RETIRE_GRACE frames ago are reclaimed. The only place
+// retirement advances; frame calls it once per frame, after wait_frame, so
+// the pools' tick counts follow frame_serial.
 @(private)
 tick_resource_pools :: proc(self: ^Manager) {
   gpu.deferred_tick(&self.gctx)
@@ -95,6 +96,7 @@ tick_resource_pools :: proc(self: ^Manager) {
   cont.tick(&self.materials, nil, nil)
   cont.tick(&self.emitters, nil, nil)
   cont.tick(&self.forcefields, nil, nil)
+  cont.tick(&self.cameras, nil, nil)
 }
 
 // Pointers to a material, emitter or force field. Write changes back with the
@@ -198,7 +200,7 @@ create_texture_from_path :: proc(
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips: bool = false,
 ) -> (
-  handle: Texture2DHandle,
+  handle: TextureHandle,
   ret: vk.Result,
 ) {
   return create_texture_2d_from_path(&self.gctx, &self.texture_manager, path, format, generate_mips)
@@ -211,7 +213,7 @@ create_texture_from_data :: proc(
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips: bool = false,
 ) -> (
-  handle: Texture2DHandle,
+  handle: TextureHandle,
   ret: vk.Result,
 ) {
   return create_texture_2d_from_data(&self.gctx, &self.texture_manager, data, format, generate_mips)
@@ -219,8 +221,8 @@ create_texture_from_data :: proc(
 
 // Free a texture loaded with create_texture_from_*. Its GPU image is released
 // once no frame in flight samples it; teardown frees every texture.
-destroy_texture :: proc(self: ^Manager, handle: Texture2DHandle) {
-  free_texture_2d(&self.texture_manager, &self.gctx, handle)
+destroy_texture :: proc(self: ^Manager, handle: TextureHandle) {
+  free_texture(&self.texture_manager, &self.gctx, handle)
 }
 
 // ---------- materials ----------
@@ -229,12 +231,11 @@ destroy_texture :: proc(self: ^Manager, handle: Texture2DHandle) {
 // material that samples textures before teardown.
 create_material :: proc(
   self: ^Manager,
-  features: ShaderFeatureSet = {},
   type: MaterialType = .PBR,
-  albedo_handle: Texture2DHandle = {},
-  metallic_roughness_handle: Texture2DHandle = {},
-  normal_handle: Texture2DHandle = {},
-  emissive_handle: Texture2DHandle = {},
+  albedo_handle: TextureHandle = {},
+  metallic_roughness_handle: TextureHandle = {},
+  normal_handle: TextureHandle = {},
+  emissive_handle: TextureHandle = {},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
@@ -249,7 +250,6 @@ create_material :: proc(
   handle, mat = cont.alloc(&self.materials, MaterialHandle) or_return
   mat^ = {
     type               = type,
-    features           = features,
     albedo             = albedo_handle,
     metallic_roughness = metallic_roughness_handle,
     normal             = normal_handle,
@@ -301,14 +301,13 @@ material_transparent :: proc(
 // `tint`. Attach it with the builtin QUAD_XY mesh; it always faces the camera.
 material_sprite :: proc(
   self: ^Manager,
-  texture: Texture2DHandle,
+  texture: TextureHandle,
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
   tint: [4]f32 = {1, 1, 1, 1},
 ) -> (MaterialHandle, bool) #optional_ok {
   return create_material(
     self,
-    {.ALBEDO_TEXTURE},
     type = .SPRITE,
     albedo_handle = texture,
     base_color_factor = tint,
@@ -380,7 +379,7 @@ init_builtin_meshes :: proc(self: ^Manager) {
 
 create_emitter :: proc(
   self: ^Manager,
-  texture_handle: Texture2DHandle = {},
+  texture_handle: TextureHandle = {},
   emission_rate: f32 = 50.0,
   initial_velocity: [3]f32 = {0, 1, 0},
   velocity_spread: f32 = 0.5,

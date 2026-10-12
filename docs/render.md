@@ -45,9 +45,9 @@ render.shutdown(&r)
   as the skybox and precomputes image-based lighting from it. Call it
   after `setup`; without one, IBL and the skybox are black.
   `r.ambient.ibl_intensity` scales the image-based lighting;
-  `r.ambient.skybox_enabled`, `skybox_blur` (0..1) and
-  `skybox_intensity` show or hide the skybox and set its blur and
-  brightness. `setup` resets them to their defaults.
+  `r.ambient.skybox_blur` (0..1) and `skybox_intensity` set the
+  skybox's blur and brightness, 0 hiding it. `setup` resets them to
+  their defaults.
 - `update(&r, dt)` advances render's own clock once per update tick:
   particle time, emitter accumulators and debug line lifetimes. The
   next frame emits and simulates everything accumulated since the
@@ -68,7 +68,9 @@ slot = world node index.
 
 - `render.attach(&r, slot, attachment)` sets what a slot draws,
   replacing what it drew before.
-- `render.stage_transform(&r, slot, world_matrix, visible)` moves it.
+- `render.stage_transforms(&r, changes)` moves slots: `changes` is a slice of
+  any struct with `index` (the slot), `world_matrix` and `visible` fields,
+  such as `world.changed_nodes(&w)`.
 - `render.stage_bones(&r, slot, matrices)` uploads a skin palette.
 - `render.stage_slot_removal(&r, slot)` frees it.
 
@@ -76,8 +78,8 @@ All of these are thread-safe and callable from the update thread.
 
 To change a look, `render.attachment(&r, slot, T)` returns a copy of
 the slot's attachment of type `T`; edit its fields (light color,
-radius, `disabled`, mesh handle, material, …) and pass it back to
-`attach`:
+radius, mesh handle, material, …) and pass it back to `attach`.
+A slot's `visible` flag hides everything it draws, lights included:
 
 ```odin
 if l, ok := render.attachment(&r, slot, render.PointLightAttachment); ok {
@@ -97,7 +99,7 @@ if l, ok := render.attachment(&r, slot, render.PointLightAttachment); ok {
   `r.builtin_materials[.RED]` a builtin solid color;
   `primitive(&r, shape, color)` pairs them into a `MeshAttachment`.
 - **Textures.** `create_texture_from_path` / `create_texture_from_data`
-  return a bindless `Texture2DHandle`; `destroy_texture` releases it.
+  return a bindless `TextureHandle`; `destroy_texture` releases it.
   Textures live for one level: `teardown` destroys them all.
 - **Materials.** `create_material` and the `material_pbr`,
   `material_wireframe`, `material_transparent` shorthands. Materials
@@ -142,18 +144,26 @@ before reuse.
   `core`, and codifies the patterns render relies on without hiding
   Vulkan:
   - `GPUContext` (instance, device, queues, descriptor and command
-    pools) and `Swapchain` (frames-in-flight fences and semaphores).
-  - `MutableBuffer(T)` (host-visible, mapped) and `ImmutableBuffer(T)`
-    (device-local, uploaded through a staging buffer); images,
-    samplers, shader modules.
+    pools, the graphics and compute timeline semaphores and
+    `frame_serial`, the one frame clock: `wait_frame`, deferred
+    destruction, staging reuse and every pool's `RETIRE_GRACE` count
+    submissions) and `Swapchain` (images and their semaphores).
+  - `Buffer`, one plain struct for both memory kinds: host-visible and
+    persistently mapped for data the CPU rewrites every frame (`mapped`
+    views it as a typed slice), device-local for data written once or only
+    by the GPU (mesh geometry and table, particles, draw lists, pyramid
+    counters). Device-local buffers and images are filled through pooled
+    staging blocks recorded in bulk at the start of the next command
+    buffer (`record_uploads`): fills, one copy per destination buffer,
+    one batch of blits per mip level.
   - `create_graphics_pipeline(gctx, GraphicsPipelineDesc)` builds a
     dynamic-rendering pipeline from one description struct.
-  - Deferred destruction: resources queued with `defer_destroy_*`
-    are released once the GPU is past every frame that could use
-    them.
-  - The bindless mechanism: `create_descriptor_array_layout` makes
-    `PARTIALLY_BOUND` descriptor arrays, and
-    `write_descriptor_array_element` fills one slot.
+  - Deferred destruction: resources queued with `defer_destroy` are
+    released once the GPU is past every frame that could use them.
+  - Descriptors: `create_descriptor_layout` makes a layout from
+    `DescriptorBinding`s, every binding a `PARTIALLY_BOUND` array (the
+    scene set's bindings are arrays of one), and `write_descriptor`
+    fills one slot.
 - **`render/mesh`** is the mesh format described above. It is plain
   data with no Vulkan, so tools and tests can build geometry without
   a device.
@@ -163,13 +173,30 @@ before reuse.
 Everything else is private to `package render`:
 
 - `bindless_*.odin` define render's arrays on top of the `gpu`
-  mechanism: the 2D texture, cube texture and sampler arrays
-  (`TextureManager`), the mesh arena (`MeshManager`: shared vertex,
+  mechanism: the texture array (2D and cube textures share it, the
+  shaders aliasing a `textureCube` array onto its binding) and the
+  sampler array (`TextureManager`), the mesh arena (`MeshManager`: shared vertex,
   index and skinning buffers sub-allocated by the containers slab
-  allocator), the scene descriptor sets, and the indirect draw lists
-  (`DrawPipeline`, `DrawBuffers`) that culling writes and draws consume.
-- `pass_*.odin` hold one pass each: `gbuffer`, `ambient`,
-  `direct_light`, `shadow`, `forward`, `particles` (draw) and
+  allocator), the scene descriptor set, and the indirect draw lists
+  (`DrawLists`) that culling writes and draws consume.
+- One scene descriptor set (set 0, per frame in flight, bindings in
+  `SceneBinding`) plus the bindless set (set 1) form one pipeline layout
+  shared by every scene pipeline, compute and graphics; it is bound once
+  per command buffer. Besides textures and samplers, set 1 holds the
+  compute-only arrays at fixed slots: every draw list buffer (camera slot
+  c, frame f at c * FRAMES_IN_FLIGHT + f, then the shadow lists), every
+  depth pyramid mip as a storage image, and the pyramid counters.
+- `MATERIAL_PIPELINES` describes every `MaterialType`: shaders, the pass
+  that draws it, raster state, and whether it is occlusion tested and
+  casts shadows. A material type's draw list, pipeline and cull rules all
+  come from that table.
+- `material_pass_record` (material_pipelines.odin) records the G-buffer
+  and forward passes from `MATERIAL_PASS_TARGETS`; forward also draws
+  particles.
+- `pass_*.odin` hold one pass each: `direct_light` (every light type,
+  ambient included), `ambient` (environment data) and
+  `ambient_precompute` (IBL), `shadow`,
+  `particles` (pipeline and draw) and
   `particles_compute` (simulation), `occlusion_culling` (depth pyramid
   + cull), `debug_line`, `post_process`. A pass's record proc takes the
   `Manager` and reads the scene buffers from it.
@@ -191,9 +218,16 @@ must outlive that window.
 ## Bindless + GPU-driven culling
 
 A draw is "indirect dispatch + bindless indices"; there is no
-per-mesh descriptor binding. Visibility culling runs as a compute
-pass per camera (frustum + depth-pyramid occlusion) and writes the
-indirect draw commands the next graphics pass consumes.
+per-mesh descriptor binding. Culling is one compute shader over a table
+of views (`ViewGPU`): one thread tests one (node, view) pair against the
+view's frustum and, when the view has a depth pyramid and the material
+type is occlusion tested, its pyramid. Visible nodes are appended to the
+draw lists the view names, in the list for their material type. A camera
+is one view with one list per material type; the shadow views share one
+list. Every camera slot has a view, empty for a slot without a camera,
+so one dispatch culls for all cameras. The depth pyramid is built in one
+dispatch per camera: each group reduces a 32×32 tile to mip 5 in shared
+memory, and the last group to finish reduces the rest.
 
 Frame N's culling builds the depth pyramid from frame N-1's depth and
 writes the draw lists frame N+1 draws. On a device with a dedicated
@@ -209,30 +243,55 @@ Buffers, camera depth and the pyramid use `CONCURRENT` sharing across the
 two families, so no ownership transfers are needed. Particle simulation
 always runs on the graphics queue at the end of the frame.
 
+## Particles
+
+Particles live in a ring of `MAX_PARTICLES` slots. Each frame the CPU
+gives every emitter a range of the frame's new particles (an exclusive
+prefix of emit counts) and the ring cursor; the emit dispatch runs one
+thread per new particle, which finds its emitter by binary search. The
+simulation advances every live slot and appends it to the alive list,
+whose header is the indirect draw: the forward pass draws exactly the
+live particles.
+
 ## Why deferred + light volumes
 
 Forward shading scales as `pixels × lights`. The deferred pass writes
 a G-buffer (normal, albedo, metallic-roughness, emissive, depth) once
 per visible fragment; the lighting passes rebuild world position from
-depth and the camera's inverse view-projection. It then runs one fullscreen ambient
-pass (IBL + BRDF LUT) plus a per-light volume pass for each direct
-light. The IBL environment map comes from `load_environment_map`.
-A light's volume (sphere for point, cone for spot, fullscreen
-triangle for directional) is rasterized with reversed depth test so
-only fragments actually reached by that light get shaded.
+depth and the camera's inverse view-projection, with one instanced
+volume draw per light type, all blended additively. The ambient light
+(IBL + BRDF LUT, emissive and the skybox) is one more light type, one
+instance per frame; its environment map comes from
+`load_environment_map`. Lights are uploaded to a storage buffer sorted
+by type, so each type is one draw of its volume (sphere for point, cone
+for spot, fullscreen triangle for directional and ambient) with one
+instance per light, rasterized with reversed depth test so only
+fragments actually reached by a light get shaded.
+
+Cameras are recorded phase by phase: every camera's G-buffer scope, then
+every camera's lighting scope, then every camera's forward scope. One
+barrier separates each phase for all cameras, so the barrier count does
+not grow with the camera count.
 
 ## Shadows
 
-Every shadow map renders one or more views: a 2D map (directional and
-spot lights) one, a cube map (point lights) one per face, each a 90°
-view. Each frame one compute dispatch tests every node against every
-view and appends the visible casters to that view's draw list; then
-every view draws its list into a 512² D32_SFLOAT target with no
-barriers between views. Cube faces keep the viewport unflipped to match
-cube sampling, so they wind clockwise.
+Shadow maps are layers of one 512² D32_SFLOAT 2D array image per frame
+in flight. A map has one face per layer, `SHADOW_FACES[type]`: a
+directional or spot light has one, a point light six (the cube faces,
+each a 90° perspective view). Each face is one view in the cull's view
+table, and shadow view i renders layer i. The image grows, doubling, as
+more layers are needed; only the layers in use are rendered. One cull
+dispatch over every (node, view) pair fills one shared list, each draw
+tagged with its view; one layered draw renders every view, the vertex
+shader picking the layer. Shadow views share the scene passes' raster
+state: projections put clip-space y down and no viewport is flipped.
 
-Lighting samples both kinds through a depth-compare sampler, which
-filters the shadow test over 2×2 texels.
+Lighting has one shadow path for every light type: it picks the face
+(the major axis of the light-to-fragment direction for a point light,
+the only face otherwise), projects the fragment with that face's view
+and samples its layer through a depth-compare sampler, which filters the
+shadow test over 2×2 texels. The slope-scaled depth bias is per light
+data (`shadow_bias`).
 
 There are `MAX_SHADOW_MAPS` shadow maps. Every light has a bounding
 sphere (radius = range; unbounded for directional lights). Each frame
@@ -241,9 +300,7 @@ ranked by `intensity × r² / (d² − r²)`, an estimate of the screen area
 the sphere covers. The top `SHADOW_RANKED_CASTERS` get a map; the
 remaining maps stay with casters that ranked within the last
 `SHADOW_GRACE_FRAMES` frames. Other casters light unshadowed. A
-selected caster keeps its map; the others take a free map of their kind
-first, and a map's textures switch between cube and 2D when it goes to
-a light of the other kind.
+selected caster keeps its map; the others take a free one.
 
 ## Cameras
 
@@ -289,18 +346,21 @@ line primitives. A line lasts `life` seconds of render's clock
 
 ## Post-process
 
-`render.add_effect(&r, effect)` appends one effect value
-(`ToneMapEffect`, `BloomEffect`, `BlurEffect`, `FogEffect`,
-`OutlineEffect`, `DoFEffect`, `CrossHatchEffect`, `GrayscaleEffect`)
-and `clear(&r.post_process.effect_stack)` empties the stack:
+Append effect values (`ToneMapEffect`, `BloomEffect`, `BlurEffect`,
+`FogEffect`, `OutlineEffect`, `DoFEffect`, `CrossHatchEffect`,
+`GrayscaleEffect`) to `r.post_process.effect_stack`; `clear` empties
+it:
 
 ```odin
 clear(&r.post_process.effect_stack)
-render.add_effect(&r, render.BloomEffect{threshold = 1, intensity = 2, blur_radius = 32})
-render.add_effect(&r, render.ToneMapEffect{exposure = 1, gamma = 2.2})
+append(&r.post_process.effect_stack, render.BloomEffect{threshold = 1, intensity = 2, blur_radius = 32})
+append(&r.post_process.effect_stack, render.ToneMapEffect{exposure = 1, gamma = 2.2})
 ```
 
 Effects run in insertion order inside the `POST_PROCESS` pass of every
-camera that has it. Blur and bloom run as two separable passes
-(horizontal, then vertical); `add_effect` sets their `direction`. A
+camera that has it. `EFFECTS` gives each effect's shader and pass
+count; each pass reads the previous pass's output (input) and the one
+before it (original) from a ring of three images, plus its pass number.
+Blur and bloom run two separable passes (horizontal, then vertical),
+and bloom's vertical pass composites over its original. A
 `GrayscaleEffect` with zero `weights` uses Rec. 601 luma weights.

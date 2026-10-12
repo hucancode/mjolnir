@@ -1,116 +1,108 @@
 #+private
 package render
 
-import cont "../containers"
 import "gpu"
-import "core:math/linalg"
+import "mesh"
 import vk "vendor:vulkan"
 
-DIRECT_LIGHT_SHADER_VERT := #load("shader/lighting/vert.spv")
-DIRECT_LIGHT_SHADER_FRAG := #load("shader/lighting/frag.spv")
+LIGHTING_SHADER_VERT :: #load("shader/lighting/vert.spv")
+LIGHTING_SHADER_FRAG :: #load("shader/lighting/frag.spv")
+AMBIENT_SHADER_FRAG :: #load("shader/lighting_ambient/frag.spv")
 
-
-// Selects the light branch of the lighting shader (specialization constant 6).
+// Selects the light branch of the lighting shaders (specialization constant 0).
+// AMBIENT is the environment light: image-based lighting, emissive and the
+// skybox, one per frame.
 LightType :: enum u32 {
   POINT,
   SPOT,
   DIRECTIONAL,
+  AMBIENT,
 }
 
-// One light's parameters. Point lights ignore direction and angles;
-// directional lights ignore position, radius and angles.
-DirectLight :: struct {
+// One light as the lighting shaders read it from the light buffer. Point
+// lights ignore direction and angles; directional lights ignore position,
+// radius and angles.
+LightGPU :: struct {
   color:       [4]f32, // RGB + intensity
   position:    [3]f32,
-  direction:   [3]f32,
   radius:      f32,
+  direction:   [3]f32, // normalized
   angle_inner: f32,
   angle_outer: f32,
+  // view table index of the shadow map's first face, NO_SHADOW without one
+  shadow_map:  u32,
+  // depth bias per unit of tan(angle of incidence), in shadow map depth
+  shadow_bias: f32,
+  _:           u32,
 }
 
 // shadow_map value for a light without a shadow map.
-NO_SHADOW :: 0xFFFF
+NO_SHADOW :: 0xFFFFFFFF
 
-// Indices travel as 16-bit halves of a u32.
-#assert(MAX_TEXTURES < NO_SHADOW && MAX_CUBE_TEXTURES < NO_SHADOW)
-
-DirectLightPushConstants :: struct {
-  shadow_view_projection:      matrix[4, 4]f32,
-  light_color:                 [4]f32,
-  position:                    [3]f32,
-  angle_inner:                 f32,
-  direction:                   [3]f32,
-  radius:                      f32,
-  angle_outer:                 f32,
-  shadow_and_camera_indices:   u32, // shadow map | camera << 16
-  depth_and_normal_indices:    u32, // depth | normal << 16
-  albedo_and_metallic_indices: u32, // albedo | metallic_roughness << 16
+// Pushed once per camera, read by every lighting pipeline.
+LightingPushConstants :: struct {
+  camera_index:     u32,
+  gbuffer:          GBuffer,
+  irradiance:       u32,
+  prefilter:        u32,
+  brdf_lut:         u32,
+  environment:      u32,
+  skybox_intensity: f32,
+  skybox_blur:      f32,
 }
-
-#assert(size_of(DirectLightPushConstants) == 128)
 
 DirectLightRenderer :: struct {
-  pipelines:       [LightType]vk.Pipeline,
-  pipeline_layout: vk.PipelineLayout,
+  pipelines: [LightType]vk.Pipeline,
+  volumes:   [LightType]MeshAllocations,
 }
 
-// DirectLight volume each type rasterizes. Point and spot draw their volume's back
-// faces where the scene lies in front of them; directional lights cover the
-// whole screen.
+// The volume each light type rasterizes, one instance per light, and the
+// fragment shader shading it. Point and spot draw their volume's back faces
+// where the scene lies in front of them; directional and ambient lights cover
+// the screen with a clip-space triangle.
 @(private = "file")
 DRAW_STATE := [LightType]struct {
   depth_compare: vk.CompareOp,
   cull:          vk.CullModeFlags,
+  volume:        proc() -> mesh.Geometry,
+  frag:          []u8,
 } {
-  .POINT       = {.GREATER_OR_EQUAL, {.FRONT}},
-  .SPOT        = {.GREATER_OR_EQUAL, {.BACK}},
-  .DIRECTIONAL = {.ALWAYS, {.BACK}},
+  .POINT       = {.GREATER_OR_EQUAL, {.FRONT}, proc() -> mesh.Geometry {return mesh.make_sphere()}, LIGHTING_SHADER_FRAG},
+  .SPOT        = {.GREATER_OR_EQUAL, {.BACK}, proc() -> mesh.Geometry {return mesh.make_cone()}, LIGHTING_SHADER_FRAG},
+  .DIRECTIONAL = {.ALWAYS, {.BACK}, fullscreen_triangle, LIGHTING_SHADER_FRAG},
+  .AMBIENT     = {.ALWAYS, {.BACK}, fullscreen_triangle, AMBIENT_SHADER_FRAG},
 }
 
-direct_light_init :: proc(
-  self: ^DirectLightRenderer,
-  gctx: ^gpu.GPUContext,
-  camera_set_layout: vk.DescriptorSetLayout,
-  textures_set_layout: vk.DescriptorSetLayout,
-) -> (
-  ret: vk.Result,
-) {
-  self.pipeline_layout = gpu.create_pipeline_layout(
-    gctx,
-    vk.PushConstantRange {
-      stageFlags = {.VERTEX, .FRAGMENT},
-      size = size_of(DirectLightPushConstants),
-    },
-    camera_set_layout,
-    textures_set_layout,
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
-  }
-  SpecData :: struct {
-    using shared: SpecConstants,
-    light_type:   LightType,
-  }
-  N :: len(SHADER_SPEC_ENTRIES)
-  entries: [N + 1]vk.SpecializationMapEntry
-  copy(entries[:N], SHADER_SPEC_ENTRIES[:])
-  entries[N] = {
-    constantID = N,
-    offset     = u32(offset_of(SpecData, light_type)),
-    size       = size_of(u32),
-  }
+// Clip-space triangle covering the screen, counter-clockwise in framebuffer
+// space (clip-space y points down).
+@(private = "file")
+fullscreen_triangle :: proc() -> mesh.Geometry {
+  vertices := make([]mesh.Vertex, 3)
+  vertices[0].position = {-1, -1, 0}
+  vertices[1].position = {-1, 3, 0}
+  vertices[2].position = {3, -1, 0}
+  indices := make([]u32, 3)
+  indices[0], indices[1], indices[2] = 0, 1, 2
+  return {vertices = vertices, indices = indices}
+}
+
+direct_light_init :: proc(r: ^Manager) -> (ret: vk.Result) {
+  self := &r.internal.direct_light
+  gctx := &r.gctx
+  light_type_entry := vk.SpecializationMapEntry{constantID = 0, size = size_of(LightType)}
   color_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
   blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ADDITIVE}
-  defer if ret != .SUCCESS {
-    for p in self.pipelines do vk.DestroyPipeline(gctx.device, p, nil)
-  }
+  defer if ret != .SUCCESS do direct_light_shutdown(r)
   for type in LightType {
-    data := SpecData{SHADER_SPEC_DATA, type}
+    geometry := DRAW_STATE[type].volume()
+    defer mesh.delete_geometry(geometry)
+    self.volumes[type] = allocate_mesh(&r.mesh_manager, gctx, geometry) or_return
+    light_type := type
     specialization := vk.SpecializationInfo {
-      mapEntryCount = len(entries),
-      pMapEntries   = raw_data(entries[:]),
-      dataSize      = size_of(data),
-      pData         = &data,
+      mapEntryCount = 1,
+      pMapEntries   = &light_type_entry,
+      dataSize      = size_of(light_type),
+      pData         = &light_type,
     }
     raster := gpu.STANDARD_RASTERIZER
     raster.cullMode = DRAW_STATE[type].cull
@@ -119,8 +111,8 @@ direct_light_init :: proc(
     self.pipelines[type] = gpu.create_graphics_pipeline(
       gctx,
       {
-        vert = DIRECT_LIGHT_SHADER_VERT,
-        frag = DIRECT_LIGHT_SHADER_FRAG,
+        vert = LIGHTING_SHADER_VERT,
+        frag = DRAW_STATE[type].frag,
         specialization = &specialization,
         vertex_bindings = VERTEX_BINDING_DESCRIPTION[:],
         vertex_attributes = POSITION_ATTRIBUTE_DESCRIPTIONS[:],
@@ -129,21 +121,24 @@ direct_light_init :: proc(
         depth = depth,
         blend = blend[:],
         color_formats = color_formats[:],
-        depth_format = .D32_SFLOAT,
-        layout = self.pipeline_layout,
+        depth_format = ATTACHMENTS[.DEPTH].format,
+        layout = r.internal.scene.layout,
       },
     ) or_return
   }
   return .SUCCESS
 }
 
-direct_light_shutdown :: proc(self: ^DirectLightRenderer, gctx: ^gpu.GPUContext) {
-  vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
-  for p in self.pipelines do vk.DestroyPipeline(gctx.device, p, nil)
+direct_light_shutdown :: proc(r: ^Manager) {
+  self := &r.internal.direct_light
+  for p in self.pipelines do vk.DestroyPipeline(r.gctx.device, p, nil)
+  for v in self.volumes do free_mesh(&r.mesh_manager, v)
+  self^ = {}
 }
 
-// Record one camera's lighting: ambient, then one volume per light, additively
-// over the same color image and depth-tested against the G-buffer depth.
+// Record one camera's lighting: every light as one instance of its type's
+// volume, additively over the cleared color image and depth-tested against
+// the G-buffer depth. record_camera_passes orders it with the other passes.
 lighting_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Camera) {
   self := &r.internal.direct_light
   cmd := r.internal.command_buffers[frame_index]
@@ -158,108 +153,33 @@ lighting_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Cam
     gpu.create_depth_attachment(depth_texture.view, .LOAD, .NONE),
     gpu.create_color_attachment(final_image.view),
   )
-  // the ambient fullscreen triangle is built unflipped
-  gpu.set_viewport_scissor(cmd, depth_texture.extent, flip_y = false)
-  ambient_draw(r, cmd, frame_index, cam_index, gbuffer)
   gpu.set_viewport_scissor(cmd, depth_texture.extent)
-  descriptor_sets := [?]vk.DescriptorSet {
-    r.internal.camera_buffer.descriptor_sets[frame_index],
-    r.texture_manager.descriptor_set,
+  bind_mesh_buffers(r, cmd)
+  ambient := &r.ambient
+  push := LightingPushConstants {
+    camera_index     = cam_index,
+    gbuffer          = gbuffer,
+    irradiance       = texture_index(ambient.ibl.irradiance_cube),
+    prefilter        = texture_index(ambient.ibl.prefilter_cube),
+    brdf_lut         = texture_index(ambient.brdf_lut),
+    environment      = texture_index(ambient.environment_map),
+    skybox_intensity = ambient.skybox_intensity,
+    skybox_blur      = ambient.skybox_blur,
   }
-  vk.CmdBindDescriptorSets(
-    cmd,
-    .GRAPHICS,
-    self.pipeline_layout,
-    0,
-    len(descriptor_sets),
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
-  )
-  gpu.bind_vertex_index_buffers(
-    cmd,
-    r.mesh_manager.vertex_buffer.buffer,
-    r.mesh_manager.index_buffer.buffer,
-  )
-  sphere := cont.get(r.meshes, r.builtin_meshes[.SPHERE])
-  cone := cont.get(r.meshes, r.builtin_meshes[.CONE])
-  // Lights grouped by type: one pipeline bind per type.
+  push_constants(r, cmd, &push)
   for type in LightType {
-    bound := false
-    for &fl in r.internal.frame_lights {
-      if fl.type != type do continue
-      if !bound {
-        vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipelines[type])
-        bound = true
-      }
-      shadow_map: u32 = NO_SHADOW
-      shadow_view_projection: matrix[4, 4]f32
-      if sm := fl.shadow_map; sm != nil {
-        shadow_map = sm.textures[frame_index].index
-        shadow_view_projection = fl.info.projection if sm.cube else fl.info.view_projection
-      }
-      direct_light_record_light(
-        self,
-        cmd,
-        fl.type,
-        fl.params,
-        cone.allocations if fl.type == .SPOT else sphere.allocations,
-        cam_index,
-        gbuffer,
-        shadow_map,
-        shadow_view_projection,
-      )
-    }
-  }
-  vk.CmdEndRendering(cmd)
-}
-
-@(private = "file")
-direct_light_record_light :: proc(
-  self: ^DirectLightRenderer,
-  command_buffer: vk.CommandBuffer,
-  type: LightType,
-  light: DirectLight,
-  volume: MeshAllocations,
-  camera_index: u32,
-  gbuffer: GBuffer,
-  shadow_map: u32,
-  shadow_view_projection: matrix[4, 4]f32,
-) {
-  pack :: proc(lo, hi: u32) -> u32 {return (lo & 0xFFFF) | (hi << 16)}
-  push := DirectLightPushConstants {
-    shadow_view_projection      = shadow_view_projection,
-    light_color                 = light.color,
-    position                    = light.position,
-    angle_inner                 = light.angle_inner,
-    direction                   = light.direction,
-    radius                      = light.radius,
-    angle_outer                 = light.angle_outer,
-    shadow_and_camera_indices   = pack(shadow_map, camera_index),
-    depth_and_normal_indices    = pack(gbuffer.depth, gbuffer.normal),
-    albedo_and_metallic_indices = pack(gbuffer.albedo, gbuffer.metallic_roughness),
-  }
-  if type == .SPOT do push.direction = linalg.normalize(light.direction)
-  vk.CmdPushConstants(
-    command_buffer,
-    self.pipeline_layout,
-    {.VERTEX, .FRAGMENT},
-    0,
-    size_of(push),
-    &push,
-  )
-  // Directional lights cover the screen with a triangle built in the vertex
-  // shader, ignoring the bound vertex buffer.
-  if type == .DIRECTIONAL {
-    vk.CmdDraw(command_buffer, 3, 1, 0, 0)
-  } else {
+    count := r.internal.light_count[type]
+    if count == 0 do continue
+    volume := self.volumes[type]
+    vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipelines[type])
     vk.CmdDrawIndexed(
-      command_buffer,
+      cmd,
       volume.indices.count,
-      1,
+      count,
       volume.indices.offset,
       i32(volume.vertices.offset),
-      0,
+      r.internal.light_first[type],
     )
   }
+  vk.CmdEndRendering(cmd)
 }

@@ -13,7 +13,6 @@ struct Camera {
     float near;
     float far;
     vec4 position;
-    vec4 frustum_planes[6];
     mat4 inv_view_projection;
 };
 
@@ -21,7 +20,7 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
 };
 // set 1 (textures), not available in vertex shader
-layout(set = 2, binding = 0) readonly buffer BoneMatrices {
+layout(set = 0, binding = 4) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 
@@ -33,7 +32,7 @@ struct NodeData {
     uint flags;
 };
 
-layout(set = 4, binding = 0) readonly buffer NodeBuffer {
+layout(set = 0, binding = 1) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 
@@ -50,7 +49,7 @@ struct MeshData {
     uint _padding;
 };
 
-layout(set = 5, binding = 0) readonly buffer MeshBuffer {
+layout(set = 0, binding = 2) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
@@ -59,7 +58,7 @@ struct VertexSkinningData {
     vec4 weights;
 };
 
-layout(set = 6, binding = 0) readonly buffer VertexSkinningBuffer {
+layout(set = 0, binding = 5) readonly buffer VertexSkinningBuffer {
     VertexSkinningData vertex_skinning[];
 };
 

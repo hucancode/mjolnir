@@ -1,19 +1,16 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
 
-layout(constant_id = 0) const uint MAX_TEXTURES = 1u;
-layout(constant_id = 1) const uint MAX_CUBE_TEXTURES = 1u;
-layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
-layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
-layout(constant_id = 4) const uint SAMPLER_NEAREST_REPEAT = 2u;
-layout(constant_id = 5) const uint SAMPLER_LINEAR_REPEAT = 3u;
+const uint SAMPLER_NEAREST_CLAMP = 0u;
+const uint SAMPLER_LINEAR_CLAMP = 1u;
+const uint SAMPLER_NEAREST_REPEAT = 2u;
+const uint SAMPLER_LINEAR_REPEAT = 3u;
 
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 0, binding = 0) uniform texture2D textures[];
-layout(set = 0, binding = 1) uniform sampler samplers[];
-layout(set = 0, binding = 2) uniform textureCube textures_cube[];
+layout(set = 1, binding = 0) uniform texture2D textures[];
+layout(set = 1, binding = 1) uniform sampler samplers[];
 
 layout(push_constant) uniform PostProcessPushConstant {
     float camera_near;
@@ -22,12 +19,11 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint depth_texture_index;
     uint input_image_index;
     uint original_image_index;
+    uint pass; // 0 = bright pass + horizontal blur, 1 = vertical blur + composite
     uint _pad0;
-    uint _pad1;
     float threshold;
     float intensity;
     float blur_radius;
-    float direction;
 };
 
 const float MAX_RADIUS = 64.0;
@@ -57,8 +53,8 @@ void main() {
     // truncated separable Gaussian leaves a square box artifact (visible as
     // square halos). sigma = radius/3 keeps the iso-weight contour circular.
     float sigma = effective_radius / 3.0;
-    vec2 dir = mix(vec2(1.0, 0.0), vec2(0.0, 1.0), direction);
-    bool is_horizontal = direction < 0.5;
+    bool is_horizontal = pass == 0u;
+    vec2 dir = is_horizontal ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
 
     vec3 acc = vec3(0.0);
     float total = 0.0;

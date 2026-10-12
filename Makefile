@@ -3,10 +3,8 @@ SHADER_DIR := mjolnir/render/shader
 # Find all shader files
 VERT_SHADERS := $(shell find $(SHADER_DIR) -name "shader.vert")
 FRAG_SHADERS := $(shell find $(SHADER_DIR) -name "shader.frag")
-GEOM_SHADERS := $(shell find $(SHADER_DIR) -name "shader.geom")
 SPV_SHADERS := $(patsubst $(SHADER_DIR)/%/shader.vert,$(SHADER_DIR)/%/vert.spv,$(VERT_SHADERS)) \
-               $(patsubst $(SHADER_DIR)/%/shader.frag,$(SHADER_DIR)/%/frag.spv,$(FRAG_SHADERS)) \
-               $(patsubst $(SHADER_DIR)/%/shader.geom,$(SHADER_DIR)/%/geom.spv,$(GEOM_SHADERS))
+               $(patsubst $(SHADER_DIR)/%/shader.frag,$(SHADER_DIR)/%/frag.spv,$(FRAG_SHADERS))
 COMP_SHADERS := $(shell find $(SHADER_DIR) -name "*.comp")
 SPV_COMPUTE_SHADERS := $(patsubst %.comp,%.spv,$(COMP_SHADERS))
 
@@ -95,10 +93,6 @@ $(SHADER_DIR)/%/vert.spv: $(SHADER_DIR)/%/shader.vert
 
 $(SHADER_DIR)/%/frag.spv: $(SHADER_DIR)/%/shader.frag
 	@echo "Compiling fragment shader $<..."
-	@glslc "$<" -o "$@"
-
-$(SHADER_DIR)/%/geom.spv: $(SHADER_DIR)/%/shader.geom
-	@echo "Compiling geometry shader $<..."
 	@glslc "$<" -o "$@"
 
 long-proc:
