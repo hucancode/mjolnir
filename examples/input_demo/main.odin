@@ -128,7 +128,7 @@ update :: proc(app: ^App, dt: f32) {
   }
   world.translate(&app.scene, cube_handle, cube_pos)
   world.rotate(&app.scene, cube_handle, cube_yaw)
-  if l, ok := render.attachment(&app.renderer, light_handle.index, render.LightAttachment); ok {
+  if l, ok := render.attachment(&app.renderer, light_handle.index, render.Light); ok {
     l.color[3] = f32(light_intensity)
     render.attach(&app.renderer, light_handle.index, l)
   }

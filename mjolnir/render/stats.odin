@@ -1,6 +1,5 @@
 package render
 
-import cont "../containers"
 import "gpu"
 import "core:fmt"
 import mu "vendor:microui"
@@ -16,9 +15,9 @@ stats_panel :: proc(self: ^Manager) {
   }
   // mu.window is scoped: widgets must stay inside the if-block.
   if mu.window(ctx, "Engine", {40, 40, 200, 200}, {}) {
-    mu.label(ctx, fmt.tprintf("Textures %d", cont.count(self.textures)))
-    mu.label(ctx, fmt.tprintf("Materials %d", cont.count(self.materials)))
-    mu.label(ctx, fmt.tprintf("Meshes %d", cont.count(self.meshes)))
+    mu.label(ctx, fmt.tprintf("Textures %d", self.texture_slots.count))
+    mu.label(ctx, fmt.tprintf("Materials %d", self.material_slots.count))
+    mu.label(ctx, fmt.tprintf("Meshes %d", self.mesh_slots.count))
     mu.label(ctx, fmt.tprintf("Render slots %d", self.node_count))
     mu.label(ctx, fmt.tprintf("Draw count: %d draws", draws))
   }

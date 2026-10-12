@@ -105,7 +105,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
   }
-  if l, ok := render.attachment(&app.renderer, sun_light.index, render.LightAttachment); ok {
+  if l, ok := render.attachment(&app.renderer, sun_light.index, render.Light); ok {
     l.color[3] = f32(sun_intensity)
     render.attach(&app.renderer, sun_light.index, l)
   }
@@ -116,7 +116,6 @@ update :: proc(app: ^App, dt: f32) {
     mat := render.material(&app.renderer, grid_materials[row][col]) or_continue
     mat.metallic_value = m
     mat.roughness_value = r
-    render.set_material(&app.renderer, grid_materials[row][col], mat^)
   }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)

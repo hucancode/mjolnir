@@ -92,13 +92,13 @@ test_shadow_selection_grace_limited :: proc(t: ^testing.T) {
 
 @(test)
 test_shadow_layers_packed_by_type :: proc(t: ^testing.T) {
-	lights := [?]LightGPU {
+	lights := [?]Light {
 		{type = .SPOT, shadow_map = 0},
 		{type = .POINT, shadow_map = NO_SHADOW},
 		{type = .DIRECTIONAL, shadow_map = 0},
 		{type = .POINT, shadow_map = 0},
 	}
-	dst: [len(lights)]LightGPU
+	dst: [len(lights)]Light
 	count, layers := pack_lights(lights[:], dst[:])
 	testing.expect_value(t, count, [LightType]u32{.POINT = 2, .SPOT = 1, .DIRECTIONAL = 1, .AMBIENT = 0})
 	testing.expect_value(t, dst[0].type, LightType.POINT)

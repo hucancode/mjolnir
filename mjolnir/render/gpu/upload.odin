@@ -2,6 +2,7 @@ package gpu
 
 import "core:mem"
 import "core:slice"
+import "core:sync"
 import vk "vendor:vulkan"
 
 // Uploads are written into host-visible staging blocks and recorded in bulk at
@@ -54,6 +55,9 @@ Uploads :: struct {
   images: [dynamic]PendingImage,
   // fresh images to move out of UNDEFINED
   inits:  [dynamic]ImageDiscard,
+  // queuing may happen on any thread; record_uploads drains on the render
+  // thread
+  mutex:  sync.Mutex,
 }
 
 // `size` bytes of staging memory for the next recording.
@@ -93,6 +97,7 @@ queue_buffer_write :: proc(
 ) -> vk.Result {
   size := len(data) * size_of(T)
   if size == 0 do return .SUCCESS
+  sync.mutex_guard(&gctx.uploads.mutex)
   src, offset, ptr := staging_alloc(gctx, size) or_return
   mem.copy(ptr, raw_data(data), size)
   append(
@@ -120,6 +125,7 @@ queue_buffer_fill :: proc(
   size := vk.DeviceSize(vk.WHOLE_SIZE),
   value: u32 = 0,
 ) {
+  sync.mutex_guard(&gctx.uploads.mutex)
   append(&gctx.uploads.fills, PendingFill{buffer.buffer, offset, size, value})
 }
 
@@ -132,6 +138,7 @@ queue_image_write :: proc(
   data: rawptr,
   size: int,
 ) -> vk.Result {
+  sync.mutex_guard(&gctx.uploads.mutex)
   src, offset, ptr := staging_alloc(gctx, size) or_return
   mem.copy(ptr, data, size)
   append(
@@ -151,6 +158,7 @@ queue_image_write :: proc(
 // Move a fresh image out of UNDEFINED, ready for `init.access` at
 // `init.stage`, when the next command buffer records its uploads.
 queue_image_init :: proc(gctx: ^GPUContext, init: ImageDiscard) {
+  sync.mutex_guard(&gctx.uploads.mutex)
   append(&gctx.uploads.inits, init)
 }
 
@@ -160,6 +168,7 @@ queue_image_init :: proc(gctx: ^GPUContext, init: ImageDiscard) {
 // to vertex input, indirect reads and shader access.
 record_uploads :: proc(gctx: ^GPUContext, cmd: vk.CommandBuffer) {
   u := &gctx.uploads
+  sync.mutex_guard(&u.mutex)
   if len(u.inits) > 0 {
     image_discard_barrier(cmd, ..u.inits[:])
     clear(&u.inits)
@@ -236,6 +245,7 @@ record_image_uploads :: proc(cmd: vk.CommandBuffer, images: []PendingImage) {
 // flight.
 @(private)
 discard_uploads :: proc(gctx: ^GPUContext) {
+  sync.mutex_guard(&gctx.uploads.mutex)
   clear(&gctx.uploads.copies)
   clear(&gctx.uploads.fills)
   clear(&gctx.uploads.images)

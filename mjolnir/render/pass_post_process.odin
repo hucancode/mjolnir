@@ -1,7 +1,6 @@
 #+private
 package render
 
-import cont "../containers"
 import "gpu"
 import "base:intrinsics"
 import "core:log"
@@ -140,7 +139,7 @@ post_process_record :: proc(
   discards: [POST_PROCESS_RING]gpu.ImageDiscard
   ring_count := post_process_image_count(effects)
   for &img, slot in ring[:ring_count] {
-    img = cont.get(r.textures, self.images[frame_index][slot])
+    img = texture_image(r, self.images[frame_index][slot])
     if img == nil {
       log.errorf("Post-process image handle %v not found", self.images[frame_index][slot])
       return

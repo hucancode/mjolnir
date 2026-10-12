@@ -2,42 +2,11 @@
 package render
 
 import "gpu"
-import cont "../containers"
 import vk "vendor:vulkan"
 
 LIGHTING_SHADER_VERT :: #load("shader/lighting/vert.spv")
 LIGHTING_SHADER_FRAG :: #load("shader/lighting/frag.spv")
 AMBIENT_SHADER_FRAG :: #load("shader/lighting_ambient/frag.spv")
-
-// Selects the light branch of the lighting shaders (specialization constant 0).
-// AMBIENT is the environment light: image-based lighting, emissive and the
-// skybox, one per frame.
-LightType :: enum u32 {
-  POINT,
-  SPOT,
-  DIRECTIONAL,
-  AMBIENT,
-}
-
-// One light as the lighting shaders read it from the light buffer. Point
-// lights ignore direction and angles; directional lights shade with neither
-// position, radius nor angles, which place and size their shadow map.
-LightGPU :: struct {
-  color:       [4]f32, // RGB + intensity
-  position:    [3]f32,
-  radius:      f32,
-  direction:   [3]f32, // normalized
-  angle_inner: f32,
-  angle_outer: f32,
-  // view table index of the shadow map's first face, NO_SHADOW without one
-  shadow_map:  u32,
-  // world size of a shadow texel; per unit of view depth for point and spot
-  shadow_texel: f32,
-  type:        LightType,
-}
-
-// shadow_map value for a light without a shadow map.
-NO_SHADOW :: 0xFFFFFFFF
 
 // Pushed once per camera, read by every lighting pipeline. The camera's view
 // holds its G-buffer.
@@ -72,11 +41,11 @@ DRAW_STATE := [LightType]struct {
 
 direct_light_init :: proc(r: ^Manager) -> vk.Result {
   gctx := &r.gctx
-  light_type_entry := vk.SpecializationMapEntry{constantID = 0, size = size_of(LightType)}
+  light_type_entry := vk.SpecializationMapEntry{constantID = 0, size = size_of(u32)}
   color_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
   blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ADDITIVE}
   for type in LightType {
-    light_type := type
+    light_type := u32(type)
     specialization := vk.SpecializationInfo {
       mapEntryCount = 1,
       pMapEntries   = &light_type_entry,
@@ -140,7 +109,7 @@ lighting_record :: proc(r: ^Manager, frame_index: u32, cam_index: u32, cam: ^Cam
     if count == 0 do continue
     vk.CmdBindPipeline(cmd, .GRAPHICS, r.light_pipelines[type])
     if primitive, ok := DRAW_STATE[type].volume.?; ok {
-      volume, _ := cont.get(r.meshes, r.builtin_meshes[primitive])
+      volume := &r.meshes[r.builtin_meshes[primitive].index]
       vk.CmdDrawIndexed(cmd, volume.index_count, count, volume.first_index, volume.vertex_offset, first)
     } else {
       vk.CmdDraw(cmd, 3, count, 0, first)

@@ -1,6 +1,8 @@
 package render
 
 import cont "../containers"
+import ba "core:container/bit_array"
+import "core:sync"
 import "gpu"
 import vk "vendor:vulkan"
 
@@ -135,9 +137,10 @@ PipelineId :: enum {
 // Callers outside the render package use the fields listed here and the
 // public procs; every other field is render's own state.
 //   * meshes / materials / emitters / forcefields: resources, stored as the
-//     shaders read them. Create and change them through the procs in
-//     resources.odin; changes reach the GPU through staging.
-//   * instances: per-slot looks (mesh, light, emitter, ...), indexed by
+//     shaders read them. Create them through the procs in resources.odin;
+//     material, emitter and forcefield return pointers into the table the
+//     next frame draws from, to edit in place.
+//   * attachments: per-slot looks (mesh, light, emitter, ...), indexed by
 //     transform slot. A slot is whatever index the caller uses to identify a
 //     transform; the engine uses world node indices.
 //   * cameras: views with their GPU targets. `main_camera` is presented.
@@ -157,14 +160,19 @@ PipelineId :: enum {
 Manager :: struct {
   gctx:                    gpu.GPUContext,
   swapchain:               gpu.Swapchain,
-  meshes:                  cont.Pool(MeshData),
-  materials:               cont.Pool(Material),
-  emitters:                cont.Pool(Emitter),
-  forcefields:             cont.Pool(ForceField),
-  instances:               [dynamic]Instance,
+  // Handles index the resource arrays; materials, emitters and force fields
+  // live in the frame tables (write_table).
+  meshes:                  []MeshData,
+  mesh_slots:              cont.Slots,
+  material_slots:          cont.Slots,
+  emitter_slots:           cont.Slots,
+  forcefield_slots:        cont.Slots,
+  // per slot; the slot's node record is in the node table
+  attachments:             [dynamic]Attachment,
   builtin_materials:       [Color]MaterialHandle,
   builtin_meshes:          [Primitive]MeshHandle,
-  cameras:                 cont.Pool(Camera),
+  cameras:                 []Camera,
+  camera_slots:            cont.Slots,
   main_camera:             CameraHandle,
   // Single source of truth for active scene node count. Drives compute
   // dispatch sizing across visibility, depth pyramid, and both shadow culls.
@@ -181,15 +189,19 @@ Manager :: struct {
   material_pipelines:      [MaterialType]vk.Pipeline,
   light_pipelines:         [LightType]vk.Pipeline,
   // bindless arrays: textures (level lifetime) and samplers
-  textures:                cont.Pool(gpu.Image),
+  textures:                []gpu.Image,
+  texture_slots:           cont.Slots,
   samplers:                [SamplerType]vk.Sampler,
   // the mesh arena: shared vertex, index and skinning buffers
   mesh_buffers:            [MeshStream]gpu.Buffer,
   mesh_slabs:              [MeshStream]cont.SlabAllocator,
-  // Scene storage buffers, bound together through `scene`: the per-frame
-  // tables in one arena per frame in flight, and the mesh table.
+  // Scene storage buffers, bound together through `scene`: per frame in
+  // flight the arena of fixed-size tables and the bone table, and the mesh
+  // table. region_debt tracks the writes still to carry to other frames.
   frame_arena:             [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
+  bone_buffers:            [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
   arena_layout:            ArenaLayout,
+  region_debt:             RegionDebt,
   mesh_data_buffer:        gpu.Buffer,
   // the main camera's draw counts of each frame, copied back for stats
   draw_count_readback:     [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
@@ -211,10 +223,16 @@ Manager :: struct {
   // shadow views, one per atlas layer, the frame's shadow maps take
   // (pack_lights)
   shadow_view_count:       u32,
-  shadow_atlas:            [gpu.FRAMES_IN_FLIGHT]ShadowAtlas,
+  shadow_atlas:            [gpu.FRAMES_IN_FLIGHT]gpu.Image,
   // the shadow views' shared draw list
   shadow_draws:            DrawLists,
-  staging:                 Staging,
+  // Held by every write to scene data and by frame from flush through the
+  // hand-off (lock / unlock).
+  mutex:                   sync.Recursive_Mutex,
+  // slots whose attachment is a light
+  light_slots:             ba.Bit_Array,
+  // simulation seconds advanced by update since the last frame
+  particle_time:           f32,
 }
 
 AttachmentType :: enum {

@@ -5,6 +5,7 @@ import "gpu"
 import "core:c"
 import "core:log"
 import "core:os"
+import "core:sync"
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
 
@@ -113,25 +114,34 @@ bindless_shutdown :: proc(r: ^Manager) {
 
 // Pool retire callback: no frame in flight samples the image any more.
 @(private = "file")
-retire_image :: proc(img: ^gpu.Image, user: rawptr) {
-  if img.image != 0 do gpu.image_destroy((^gpu.GPUContext)(user).device, img)
+retire_image :: proc(r: ^Manager, index: u32) {
+  img := &r.textures[index]
+  if img.image != 0 do gpu.image_destroy(r.gctx.device, img)
 }
 
 // Reclaim retired texture slots and destroy their images. Call once per
 // frame, after wait_frame.
 @(private)
 textures_tick :: proc(r: ^Manager) {
-  cont.tick(&r.textures, &r.gctx, retire_image)
+  for i in cont.slots_tick(&r.texture_slots) do retire_image(r, i)
 }
 
-// Destroy every texture and free the pool. The caller has waited for the GPU
+// Destroy every texture and free the slots. The caller has waited for the GPU
 // to go idle, so retired images go at once.
 @(private)
 textures_destroy :: proc(r: ^Manager) {
-  cont.flush(&r.textures, &r.gctx, retire_image)
-  it := cont.iterator(&r.textures)
-  for img in cont.next(&it, TextureHandle) do retire_image(img, &r.gctx)
-  cont.destroy(&r.textures)
+  for i in cont.slots_flush(&r.texture_slots) do retire_image(r, i)
+  c: u32
+  for i in cont.slots_next(&r.texture_slots, &c) do retire_image(r, i)
+  cont.slots_destroy(&r.texture_slots)
+  delete(r.textures)
+  r.textures = nil
+}
+
+// The image of a live texture, nil for a stale or empty handle.
+@(private)
+texture_image :: proc(r: ^Manager, handle: TextureHandle) -> ^gpu.Image {
+  return cont.slots_get(&r.texture_slots, r.textures, handle)
 }
 
 // Allocate a texture in the bindless array: 2D, or a cube when `cube` (the
@@ -154,6 +164,8 @@ allocate_texture :: proc(
   ret: vk.Result,
 ) {
   gctx := &r.gctx
+  sync.recursive_mutex_lock(&r.mutex)
+  defer sync.recursive_mutex_unlock(&r.mutex)
   // level 0 is copied in, the other levels blitted down from it
   usage := usage | ({.TRANSFER_DST, .TRANSFER_SRC} if data != nil else {})
   img := gpu.image_create(gctx, extent, format, usage, mip_levels, cube = cube, shared = shared, components = swizzle) or_return
@@ -163,12 +175,12 @@ allocate_texture :: proc(
       return
     }
   }
-  h, slot, ok := cont.alloc(&r.textures, TextureHandle)
+  h, ok := cont.slots_alloc(&r.texture_slots, TextureHandle)
   if !ok {
     gpu.image_destroy(gctx.device, &img)
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  slot^ = img
+  r.textures[h.index] = img
   gpu.write_descriptor(gctx, r.scene.bindless_set, BINDING_TEXTURES, h.index, .SAMPLED_IMAGE, vk.DescriptorImageInfo{imageView = img.view, imageLayout = .GENERAL})
   return h, .SUCCESS
 }
@@ -177,7 +189,9 @@ allocate_texture :: proc(
 // released once no frame in flight samples them. teardown frees every
 // texture.
 destroy_texture :: proc(r: ^Manager, handle: TextureHandle) {
-  cont.free_deferred(&r.textures, handle)
+  sync.recursive_mutex_lock(&r.mutex)
+  defer sync.recursive_mutex_unlock(&r.mutex)
+  cont.slots_free(&r.texture_slots, handle)
 }
 
 // Bindless index shaders read for a texture slot: NO_TEXTURE when empty.

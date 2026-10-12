@@ -1,7 +1,6 @@
 #+private
 package render
 
-import cont "../containers"
 import "gpu"
 import vk "vendor:vulkan"
 
@@ -108,7 +107,7 @@ occlusion_setup_pyramid :: proc(
     gpu.calculate_mip_levels(extent.width, extent.height),
     shared = true,
   ) or_return
-  img := cont.get(r.textures, pyramid.texture)
+  img := texture_image(r, pyramid.texture)
   assert(img.mip_levels <= MAX_DEPTH_MIPS_LEVEL)
   gpu.queue_image_init(gctx, {img.image, {.COLOR}, {.SHADER_READ, .SHADER_WRITE}, {.COMPUTE_SHADER}})
   for mip in 0 ..< img.mip_levels {
@@ -150,7 +149,7 @@ occlusion_build_pyramid :: proc(
   pyramid: ^DepthPyramid,
   depth_index: u32,
 ) {
-  img := cont.get(r.textures, pyramid.texture)
+  img := texture_image(r, pyramid.texture)
   if img == nil || !pyramid.bound do return
   groups := [2]u32 {
     (img.extent.width + PYRAMID_TILE - 1) / PYRAMID_TILE,

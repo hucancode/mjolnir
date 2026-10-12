@@ -1,7 +1,6 @@
 #+private
 package render
 
-import cont "../containers"
 import "gpu"
 import "core:log"
 import vk "vendor:vulkan"
@@ -104,7 +103,7 @@ ambient_precompute :: proc(
   views: [PRECOMPUTE_DISPATCHES]vk.ImageView
   defer for v in views do vk.DestroyImageView(gctx.device, v, nil)
   for d, i in dispatches {
-    views[i] = gpu.image_create_view(gctx.device, cont.get(r.textures, d.dst), .D2_ARRAY, d.mip, 1, 0, 6) or_return
+    views[i] = gpu.image_create_view(gctx.device, texture_image(r, d.dst), .D2_ARRAY, d.mip, 1, 0, 6) or_return
     gpu.write_descriptor(gctx, r.scene.bindless_set, BINDING_STORAGE_IMAGES, PRECOMPUTE_STORAGE_BASE + u32(i), .STORAGE_IMAGE, vk.DescriptorImageInfo{imageView = views[i], imageLayout = .GENERAL})
   }
   pipelines: [PrecomputeShader]vk.Pipeline
@@ -116,12 +115,12 @@ ambient_precompute :: proc(
   // The cubes were just allocated; move out of UNDEFINED for storage write.
   gpu.image_discard_barrier(
     cmd,
-    {cont.get(r.textures, env_cube).image, {.COLOR}, {.SHADER_WRITE}, {.COMPUTE_SHADER}},
-    {cont.get(r.textures, irradiance_cube).image, {.COLOR}, {.SHADER_WRITE}, {.COMPUTE_SHADER}},
-    {cont.get(r.textures, prefilter_cube).image, {.COLOR}, {.SHADER_WRITE}, {.COMPUTE_SHADER}},
+    {texture_image(r, env_cube).image, {.COLOR}, {.SHADER_WRITE}, {.COMPUTE_SHADER}},
+    {texture_image(r, irradiance_cube).image, {.COLOR}, {.SHADER_WRITE}, {.COMPUTE_SHADER}},
+    {texture_image(r, prefilter_cube).image, {.COLOR}, {.SHADER_WRITE}, {.COMPUTE_SHADER}},
   )
   for d, i in dispatches {
-    size := max(cont.get(r.textures, d.dst).extent.width >> d.mip, 1)
+    size := max(texture_image(r, d.dst).extent.width >> d.mip, 1)
     push := PrecomputePush{texture_index(d.src), PRECOMPUTE_STORAGE_BASE + u32(i), size, d.value, d.count}
     vk.CmdBindPipeline(cmd, .COMPUTE, pipelines[d.shader])
     push_constants(r, cmd, &push)

@@ -62,8 +62,8 @@ render.shutdown(&r)
 ## Transform slots
 
 Render draws *instances*. An instance lives at a `u32` transform slot
-and holds one `Attachment` (mesh, light, emitter or force
-field). Render does not know where slots come from; by convention
+and holds one `Attachment`: a `MeshAttachment`, a `Light`, or an
+`EmitterHandle` / `ForceFieldHandle` bound to the slot's transform. Render does not know where slots come from; by convention
 slot = world node index.
 
 - `render.attach(&r, slot, attachment)` sets what a slot draws,
@@ -82,7 +82,7 @@ radius, mesh handle, material, …) and pass it back to `attach`.
 A slot's `visible` flag hides everything it draws, lights included:
 
 ```odin
-if l, ok := render.attachment(&r, slot, render.LightAttachment); ok {
+if l, ok := render.attachment(&r, slot, render.Light); ok {
   l.color = {1, 0, 0, 1}
   render.attach(&r, slot, l)
 }
@@ -109,8 +109,8 @@ if l, ok := render.attachment(&r, slot, render.LightAttachment); ok {
   at whatever the new level allocates in its place.
   A `Material` is stored as the shaders read it: its textures are
   bindless indices (`texture_index(handle)`, `NO_TEXTURE` for none).
-  `material(&r, h)` returns a `^Material`; edit it and write it back
-  with `set_material(&r, h, m^)` to stage the upload.
+  `material(&r, h)` returns a `^Material` into the table the next
+  frame draws from; edit it in place.
 - **Sprites.** `material_sprite(&r, texture, columns, rows, tint)`
   makes a sprite-sheet material; attach it as a `MeshAttachment` with
   `r.builtin_meshes[.QUAD_XY]` and it faces the camera.
@@ -119,11 +119,11 @@ if l, ok := render.attachment(&r, slot, render.LightAttachment); ok {
 - **Emitters, force fields.** `create_emitter` / `create_forcefield`.
   Both are stored as the particle shaders read them; `attach` sets
   their `node_index`. `emitter(&r, h)` / `forcefield(&r, h)` return a
-  pointer; edit it and write it back with `set_emitter` /
-  `set_forcefield`. Emitters are uploaded every frame; force field
-  changes are staged.
-- **Lights** have no resource; a light is a `LightAttachment` whose
-  `type` picks point, spot or directional
+  pointer into the next frame's table; edit it in place.
+- **Lights** have no resource; a light is a `Light` attachment, stored
+  as the lighting shaders read it (render fills its position, direction
+  and shadow map from the slot each frame), whose `type` picks point,
+  spot or directional
   (`point_light_attachment`, `directional_light_attachment`,
   `spot_light_attachment` fill in the defaults).
 
@@ -131,18 +131,30 @@ if l, ok := render.attachment(&r, slot, render.LightAttachment); ok {
 material and slot counts and the main camera's opaque draw count in the
 debug UI.
 
-## Staging
+## Write-through frame tables
 
-Every mutation marks an entry dirty in a mutex-guarded staging set.
-`render.frame` uploads dirty entries once per frame on the render
-thread. Everything the CPU can change while a frame is in flight
-(node transforms, bone palettes, materials, emitters, force fields,
-cameras) lives in one buffer per frame in flight; a dirty entry is
-re-uploaded until every frame's copy has it. Mesh descriptions are
-written once: an index is only reused after its grace period.
-Freed meshes, materials, emitters and force fields hold their
-slot (and a mesh its GPU memory) for `FRAMES_IN_FLIGHT + 1` frames
-before reuse.
+Everything the CPU can change while a frame is in flight (node
+records, bone palettes, materials, emitters, force fields) lives in
+host-visible tables, one copy per frame in flight. The CPU writes only
+the copy of the frame recorded next (the write frame), in place:
+`material`, `emitter` and `forcefield` return pointers into it, and
+`attach`, `stage_transforms` and `stage_bones` write it directly.
+There is no CPU mirror.
+
+Writes are tracked coarsely: each table is split into 64 byte regions,
+and a write sets its region's debt to `FRAMES_IN_FLIGHT - 1`. After
+each submission, `render.frame` waits for the next frame's copy to
+leave the GPU, copies every region in debt from the frame just
+submitted into it, and pays one off. The next frame's copy then holds
+every write, and becomes the write frame.
+
+A pointer is valid until the next `render.frame`. A thread other than
+the one calling `render.frame` edits between `render.lock` and
+`render.unlock`; the `stage_*`, `create_*` and `destroy_*` procs lock
+themselves. Mesh descriptions are device-local and written once
+through upload staging. Freed meshes, materials, emitters and force
+fields hold their index (and a mesh its GPU memory) for
+`FRAMES_IN_FLIGHT + 1` frames before reuse.
 
 ## Subpackages
 

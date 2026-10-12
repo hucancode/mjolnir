@@ -1,12 +1,10 @@
 package render
 
-import "base:builtin"
 import geom "../geometry"
 import cont "../containers"
 import ba "core:container/bit_array"
 import "core:log"
 import "gpu"
-import "mesh"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
@@ -17,18 +15,43 @@ import vk "vendor:vulkan"
 // region with full intensity; outer cone is the falloff edge.
 SPOT_LIGHT_INNER_RATIO :: f32(0.75)
 
-// A light at the slot's transform, shining along the transform's forward
-// axis. AMBIENT is the environment light render adds itself.
-LightAttachment :: struct {
-  type:        LightType,
-  color:       [4]f32, // RGB + intensity
+// Selects the light branch of the lighting shaders (specialization constant 0).
+// AMBIENT is the environment light: image-based lighting, emissive and the
+// skybox, one per frame.
+LightType :: enum u16 {
+  POINT,
+  SPOT,
+  DIRECTIONAL,
+  AMBIENT,
+}
+
+// A light, stored as the lighting shaders read it from the light buffer.
+// Attached to a slot it shines from the slot's transform along its forward
+// axis: render fills position, direction, shadow_map and shadow_texel each
+// frame. Point lights ignore direction and angles; directional lights shade
+// with neither position, radius nor angles, which place and size their
+// shadow map. AMBIENT is the environment light render adds itself.
+Light :: struct {
+  color:        [4]f32, // RGB + intensity
+  position:     [3]f32,
   // range of a point or spot light; half extent of a directional light's
   // shadow box centered on the light
-  radius:      f32,
-  angle_inner: f32, // spot cone angles
-  angle_outer: f32,
-  cast_shadow: bool,
+  radius:       f32,
+  direction:    [3]f32, // normalized
+  angle_inner:  f32, // spot cone angles
+  angle_outer:  f32,
+  // view table index of the shadow map's first face, NO_SHADOW without one
+  shadow_map:   u32,
+  // world size of a shadow texel; per unit of view depth for point and spot
+  shadow_texel: f32,
+  // the shaders' last u32, which they don't read
+  type:         LightType,
+  cast_shadow:  b16,
 }
+#assert(size_of(Light) == 64)
+
+// shadow_map value for a light without a shadow map.
+NO_SHADOW :: 0xFFFFFFFF
 
 MeshAttachment :: struct {
   handle:      MeshHandle,
@@ -36,135 +59,74 @@ MeshAttachment :: struct {
   cast_shadow: bool,
 }
 
-EmitterAttachment :: struct {
-  handle: EmitterHandle,
-}
-
-ForceFieldAttachment :: struct {
-  handle: ForceFieldHandle,
-}
-
+// What a slot draws. An emitter or force field is bound to the slot's
+// transform; a Light shines from it.
 Attachment :: union {
-  LightAttachment,
+  Light,
   MeshAttachment,
-  EmitterAttachment,
-  ForceFieldAttachment,
+  EmitterHandle,
+  ForceFieldHandle,
 }
 
-// What render draws at one transform slot. The transform itself is owned by
-// whoever drives the slot (normally the world module) and pushed in with
-// stage_transforms.
-@(private)
-Instance :: struct {
-  world_matrix: matrix[4, 4]f32,
-  visible:      bool,
-  attachment:   Attachment,
-}
-
-// A slot's skin palette: CPU copy plus its range in the per-frame bone
-// buffers. `offset` is NO_BONES when the slab is full.
+// A slot's skin palette: `count` matrices from `offset` of the bone table.
+// `offset` is NO_BONES when the slab is full.
 @(private)
 BonePalette :: struct {
-  offset:   u32,
-  matrices: []matrix[4, 4]f32,
+  offset: u32,
+  count:  u32,
 }
 
 @(private)
 NO_BONES :: 0xFFFFFFFF
 
-// Dirty sets drained by flush, one bit per slot or pool index, sized to the
-// slot and pool capacities so marking never allocates. Every marked entry is
-// written from the current state of its slot or pool entry; a removed one is
-// written empty. Nodes and bones live in per-frame buffers, so they have one
-// set per frame in flight: staging marks all of them and each frame drains its
-// own. Everything else is written once.
-// Instance writes and their staging happen under `mutex` so flush on the
-// render thread never sees a half-written slot.
-@(private)
-Staging :: struct {
-  nodes:       [gpu.FRAMES_IN_FLIGHT]ba.Bit_Array,
-  bones:       [gpu.FRAMES_IN_FLIGHT]ba.Bit_Array,
-  materials:   [gpu.FRAMES_IN_FLIGHT]ba.Bit_Array,
-  forcefields: [gpu.FRAMES_IN_FLIGHT]ba.Bit_Array,
-  // slots whose attachment is a light; not drained
-  lights:      ba.Bit_Array,
-  // created meshes and their geometry, uploaded and deleted by flush
-  mesh_handles:  [dynamic]MeshHandle,
-  mesh_geometry: [dynamic]mesh.Geometry,
-  // simulation seconds advanced by update since the last frame
-  particle_time: f32,
-  // per emitter: fractional emissions carried over, and whole particles
-  // accumulated by update and not yet handed to a frame
-  emit_accumulator: [MAX_EMITTERS]f32,
-  emit_pending:     [MAX_EMITTERS]u32,
-  mutex:       sync.Mutex,
+// Hold off the render thread's frame while editing scene data through the
+// pointers material, emitter and forcefield return. Only needed when another
+// thread than the one calling frame edits; the stage_*, create_* and
+// destroy_* procs lock themselves. frame holds the lock from flush through
+// the hand-off to the next write frame.
+lock :: proc(self: ^Manager) {
+  sync.recursive_mutex_lock(&self.mutex)
 }
 
-@(private)
-staging_init :: proc(s: ^Staging) {
-  for f in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    ba.init(&s.nodes[f], MAX_NODES_IN_SCENE)
-    ba.init(&s.bones[f], MAX_NODES_IN_SCENE)
-    ba.init(&s.materials[f], MAX_MATERIALS)
-    ba.init(&s.forcefields[f], MAX_FORCE_FIELDS)
-  }
-  ba.init(&s.lights, MAX_NODES_IN_SCENE)
-}
-
-@(private)
-staging_destroy :: proc(s: ^Staging) {
-  for f in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    ba.destroy(&s.nodes[f])
-    ba.destroy(&s.bones[f])
-    ba.destroy(&s.materials[f])
-    ba.destroy(&s.forcefields[f])
-  }
-  for g in s.mesh_geometry do mesh.delete_geometry(g)
-  delete(s.mesh_handles)
-  delete(s.mesh_geometry)
-  ba.destroy(&s.lights)
-}
-
-@(private)
-stage :: proc(self: ^Manager, set: ^ba.Bit_Array, index: u32) {
-  sync.mutex_lock(&self.staging.mutex)
-  ba.set(set, index)
-  sync.mutex_unlock(&self.staging.mutex)
-}
-
-// Mark `index` in every frame's set.
-@(private)
-stage_frames :: proc(self: ^Manager, sets: ^[gpu.FRAMES_IN_FLIGHT]ba.Bit_Array, index: u32) {
-  sync.mutex_lock(&self.staging.mutex)
-  stage_per_frame(sets, index)
-  sync.mutex_unlock(&self.staging.mutex)
-}
-
-// Mark `index` in every frame's set. Caller holds the staging mutex.
-@(private = "file")
-stage_per_frame :: proc(sets: ^[gpu.FRAMES_IN_FLIGHT]ba.Bit_Array, index: u32, set_to := true) {
-  for &s in sets do ba.set(&s, index, set_to)
+unlock :: proc(self: ^Manager) {
+  sync.recursive_mutex_unlock(&self.mutex)
 }
 
 @(private)
 init_instances :: proc(self: ^Manager) {
   // Reserve the full slot range up front so growth never reallocates while
-  // the render thread reads instances during flush.
-  self.instances = make([dynamic]Instance, 0, MAX_NODES_IN_SCENE)
-  staging_init(&self.staging)
+  // the render thread reads attachments during flush.
+  self.attachments = make([dynamic]Attachment, 0, MAX_NODES_IN_SCENE)
+  ba.init(&self.light_slots, MAX_NODES_IN_SCENE)
 }
 
+// The node record of a slot no attachment or transform has touched.
 @(private)
-ensure_slot :: proc(self: ^Manager, slot: u32) -> ^Instance {
+INVALID_NODE :: NodeData {
+  material_id           = 0xFFFFFFFF,
+  mesh_id               = 0xFFFFFFFF,
+  attachment_data_index = NO_BONES,
+}
+
+// Slot `slot`'s node record in the write frame's node table, growing the
+// slot range to cover it. Caller holds the render mutex and marks what it
+// changes.
+@(private)
+slot_node :: proc(self: ^Manager, slot: u32) -> ^NodeData {
   assert(slot < MAX_NODES_IN_SCENE, "slot exceeds MAX_NODES_IN_SCENE")
-  if int(slot) >= len(self.instances) do builtin.resize(&self.instances, int(slot) + 1)
-  return &self.instances[slot]
+  nodes := write_table(self, .NODES, NodeData)
+  if n := len(self.attachments); int(slot) >= n {
+    resize(&self.attachments, int(slot) + 1)
+    for &node in nodes[n:][:int(slot) + 1 - n] do node = INVALID_NODE
+    mark_dirty(self, .NODES, NodeData, n, int(slot) + 1 - n)
+  }
+  return &nodes[slot]
 }
 
 // A slot holding nothing: no attachment and never given a transform.
 @(private = "file")
-slot_empty :: proc(inst: ^Instance) -> bool {
-  return inst.attachment == nil && inst.world_matrix == {} && !inst.visible
+slot_empty :: proc(self: ^Manager, slot: int) -> bool {
+  return self.attachments[slot] == nil && write_table(self, .NODES, NodeData)[slot] == INVALID_NODE
 }
 
 // ---------- slot boundary: what the transform owner pushes in ----------
@@ -173,100 +135,100 @@ slot_empty :: proc(inst: ^Instance) -> bool {
 // `changes`: any struct with `index` (the slot), `world_matrix` and `visible`
 // fields, such as world.NodeChange.
 stage_transforms :: proc(self: ^Manager, changes: []$T) {
-  sync.mutex_lock(&self.staging.mutex)
-  defer sync.mutex_unlock(&self.staging.mutex)
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
   for &c in changes {
-    inst := ensure_slot(self, c.index)
-    inst.world_matrix = c.world_matrix
-    inst.visible = c.visible
-    stage_per_frame(&self.staging.nodes, c.index)
+    node := slot_node(self, c.index)
+    node.world_matrix = c.world_matrix
+    if c.visible do node.flags += {.VISIBLE}
+    else do node.flags -= {.VISIBLE}
+    mark_dirty(self, .NODES, NodeData, int(c.index))
   }
 }
 
 // Forget everything drawn at a slot. Emitters and force fields owned
 // by the attachment are destroyed; meshes and materials are shared and stay.
 stage_slot_removal :: proc(self: ^Manager, slot: u32) {
-  sync.mutex_lock(&self.staging.mutex)
-  defer sync.mutex_unlock(&self.staging.mutex)
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
   remove_slot(self, slot)
 }
 
 // Remove every slot. Use when the transform owner resets all of its slots at
 // once (level teardown).
 clear_slots :: proc(self: ^Manager) {
-  sync.mutex_lock(&self.staging.mutex)
-  defer sync.mutex_unlock(&self.staging.mutex)
-  for i := len(self.instances) - 1; i >= 0; i -= 1 do remove_slot(self, u32(i))
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
+  for i := len(self.attachments) - 1; i >= 0; i -= 1 do remove_slot(self, u32(i))
 }
 
-// Caller holds the staging mutex.
+// Caller holds the render mutex.
 @(private = "file")
 remove_slot :: proc(self: ^Manager, slot: u32) {
-  if int(slot) >= len(self.instances) do return
-  staging := &self.staging
-  inst := &self.instances[slot]
-  #partial switch a in inst.attachment {
-  case EmitterAttachment:
-    cont.free_deferred(&self.emitters, a.handle)
-  case ForceFieldAttachment:
-    if cont.free_deferred(&self.forcefields, a.handle) do stage_per_frame(&staging.forcefields, a.handle.index)
+  if int(slot) >= len(self.attachments) do return
+  #partial switch a in self.attachments[slot] {
+  case EmitterHandle:
+    destroy_emitter(self, a)
+  case ForceFieldHandle:
+    destroy_forcefield(self, a)
   }
-  inst^ = {}
-  stage_per_frame(&staging.nodes, slot)
-  ba.unset(&staging.lights, slot)
+  self.attachments[slot] = nil
   release_bones(self, slot)
+  write_table(self, .NODES, NodeData)[slot] = INVALID_NODE
+  mark_dirty(self, .NODES, NodeData, int(slot))
+  ba.unset(&self.light_slots, slot)
 }
 
-// Free a slot's skin palette and its bone buffer range. Caller holds the
-// staging mutex.
+// Free a slot's skin palette and its bone table range. Caller holds the
+// render mutex.
 @(private = "file")
 release_bones :: proc(self: ^Manager, slot: u32) {
   p, ok := self.bones[slot]
   if !ok do return
   if p.offset != NO_BONES do cont.slab_free(&self.bone_matrix_slab, p.offset)
-  delete(p.matrices)
   delete_key(&self.bones, slot)
-  stage_per_frame(&self.staging.bones, slot, false)
+  slot_node(self, slot).attachment_data_index = NO_BONES
+  mark_dirty(self, .NODES, NodeData, int(slot))
 }
 
 // Skin palette (bone skinning matrices) for the skinned mesh at `slot`.
 // The matrices are copied.
 stage_bones :: proc(self: ^Manager, slot: u32, matrices: []matrix[4, 4]f32) {
   if len(matrices) == 0 do return
-  sync.mutex_lock(&self.staging.mutex)
-  defer sync.mutex_unlock(&self.staging.mutex)
-  p := self.bones[slot]
-  if len(p.matrices) != len(matrices) {
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
+  p, ok := self.bones[slot]
+  if !ok || int(p.count) != len(matrices) {
     release_bones(self, slot)
-    p.matrices = make([]matrix[4, 4]f32, len(matrices))
-    p.offset = alloc_bones(self, u32(len(matrices)))
+    p = {alloc_bones(self, u32(len(matrices))), u32(len(matrices))}
     self.bones[slot] = p
-    // node data carries the bone range offset; refresh it
-    stage_per_frame(&self.staging.nodes, slot)
+    slot_node(self, slot).attachment_data_index = p.offset
+    mark_dirty(self, .NODES, NodeData, int(slot))
   }
-  copy(p.matrices, matrices)
-  stage_per_frame(&self.staging.bones, slot)
+  if p.offset == NO_BONES do return
+  copy(write_table(self, .BONES, matrix[4, 4]f32)[p.offset:][:p.count], matrices)
+  mark_dirty(self, .BONES, matrix[4, 4]f32, int(p.offset), int(p.count))
 }
 
 // A bone range of `count` matrices, growing the slab when it is full.
 // NO_BONES when no size class fits `count` or the grown buffer would exceed
-// the device's storage buffer range. Caller holds the staging mutex.
+// the device's storage buffer range. Caller holds the render mutex.
 @(private = "file")
 alloc_bones :: proc(self: ^Manager, count: u32) -> u32 {
   if offset, ok := cont.slab_alloc(&self.bone_matrix_slab, count); ok do return offset
-  if grow_bones(self) {
+  if grow_bones(self) == .SUCCESS {
     if offset, ok := cont.slab_alloc(&self.bone_matrix_slab, count); ok do return offset
   }
   log.warnf("No bone range for a %d-bone palette; the mesh draws unskinned", count)
   return NO_BONES
 }
 
-// Double every bone size class and re-place every palette in the new layout.
-// Node data and bone buffers pick the new offsets up as each frame flushes;
-// flush_bones resizes a frame's buffer before writing it. Caller holds the
-// staging mutex.
+// Double every bone size class and re-place every palette in the new layout:
+// the write frame's bone buffer is replaced at once with the palettes moved
+// to their new offsets, the other frames' buffers at their hand-off. Caller
+// holds the render mutex.
 @(private = "file")
-grow_bones :: proc(self: ^Manager) -> bool {
+grow_bones :: proc(self: ^Manager) -> vk.Result {
   slab := &self.bone_matrix_slab
   config: [cont.MAX_SLAB_CLASSES]struct {
     block_size, block_count: u32,
@@ -277,17 +239,33 @@ grow_bones :: proc(self: ^Manager) -> bool {
     capacity += u64(c.block_size) * u64(c.block_count) * 2
   }
   limit := u64(self.gctx.device_properties.limits.maxStorageBufferRange)
-  if capacity * size_of(matrix[4, 4]f32) > limit do return false
+  if capacity * size_of(matrix[4, 4]f32) > limit do return .ERROR_OUT_OF_DEVICE_MEMORY
+  grown := gpu.buffer_create(
+    &self.gctx,
+    vk.DeviceSize(capacity * size_of(matrix[4, 4]f32)),
+    {.STORAGE_BUFFER},
+    host_cached = true,
+  ) or_return
+  w := write_frame(self)
+  // the write frame is not in flight: its old buffer goes at once
+  old := self.bone_buffers[w]
+  defer gpu.buffer_destroy(self.gctx.device, &old)
+  self.bone_buffers[w] = grown
+  scene_write_binding(self, .BONES, int(w))
+  old_bones := gpu.mapped(&old, matrix[4, 4]f32)
   cont.slab_destroy(slab)
   cont.slab_init(slab, config)
+  bones := write_table(self, .BONES, matrix[4, 4]f32)
   for slot, &p in self.bones {
-    offset, ok := cont.slab_alloc(slab, u32(len(p.matrices)))
+    offset, ok := cont.slab_alloc(slab, p.count)
+    if p.offset != NO_BONES && ok do copy(bones[offset:][:p.count], old_bones[p.offset:][:p.count])
     p.offset = offset if ok else NO_BONES
-    stage_per_frame(&self.staging.nodes, slot)
-    stage_per_frame(&self.staging.bones, slot)
+    slot_node(self, slot).attachment_data_index = p.offset
+    mark_dirty(self, .NODES, NodeData, int(slot))
   }
+  mark_table_dirty(self, .BONES)
   log.infof("Bone buffer grown to %d matrices", slab.capacity)
-  return true
+  return .SUCCESS
 }
 
 // ---------- attachments ----------
@@ -295,23 +273,25 @@ grow_bones :: proc(self: ^Manager) -> bool {
 // Draw `attachment` at `slot`, replacing what the slot drew before. Emitters
 // and force fields are bound to the slot's transform.
 attach :: proc(self: ^Manager, slot: u32, attachment: Attachment) {
-  sync.mutex_lock(&self.staging.mutex)
-  defer sync.mutex_unlock(&self.staging.mutex)
-  staging := &self.staging
-  inst := ensure_slot(self, slot)
-  inst.attachment = attachment
-  #partial switch a in attachment {
-  case EmitterAttachment:
-    if em, ok := cont.get(self.emitters, a.handle); ok do em.node_index = slot
-  case ForceFieldAttachment:
-    if ff, ok := cont.get(self.forcefields, a.handle); ok {
-      ff.node_index = slot
-      stage_per_frame(&staging.forcefields, a.handle.index)
-    }
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
+  node := slot_node(self, slot)
+  self.attachments[slot] = attachment
+  node.mesh_id, node.material_id = INVALID_NODE.mesh_id, INVALID_NODE.material_id
+  node.flags -= {.CASTS_SHADOW}
+  switch a in attachment {
+  case MeshAttachment:
+    node.mesh_id, node.material_id = a.handle.index, a.material.index
+    if a.cast_shadow do node.flags += {.CASTS_SHADOW}
+  case EmitterHandle:
+    if em, ok := emitter(self, a); ok do em.node_index = slot
+  case ForceFieldHandle:
+    if ff, ok := forcefield(self, a); ok do ff.node_index = slot
+  case Light:
   }
-  stage_per_frame(&staging.nodes, slot)
-  _, is_light := attachment.(LightAttachment)
-  ba.set(&staging.lights, slot, is_light)
+  mark_dirty(self, .NODES, NodeData, int(slot))
+  _, is_light := attachment.(Light)
+  ba.set(&self.light_slots, slot, is_light)
 }
 
 // A copy of the attachment of type T at `slot`, e.g.
@@ -324,26 +304,26 @@ attachment :: proc(
   att: T,
   ok: bool,
 ) #optional_ok {
-  sync.mutex_lock(&self.staging.mutex)
-  defer sync.mutex_unlock(&self.staging.mutex)
-  if int(slot) >= len(self.instances) do return
-  return self.instances[slot].attachment.(T)
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
+  if int(slot) >= len(self.attachments) do return
+  return self.attachments[slot].(T)
 }
 
 point_light_attachment :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   cast_shadow: bool = true,
-) -> LightAttachment {
-  return {type = .POINT, color = color, radius = radius, cast_shadow = cast_shadow}
+) -> Light {
+  return {type = .POINT, color = color, radius = radius, cast_shadow = b16(cast_shadow)}
 }
 
 directional_light_attachment :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   shadow_radius: f32 = 10.0,
   cast_shadow: bool = false,
-) -> LightAttachment {
-  return {type = .DIRECTIONAL, color = color, radius = shadow_radius, cast_shadow = cast_shadow}
+) -> Light {
+  return {type = .DIRECTIONAL, color = color, radius = shadow_radius, cast_shadow = b16(cast_shadow)}
 }
 
 spot_light_attachment :: proc(
@@ -351,134 +331,48 @@ spot_light_attachment :: proc(
   radius: f32 = 10.0,
   angle: f32 = math.PI * 0.2,
   cast_shadow: bool = true,
-) -> LightAttachment {
+) -> Light {
   return {
     type        = .SPOT,
     color       = color,
     radius      = radius,
     angle_inner = angle * SPOT_LIGHT_INNER_RATIO,
     angle_outer = angle,
-    cast_shadow = cast_shadow,
+    cast_shadow = b16(cast_shadow),
   }
 }
 
-// ---------- flush: drain staging into GPU buffers (render thread) ----------
+// ---------- flush: render-generated data ----------
 
+// Hand the simulation time accumulated by update to this frame, and each
+// enabled emitter the whole particles its rate makes of it. Emitters take
+// consecutive ranges of the frame's new particles, which take consecutive
+// ring slots after the previous frame's. A destroyed emitter is zeroed, so
+// disabled.
 @(private = "file")
-INVALID_NODE :: NodeData {
-  material_id           = 0xFFFFFFFF,
-  mesh_id               = 0xFFFFFFFF,
-  attachment_data_index = 0xFFFFFFFF,
-}
-
-@(private = "file")
-flush_nodes :: proc(self: ^Manager, frame_index: u32) {
-  nodes := frame_table(self, .NODES, NodeData, frame_index)
-  staged := &self.staging.nodes[frame_index]
-  it := ba.make_iterator(staged)
-  // Slots trimmed off the end are still cleared, in case the list grows back
-  // over them.
-  empty: Instance
-  for slot in ba.iterate_by_set(&it) {
-    inst := &self.instances[slot] if slot < len(self.instances) else &empty
-    nd := INVALID_NODE
-    nd.world_matrix = inst.world_matrix
-    #partial switch att in inst.attachment {
-    case MeshAttachment:
-      if p, skinned := self.bones[u32(slot)]; skinned {
-        nd.attachment_data_index = p.offset
-      }
-      nd.material_id = att.material.index
-      nd.mesh_id = att.handle.index
-      if att.cast_shadow do nd.flags |= {.CASTS_SHADOW}
-      if inst.visible do nd.flags |= {.VISIBLE}
-    }
-    nodes[slot] = nd
-  }
-  ba.clear(staged)
-}
-
-// Upload created meshes and delete their geometry. Destroyed meshes free
-// their GPU allocations in mesh_retire, once no frame in flight can draw them.
-@(private = "file")
-flush_meshes :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  staging := &self.staging
-  for h, i in staging.mesh_handles {
-    g := staging.mesh_geometry[i]
-    defer mesh.delete_geometry(g)
-    m := cont.get(self.meshes, h) or_continue
-    if res := upload_mesh(self, gctx, h.index, m, g); res != .SUCCESS {
-      log.errorf("Mesh %d upload failed: %v", h.index, res)
-    }
-  }
-  clear(&staging.mesh_handles)
-  clear(&staging.mesh_geometry)
-}
-
-// Live pool item at a staged slot index; staging is keyed by index alone.
-@(private = "file")
-live_at :: proc(pool: ^cont.Pool($T), index: int) -> (^T, bool) {
-  if index >= len(pool.entries) do return nil, false
-  e := &pool.entries[index]
-  return &e.item, e.active
-}
-
-// Write every staged pool slot into its GPU buffer. Slots no longer live are
-// zeroed so the GPU stops using them.
-@(private = "file")
-flush_pool :: proc(staged: ^ba.Bit_Array, pool: ^cont.Pool($T), table: []T) {
-  it := ba.make_iterator(staged)
-  for index in ba.iterate_by_set(&it) {
-    item, live := live_at(pool, index)
-    table[index] = item^ if live else {}
-  }
-  ba.clear(staged)
-}
-
-// Hand the emissions and simulation time accumulated by update to this
-// frame. Every emitter is written: the buffer is per frame and emit counts
-// change every frame. Emitters take consecutive ranges of the frame's new
-// particles, which take consecutive ring slots after the previous frame's.
-@(private = "file")
-flush_particles :: proc(self: ^Manager, frame_index: u32) {
-  emitters := frame_table(self, .EMITTERS, Emitter, frame_index)
-  staging := &self.staging
-  emitter_count := min(len(self.emitters.entries), MAX_EMITTERS)
+flush_particles :: proc(self: ^Manager) {
+  emitters := write_table(self, .EMITTERS, Emitter)[:self.emitter_slots.high_water]
   p := &self.particle_params
   p.emit_cursor = (p.emit_cursor + p.emit_total) % MAX_PARTICLES
   total: u32
-  for index in 0 ..< emitter_count {
-    em, live := live_at(&self.emitters, index)
-    emitters[index] = em^ if live else {}
-    emitters[index].emit_first = total
-    if live do total += staging.emit_pending[index]
-    staging.emit_pending[index] = 0
+  for &em in emitters {
+    emit: u32
+    if em.enabled {
+      em.emit_carry += em.emission_rate * self.particle_time
+      emit = u32(em.emit_carry)
+      em.emit_carry -= f32(emit)
+    }
+    em.emit_first = total
+    total += emit
   }
+  mark_dirty(self, .EMITTERS, Emitter, 0, len(emitters))
   // A ring slot takes at most one new particle per frame.
   p.emit_total = min(total, MAX_PARTICLES)
-  p.emitter_count = u32(emitter_count)
-  p.forcefield_count = u32(min(len(self.forcefields.entries), MAX_FORCE_FIELDS))
-  p.delta_time = staging.particle_time
+  p.emitter_count = u32(len(emitters))
+  p.forcefield_count = self.forcefield_slots.high_water
+  p.delta_time = self.particle_time
   p.frame_counter += 1
-  staging.particle_time = 0
-}
-
-@(private = "file")
-flush_bones :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
-  // wait_frame has returned, so this frame's arena is free to replace.
-  capacity := int(self.bone_matrix_slab.capacity)
-  if len(frame_table(self, .BONES, matrix[4, 4]f32, frame_index)) < capacity {
-    grow_frame_arena(self, frame_index, capacity) or_return
-  }
-  bones := frame_table(self, .BONES, matrix[4, 4]f32, frame_index)
-  staged := &self.staging.bones[frame_index]
-  it := ba.make_iterator(staged)
-  for slot in ba.iterate_by_set(&it) {
-    p := self.bones[u32(slot)] or_continue
-    if p.offset != NO_BONES do copy(bones[p.offset:][:len(p.matrices)], p.matrices)
-  }
-  ba.clear(staged)
-  return .SUCCESS
+  self.particle_time = 0
 }
 
 @(private = "file")
@@ -487,17 +381,18 @@ flush_cameras :: proc(self: ^Manager, frame_index: u32) {
   // This frame's cull writes the lists of the next frame. A slot without a
   // camera keeps an empty view that draws no type.
   next_frame_index := (frame_index + 1) % gpu.FRAMES_IN_FLIGHT
-  slot_count := len(self.cameras.entries)
+  slot_count := self.camera_slots.high_water
   slice.zero(views[CAMERA_VIEW_BASE:][:slot_count])
   all_types := u32(1 << len(MaterialType) - 1)
   occlusion_mask, _ := material_masks()
-  it := cont.iterator(&self.cameras)
-  for cam, handle in cont.next(&it, CameraHandle) {
+  c: u32
+  for i in cont.slots_next(&self.camera_slots, &c) {
+    cam := &self.cameras[i]
     occlusion_bind_pyramid(self, &cam.depth_pyramid[frame_index])
     view := camera_view_matrix(cam)
     projection := camera_projection_matrix(cam)
     view_projection := projection * view
-    v := &views[CAMERA_VIEW_BASE + handle.index]
+    v := &views[CAMERA_VIEW_BASE + i]
     v^ = {
       view                = view,
       projection          = projection,
@@ -520,34 +415,21 @@ flush_cameras :: proc(self: ^Manager, frame_index: u32) {
   }
 }
 
-// Drain staged scene changes into GPU buffers for `frame_index`. Call once per
-// frame on the render thread before record_frame.
+// Write this frame's render-generated tables (views, lights, particle
+// inputs). Call once per frame on the render thread, under the render
+// mutex, before record_frame.
 @(private)
-flush :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-  frame_index: u32,
-) -> vk.Result {
+flush :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
   // before the lights: shadow casters are ranked by the camera views
   flush_cameras(self, frame_index)
-  {
-    sync.mutex_lock(&self.staging.mutex)
-    defer sync.mutex_unlock(&self.staging.mutex)
-    staging := &self.staging
-    flush_nodes(self, frame_index)
-    flush_meshes(self, gctx)
-    flush_bones(self, frame_index) or_return
-    flush_pool(&staging.materials[frame_index], &self.materials, frame_table(self, .MATERIALS, Material, frame_index))
-    flush_particles(self, frame_index)
-    flush_pool(&staging.forcefields[frame_index], &self.forcefields, frame_table(self, .FORCEFIELDS, ForceField, frame_index))
-    collect_lights(self, frame_index)
-    shadow_atlas_reserve(self, frame_index, self.shadow_view_count) or_return
-    // Culling dispatches cover the slots up to the last occupied one.
-    for n := len(self.instances); n > 0 && slot_empty(&self.instances[n - 1]); n -= 1 {
-      pop(&self.instances)
-    }
-    self.node_count = min(u32(len(self.instances)), MAX_NODES_IN_SCENE)
+  flush_particles(self)
+  collect_lights(self, frame_index)
+  shadow_atlas_reserve(self, frame_index, self.shadow_view_count) or_return
+  // Culling dispatches cover the slots up to the last occupied one.
+  for n := len(self.attachments); n > 0 && slot_empty(self, n - 1); n -= 1 {
+    pop(&self.attachments)
   }
+  self.node_count = u32(len(self.attachments))
   flush_ui_atlas(self) or_return
   return .SUCCESS
 }

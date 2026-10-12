@@ -2,6 +2,7 @@ package render
 
 import cont "../containers"
 import "core:log"
+import "core:sync"
 import "gpu"
 import vk "vendor:vulkan"
 
@@ -21,8 +22,9 @@ record_compute_commands :: proc(
   // Every camera's pyramid and list clear, then one cull over every camera
   // slot; an empty slot's view draws nothing.
   vk.CmdBindPipeline(cmd, .COMPUTE, self.pipelines[.DEPTH_REDUCE])
-  it := cont.iterator(&self.cameras)
-  for cam in cont.next(&it, CameraHandle) {
+  c: u32
+  for i in cont.slots_next(&self.camera_slots, &c) {
+    cam := &self.cameras[i]
     draw_lists_clear(&cam.draws, cmd, next_frame_index)
     if self.gctx.frame_serial < cam.ready_serial do continue
     occlusion_build_pyramid(
@@ -39,7 +41,7 @@ record_compute_commands :: proc(
     {.COMPUTE_SHADER, .TRANSFER},
     {.COMPUTE_SHADER},
   )
-  occlusion_cull(self, cmd, CAMERA_VIEW_BASE, u32(len(self.cameras.entries)))
+  occlusion_cull(self, cmd, CAMERA_VIEW_BASE, self.camera_slots.high_water)
 }
 
 // Record every camera's passes phase by phase, so one barrier orders each
@@ -50,16 +52,17 @@ record_compute_commands :: proc(
 record_camera_passes :: proc(self: ^Manager, frame_index: u32) {
   cmd := self.command_buffers[frame_index]
   discards := make([dynamic]gpu.ImageDiscard, context.temp_allocator)
-  it := cont.iterator(&self.cameras)
-  for cam in cont.next(&it, CameraHandle) {
+  c: u32
+  for i in cont.slots_next(&self.camera_slots, &c) {
+    cam := &self.cameras[i]
     for a in AttachmentType do append(&discards, gpu.attachment_discard(camera_image(self, cam, a, frame_index)))
   }
   if len(discards) == 0 do return
   // The draw lists written by culling become indirect arguments.
   indirect_barrier(cmd)
   gpu.image_discard_barrier(cmd, ..discards[:])
-  it = cont.iterator(&self.cameras)
-  for cam, handle in cont.next(&it, CameraHandle) do material_pass_record(self, frame_index, handle.index, cam, .GBUFFER)
+  c = 0
+  for i in cont.slots_next(&self.camera_slots, &c) do material_pass_record(self, frame_index, i, &self.cameras[i], .GBUFFER)
   // G-buffer and depth writes reach the lighting shaders and depth tests.
   gpu.memory_barrier(
     cmd,
@@ -68,8 +71,8 @@ record_camera_passes :: proc(self: ^Manager, frame_index: u32) {
     {.COLOR_ATTACHMENT_OUTPUT, .LATE_FRAGMENT_TESTS},
     {.FRAGMENT_SHADER, .EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
   )
-  it = cont.iterator(&self.cameras)
-  for cam, handle in cont.next(&it, CameraHandle) do lighting_record(self, frame_index, handle.index, cam)
+  c = 0
+  for i in cont.slots_next(&self.camera_slots, &c) do lighting_record(self, frame_index, i, &self.cameras[i])
   // The lit color reaches the forward blend; the previous frame's
   // simulation wrote the particles the forward pass draws.
   gpu.memory_barrier(
@@ -86,8 +89,8 @@ record_camera_passes :: proc(self: ^Manager, frame_index: u32) {
     {.FRAGMENT_SHADER, .COMPUTE_SHADER, .COLOR_ATTACHMENT_OUTPUT},
     {.DRAW_INDIRECT, .VERTEX_SHADER, .EARLY_FRAGMENT_TESTS, .COLOR_ATTACHMENT_OUTPUT},
   )
-  it = cont.iterator(&self.cameras)
-  for cam, handle in cont.next(&it, CameraHandle) do material_pass_record(self, frame_index, handle.index, cam, .FORWARD)
+  c = 0
+  for i in cont.slots_next(&self.camera_slots, &c) do material_pass_record(self, frame_index, i, &self.cameras[i], .FORWARD)
   // Depth reaches the depth pyramid build of the next compute work.
   gpu.memory_barrier(
     cmd,
@@ -116,7 +119,7 @@ record_frame :: proc(self: ^Manager, frame_index: u32, debug_ui_enabled: bool) -
 
   record_camera_passes(self, frame_index)
 
-  main_cam, has_main := cont.get(self.cameras, self.main_camera)
+  main_cam, has_main := main_camera(self)
   if has_main {
     draw_lists_copy_counts(&main_cam.draws, cmd, frame_index, &self.draw_count_readback[frame_index])
     // The lit image reaches post-processing, which writes the swapchain image.
@@ -173,10 +176,13 @@ record_frame :: proc(self: ^Manager, frame_index: u32, debug_ui_enabled: bool) -
 }
 
 // Render and present one frame: close the debug UI opened by debug_ui (plus
-// the stats panel when `show_stats`), wait for this frame slot's previous
-// submission, advance deferred destruction, upload staged changes, acquire a
-// swapchain image, record, submit and present. An out-of-date swapchain is rebuilt at `framebuffer_size`.
-// Renders nothing while no level is set up. Returns false on a GPU error.
+// the stats panel when `show_stats`), advance deferred destruction, write
+// this frame's render-generated tables, acquire a swapchain image, record,
+// submit and present. Then hand off: wait until the GPU is done with the
+// next frame's tables and carry this frame's writes over into them, so the
+// write frame is never in flight. An out-of-date swapchain is rebuilt at
+// `framebuffer_size`. Renders nothing while no level is set up. Returns
+// false on a GPU error.
 frame :: proc(
   self: ^Manager,
   framebuffer_size: [2]u32,
@@ -184,24 +190,28 @@ frame :: proc(
   show_stats := false,
 ) -> bool {
   gctx := &self.gctx
-  // the frame-in-flight slot this frame records
-  frame_index := u32(gctx.frame_serial % gpu.FRAMES_IN_FLIGHT)
-  // Wait before flushing: flush rewrites this frame slot's per-frame buffers,
-  // and the stats panel reads its draw count readback.
-  res := gpu.wait_frame(gctx) if self.level_ready else .SUCCESS
+  // the write frame: the hand-off after the previous submission waited for it
+  frame_index := write_frame(self)
   if show_stats do stats_panel(self)
   debug_ui_drawn := debug_ui_close(self)
   if !self.level_ready do return true
-  if res == .SUCCESS {
-    tick_resource_pools(self)
-    res = flush(self, gctx, frame_index)
-  }
+  // Writers stay out until the next write frame is ready: from here until
+  // the hand-off the GPU may read this frame's tables.
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
+  tick_resource_pools(self)
+  res := flush(self, frame_index)
   sc := &self.swapchain
   if res == .SUCCESS do res = gpu.acquire_next_image(gctx.device, sc, frame_index)
   if res == .SUCCESS do res = post_process_ensure_images(self, sc.extent, frame_index)
   if res == .SUCCESS do res = record_frame(self, frame_index, debug_ui_drawn)
   if res == .SUCCESS {
+    serial := gctx.frame_serial
     res = gpu.submit_queue_and_present(gctx, sc, self.command_buffers[frame_index], self.compute_command_buffers[frame_index])
+    // submitted, even when presenting failed
+    if gctx.frame_serial != serial {
+      if handed := hand_off(self, frame_index); handed != .SUCCESS do res = handed
+    }
   }
   if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
     res = recreate_swapchain(self, framebuffer_size, dpi_scale)

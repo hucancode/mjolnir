@@ -169,20 +169,20 @@ render frame: frame callback (poll events → debug UI widgets → ui → overla
   lighting → particles → transparency → debug → post-process → UI)
   via dynamic rendering. The UI pass draws game UI and the debug UI.
 
-Update and render are decoupled. Render's staging is the only contact
-point.
+Update and render are decoupled. Render's write frame is the only
+contact point.
 
 ---
 
-## Render-owned staging
+## Render-owned write frame
 
-Mutating a look (`attach`, `stage_transforms`, `set_material`,
-`create_mesh`, …) writes CPU state and marks the slot dirty in a
-mutex-guarded staging set. `render.frame` uploads dirty entries once
-per frame on the render thread.
+Mutating a look (`attach`, `stage_transforms`, `material`,
+`create_mesh`, …) writes the next frame's host-visible table in place
+and marks the region it touched. After each submission `render.frame`
+carries the marked regions into the following frame's copy.
 
-- **Each entry ages per upload.** An update is re-uploaded until
-  every frame in flight has it, then dropped.
+- **Each region pays off its debt per hand-off.** A written region is
+  copied forward until every frame in flight has it.
 - **Releases are deferred by `FRAMES_IN_FLIGHT`.** A removal doesn't
   free GPU memory until the GPU is past every frame that might still
   read it. No fence chain per resource.

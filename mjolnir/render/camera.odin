@@ -153,11 +153,11 @@ cursor_ray :: proc(self: ^Manager, cursor: [2]f32) -> (origin, dir: [3]f32, ok: 
 // ---------- camera pool ----------
 
 camera :: proc(self: ^Manager, handle: CameraHandle) -> (^Camera, bool) #optional_ok {
-  return cont.get(self.cameras, handle)
+  return cont.slots_get(&self.camera_slots, self.cameras, handle)
 }
 
 main_camera :: proc(self: ^Manager) -> (^Camera, bool) #optional_ok {
-  return cont.get(self.cameras, self.main_camera)
+  return camera(self, self.main_camera)
 }
 
 // Create a perspective camera with its own render targets. Cameras are drawn
@@ -174,9 +174,8 @@ create_camera :: proc(
   handle: CameraHandle,
   ok: bool,
 ) #optional_ok {
-  gctx := &self.gctx
-  cam: ^Camera
-  handle, cam = cont.alloc(&self.cameras, CameraHandle) or_return
+  handle = cont.slots_alloc(&self.camera_slots, CameraHandle) or_return
+  cam := &self.cameras[handle.index]
   cam^ = {
     extent = {width, height},
   }
@@ -195,11 +194,11 @@ create_camera :: proc(
 // The camera's slot is reused only once no frame in flight reads its draw
 // lists and pyramid slots.
 destroy_camera :: proc(self: ^Manager, handle: CameraHandle) {
-  cam := cont.get(self.cameras, handle)
+  cam := camera(self, handle)
   if cam == nil do return
   destroy_targets(self, cam)
   draw_lists_destroy(&cam.draws, &self.gctx)
-  cont.free_deferred(&self.cameras, handle)
+  cont.slots_free(&self.camera_slots, handle)
   if handle == self.main_camera do self.main_camera = {}
 }
 
@@ -214,7 +213,7 @@ camera_attachment :: proc(
   texture: TextureHandle,
   ok: bool,
 ) #optional_ok {
-  cam := cont.get(self.cameras, handle) or_return
+  cam := camera(self, handle) or_return
   return cam.attachments[attachment_type][frame_index.? or_else u32(self.gctx.frame_serial % gpu.FRAMES_IN_FLIGHT)], true
 }
 
@@ -225,8 +224,7 @@ resize_camera :: proc(
   handle: CameraHandle,
   width, height: u32,
 ) -> vk.Result {
-  gctx := &self.gctx
-  cam, ok := cont.get(self.cameras, handle)
+  cam, ok := camera(self, handle)
   if !ok do return .SUCCESS
   if cam.extent == {width, height} do return .SUCCESS
   cam.extent = {width, height}
@@ -243,9 +241,10 @@ resize_swapchain_cameras :: proc(
   self: ^Manager,
   old_extent, new_extent: vk.Extent2D,
 ) -> vk.Result {
-  it := cont.iterator(&self.cameras)
-  for cam, handle in cont.next(&it, CameraHandle) {
-    if cam.extent != {old_extent.width, old_extent.height} do continue
+  c: u32
+  for i in cont.slots_next(&self.camera_slots, &c) {
+    if self.cameras[i].extent != {old_extent.width, old_extent.height} do continue
+    handle := cont.slots_handle(&self.camera_slots, i, CameraHandle)
     resize_camera(self, handle, new_extent.width, new_extent.height) or_return
   }
   return .SUCCESS
@@ -295,7 +294,7 @@ create_targets :: proc(
   // The depth images leave UNDEFINED at the start of the next recorded frame;
   // the compute work of the frame after it is the first to read them.
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    depth := cont.get(self.textures, camera.attachments[.DEPTH][frame])
+    depth := texture_image(self, camera.attachments[.DEPTH][frame])
     gpu.queue_image_init(gctx, {depth.image, {.DEPTH}, {.DEPTH_STENCIL_ATTACHMENT_READ}, {.EARLY_FRAGMENT_TESTS}})
   }
   camera.ready_serial = gctx.frame_serial + 1

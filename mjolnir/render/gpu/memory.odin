@@ -4,7 +4,8 @@ import vk "vendor:vulkan"
 
 // A buffer shared by the graphics and compute queues. Host-visible buffers
 // are persistently mapped at `mapped`; device-local ones (mapped = nil) are
-// written through queue_buffer_write.
+// written through queue_buffer_write. A host-cached buffer is fast for the CPU
+// to read back as well as write, where the device has such memory.
 Buffer :: struct {
   buffer: vk.Buffer,
   memory: vk.DeviceMemory,
@@ -17,6 +18,7 @@ buffer_create :: proc(
   size: vk.DeviceSize,
   usage: vk.BufferUsageFlags,
   host_visible := true,
+  host_cached := false,
 ) -> (
   buffer: Buffer,
   ret: vk.Result,
@@ -34,6 +36,11 @@ buffer_create :: proc(
   mem_reqs: vk.MemoryRequirements
   vk.GetBufferMemoryRequirements(gctx.device, buffer.buffer, &mem_reqs)
   properties: vk.MemoryPropertyFlags = {.HOST_VISIBLE, .HOST_COHERENT} if host_visible else {.DEVICE_LOCAL}
+  if host_visible && host_cached {
+    if _, ok := find_memory_type_index(gctx.physical_device, mem_reqs.memoryTypeBits, properties + {.HOST_CACHED}); ok {
+      properties += {.HOST_CACHED}
+    }
+  }
   buffer.memory = allocate_memory(gctx, mem_reqs, properties) or_return
   vk.BindBufferMemory(gctx.device, buffer.buffer, buffer.memory, 0) or_return
   if host_visible {

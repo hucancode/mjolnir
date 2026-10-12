@@ -345,3 +345,69 @@ test_pool_iterator :: proc(t: ^testing.T) {
   testing.expect_value(t, sum, 40)
   _ = h0
 }
+
+@(test)
+test_slots_alloc_free_reuse :: proc(t: ^testing.T) {
+  s: Slots
+  slots_init(&s, 4)
+  defer slots_destroy(&s)
+  h0 := slots_alloc(&s, Handle)
+  h1 := slots_alloc(&s, Handle)
+  testing.expect_value(t, h0, Handle{0, 1})
+  testing.expect_value(t, h1, Handle{1, 1})
+  testing.expect(t, slots_free(&s, h0))
+  testing.expect(t, !slots_valid(&s, h0), "freed handle is stale")
+  testing.expect(t, !slots_free(&s, h0), "double free is rejected")
+  h2 := slots_alloc(&s, Handle)
+  testing.expect_value(t, h2, Handle{0, 2})
+  testing.expect_value(t, s.count, 2)
+  testing.expect_value(t, s.high_water, 2)
+}
+
+@(test)
+test_slots_capacity :: proc(t: ^testing.T) {
+  s: Slots
+  slots_init(&s, 2)
+  defer slots_destroy(&s)
+  slots_alloc(&s, Handle)
+  slots_alloc(&s, Handle)
+  _, ok := slots_alloc(&s, Handle)
+  testing.expect(t, !ok, "allocation past capacity fails")
+}
+
+@(test)
+test_slots_grace :: proc(t: ^testing.T) {
+  s: Slots
+  slots_init(&s, 8, grace = 3)
+  defer slots_destroy(&s)
+  h := slots_alloc(&s, Handle)
+  slots_free(&s, h)
+  for _ in 0 ..< 2 {
+    testing.expect_value(t, len(slots_tick(&s)), 0)
+    testing.expect(t, slots_alloc(&s, Handle).index != h.index, "index held during grace")
+  }
+  reclaimed := slots_tick(&s)
+  testing.expect_value(t, len(reclaimed), 1)
+  testing.expect_value(t, reclaimed[0], h.index)
+  testing.expect_value(t, slots_alloc(&s, Handle).index, h.index)
+}
+
+@(test)
+test_slots_flush_and_next :: proc(t: ^testing.T) {
+  s: Slots
+  slots_init(&s, 8, grace = 2)
+  defer slots_destroy(&s)
+  a := slots_alloc(&s, Handle)
+  b := slots_alloc(&s, Handle)
+  c := slots_alloc(&s, Handle)
+  slots_free(&s, b)
+  live: [dynamic]u32
+  defer delete(live)
+  cursor: u32
+  for i in slots_next(&s, &cursor) do append(&live, i)
+  testing.expect_value(t, len(live), 2)
+  testing.expect_value(t, live[0], a.index)
+  testing.expect_value(t, live[1], c.index)
+  testing.expect_value(t, len(slots_flush(&s)), 1)
+  testing.expect_value(t, slots_alloc(&s, Handle).index, b.index)
+}

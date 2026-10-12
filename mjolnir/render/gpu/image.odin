@@ -13,6 +13,8 @@ Image :: struct {
   extent:     vk.Extent2D,
   format:     vk.Format,
   mip_levels: u32,
+  // array layers; six for a cube
+  layers:     u32,
 }
 
 @(private)
@@ -54,14 +56,15 @@ image_create :: proc(
   img: Image,
   ret: vk.Result,
 ) {
+  assert(!cube || (layers == 1 && !array))
+  assert(array || layers == 1)
+  layers := u32(6) if cube else layers
   img = {
     extent     = extent,
     format     = format,
     mip_levels = mip_levels,
+    layers     = layers,
   }
-  assert(!cube || (layers == 1 && !array))
-  assert(array || layers == 1)
-  layers := u32(6) if cube else layers
   view_type: vk.ImageViewType = .CUBE if cube else .D2_ARRAY if array else .D2
   create_info := vk.ImageCreateInfo {
     sType         = .IMAGE_CREATE_INFO,

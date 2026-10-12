@@ -441,7 +441,7 @@ setup :: proc(app: ^App) {
           spawn(
             app,
             parent = lights_root_handle,
-            attachment = render.LightAttachment{
+            attachment = render.Light{
               type        = .SPOT,
               color       = color,
               radius      = 14.0,
@@ -468,7 +468,7 @@ setup :: proc(app: ^App) {
           spawn(
             app,
             parent = lights_root_handle,
-            attachment = render.LightAttachment{type = .POINT, color = color, radius = 14.0, cast_shadow = true},
+            attachment = render.Light{type = .POINT, color = color, radius = 14.0, cast_shadow = true},
           ) or_continue
           world.translate(
             &app.scene,
@@ -551,7 +551,7 @@ setup :: proc(app: ^App) {
         spawn(
           app,
           parent = psys_handle1,
-          attachment = render.EmitterAttachment{emitter_handle1},
+          attachment = emitter_handle1,
         )
       }
     }
@@ -576,7 +576,7 @@ setup :: proc(app: ^App) {
         spawn(
           app,
           parent = psys_handle2,
-          attachment = render.EmitterAttachment{emitter_handle2},
+          attachment = emitter_handle2,
         )
       }
     }
@@ -593,7 +593,7 @@ setup :: proc(app: ^App) {
       strength = 20.0,
       area_of_effect = 5.0,
     ); ok {
-      render.attach(&app.renderer, forcefield_handle.index, render.ForceFieldAttachment{ff})
+      render.attach(&app.renderer, forcefield_handle.index, ff)
     }
     handle := spawn(
       app,
@@ -695,6 +695,5 @@ on_post_render :: proc(app: ^App) {
     material.albedo_index = render.texture_index(
       render.camera_attachment(&app.renderer, portal_camera_handle, .FINAL_IMAGE),
     )
-    render.set_material(&app.renderer, portal_material_handle, material^)
   }
 }

@@ -65,7 +65,7 @@ spawn_field :: proc(
   s.parent = world.spawn(&app.scene, {0, 2, 0})
   s.ff_handle = render.create_forcefield(&app.renderer, area_of_effect = area, strength = strength, tangent_strength = tangent)
   s.ff_node = world.spawn_child(&app.scene, s.parent, {offset_x, 0, 0})
-  render.attach(&app.renderer, s.ff_node.index, render.ForceFieldAttachment{s.ff_handle})
+  render.attach(&app.renderer, s.ff_node.index, s.ff_handle)
   s.color = color
   s.enabled = true
   s.strength = mu.Real(strength)
@@ -97,7 +97,7 @@ setup :: proc(app: ^App) {
       weight_spread     = 0.0,
     )
     n := world.spawn(&app.scene, {0, 2, 0})
-    render.attach(&app.renderer, n.index, render.EmitterAttachment{em})
+    render.attach(&app.renderer, n.index, em)
   }
 
   // Repulsion field — blue marker
@@ -116,7 +116,6 @@ apply_ff :: proc(app: ^App, s: ^FFState) {
   ff.tangent_strength = f32(s.tangent_strength)
   ff.area_of_effect   = f32(s.area_of_effect)
   ff.enabled          = b32(s.enabled)
-  render.set_forcefield(&app.renderer, s.ff_handle, ff^)
 }
 
 draw_ff_marker :: proc(app: ^App, s: ^FFState) {

@@ -1,5 +1,6 @@
 package render
 
+import ba "core:container/bit_array"
 import "core:log"
 import "core:strings"
 import cont "../containers"
@@ -59,13 +60,15 @@ init_vulkan :: proc(
   gpu.device_init(gctx) or_return
   gpu.swapchain_init(&self.swapchain, gctx, framebuffer_size) or_return
   init_descriptor_pool(gctx) or_return
-  cont.init(&self.cameras, MAX_ACTIVE_CAMERAS, gpu.RETIRE_GRACE)
+  cont.slots_init(&self.camera_slots, MAX_ACTIVE_CAMERAS, gpu.RETIRE_GRACE)
+  self.cameras = make([]Camera, MAX_ACTIVE_CAMERAS)
   init_instances(self)
   init_resource_pools(self)
   gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
   gpu.allocate_command_buffer(gctx, self.compute_command_buffers[:], gctx.compute_command_pool) or_return
   mesh_arena_init(self) or_return
   init_scene_buffers(self, gctx) or_return
+  init_builtins(self)
   bindless_init(self) or_return
   scene_descriptors_init(self) or_return
   occlusion_init(self) or_return
@@ -92,13 +95,13 @@ setup :: proc(self: ^Manager) -> bool {
 @(private = "file")
 setup_level :: proc(self: ^Manager) -> (ret: vk.Result) {
   if self.level_ready do return .SUCCESS
-  gctx := &self.gctx
   swapchain_extent := self.swapchain.extent
   self.level_ready = true
   defer if ret != .SUCCESS do teardown(self)
   // GPU images back descriptor slots that submitted frames still sample, so
   // a freed slot is retired, not reclaimed at once.
-  cont.init(&self.textures, MAX_TEXTURES, gpu.RETIRE_GRACE)
+  cont.slots_init(&self.texture_slots, MAX_TEXTURES, gpu.RETIRE_GRACE)
+  self.textures = make([]gpu.Image, MAX_TEXTURES)
   ambient_setup(self) or_return
   particles_reset(self) or_return
   overlay_setup(self) or_return
@@ -125,9 +128,11 @@ teardown :: proc(self: ^Manager) {
   gctx := &self.gctx
   vk.DeviceWaitIdle(gctx.device)
   clear_slots(self)
-  it := cont.iterator(&self.cameras)
-  for _, handle in cont.next(&it, CameraHandle) do destroy_camera(self, handle)
-  cont.flush(&self.cameras, nil, nil)
+  c: u32
+  for i in cont.slots_next(&self.camera_slots, &c) {
+    destroy_camera(self, cont.slots_handle(&self.camera_slots, i, CameraHandle))
+  }
+  cont.slots_flush(&self.camera_slots)
   overlay_teardown(self)
   post_process_release_images(self)
   ambient_teardown(self)
@@ -162,12 +167,12 @@ shutdown :: proc(self: ^Manager) {
   bindless_shutdown(self)
   destroy_scene_buffers(self, gctx)
   mesh_arena_destroy(self)
-  cont.destroy(&self.cameras)
+  cont.slots_destroy(&self.camera_slots)
+  delete(self.cameras)
   destroy_resource_pools(self)
-  staging_destroy(&self.staging)
-  for _, p in self.bones do delete(p.matrices)
+  ba.destroy(&self.light_slots)
   delete(self.bones)
-  delete(self.instances)
+  delete(self.attachments)
   gpu.swapchain_destroy(&self.swapchain, gctx.device)
   gpu.shutdown(gctx)
 }

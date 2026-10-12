@@ -1,7 +1,6 @@
 #+private
 package render
 
-import cont "../containers"
 import "gpu"
 import vk "vendor:vulkan"
 
@@ -70,14 +69,12 @@ scene_binding_info :: proc(
   case .SKINNING:        return gpu.buffer_info(&self.mesh_buffers[.SKINNING])
   case .PARTICLES:       return gpu.buffer_info(&self.particle_buffer)
   case .PARTICLE_ALIVE:  return gpu.buffer_info(&self.particle_alive_buffer)
-  case .SHADOW_MAPS:     return vk.DescriptorImageInfo{imageView = atlas.image.view, imageLayout = .GENERAL}
+  case .BONES:           return gpu.buffer_info(&self.bone_buffers[frame_index])
+  case .SHADOW_MAPS:     return vk.DescriptorImageInfo{imageView = atlas.view, imageLayout = .GENERAL}
   }
-  // a frame table
-  arena := &self.frame_arena[frame_index]
+  // an arena table
   layout := &self.arena_layout
-  offset := layout.offset[b]
-  range := arena.size - offset if b == .BONES else layout.range[b]
-  return vk.DescriptorBufferInfo{buffer = arena.buffer, offset = offset, range = range}
+  return vk.DescriptorBufferInfo{buffer = self.frame_arena[frame_index].buffer, offset = layout.offset[b], range = layout.range[b]}
 }
 
 // Create the scene set layout, one set per frame in flight pointing at the
@@ -162,5 +159,5 @@ camera_image :: proc(
   a: AttachmentType,
   frame_index: u32,
 ) -> ^gpu.Image {
-  return cont.get(self.textures, cam.attachments[a][frame_index])
+  return texture_image(self, cam.attachments[a][frame_index])
 }

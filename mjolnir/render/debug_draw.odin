@@ -187,7 +187,7 @@ debug_axes :: proc(
   x := linalg.quaternion_mul_vector3(rotation, [3]f32{scale, 0, 0})
   y := linalg.quaternion_mul_vector3(rotation, [3]f32{0, scale, 0})
   z := linalg.quaternion_mul_vector3(rotation, [3]f32{0, 0, scale})
-  // Canonical axis colors (pure RGB) — independent of DEBUG_PALETTE.BLUE which is tinted.
+  // Canonical axis colors (pure RGB) — independent of DEBUG_BLUE, which is tinted.
   segs := [3]DebugLineSegment {
     {a = origin, b = origin + x, color = {1, 0, 0, 1}},
     {a = origin, b = origin + y, color = {0, 1, 0, 1}},

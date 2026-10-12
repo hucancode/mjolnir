@@ -73,42 +73,36 @@ select_shadow_casters :: proc(casters: []Caster, maps: ^[MAX_SHADOW_MAPS]Caster,
   return
 }
 
-// The light a LightAttachment at `world_matrix` shades with. Its shadow_map
-// is NO_SHADOW until a map is assigned.
+// Light `l` placed at `world_matrix`. Its shadow_map is NO_SHADOW until a map
+// is assigned.
 @(private)
-light_gpu :: proc(att: LightAttachment, world_matrix: matrix[4, 4]f32) -> (l: LightGPU) {
+place_light :: proc(l: Light, world_matrix: matrix[4, 4]f32) -> Light {
+  l := l
   forward := world_matrix[2].xyz
-  l = {
-    type        = att.type,
-    color       = att.color,
-    position    = world_matrix[3].xyz,
-    direction   = linalg.normalize(forward) if linalg.dot(forward, forward) > 1e-6 else {0, -1, 0},
-    radius      = att.radius,
-    angle_inner = att.angle_inner,
-    angle_outer = att.angle_outer,
-    shadow_map  = NO_SHADOW,
-  }
+  l.position = world_matrix[3].xyz
+  l.direction = linalg.normalize(forward) if linalg.dot(forward, forward) > 1e-6 else {0, -1, 0}
+  l.shadow_map = NO_SHADOW
   // world size of a shadow texel, per unit of view depth for a perspective map
   perspective_texel :: proc(fovy: f32) -> f32 {return 2 * math.tan(0.5 * max(fovy, 0.001)) / SHADOW_MAP_SIZE}
-  switch att.type {
+  switch l.type {
   case .POINT:
     l.shadow_texel = perspective_texel(math.PI * 0.5)
   case .SPOT:
-    l.shadow_texel = perspective_texel(att.angle_outer * 2)
+    l.shadow_texel = perspective_texel(l.angle_outer * 2)
   case .DIRECTIONAL:
     // radius: half extent of the shadow box centered on the light
-    l.radius = max(att.radius, 0.5)
+    l.radius = max(l.radius, 0.5)
     l.shadow_texel = 2 * l.radius / SHADOW_MAP_SIZE
   case .AMBIENT:
   }
-  return
+  return l
 }
 
 // Sphere a light's shadow map covers: center xyz, radius w. A spot light
 // shares the point light's sphere, loose but simple; a directional light's
 // surrounds its shadow box.
 @(private)
-shadow_bounds :: proc(l: LightGPU) -> [4]f32 {
+shadow_bounds :: proc(l: Light) -> [4]f32 {
   r := l.radius * (math.SQRT_THREE if l.type == .DIRECTIONAL else 1)
   return {l.position.x, l.position.y, l.position.z, r}
 }
@@ -117,7 +111,7 @@ shadow_bounds :: proc(l: LightGPU) -> [4]f32 {
 // maps reach the light's radius; a directional light's orthographic map
 // covers the box of half extent radius centered on it.
 @(private)
-shadow_face_matrices :: proc(l: LightGPU, face: [2][3]f32) -> (view, projection: matrix[4, 4]f32) {
+shadow_face_matrices :: proc(l: Light, face: [2][3]f32) -> (view, projection: matrix[4, 4]f32) {
   look :: proc(position, direction: [3]f32) -> matrix[4, 4]f32 {
     up := [3]f32{0, 0, 1} if math.abs(direction.y) > 0.95 else {0, 1, 0}
     return linalg.matrix4_look_at(position, position + direction, up)
@@ -145,7 +139,7 @@ shadow_face_matrices :: proc(l: LightGPU, face: [2][3]f32) -> (view, projection:
 // lights (shadow_map != NO_SHADOW) packed into the shadow views in `dst`
 // order, one view per face: shadow view i renders atlas layer i.
 @(private)
-pack_lights :: proc(lights, dst: []LightGPU) -> (count: [LightType]u32, layers: u32) {
+pack_lights :: proc(lights, dst: []Light) -> (count: [LightType]u32, layers: u32) {
   for &l in lights do count[l.type] += 1
   first: [LightType]u32
   next: u32
@@ -170,32 +164,32 @@ pack_lights :: proc(lights, dst: []LightGPU) -> (count: [LightType]u32, layers: 
 // grouped by type (light_count). The shadow casters some camera view (written
 // by flush_cameras) sees are ranked for the shadow maps (select_shadow_casters),
 // and every face of the selected maps is written into the view table. Caller
-// holds the staging mutex.
+// holds the render mutex.
 @(private)
 collect_lights :: proc(self: ^Manager, frame_index: u32) {
-  lights: [MAX_LIGHTS]LightGPU
+  lights: [MAX_LIGHTS]Light
   lights[0] = {type = .AMBIENT, color = {1, 1, 1, self.ambient.ibl_intensity}, shadow_map = NO_SHADOW}
   n := 1
   views := frame_table(self, .VIEWS, ViewGPU, frame_index)
-  cameras := views[CAMERA_VIEW_BASE:][:len(self.cameras.entries)]
+  cameras := views[CAMERA_VIEW_BASE:][:self.camera_slots.high_water]
   casters: [MAX_LIGHTS]Caster
   caster_count := 0
-  it := ba.make_iterator(&self.staging.lights)
+  nodes := frame_table(self, .NODES, NodeData, frame_index)
+  it := ba.make_iterator(&self.light_slots)
   for slot in ba.iterate_by_set(&it) {
     if n == MAX_LIGHTS do break
-    inst := &self.instances[slot]
-    if !inst.visible do continue
-    att := inst.attachment.(LightAttachment) or_continue
-    lights[n] = light_gpu(att, inst.world_matrix)
+    if .VISIBLE not_in nodes[slot].flags do continue
+    light := self.attachments[slot].(Light) or_continue
+    lights[n] = place_light(light, nodes[slot].world_matrix)
     n += 1
-    if !att.cast_shadow do continue
+    if !light.cast_shadow do continue
     bounds := shadow_bounds(lights[n - 1])
     // -1: no camera sees the light
     score: f32 = -1
     for &v in cameras {
       if v.type_mask == 0 do continue
       if !geom.frustum_test_sphere({v.planes}, bounds.xyz, bounds.w) do continue
-      score = max(score, shadow_score(bounds, att.color.a, v.position.xyz))
+      score = max(score, shadow_score(bounds, light.color.a, v.position.xyz))
     }
     if score < 0 do continue
     casters[caster_count] = {light = n - 1, owner = u32(slot) + 1, score = score}
@@ -206,7 +200,7 @@ collect_lights :: proc(self: ^Manager, frame_index: u32) {
   selected := select_shadow_casters(casters[:caster_count], maps, self.gctx.frame_serial)
   // marks the light shadowed until pack_lights picks its layers
   for c in maps[:selected] do lights[c.light].shadow_map = 0
-  dst := frame_table(self, .LIGHTS, LightGPU, frame_index)
+  dst := frame_table(self, .LIGHTS, Light, frame_index)
   self.light_count, self.shadow_view_count = pack_lights(lights[:n], dst)
   _, shadow_mask := material_masks()
   draws := &self.shadow_draws

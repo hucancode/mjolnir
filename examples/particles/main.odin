@@ -78,7 +78,7 @@ main :: proc() {
 
   emitter_handle = render.create_emitter(&app.renderer)
   emitter_node = world.spawn(&app.scene, {0, 2, 0})
-  render.attach(&app.renderer, emitter_node.index, render.EmitterAttachment{emitter_handle})
+  render.attach(&app.renderer, emitter_node.index, emitter_handle)
 
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -116,7 +116,6 @@ update :: proc(app: ^App, dt: f32) {
     em.velocity_spread   = f32(velocity_spread)
     em.color_start       = color_start
     em.color_end         = color_end
-    render.set_emitter(&app.renderer, emitter_handle, em^)
   }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)

@@ -13,8 +13,8 @@ stage_overlay :: proc(self: ^Manager, list: DrawList) {
   ui := &self.ui
   ui.commands = list.commands
   if len(list.atlas) == 0 do return
-  sync.mutex_lock(&self.staging.mutex)
-  defer sync.mutex_unlock(&self.staging.mutex)
+  sync.recursive_mutex_lock(&self.mutex)
+  defer sync.recursive_mutex_unlock(&self.mutex)
   if len(ui.atlas_pixels) != len(list.atlas) {
     delete(ui.atlas_pixels)
     ui.atlas_pixels = make([]u8, len(list.atlas))

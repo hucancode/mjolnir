@@ -92,7 +92,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
   }
-  if l, ok := render.attachment(&app.renderer, dir_light.index, render.LightAttachment); ok {
+  if l, ok := render.attachment(&app.renderer, dir_light.index, render.Light); ok {
     l.color[3] = f32(dir_intensity)
     render.attach(&app.renderer, dir_light.index, l)
   }
