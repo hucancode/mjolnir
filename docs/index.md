@@ -30,7 +30,7 @@ To use Mjolnir, run `make shader` to compile shaders to SPIR-V and copy the
 - Render to texture
 - Post-process: tonemap, bloom, blur, fog, outline, DoF, crosshatch
 
-See [`examples`](examples.html) for features showcase
+See [examples](examples.html) for more
 
 ## Build commands
 
