@@ -39,7 +39,8 @@ flowchart TB
     direction LR
     platform["platform<br/>GLFW window<br/>vulkan surface"]
     world["world<br/>scene graph<br/>change feed"]
-    render["render<br/>Vulkan, frame, passes<br/>bindless, looks<br/>2D draw commands, ui"]
+    render["render<br/>Vulkan, frame, passes<br/>bindless, looks<br/>2D overlay"]
+    ui["ui<br/>2D layout<br/>hit testing"]
     animation["animation<br/>tracks, skeletons<br/>animators, IK"]
     physics["physics<br/>rigid body<br/>BVH broadphase"]
     nav["navigation<br/>runtime: detour, crowd<br/>bake: recast"]
@@ -50,6 +51,7 @@ flowchart TB
     geometry["geometry<br/>math, AABB, frustum<br/>BVH, octree"]
     containers["containers<br/>handle pool<br/>slab allocator"]
     input["input<br/>per-tick snapshot<br/>keys, mouse, text"]
+    font["font<br/>text metrics<br/>glyphs, atlas"]
   end
 
   L3 --> L2
@@ -158,8 +160,8 @@ skinned node. See [engine](engine.html#wiring-modules) for every hop.
 
 ```
 update tick:  update callback (input snapshot → debug UI / UI / camera input → app + glue → render.update)
-render frame: frame callback (poll events → debug UI widgets → ui stage
-              → render.frame (flush → acquire → record → submit + present))
+render frame: frame callback (poll events → debug UI widgets → ui → overlay
+              commands → render.frame (flush → acquire → record → submit + present))
 ```
 
 - **Update** runs at `UPDATE_FPS` (defaults to `RENDER_FPS`). On its

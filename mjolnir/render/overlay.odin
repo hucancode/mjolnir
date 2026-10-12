@@ -9,7 +9,7 @@ import vk "vendor:vulkan"
 // Submit the 2D overlay for the next frame only; call it every frame the UI
 // should show. The commands must stay valid until that frame is recorded; a
 // non-empty atlas is copied and uploaded on flush.
-stage_ui :: proc(self: ^Manager, list: DrawList) {
+stage_overlay :: proc(self: ^Manager, list: DrawList) {
   ui := &self.ui
   ui.commands = list.commands
   if len(list.atlas) == 0 do return

@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/font"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -48,8 +49,6 @@ State :: struct {
   has_active:           bool,
   transparent_material: [len(render.Color)]render.MaterialHandle,
   opaque_material:      [len(render.Color)]render.MaterialHandle,
-  score_label:          render.Text2DHandle,
-  high_label:           render.Text2DHandle,
 }
 
 PIECE_ALPHA :: f32(0.5)
@@ -66,7 +65,7 @@ App :: struct {
   renderer: render.Manager,
   camera:   mjolnir.CameraController,
   input:    input.State,
-  gui:      render.UISystem,
+  font:     font.Font,
 }
 
 state: State
@@ -84,11 +83,11 @@ main :: proc() {
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
   app.camera = mjolnir.orbit_controller()
-  font, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
+  font_data, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
   if err != nil do return
-  defer delete(font)
-  if !render.ui_init(&app.gui, font) do return
-  defer render.ui_shutdown(&app.gui)
+  defer delete(font_data)
+  if !font.init(&app.font, font_data) do return
+  defer font.destroy(&app.font)
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -99,7 +98,12 @@ should_close :: proc(app: ^App) -> bool {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  render.stage_ui(&app.renderer, render.draw_list(&app.gui))
+  // score labels: glyph runs of the font, drawn by render's 2D overlay
+  commands := make([dynamic]render.RenderCommand, context.temp_allocator)
+  label(app, &commands, fmt.tprintf("Score: %d", state.score), {20, 20}, 32, {255, 255, 255, 255})
+  label(app, &commands, fmt.tprintf("High: %d", state.high_score), {20, 60}, 24, {255, 220, 100, 255})
+  pixels, size, changed := font.atlas(&app.font)
+  render.stage_overlay(&app.renderer, {commands = commands[:], atlas = pixels if changed else nil, atlas_size = size})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
@@ -125,10 +129,7 @@ setup :: proc(app: ^App) {
     state.opaque_material[i] = render.create_material(&app.renderer, type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0})
   }
   state.fall_period = FALL_PERIOD
-  state.score_label, _ = render.create_text2d(&app.gui, position = {20, 20}, text = "Score: 0", font_size = 32, color = {255, 255, 255, 255})
-  state.high_label, _ = render.create_text2d(&app.gui, position = {20, 60}, text = "High: 0", font_size = 24, color = {255, 220, 100, 255})
   reset_game(app)
-  refresh_score_ui(app)
 }
 
 reset_game :: proc(app: ^App) {
@@ -244,12 +245,10 @@ drop_step :: proc(app: ^App) {
   if try_move(app, 0, -1) do return
   lock_piece(app)
   spawn_piece(app)
-  refresh_score_ui(app)
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.process_input(&app.gui, &app.input)
   mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   step_game(app, dt)
   world.update(&app.scene)
@@ -267,7 +266,6 @@ step_game :: proc(app: ^App, dt: f32) {
     if state.score > state.high_score do state.high_score = state.score
     log.infof("game over - score %d high %d - restarting", state.score, state.high_score)
     reset_game(app)
-    refresh_score_ui(app)
     return
   }
   state.fall_timer += dt
@@ -292,7 +290,8 @@ on_key :: proc(app: ^App, key: input.Key) {
   }
 }
 
-refresh_score_ui :: proc(app: ^App) {
-  render.set_text(&app.gui, state.score_label, fmt.tprintf("Score: %d", state.score))
-  render.set_text(&app.gui, state.high_label,  fmt.tprintf("High: %d",  state.high_score))
+label :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand, text: string, pos: [2]f32, size: f32, color: [4]u8) {
+  glyphs := make([dynamic]font.Glyph, context.temp_allocator)
+  font.glyphs(&app.font, text, pos, size, &glyphs)
+  append(commands, render.DrawTextCommand{glyphs = glyphs[:], color = color})
 }

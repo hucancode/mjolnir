@@ -145,7 +145,7 @@
   },
   {
     "name": "ui",
-    "desc": "2D UI widgets, layout, events, fontstash text."
+    "desc": "ui layout (flex, anchors, wrap, clip, scroll) drawn through the 2D overlay."
   },
   {
     "name": "wireframe",

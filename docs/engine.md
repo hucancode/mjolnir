@@ -73,9 +73,11 @@ tears its module down in reverse.
 
 Add modules by adding a field and their lines:
 
-- **ui:** `render.ui_init` with a font in `main`, `render.process_input` in
-  `update`, `render.stage_ui(&app.renderer, render.draw_list(&app.gui))`
-  in `frame`.
+- **ui:** a `font.Font` and a `ui.UI`, initialized in `main`;
+  `ui.layout` then `ui.update_input` in `update`; in `frame`, the shown
+  nodes as overlay commands for `render.stage_overlay` (see UI → render).
+  Text with no layout needs only the font: `font.glyphs` into a
+  `render.DrawTextCommand`.
 - **debug UI:** `render.debug_ui_input` first in `update`, and
   `render.debug_ui(&app.renderer)` widgets in `frame` before
   `render.frame`.
@@ -99,7 +101,8 @@ schedules or locks anything. A full `update` with every module:
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
-  render.process_input(&app.gui, &app.input)
+  ui.layout(&app.gui, viewport, &app.font) // the window, in cursor units
+  ui.update_input(&app.gui, &app.input)
   mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   // gameplay, reading app.input
   physics.step(&app.phys, dt)
@@ -123,9 +126,13 @@ input a UI took.
 
 ### UI → render
 
-Once per frame, before `render.frame`:
-`render.stage_ui(&app.renderer, render.draw_list(&app.gui))`. The draw list
-carries the font atlas on frames where it changed.
+ui only lays out; the application decides how each node looks. Once
+per frame, before `render.frame`, walk `gui.draw_order` (back to
+front) and turn each node into overlay commands: a `DrawQuadCommand`
+from its `ui.rect` and the app's color or texture for it, a
+`DrawTextCommand` per `ui.lines` entry from `font.glyphs`, each clipped
+to `ui.clip`. Hand them to `render.stage_overlay` with `font.atlas` on
+frames where it changed. `examples/ui` does all of it in one loop.
 
 ### Platform → render
 

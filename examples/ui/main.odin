@@ -1,13 +1,22 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/font"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
+import "../../mjolnir/ui"
 import "../../mjolnir/world"
+import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:os"
+
+// How the app draws a node: ui lays nodes out, the app gives them a look.
+Look :: struct {
+  color:   [4]u8,
+  texture: u32, // render.NO_TEXTURE for a flat color
+}
 
 App :: struct {
   window:   platform.Platform,
@@ -15,46 +24,27 @@ App :: struct {
   renderer: render.Manager,
   camera:   mjolnir.CameraController,
   input:    input.State,
-  gui:      render.UISystem,
+  font:     font.Font,
+  gui:      ui.UI,
+  looks:    map[ui.NodeHandle]Look,
+  button:   ui.NodeHandle,
+  counter:  ui.NodeHandle,
+  list:     ui.NodeHandle,
+  star:     ui.NodeHandle,
+  clicks:   int,
 }
 
-button: render.Quad2DHandle
-label: render.Text2DHandle
-star: render.Mesh2DHandle
-image_quad: render.Quad2DHandle
-
-create_star_mesh :: proc(center: [2]f32, outer_radius, inner_radius: f32, color: [4]u8) -> (vertices: []render.Vertex2D, indices: []u32) {
-  vertices = make([]render.Vertex2D, 11)
-  indices = make([]u32, 30)
-  vertices[0] = render.Vertex2D{pos = center, uv = {0.5, 0.5}, color = color}
-  for i in 0 ..< 5 {
-    angle := f32(i) * (2.0 * math.PI / 5.0) - math.PI / 2.0
-    outer_idx := 1 + i * 2
-    vertices[outer_idx] = render.Vertex2D{
-      pos = {center.x + math.cos(angle) * outer_radius, center.y + math.sin(angle) * outer_radius},
-      uv = {0.5 + math.cos(angle) * 0.5, 0.5 + math.sin(angle) * 0.5}, color = color,
-    }
-    inner_angle := angle + (math.PI / 5.0)
-    inner_idx := 2 + i * 2
-    vertices[inner_idx] = render.Vertex2D{
-      pos = {center.x + math.cos(inner_angle) * inner_radius, center.y + math.sin(inner_angle) * inner_radius},
-      uv = {0.5 + math.cos(inner_angle) * 0.3, 0.5 + math.sin(inner_angle) * 0.3}, color = color,
-    }
-  }
-  for i in 0 ..< 5 {
-    outer := u32(1 + i * 2); inner := u32(2 + i * 2); next_outer := u32(1 + ((i + 1) % 5) * 2)
-    indices[i * 6 + 0] = 0; indices[i * 6 + 1] = outer; indices[i * 6 + 2] = inner
-    indices[i * 6 + 3] = 0; indices[i * 6 + 4] = inner; indices[i * 6 + 5] = next_outer
-  }
-  return
-}
+TEXT_COLOR :: [4]u8{235, 235, 245, 255}
+BUTTON_COLOR :: [4]u8{200, 80, 80, 255}
+BUTTON_HOVER :: [4]u8{230, 120, 90, 255}
+BUTTON_PRESSED :: [4]u8{110, 200, 110, 255}
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   defer free(app)
   w := &app.window
-  if !platform.init(w, 800, 700, "UI") do return
+  if !platform.init(w, 900, 700, "UI") do return
   defer platform.shutdown(w)
   if !render.init(&app.renderer, "UI", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
@@ -62,77 +52,63 @@ main :: proc() {
   defer world.shutdown(&app.scene)
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
   app.camera = mjolnir.orbit_controller()
-  font, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
+  font_data, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
   if err != nil do return
-  defer delete(font)
-  if !render.ui_init(&app.gui, font) do return
-  defer render.ui_shutdown(&app.gui)
-
-  bg_quad, _ := render.create_quad2d(&app.gui, position = {50, 50}, size = {700, 200}, color = {40, 40, 60, 200}, z_order = -1)
-  log.infof("Background quad created: handle=%v", bg_quad)
-
-  star_vertices, star_indices := create_star_mesh(center = {500, 125}, outer_radius = 70, inner_radius = 30, color = {255, 215, 0, 255})
-  defer delete(star_vertices)
-  defer delete(star_indices)
-
-  star, star_ok := render.create_mesh2d(&app.gui, position = {0, 0}, vertices = star_vertices, indices = star_indices, z_order = 1)
-  log.infof("Star mesh created: handle=%v, ok=%v", star, star_ok)
-
-  star_texture, texture_ret := render.create_texture_from_path(&app.renderer, "assets/gold-star.png")
-  log.infof("Star texture loaded: handle=%v, ret=%v", star_texture, texture_ret)
-
-  if texture_ret == .SUCCESS {
-    image_quad, image_quad_ok := render.create_quad2d(&app.gui, position = {350, 300}, size = {128, 128}, texture = star_texture.index, z_order = 1)
-    log.infof("Image quad created: handle=%v, ok=%v", image_quad, image_quad_ok)
-  }
-
-  button, button_ok := render.create_quad2d(&app.gui, position = {100, 100}, size = {200, 50}, color = {255, 100, 100, 255}, z_order = 0)
-  log.infof("Button quad created: handle=%v, ok=%v", button, button_ok)
-
-  button_label, button_label_ok := render.create_text2d(&app.gui, position = {100, 100}, text = "Click me!", font_size = 20, color = {255, 255, 255, 255}, z_order = 2, bounds = {200, 50}, h_align = .Center, v_align = .Middle)
-  log.infof("Button label created: handle=%v, ok=%v", button_label, button_label_ok)
-
-  if btn := render.get_as(&app.gui, button, render.Quad2D); btn != nil {
-    handlers := render.EventHandlers{
-      on_mouse_down = proc(event: render.MouseEvent) {
-        log.info("Button clicked!")
-        app := cast(^App)event.user_data
-        if app == nil do return
-        if q := render.get_as(&app.gui, event.widget, render.Quad2D); q != nil do q.color = {100, 255, 100, 255}
-      },
-      on_mouse_up = proc(event: render.MouseEvent) {
-        log.info("Button released!")
-        app := cast(^App)event.user_data
-        if app == nil do return
-        if q := render.get_as(&app.gui, event.widget, render.Quad2D); q != nil do q.color = {255, 150, 100, 255}
-      },
-      on_hover_in = proc(event: render.MouseEvent) {
-        log.info("Button hovered")
-        app := cast(^App)event.user_data
-        if app == nil do return
-        if q := render.get_as(&app.gui, event.widget, render.Quad2D); q != nil do q.color = {255, 150, 100, 255}
-      },
-      on_hover_out = proc(event: render.MouseEvent) {
-        log.info("Button unhovered")
-        app := cast(^App)event.user_data
-        if app == nil do return
-        if q := render.get_as(&app.gui, event.widget, render.Quad2D); q != nil do q.color = {255, 100, 100, 255}
-      },
-    }
-    btn.event_handlers = handlers
-    btn.user_data = app
-  }
-  label, label_ok := render.create_text2d(&app.gui, position = {100, 180}, text = "The star is created using Mesh2D API!", font_size = 20, color = {255, 255, 255, 255}, z_order = 1)
-  log.infof("Text label created: handle=%v, ok=%v", label, label_ok)
-
-  image_label, image_label_ok := render.create_text2d(&app.gui, position = {300, 440}, text = "Image display using Quad2D with texture", font_size = 20, color = {255, 255, 255, 255}, z_order = 1)
-  log.infof("Image label created: handle=%v, ok=%v", image_label, image_label_ok)
-
+  defer delete(font_data)
+  if !font.init(&app.font, font_data) do return
+  defer font.destroy(&app.font)
+  ui.init(&app.gui)
+  defer ui.destroy(&app.gui)
+  defer delete(app.looks)
+  build_ui(app)
   cube := world.spawn(&app.scene)
   render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, .BLUE))
   render.main_camera_look_at(&app.renderer, {3, 2, 3}, {0, 0, 0})
-
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+}
+
+text :: proc(app: ^App, parent: ui.NodeHandle, s: string, size: f32 = 18, n: ui.Node = {}) -> ui.NodeHandle {
+  n := n
+  n.parent, n.text, n.font_size = parent, s, size
+  return ui.create(&app.gui, n)
+}
+
+build_ui :: proc(app: ^App) {
+  // a column panel: title, a row with a button and a counter, wrapped text
+  // and a clipped list that scrolls with the wheel
+  panel := ui.create(&app.gui, {direction = .COLUMN, padding = {16, 16, 16, 16}, gap = 12, offset = {32, 32}})
+  app.looks[panel] = {{30, 30, 46, 220}, render.NO_TEXTURE}
+  text(app, panel, "Mjolnir UI", 28)
+  row := ui.create(&app.gui, {parent = panel, gap = 16, align = {.START, .CENTER}})
+  app.button = ui.create(&app.gui, {parent = row, size = {{.FIXED, 160}, {.FIXED, 44}}, interactive = true, align = {.CENTER, .CENTER}})
+  app.looks[app.button] = {BUTTON_COLOR, render.NO_TEXTURE}
+  // the label sits in the button: hovering or clicking it counts for the button
+  text(app, app.button, "Click me!", 20)
+  app.counter = text(app, row, "Clicks: 0")
+  text(
+    app,
+    panel,
+    "ui lays out nodes and answers hit tests; the app turns rects and text lines into render's overlay commands. This paragraph wraps to its width.",
+    16,
+    {size = {{.FIXED, 360}, {}}, wrap = true},
+  )
+  app.list = ui.create(&app.gui, {parent = panel, direction = .COLUMN, size = {{.FIXED, 360}, {.FIXED, 120}}, gap = 4, clip = true, interactive = true})
+  app.looks[app.list] = {{18, 18, 26, 255}, render.NO_TEXTURE}
+  for i in 0 ..< 12 {
+    item := ui.create(&app.gui, {parent = app.list, size = {{.GROW, 0}, {.FIXED, 28}}, padding = {8, 0, 8, 0}, align = {.START, .CENTER}})
+    app.looks[item] = {{50, 60, 90, 255} if i % 2 == 0 else {40, 48, 72, 255}, render.NO_TEXTURE}
+    text(app, item, fmt.tprintf("Item %d", i + 1))
+  }
+  // HUD corner: anchored to the window's top-right
+  hint := ui.create(&app.gui, {position = .ABSOLUTE, anchor = {1, 0}, offset = {-16, 16}, padding = {10, 6, 10, 6}})
+  app.looks[hint] = {{0, 0, 0, 160}, render.NO_TEXTURE}
+  text(app, hint, "drag: orbit   wheel over list: scroll", 14)
+  // an image anchored bottom-right, and a star mesh bottom-left
+  if star_texture, ret := render.create_texture_from_path(&app.renderer, "assets/gold-star.png"); ret == .SUCCESS {
+    image := ui.create(&app.gui, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, size = {{.FIXED, 128}, {.FIXED, 128}}})
+    app.looks[image] = {{255, 255, 255, 255}, star_texture.index}
+  }
+  app.star = ui.create(&app.gui, {position = .ABSOLUTE, anchor = {0, 1}, offset = {16, -16}, size = {{.FIXED, 140}, {.FIXED, 140}}})
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -141,7 +117,21 @@ should_close :: proc(app: ^App) -> bool {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.process_input(&app.gui, &app.input)
+  // layout in window pixels, where the cursor is; frame scales to the framebuffer
+  size := platform.framebuffer_size(&app.window)
+  dpi := platform.dpi_scale(&app.window)
+  ui.layout(&app.gui, {size = {f32(size.x), f32(size.y)} / dpi}, &app.font)
+  ui.update_input(&app.gui, &app.input)
+  if ui.clicked(&app.gui, app.button) {
+    app.clicks += 1
+    ui.set_text(&app.gui, app.counter, fmt.tprintf("Clicks: %d", app.clicks))
+  }
+  look := &app.looks[app.button]
+  look.color = BUTTON_PRESSED if ui.pressed(&app.gui, app.button) else BUTTON_HOVER if ui.hovered(&app.gui, app.button) else BUTTON_COLOR
+  if ui.hovered(&app.gui, app.list) {
+    list := ui.node(&app.gui, app.list)
+    list.scroll.y = clamp(list.scroll.y - app.input.scroll.y * 20, 0, 12 * 32 - 4 - 120)
+  }
   mjolnir.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
@@ -149,8 +139,46 @@ update :: proc(app: ^App, dt: f32) {
   render.update(&app.renderer, dt)
 }
 
+// The app's half of the UI: every shown node, back to front, as overlay
+// commands in framebuffer pixels.
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  render.stage_ui(&app.renderer, render.draw_list(&app.gui))
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  s := platform.dpi_scale(&app.window)
+  commands := make([dynamic]render.RenderCommand, context.temp_allocator)
+  for h, z in app.gui.draw_order {
+    r, c := ui.rect(&app.gui, h), ui.clip(&app.gui, h)
+    clip := [4]f32{c.pos.x, c.pos.y, c.size.x, c.size.y} * s
+    if look, ok := app.looks[h]; ok {
+      append(&commands, render.DrawQuadCommand{r.pos * s, r.size * s, look.color, look.texture, i32(z), clip})
+    }
+    if h == app.star {
+      vertices, indices := star_mesh(r.size * s * 0.5, {255, 215, 0, 255})
+      append(&commands, render.DrawMeshCommand{r.pos * s, vertices, indices, render.NO_TEXTURE, i32(z), clip})
+    }
+    n := ui.node(&app.gui, h)
+    for line in ui.lines(&app.gui, h) {
+      glyphs := make([dynamic]font.Glyph, context.temp_allocator)
+      font.glyphs(&app.font, n.text[line.start:line.end], line.pos * s, n.font_size * s, &glyphs)
+      append(&commands, render.DrawTextCommand{glyphs[:], TEXT_COLOR, i32(z), clip})
+    }
+  }
+  pixels, atlas_size, changed := font.atlas(&app.font)
+  render.stage_overlay(&app.renderer, {commands = commands[:], atlas = pixels if changed else nil, atlas_size = atlas_size})
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), s)
+}
+
+// A five-pointed star filling a box of half extent `r`, centered in it.
+star_mesh :: proc(r: [2]f32, color: [4]u8) -> (vertices: []render.Vertex2D, indices: []u32) {
+  vertices = make([]render.Vertex2D, 11, context.temp_allocator)
+  indices = make([]u32, 30, context.temp_allocator)
+  vertices[0] = {pos = r, uv = {0.5, 0.5}, color = color}
+  for i in 0 ..< 10 {
+    angle := f32(i) * math.PI / 5 - math.PI / 2
+    radius: f32 = 1 if i % 2 == 0 else 0.4
+    dir := [2]f32{math.cos(angle), math.sin(angle)}
+    vertices[1 + i] = {pos = r + r * dir * radius, uv = 0.5 + dir * radius * 0.5, color = color}
+    p := indices[i * 3:]
+    p[0], p[1], p[2] = 0, u32(1 + i), u32(1 + (i + 1) % 10)
+  }
+  return
 }

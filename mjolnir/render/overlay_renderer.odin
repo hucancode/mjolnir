@@ -1,17 +1,21 @@
 // 2D overlay renderer. Draws two producers into the swapchain image after
 // post-processing, with one pipeline and one vertex stream:
-// - draw2d commands staged by the app (game UI), sorted by z_order;
+// - draw2d commands staged by the app (its UI), sorted by z_order and
+//   clipped per command;
 // - the microui debug context, clipped per microui clip rect and scaled by
 //   the window DPI.
 package render
 
+import "../font"
 import "gpu"
 import "core:math/linalg"
 import "core:slice"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-// ---------- draw2d commands: what a 2D producer (the retained UI) hands in ----------
+// ---------- draw2d commands: what a 2D producer (the app's UI) hands in ----------
+// Positions are framebuffer pixels. Every command draws inside its `clip`
+// rect (x, y, width, height), the whole framebuffer when it is zero.
 
 // texture_id value meaning "untextured"; the renderer substitutes a white texture.
 NO_TEXTURE :: max(u32)
@@ -22,21 +26,15 @@ DrawQuadCommand :: struct {
   color:      [4]u8,
   texture_id: u32,
   z_order:    i32,
+  clip:       [4]f32,
 }
 
-DrawTextGlyph :: struct {
-  p0:    [2]f32,
-  p1:    [2]f32,
-  uv0:   [2]f32,
-  uv1:   [2]f32,
-  color: [4]u8,
-}
-
-// Glyph uvs index the producer's font atlas, which the renderer owns on the GPU.
+// A run of glyphs of the DrawList's font atlas (font.glyphs), in one color.
 DrawTextCommand :: struct {
-  position: [2]f32,
-  glyphs:   []DrawTextGlyph,
-  z_order:  i32,
+  glyphs:  []font.Glyph,
+  color:   [4]u8,
+  z_order: i32,
+  clip:    [4]f32,
 }
 
 Vertex2D :: struct {
@@ -52,6 +50,7 @@ DrawMeshCommand :: struct {
   indices:    []u32,
   texture_id: u32,
   z_order:    i32,
+  clip:       [4]f32,
 }
 
 RenderCommand :: union {
@@ -61,7 +60,8 @@ RenderCommand :: union {
 }
 
 // One frame of 2D output. `atlas` holds the producer's R8 font atlas
-// (`atlas_size` texels) only on frames where it changed; otherwise it is empty.
+// (`atlas_size` texels, font.atlas) only on frames where it changed;
+// otherwise it is empty.
 DrawList :: struct {
   commands:   []RenderCommand,
   atlas:      []u8,
@@ -205,10 +205,7 @@ overlay_record :: proc(
   self.index_count = 0
   clear(&self.batches)
   full := vk.Rect2D{extent = extent}
-  if draw_commands {
-    begin_batch(self, full)
-    batch_commands(self)
-  }
+  if draw_commands do batch_commands(self, extent)
   if draw_debug {
     begin_batch(self, full)
     batch_debug_ui(self, extent)
@@ -273,7 +270,7 @@ push_quad :: proc(
 }
 
 @(private)
-batch_commands :: proc(self: ^OverlayRenderer) {
+batch_commands :: proc(self: ^OverlayRenderer, extent: vk.Extent2D) {
   CommandSortKey :: struct {
     z_order:   i32,
     cmd_index: int,
@@ -291,18 +288,42 @@ batch_commands :: proc(self: ^OverlayRenderer) {
   slice.stable_sort_by(keys, proc(a, b: CommandSortKey) -> bool {
     return a.z_order < b.z_order
   })
+  atlas_size := [2]f32{f32(self.atlas_extent.x), f32(self.atlas_extent.y)}
+  scissor := vk.Rect2D{{-1, -1}, {}}
   for key in keys {
+    clip: [4]f32
+    switch c in self.commands[key.cmd_index] {
+    case DrawQuadCommand: clip = c.clip
+    case DrawMeshCommand: clip = c.clip
+    case DrawTextCommand: clip = c.clip
+    }
+    // a new batch wherever the clip changes
+    if s := clip_scissor(clip, extent); s != scissor {
+      scissor = s
+      begin_batch(self, s)
+    }
     switch c in self.commands[key.cmd_index] {
     case DrawQuadCommand:
       push_quad(self, c.position, c.position + c.size, {0, 0}, {1, 1}, c.color, resolve_texture(self, c.texture_id))
     case DrawTextCommand:
       for g in c.glyphs {
-        push_quad(self, c.position + g.p0, c.position + g.p1, g.uv0, g.uv1, g.color, self.font_atlas.index)
+        push_quad(self, g.p0, g.p1, g.uv0 / atlas_size, g.uv1 / atlas_size, c.color, self.font_atlas.index)
       }
     case DrawMeshCommand:
       push_mesh(self, c, resolve_texture(self, c.texture_id))
     }
   }
+}
+
+// The scissor of a command clip; zero clips nothing.
+@(private)
+clip_scissor :: proc(clip: [4]f32, extent: vk.Extent2D) -> vk.Rect2D {
+  if clip == {} do return {extent = extent}
+  x0 := clamp(i32(clip.x), 0, i32(extent.width))
+  y0 := clamp(i32(clip.y), 0, i32(extent.height))
+  x1 := clamp(i32(clip.x + clip.z), x0, i32(extent.width))
+  y1 := clamp(i32(clip.y + clip.w), y0, i32(extent.height))
+  return {offset = {x0, y0}, extent = {u32(x1 - x0), u32(y1 - y0)}}
 }
 
 @(private)
@@ -360,18 +381,11 @@ batch_debug_ui :: proc(self: ^OverlayRenderer, extent: vk.Extent2D) {
       y := c.rect.y + (c.rect.h - src.h) / 2
       quad(self, {x, y, src.w, src.h}, src, c.color, atlas_size, scale)
     case ^mu.Command_Clip:
-      begin_batch(self, clip_to_scissor(c.rect, scale, extent))
+      begin_batch(self, clip_scissor([4]f32{f32(c.rect.x), f32(c.rect.y), f32(c.rect.w), f32(c.rect.h)} * scale, extent))
     case ^mu.Command_Jump:
       unreachable()
     }
   }
 }
 
-@(private)
-clip_to_scissor :: proc(rect: mu.Rect, scale: f32, extent: vk.Extent2D) -> vk.Rect2D {
-  x0 := clamp(i32(f32(rect.x) * scale), 0, i32(extent.width))
-  y0 := clamp(i32(f32(rect.y) * scale), 0, i32(extent.height))
-  x1 := clamp(i32(f32(rect.x + rect.w) * scale), x0, i32(extent.width))
-  y1 := clamp(i32(f32(rect.y + rect.h) * scale), y0, i32(extent.height))
-  return {offset = {x0, y0}, extent = {u32(x1 - x0), u32(y1 - y0)}}
-}
+

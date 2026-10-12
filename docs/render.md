@@ -333,9 +333,12 @@ package; see the engine docs.
 
 The UI pass draws two things with one pipeline:
 
-- **Game UI.** `render.stage_ui(&r, list)` takes a `DrawList`
-  (from `render.draw_list` or anywhere else). The list holds the frame's
-  commands and, when it changed, the glyph atlas.
+- **2D overlay.** `render.stage_overlay(&r, list)` takes a `DrawList`:
+  the frame's quad, mesh and text commands in framebuffer pixels, each
+  with a z order and a clip rect, and, when it changed, the font atlas
+  (`font.atlas`). Text commands are `font.Glyph` runs, their uvs in atlas
+  texels. Render draws; laying a UI out is the `ui` module's job and
+  turning its nodes into commands the application's.
 - **Debug UI.** A microui context owned by render. `debug_ui(&r)`
   returns it, opening it on the first call of the frame. Build
   widgets before `frame`, which closes and draws it. Frames that never
