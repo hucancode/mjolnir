@@ -224,12 +224,13 @@ frame :: proc(
   dpi_scale: f32,
   show_stats := false,
 ) -> bool {
+  gctx := &self.gctx
+  // Wait before flushing: flush rewrites this frame slot's per-frame buffers,
+  // and the stats panel reads its draw count readback.
+  res := gpu.wait_frame(gctx) if self.internal.level_ready else .SUCCESS
   if show_stats do stats_panel(self)
   debug_ui_drawn := debug_ui_close(self)
   if !self.internal.level_ready do return true
-  gctx := &self.gctx
-  // Wait before flushing: flush rewrites this frame slot's per-frame buffers.
-  res := gpu.wait_frame(gctx)
   if res == .SUCCESS {
     tick_resource_pools(self)
     res = flush(self, gctx, self.frame_index)

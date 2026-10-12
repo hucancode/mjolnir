@@ -482,7 +482,7 @@ emitter_gpu :: proc(em: ^Emitter, emit_first: u32) -> EmitterData {
     size_end = em.size_end,
     weight = em.weight,
     weight_spread = em.weight_spread,
-    texture_index = em.texture_handle.index,
+    texture_index = texture_index(em.texture_handle),
     node_index = em.slot,
   }
 }

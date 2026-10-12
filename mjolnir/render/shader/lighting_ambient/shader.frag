@@ -38,7 +38,7 @@ struct Light {
     float angle_inner;
     float angle_outer;
     uint shadow_map;
-    float shadow_bias;
+    float shadow_texel;
     uint _pad0;
 };
 

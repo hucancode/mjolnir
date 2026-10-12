@@ -31,10 +31,9 @@ OutlineEffect :: struct {
 }
 
 FogEffect :: struct {
-  color:   [3]f32,
-  density: f32,
-  start:   f32,
-  end:     f32,
+  color: [3]f32,
+  start: f32,
+  end:   f32,
 }
 
 CrossHatchEffect :: struct {

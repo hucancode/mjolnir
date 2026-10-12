@@ -517,7 +517,6 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     multiDrawIndirect         = true, // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
     drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
     fillModeNonSolid          = true, // Required for VK_POLYGON_MODE_LINE wireframe rendering
-    wideLines                 = true, // Required for lineWidth > 1.0
     // depth pyramid mips indexed by loop counter
     shaderStorageImageArrayDynamicIndexing = true,
     // draw list buffers indexed by view

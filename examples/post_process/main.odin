@@ -29,7 +29,6 @@ bloom_threshold: mu.Real = 1.0
 bloom_intensity: mu.Real = 1.0
 tonemap_exposure: mu.Real = 1.0
 tonemap_gamma: mu.Real = 1.0
-fog_density: mu.Real = 0.02
 fog_start: mu.Real = 5.0
 fog_end: mu.Real = 40.0
 outline_thickness: mu.Real = 1.5
@@ -106,7 +105,7 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   clear(&app.renderer.post_process.effect_stack)
   if outline_on    do append(&app.renderer.post_process.effect_stack, render.OutlineEffect{thickness = f32(outline_thickness)})
-  if fog_on        do append(&app.renderer.post_process.effect_stack, render.FogEffect{color = {0.55, 0.6, 0.7}, density = f32(fog_density), start = f32(fog_start), end = f32(fog_end)})
+  if fog_on        do append(&app.renderer.post_process.effect_stack, render.FogEffect{color = {0.55, 0.6, 0.7}, start = f32(fog_start), end = f32(fog_end)})
   if dof_on        do append(&app.renderer.post_process.effect_stack, render.DoFEffect{focus_distance = f32(dof_focus), focus_range = f32(dof_range), blur_strength = f32(dof_blur), bokeh_intensity = 0.5})
   if bloom_on      do append(&app.renderer.post_process.effect_stack, render.BloomEffect{threshold = f32(bloom_threshold), intensity = f32(bloom_intensity), blur_radius = 32.0})
   if blur_on       do append(&app.renderer.post_process.effect_stack, render.BlurEffect{radius = f32(blur_radius), weight_falloff = 1.0})
@@ -143,7 +142,6 @@ debug_ui :: proc(app: ^App) {
     }
     mu.checkbox(ctx, "Fog", &fog_on)
     if fog_on {
-      mu.label(ctx, "Density"); mu.slider(ctx, &fog_density, 0.0, 0.2)
       mu.label(ctx, "Start");     mu.slider(ctx, &fog_start, 0.0, 50.0)
       mu.label(ctx, "End");         mu.slider(ctx, &fog_end, 1.0, 200.0)
     }

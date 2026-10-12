@@ -311,7 +311,6 @@ destroy_targets :: proc(
   for attachment_type in AttachmentType {
     for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
       handle := camera.attachments[attachment_type][frame]
-      if handle.index == 0 do continue
       free_texture(&self.texture_manager, gctx, handle)
     }
   }

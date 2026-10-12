@@ -22,7 +22,6 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint _pad1;
     uint _pad2;
     vec3 fog_color;
-    float fog_density;
     float fog_start;
     float fog_end;
 };
@@ -39,18 +38,11 @@ float compute_fog_factor(float distance) {
     if (distance <= fog_start) {
         return 0.0;
     }
-    // Linear fog
-    float factor = (distance - fog_start) / (fog_end - fog_start);
-    // Exponential fog (alternative)
-    // float factor = 1.0 - exp(-fog_density * distance);
-    // Exponential squared fog (alternative)
-    // float factor = 1.0 - exp(-fog_density * fog_density * distance * distance);
-    return clamp(factor, 0.0, 1.0);
+    return clamp((distance - fog_start) / (fog_end - fog_start), 0.0, 1.0);
 }
 
 void main() {
     vec4 color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
-    vec4 normal = texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv);
     float depth = texture(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv).r;
     float linear_depth = linearize_depth(depth);
     float fog_factor = compute_fog_factor(linear_depth);

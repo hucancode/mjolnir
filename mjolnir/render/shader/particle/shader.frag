@@ -5,6 +5,7 @@ const uint SAMPLER_NEAREST_CLAMP = 0u;
 const uint SAMPLER_LINEAR_CLAMP = 1u;
 const uint SAMPLER_NEAREST_REPEAT = 2u;
 const uint SAMPLER_LINEAR_REPEAT = 3u;
+const uint NO_TEXTURE = 0xFFFFFFFFu;
 
 // Camera structure
 struct Camera {
@@ -31,8 +32,8 @@ layout (location = 1) in flat uint inTextureIndex;
 layout (location = 0) out vec4 outFragColor;
 
 void main() {
-    vec4 texColor = texture(sampler2D(textures[nonuniformEXT(inTextureIndex)], samplers[SAMPLER_LINEAR_REPEAT]), gl_PointCoord);
-    vec4 finalColor = vec4(inColor.rgb, texColor.a * inColor.a);
+    float texAlpha = inTextureIndex == NO_TEXTURE ? 1.0 : texture(sampler2D(textures[nonuniformEXT(inTextureIndex)], samplers[SAMPLER_LINEAR_REPEAT]), gl_PointCoord).a;
+    vec4 finalColor = vec4(inColor.rgb, texAlpha * inColor.a);
     if (finalColor.a < 0.01) {
         discard;
     }
