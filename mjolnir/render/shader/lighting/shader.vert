@@ -37,7 +37,7 @@ struct Light {
     float angle_inner;
     float angle_outer;
     uint shadow_map; // view index of the first shadow face
-    float shadow_bias; // per unit of tan(angle of incidence)
+    float shadow_texel; // world size of a shadow texel; per unit of view depth for point and spot
     uint _pad0;
 };
 
@@ -65,8 +65,9 @@ layout(location = 0) flat out uint v_light;
 void main() {
     v_light = gl_InstanceIndex;
     if (LIGHT_TYPE == LIGHT_DIRECTIONAL || LIGHT_TYPE == LIGHT_AMBIENT) {
-        // the volume is a clip-space triangle covering the screen
-        gl_Position = vec4(a_position.xy, 0.0, 1.0);
+        // the volume is a clip-space triangle covering the screen on the far
+        // plane: directional lights depth-test it to skip the background
+        gl_Position = vec4(a_position.xy, 1.0, 1.0);
         return;
     }
     Light light = lights[gl_InstanceIndex];

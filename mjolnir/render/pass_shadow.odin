@@ -73,14 +73,13 @@ shadow_safe_normalize :: proc(v: [3]f32, fallback: [3]f32) -> [3]f32 {
   return linalg.normalize(v)
 }
 
+// View from `position` along the normalized `direction`.
 shadow_make_light_view :: proc(position, direction: [3]f32) -> matrix[4, 4]f32 {
-  forward := shadow_safe_normalize(direction, {0, -1, 0})
   up := [3]f32{0, 1, 0}
-  if math.abs(linalg.dot(forward, up)) > 0.95 {
+  if math.abs(linalg.dot(direction, up)) > 0.95 {
     up = {0, 0, 1}
   }
-  target := position + forward
-  return linalg.matrix4_look_at(position, target, up)
+  return linalg.matrix4_look_at(position, position + direction, up)
 }
 
 // Square perspective projection of a spot light's cone or a point light's
@@ -90,25 +89,27 @@ shadow_projection_perspective :: proc(fovy, radius: f32) -> matrix[4, 4]f32 {
   return geom.make_perspective_matrix(max(fovy, 0.001), 1.0, near, max(near + 0.1, radius))
 }
 
+// World size of a texel of shadow_projection_perspective(fovy, _) per unit of
+// view depth.
+shadow_texel_perspective :: proc(fovy: f32) -> f32 {
+  return 2 * math.tan(0.5 * max(fovy, 0.001)) / SHADOW_MAP_SIZE
+}
+
+// Half extent of a directional light's shadow box.
+shadow_radius_directional :: proc(shadow_radius: f32) -> f32 {
+  return max(shadow_radius, 0.5)
+}
+
+// Orthographic shadow of the box of half extent `radius` centered on
+// `position`, looking along the normalized `direction`.
 shadow_matrices_directional :: proc(
   position, direction: [3]f32,
   radius: f32,
 ) -> (
   view, projection: matrix[4, 4]f32,
 ) {
-  near :: 0.1
-  far := max(near + 0.1, radius * 2.0)
-  camera_pos := position - direction * radius
-  view = shadow_make_light_view(camera_pos, direction)
-  half_extent := max(radius, 0.5)
-  projection = geom.make_ortho_matrix(
-    -half_extent,
-    half_extent,
-    -half_extent,
-    half_extent,
-    near,
-    far,
-  )
+  view = shadow_make_light_view(position - direction * radius, direction)
+  projection = geom.make_ortho_matrix(-radius, radius, -radius, radius, 0, 2 * radius)
   return
 }
 

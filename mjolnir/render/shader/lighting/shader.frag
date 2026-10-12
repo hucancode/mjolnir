@@ -42,7 +42,7 @@ struct Light {
     float angle_inner;
     float angle_outer;
     uint shadow_map; // view index of the first shadow face
-    float shadow_bias; // per unit of tan(angle of incidence)
+    float shadow_texel; // world size of a shadow texel; per unit of view depth for point and spot
     uint _pad0;
 };
 
@@ -104,33 +104,44 @@ vec3 lightDirection(vec3 fragPos) {
     return normalize(light.position - fragPos);
 }
 
-// tan(acos(c)) for c in [0, 1].
-float tanFromCos(float c) {
-    return sqrt(max(1.0 - c * c, 0.0)) / max(c, 1e-4);
-}
-
 // Light reaching a fragment: 1 when lit, SHADOW_FLOOR when fully occluded.
 const float SHADOW_FLOOR = 0.1;
+// Shadow lookups move off the surface along its normal by this many shadow
+// texels, enough to clear the 2x2 compare filter.
+const float SHADOW_NORMAL_OFFSET = 1.5;
 
-// The shadow face seen from the light towards fragPos: the cube face on the
-// major axis of the light-to-fragment direction (+X, -X, +Y, -Y, +Z, -Z) for a
-// point light, the only face otherwise.
-uint shadowFace(vec3 fragPos) {
+// The shadow face seen from the light towards p: the cube face on the major
+// axis of the light-to-p direction (+X, -X, +Y, -Y, +Z, -Z) for a point light,
+// the only face otherwise.
+uint shadowFace(vec3 p) {
     if (LIGHT_TYPE != LIGHT_POINT) return 0u;
-    vec3 d = fragPos - light.position;
+    vec3 d = p - light.position;
     vec3 a = abs(d);
     if (a.x >= a.y && a.x >= a.z) return d.x >= 0.0 ? 0u : 1u;
     if (a.y >= a.z) return d.y >= 0.0 ? 2u : 3u;
     return d.z >= 0.0 ? 4u : 5u;
 }
 
-// Depth test of fragPos against its shadow face: the face's view projects it
-// into its atlas layer, rendered with an unflipped viewport (clip y = -1 is
-// texel row 0).
+// World size of a shadow texel at fragPos: constant for an orthographic map,
+// growing with view depth for a perspective one.
+float shadowTexel(vec3 fragPos) {
+    vec3 d = fragPos - light.position;
+    if (LIGHT_TYPE == LIGHT_POINT) {
+        vec3 a = abs(d);
+        return light.shadow_texel * max(a.x, max(a.y, a.z));
+    }
+    if (LIGHT_TYPE == LIGHT_SPOT) return light.shadow_texel * max(dot(d, light.direction), 0.0);
+    return light.shadow_texel;
+}
+
+// Depth test of fragPos, offset along its normal, against its shadow face:
+// the face's view projects it into its atlas layer, rendered with an
+// unflipped viewport (clip y = -1 is texel row 0).
 float calculateShadow(vec3 fragPos, vec3 n) {
     if (light.shadow_map == NO_SHADOW) return 1.0;
-    View view = views[light.shadow_map + shadowFace(fragPos)];
-    vec4 lightSpacePos = view.view_projection * vec4(fragPos, 1.0);
+    vec3 p = fragPos + n * (SHADOW_NORMAL_OFFSET * shadowTexel(fragPos));
+    View view = views[light.shadow_map + shadowFace(p)];
+    vec4 lightSpacePos = view.view_projection * vec4(p, 1.0);
     vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
     shadowCoord.xy = shadowCoord.xy * 0.5 + 0.5;
     if (shadowCoord.x < 0.0 || shadowCoord.x > 1.0 ||
@@ -138,10 +149,8 @@ float calculateShadow(vec3 fragPos, vec3 n) {
         return 1.0;
     }
     shadowCoord.z = clamp(shadowCoord.z, 0.0, 1.0);
-    float cosTheta = clamp(dot(n, lightDirection(fragPos)), 0.0, 1.0);
-    float bias = clamp(light.shadow_bias * tanFromCos(cosTheta), 0.001, 0.01);
     // the compare sampler filters the depth test over 2x2 texels
-    float lit = texture(sampler2DArrayShadow(shadow_maps, samplers[SAMPLER_SHADOW_COMPARE]), vec4(shadowCoord.xy, float(view.layer), shadowCoord.z - bias));
+    float lit = texture(sampler2DArrayShadow(shadow_maps, samplers[SAMPLER_SHADOW_COMPARE]), vec4(shadowCoord.xy, float(view.layer), shadowCoord.z));
     return mix(SHADOW_FLOOR, 1.0, lit);
 }
 

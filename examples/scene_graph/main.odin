@@ -43,9 +43,9 @@ main :: proc() {
 
   light := world.spawn(&app.scene, {8, 14, 8})
   render.attach(&app.renderer, light.index, render.directional_light_attachment(
-    color       = {1, 0.97, 0.92, 1},
-    radius      = 8.0,
-    cast_shadow = true,
+    color         = {1, 0.97, 0.92, 1},
+    shadow_radius = 8.0,
+    cast_shadow   = true,
   ))
 
   ground := world.spawn(&app.scene, {0, -2, 0})

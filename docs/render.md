@@ -266,7 +266,9 @@ instance per frame; its environment map comes from
 by type, so each type is one draw of its volume (sphere for point, cone
 for spot, fullscreen triangle for directional and ambient) with one
 instance per light, rasterized with reversed depth test so only
-fragments actually reached by a light get shaded.
+fragments actually reached by a light get shaded. The fullscreen
+triangle sits on the far plane, so directional lights skip the
+background; ambient shades it to draw the skybox.
 
 Cameras are recorded phase by phase: every camera's G-buffer scope, then
 every camera's lighting scope, then every camera's forward scope. One
@@ -290,11 +292,13 @@ Lighting has one shadow path for every light type: it picks the face
 (the major axis of the light-to-fragment direction for a point light,
 the only face otherwise), projects the fragment with that face's view
 and samples its layer through a depth-compare sampler, which filters the
-shadow test over 2×2 texels. The slope-scaled depth bias is per light
-data (`shadow_bias`).
+shadow test over 2×2 texels. Before projecting, the fragment moves along
+its normal by 1.5 shadow texels; the texel's world size is per light data
+(`shadow_texel`), scaled by view depth for point and spot lights.
 
-There are `MAX_SHADOW_MAPS` shadow maps. Every light has a bounding
-sphere (radius = range; unbounded for directional lights). Each frame
+There are `MAX_SHADOW_MAPS` shadow maps. Every light has a shadow
+bounds sphere (radius = range; around the shadow box for directional
+lights, a box of half extent `shadow_radius` centered on the light). Each frame
 the shadow casters whose sphere touches some camera's frustum are
 ranked by `intensity × r² / (d² − r²)`, an estimate of the screen area
 the sphere covers. The top `SHADOW_RANKED_CASTERS` get a map; the

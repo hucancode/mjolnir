@@ -104,7 +104,7 @@ setup :: proc(app: ^App) {
   world.scale(&app.scene, cube, 0.6)
 
   dir_light = world.spawn(&app.scene, {6, 10, 6})
-  render.attach(&app.renderer, dir_light.index, render.directional_light_attachment(color = {1, 1, 1, f32(dir_intensity)}, radius = 12.0, cast_shadow = true))
+  render.attach(&app.renderer, dir_light.index, render.directional_light_attachment(color = {1, 1, 1, f32(dir_intensity)}, shadow_radius = 12.0, cast_shadow = true))
 
   // Glowing marker so each light's position is visible.
   marker_material = render.create_material(&app.renderer, emissive_value = 4.0)

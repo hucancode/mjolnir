@@ -79,8 +79,8 @@ setup :: proc(app: ^App) {
 
   light := world.spawn(&app.scene, {3, 6, 3})
   render.attach(&app.renderer, light.index, render.directional_light_attachment(
-    color       = {1, 0.97, 0.9, 1},
-    radius      = 10,
-    cast_shadow = true,
+    color         = {1, 0.97, 0.9, 1},
+    shadow_radius = 10,
+    cast_shadow   = true,
   ))
 }

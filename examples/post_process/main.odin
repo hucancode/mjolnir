@@ -89,7 +89,7 @@ setup :: proc(app: ^App) {
   for i in 0 ..< 5 do spawn_mesh(app, cube_mesh, white_mat, {f32(i) * 4.0 - 8.0, 0.5, -7.0})
 
   sun := world.spawn(&app.scene, {-3, 8, 6})
-  render.attach(&app.renderer, sun.index, render.directional_light_attachment(color = {1.0, 0.95, 0.9, 1}, radius = 5.0, cast_shadow = true))
+  render.attach(&app.renderer, sun.index, render.directional_light_attachment(color = {1.0, 0.95, 0.9, 1}, shadow_radius = 5.0, cast_shadow = true))
   lamp := world.spawn(&app.scene, {0, 3, 0})
   render.attach(&app.renderer, lamp.index, render.point_light_attachment(color = {1.0, 0.5, 0.2, 1}, radius = 8.0, cast_shadow = false))
   log.info("Post-process stack panel — toggle effects via debug UI")

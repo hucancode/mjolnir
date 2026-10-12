@@ -72,7 +72,7 @@ setup :: proc(app: ^App) {
   }
 
   light := world.spawn(&app.scene, {2, 6, 4})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 1, 1, 1}, radius = 8))
+  render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 1, 1, 1}, shadow_radius = 8))
 }
 
 should_close :: proc(app: ^App) -> bool {

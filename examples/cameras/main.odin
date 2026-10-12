@@ -48,7 +48,7 @@ main :: proc() {
 
   render.main_camera_look_at(&app.renderer, {0, 6, 12}, {0, 0, 0})
   sun := world.spawn(&app.scene, {6, 12, 6})
-  render.attach(&app.renderer, sun.index, render.directional_light_attachment(color = {1, 0.97, 0.92, 1}, radius = 6.0, cast_shadow = true))
+  render.attach(&app.renderer, sun.index, render.directional_light_attachment(color = {1, 0.97, 0.92, 1}, shadow_radius = 6.0, cast_shadow = true))
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)

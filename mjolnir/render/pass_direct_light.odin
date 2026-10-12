@@ -31,8 +31,8 @@ LightGPU :: struct {
   angle_outer: f32,
   // view table index of the shadow map's first face, NO_SHADOW without one
   shadow_map:  u32,
-  // depth bias per unit of tan(angle of incidence), in shadow map depth
-  shadow_bias: f32,
+  // world size of a shadow texel; per unit of view depth for point and spot
+  shadow_texel: f32,
   _:           u32,
 }
 
@@ -59,7 +59,8 @@ DirectLightRenderer :: struct {
 // The volume each light type rasterizes, one instance per light, and the
 // fragment shader shading it. Point and spot draw their volume's back faces
 // where the scene lies in front of them; directional and ambient lights cover
-// the screen with a clip-space triangle.
+// the screen with a clip-space triangle on the far plane, directional only
+// where the scene lies in front of it.
 @(private = "file")
 DRAW_STATE := [LightType]struct {
   depth_compare: vk.CompareOp,
@@ -69,7 +70,7 @@ DRAW_STATE := [LightType]struct {
 } {
   .POINT       = {.GREATER_OR_EQUAL, {.FRONT}, proc() -> mesh.Geometry {return mesh.make_sphere()}, LIGHTING_SHADER_FRAG},
   .SPOT        = {.GREATER_OR_EQUAL, {.BACK}, proc() -> mesh.Geometry {return mesh.make_cone()}, LIGHTING_SHADER_FRAG},
-  .DIRECTIONAL = {.ALWAYS, {.BACK}, fullscreen_triangle, LIGHTING_SHADER_FRAG},
+  .DIRECTIONAL = {.GREATER, {.BACK}, fullscreen_triangle, LIGHTING_SHADER_FRAG},
   .AMBIENT     = {.ALWAYS, {.BACK}, fullscreen_triangle, AMBIENT_SHADER_FRAG},
 }
 

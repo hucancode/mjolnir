@@ -469,7 +469,7 @@ setup :: proc(app: ^App) {
       }
     }
     when ENABLE_DIRECTIONAL_LIGHT {
-      dir_light_handle, _ := spawn(app, attachment = render.directional_light_attachment(color = {0.2, 0.5, 0.9, 3.0}, radius = 20, cast_shadow = true))
+      dir_light_handle, _ := spawn(app, attachment = render.directional_light_attachment(color = {0.2, 0.5, 0.9, 3.0}, shadow_radius = 20, cast_shadow = true))
       world.rotate(&app.scene, dir_light_handle, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
     }
   }

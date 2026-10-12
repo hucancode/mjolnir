@@ -48,17 +48,14 @@ SHADOW_FACES := [LightType][6][2][3]f32 {
   .AMBIENT     = {},
 }
 
-// Bounding radius of a light that reaches everywhere (directional).
-@(private)
-UNBOUNDED_LIGHT_RADIUS :: 1e18
-
 // One light as the shadow depth and lighting passes consume it this frame.
 @(private)
 FrameLight :: struct {
   type:              LightType,
   // light.shadow_map: first shadow view of its map, NO_SHADOW without one
   light:             LightGPU,
-  bounds:            [4]f32, // bounding sphere: center xyz, radius w
+  // sphere the shadow map covers: center xyz, radius w
+  shadow_bounds:     [4]f32,
   // face f's view-projection: projection * SHADOW_FACES[type][f] * view
   shadow_view:       matrix[4, 4]f32,
   shadow_projection: matrix[4, 4]f32,
@@ -78,9 +75,9 @@ Caster :: struct {
   last_ranked: u64, // ShadowMap.last_ranked once it holds a map
 }
 
-// How much of a camera's view a light's bounding sphere covers, weighted by
+// How much of a camera's view a light's shadow bounds cover, weighted by
 // intensity: r²/(d²−r²) grows like the sphere's projected area, and a camera
-// inside the sphere (any unbounded light) scores highest.
+// inside the sphere scores highest.
 @(private)
 shadow_score :: proc(bounds: [4]f32, intensity: f32, camera_position: [3]f32) -> f32 {
   offset := bounds.xyz - camera_position
@@ -143,7 +140,6 @@ collect_lights :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
     FrameLight {
       type = .AMBIENT,
       light = {color = {1, 1, 1, self.ambient.ibl_intensity}, shadow_map = NO_SHADOW},
-      bounds = {0, 0, 0, UNBOUNDED_LIGHT_RADIUS},
     },
   )
   casters: [MAX_LIGHTS]Caster
@@ -160,8 +156,8 @@ collect_lights :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
     // -1: no camera sees the light
     score: f32 = -1
     for v in views[:view_count] {
-      if !geom.frustum_test_sphere(v.frustum, fl.bounds.xyz, fl.bounds.w) do continue
-      score = max(score, shadow_score(fl.bounds, fl.light.color.a, v.position))
+      if !geom.frustum_test_sphere(v.frustum, fl.shadow_bounds.xyz, fl.shadow_bounds.w) do continue
+      score = max(score, shadow_score(fl.shadow_bounds, fl.light.color.a, v.position))
     }
     if score < 0 do continue
     casters[caster_count] = {light = len(self.internal.frame_lights) - 1, owner = u32(slot) + 1, score = score}
@@ -260,12 +256,12 @@ frame_light :: proc(
     fl.light = {
       color       = att.color,
       position    = position,
-      radius      = att.radius,
-      shadow_bias = 0.0005,
+      radius       = att.radius,
+      shadow_texel = shadow_texel_perspective(f32(math.PI * 0.5)),
     }
     fl.shadow_view = linalg.matrix4_translate(-position)
     fl.shadow_projection = shadow_projection_perspective(f32(math.PI * 0.5), att.radius)
-    fl.bounds = {position.x, position.y, position.z, att.radius}
+    fl.shadow_bounds = {position.x, position.y, position.z, att.radius}
     cast_shadow = att.cast_shadow
   case SpotLightAttachment:
     fl.type = .SPOT
@@ -275,19 +271,21 @@ frame_light :: proc(
       direction   = direction,
       radius      = att.radius,
       angle_inner = att.angle_inner,
-      angle_outer = att.angle_outer,
-      shadow_bias = 0.0005,
+      angle_outer  = att.angle_outer,
+      shadow_texel = shadow_texel_perspective(att.angle_outer * 2),
     }
     fl.shadow_view = shadow_make_light_view(position, direction)
     fl.shadow_projection = shadow_projection_perspective(att.angle_outer * 2, att.radius)
     // the point-light sphere around the cone: loose, but shared
-    fl.bounds = {position.x, position.y, position.z, att.radius}
+    fl.shadow_bounds = {position.x, position.y, position.z, att.radius}
     cast_shadow = att.cast_shadow
   case DirectionalLightAttachment:
     fl.type = .DIRECTIONAL
-    fl.light = {color = att.color, direction = direction, shadow_bias = 0.005}
-    fl.shadow_view, fl.shadow_projection = shadow_matrices_directional(position, direction, att.radius)
-    fl.bounds = {position.x, position.y, position.z, UNBOUNDED_LIGHT_RADIUS}
+    r := shadow_radius_directional(att.shadow_radius)
+    fl.light = {color = att.color, direction = direction, shadow_texel = 2 * r / SHADOW_MAP_SIZE}
+    fl.shadow_view, fl.shadow_projection = shadow_matrices_directional(position, direction, r)
+    // the sphere around the shadow box
+    fl.shadow_bounds = {position.x, position.y, position.z, r * math.SQRT_THREE}
     cast_shadow = att.cast_shadow
   case:
     return

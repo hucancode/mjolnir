@@ -65,7 +65,7 @@ spawn_mesh :: proc(app: ^App, mesh_handle: render.MeshHandle, material: render.M
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 6, 14}, {0, 1, 0})
   light := world.spawn(&app.scene, {6, 12, 6})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 0.97, 0.93, 5.0}, radius = 20.0))
+  render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 0.97, 0.93, 5.0}, shadow_radius = 20.0))
   ground := world.spawn(&app.scene, {0, -1, 0})
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 12.0)

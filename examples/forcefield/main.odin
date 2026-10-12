@@ -108,7 +108,7 @@ setup :: proc(app: ^App) {
   attract = spawn_field(app, 3.5, 12.0, -5.0, 4.0, {0.2, 1.0, 0.4, 1}, 0.7, -1.0)
 
   light := world.spawn(&app.scene, {3, 6, 3})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 1, 1, 1}, radius = 10))
+  render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 1, 1, 1}, shadow_radius = 10))
 }
 
 apply_ff :: proc(app: ^App, s: ^FFState) {

@@ -24,8 +24,9 @@ PointLightAttachment :: struct {
 
 DirectionalLightAttachment :: struct {
   color:       [4]f32, // RGB + intensity
-  radius:      f32, // shadow projection radius
-  cast_shadow: bool,
+  // half extent of the shadow box centered on the light
+  shadow_radius: f32,
+  cast_shadow:   bool,
 }
 
 SpotLightAttachment :: struct {
@@ -349,10 +350,10 @@ point_light_attachment :: proc(
 
 directional_light_attachment :: proc(
   color: [4]f32 = {1, 1, 1, 1},
-  radius: f32 = 10.0,
+  shadow_radius: f32 = 10.0,
   cast_shadow: bool = false,
 ) -> DirectionalLightAttachment {
-  return {color = color, radius = radius, cast_shadow = cast_shadow}
+  return {color = color, shadow_radius = shadow_radius, cast_shadow = cast_shadow}
 }
 
 spot_light_attachment :: proc(

@@ -27,13 +27,13 @@ test_shadow_score_prefers_close_large_bright :: proc(t: ^testing.T) {
 	large := shadow_score({0, 0, 10, 4}, 1, cam)
 	bright := shadow_score({0, 0, 10, 2}, 2, cam)
 	inside := shadow_score({0, 0, 1, 2}, 1, cam)
-	unbounded := shadow_score({0, 0, 100, UNBOUNDED_LIGHT_RADIUS}, 1, cam)
+	huge := shadow_score({0, 0, 100, 1000}, 1, cam)
 	testing.expect(t, near > far, "closer light scores higher")
 	testing.expect(t, large > near, "larger light scores higher")
 	testing.expect(t, bright > near, "brighter light scores higher")
 	testing.expect(t, inside > large, "camera inside the sphere scores highest")
-	testing.expect(t, unbounded >= inside, "an unbounded light scores highest")
-	testing.expect(t, shadow_score({0, 0, 100, UNBOUNDED_LIGHT_RADIUS}, 0, cam) == 0, "zero intensity is finite")
+	testing.expect(t, huge > inside, "a huge sphere around the camera scores higher")
+	testing.expect(t, shadow_score({0, 0, 100, 1000}, 0, cam) == 0, "zero intensity scores zero")
 }
 
 @(test)
