@@ -26,7 +26,7 @@ layout(push_constant) uniform PostProcessPushConstant {
     float lum_thresholds[4];
 };
 
-const float HATCH_BRIGHTNESS = 0.35;
+const float HATCH_BRIGHTNESS = 0.65;
 const float STROKE_WIDTH = 1.5;
 const float STROKE_SPACING = 10.0;
 
