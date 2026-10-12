@@ -19,7 +19,7 @@ App :: struct {
   input:    input.State,
 }
 
-LIGHT_COUNT :: 10
+LIGHT_COUNT :: 4
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 ENABLE_DIRECTIONAL_LIGHT :: true
@@ -178,6 +178,7 @@ spawn :: proc(
 }
 
 setup :: proc(app: ^App) {
+  app.renderer.ambient.ibl_intensity = 0.3
   plain_material_handle := app.renderer.builtin_materials[render.Color.WHITE]
   cube_mesh_handle := app.renderer.builtin_meshes[render.Primitive.CUBE]
   sphere_mesh_handle := app.renderer.builtin_meshes[render.Primitive.SPHERE]
@@ -419,10 +420,10 @@ setup :: proc(app: ^App) {
       radius: f32 = 8.0
       for i in 0 ..< LIGHT_COUNT {
         color := [4]f32 {
-          math.sin(f32(i)),
-          math.cos(f32(i)),
-          math.sin(f32(i)),
-          0.2,
+          0.5 + 0.5 * math.sin(f32(i)),
+          0.5 + 0.5 * math.cos(f32(i)),
+          0.5 + 0.5 * math.sin(f32(i)),
+          1,
         }
         // Calculate fixed local position in a circle
         angle := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
