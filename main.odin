@@ -614,12 +614,12 @@ setup :: proc(app: ^App) {
   }
   // append(&app.renderer.post_process.effect_stack, render.FogEffect{color = {0.4, 0.0, 0.8}, density = 0.02, start = 5.0, end = 20.0})
   // append(&app.renderer.post_process.effect_stack, render.BloomEffect{threshold = 0.2, intensity = 1.0, blur_radius = 4.0})
-  // append(&app.renderer.post_process.effect_stack, render.CrossHatchEffect{hatch_offset_y = 5.0, lum_threshold_01 = 0.6, lum_threshold_02 = 0.3, lum_threshold_03 = 0.15, lum_threshold_04 = 0.07})
+  append(&app.renderer.post_process.effect_stack, render.CrossHatchEffect{hatch_offset_y = 1.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
   // append(&app.renderer.post_process.effect_stack, render.BlurEffect{radius = 18.0, weight_falloff = 1.0})
   // append(&app.renderer.post_process.effect_stack, render.ToneMapEffect{exposure = 1.5, gamma = 1.3})
   // append(&app.renderer.post_process.effect_stack, render.DoFEffect{focus_distance = 3.0, focus_range = 2.0, blur_strength = 20.0, bokeh_intensity = 0.5})
   // append(&app.renderer.post_process.effect_stack, render.GrayscaleEffect{strength = 0.9})
-  // append(&app.renderer.post_process.effect_stack, render.OutlineEffect{thickness = 2.0, color = {1.0, 0.0, 0.0}})
+  append(&app.renderer.post_process.effect_stack, render.OutlineEffect{thickness = 0.8, color = {0.0, 0.0, 0.01}})
   when true {
     portal_camera_handle = render.create_camera(
       &app.renderer,
