@@ -116,8 +116,8 @@ setup :: proc(app: ^App) {
   ground_plane = world.spawn(&app.scene)
   render.attach(&app.renderer, ground_plane.index, render.primitive(&app.renderer, .CUBE, .GRAY))
   world.scale(&app.scene, ground_plane, [3]f32{20, 0.2, 20})
-  light := world.spawn(&app.scene, {-15, 15, 20})
-  render.attach(&app.renderer, light.index, render.point_light_attachment({0.6, 0.7, 1.0, 1.5}, 40.0, false))
+  light := world.spawn(&app.scene, {0, 10, 0})
+  render.attach(&app.renderer, light.index, render.point_light_attachment(radius=15))
 }
 
 apply_group :: proc(app: ^App, group: []int, lift_height, lift_duration, lift_frequency, time_offset: f32) {
@@ -136,7 +136,7 @@ update :: proc(app: ^App, dt: f32) {
   if body_anim_enabled {
     animation_time += dt
     body_x := f32(body_amplitude) * math.sin(animation_time * f32(body_speed) * 2 * math.PI)
-    body_current_pos = {body_x, 2, 0}
+    body_current_pos = {body_x, 0.2, 0}
     body_pos_x = mu.Real(body_x)
     body_pos_z = 0
   } else {
