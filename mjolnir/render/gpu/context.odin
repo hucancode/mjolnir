@@ -62,6 +62,7 @@ GPUContext :: struct {
   graphics_timeline:    vk.Semaphore,
   compute_timeline:     vk.Semaphore,
   frame_serial:         u64, // frames submitted so far
+  depth_clamp: b32,
 }
 
 // Compute work is recorded and submitted separately only when the device has
@@ -439,10 +440,12 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     shaderDemoteToHelperInvocation = true,
     pNext                          = &unified_layouts_features,
   }
+  // self.depth_clamp = features.depthClamp
   basic_features := vk.PhysicalDeviceFeatures {
     multiDrawIndirect         = true, // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
     drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
     fillModeNonSolid          = true, // Required for VK_POLYGON_MODE_LINE wireframe rendering
+    depthClamp                = self.depth_clamp,
     // depth pyramid mips indexed by loop counter
     shaderStorageImageArrayDynamicIndexing = true,
     // draw list buffers indexed by view

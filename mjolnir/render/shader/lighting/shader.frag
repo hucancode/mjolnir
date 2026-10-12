@@ -90,6 +90,36 @@ vec3 worldPosition(View camera, vec2 uv, float depth) {
     return p.xyz / p.w;
 }
 
+float sceneDepth(View camera, ivec2 pixel) {
+    return texelFetch(sampler2D(textures[camera.attachments[ATTACHMENT_DEPTH]], samplers[SAMPLER_NEAREST_CLAMP]), pixel, 0).r;
+}
+
+// Difference of world positions across `pixel` along `axis`, taken towards
+// the neighbor nearer in depth so a silhouette doesn't bend it.
+vec3 surfaceStep(View camera, ivec2 pixel, ivec2 axis, vec3 fragPos, float depth) {
+    ivec2 hi = min(pixel + axis, ivec2(camera.extent) - 1);
+    ivec2 lo = max(pixel - axis, ivec2(0));
+    float hiDepth = sceneDepth(camera, hi);
+    float loDepth = sceneDepth(camera, lo);
+    if (lo == pixel || (hi != pixel && abs(hiDepth - depth) <= abs(loDepth - depth))) {
+        return worldPosition(camera, (vec2(hi) + 0.5) / camera.extent, hiDepth) - fragPos;
+    }
+    return fragPos - worldPosition(camera, (vec2(lo) + 0.5) / camera.extent, loDepth);
+}
+
+// Normal of the rasterized surface at `pixel`, rebuilt from the depth buffer
+// and facing the camera: unlike the G-buffer normal, neither normal maps nor
+// smooth shading tilt it off the surface the shadow map recorded. `fallback`
+// where the surface is degenerate.
+vec3 geometricNormal(View camera, ivec2 pixel, vec3 fragPos, float depth, vec3 fallback) {
+    vec3 c = cross(surfaceStep(camera, pixel, ivec2(1, 0), fragPos, depth),
+                   surfaceStep(camera, pixel, ivec2(0, 1), fragPos, depth));
+    float len = length(c);
+    if (len < 1e-12) return fallback;
+    vec3 n = c / len;
+    return dot(n, camera.position.xyz - fragPos) < 0.0 ? -n : n;
+}
+
 // The light this fragment shades, read once in main.
 Light light;
 
@@ -101,14 +131,33 @@ vec3 lightDirection(vec3 fragPos) {
 
 // Light reaching a fragment: 1 when lit, SHADOW_FLOOR when fully occluded.
 const float SHADOW_FLOOR = 0.1;
-// Shadow lookups move off the surface along its normal by this many shadow
-// texels, enough to clear the 2x2 compare filter.
-const float SHADOW_NORMAL_OFFSET = 1.5;
+// Shadow texels from a lookup to the farthest texel its filter reads: a 3x3
+// grid of 2x2 compare taps.
+const float SHADOW_FILTER_RADIUS = 2.0;
+// Cascades of a directional light's map, SHADOW_CASCADES in scene_lights.odin.
+const uint SHADOW_CASCADES = 4u;
+
+// Texels on a side of a shadow map.
+float shadowMapSize() {
+    return float(textureSize(sampler2DArrayShadow(shadow_maps, samplers[SAMPLER_SHADOW_COMPARE]), 0).x);
+}
 
 // The shadow face seen from the light towards p: the cube face on the major
 // axis of the light-to-p direction (+X, -X, +Y, -Y, +Z, -Z) for a point light,
-// the only face otherwise.
+// the finest cascade whose box holds p, with room for the filter, for a directional
+// light (NO_SHADOW beyond the last), the only face otherwise.
 uint shadowFace(vec3 p) {
+    if (LIGHT_TYPE == LIGHT_DIRECTIONAL) {
+        // the normal offset moves p up to SHADOW_FILTER_RADIUS + 0.5 texels
+        float edge = 1.0 - 2.0 * (2.0 * SHADOW_FILTER_RADIUS + 0.5) / shadowMapSize();
+        for (uint c = 0u; c < SHADOW_CASCADES; c++) {
+            vec4 s = views[light.shadow_map + c].view_projection * vec4(p, 1.0);
+            // a cascade's box is no deeper than wide: with the light along
+            // the view, far points project into the near cascades too
+            if (abs(s.x) < edge && abs(s.y) < edge && s.z > 0.0 && s.z < 1.0) return c;
+        }
+        return NO_SHADOW;
+    }
     if (LIGHT_TYPE != LIGHT_POINT) return 0u;
     vec3 d = p - light.position;
     vec3 a = abs(d);
@@ -117,25 +166,43 @@ uint shadowFace(vec3 p) {
     return d.z >= 0.0 ? 4u : 5u;
 }
 
-// World size of a shadow texel at fragPos: constant for an orthographic map,
-// growing with view depth for a perspective one.
-float shadowTexel(vec3 fragPos) {
+// World size of a shadow texel of `view` at fragPos: constant for an
+// orthographic map, read from its projection, growing with view depth for a
+// perspective one.
+float shadowTexel(vec3 fragPos, View view) {
     vec3 d = fragPos - light.position;
     if (LIGHT_TYPE == LIGHT_POINT) {
         vec3 a = abs(d);
         return light.shadow_texel * max(a.x, max(a.y, a.z));
     }
     if (LIGHT_TYPE == LIGHT_SPOT) return light.shadow_texel * max(dot(d, light.direction), 0.0);
-    return light.shadow_texel;
+    return 2.0 / (view.projection[0][0] * shadowMapSize());
 }
 
-// Depth test of fragPos, offset along its normal, against its shadow face:
-// the face's view projects it into its atlas layer, rendered with an
-// unflipped viewport (clip y = -1 is texel row 0).
-float calculateShadow(vec3 fragPos, vec3 n) {
+// Depth test of fragPos against its shadow face, filtered over a 3x3 grid of
+// 2x2 compare taps. The lookup moves off the surface along its geometric
+// normal n, further the more the surface turns from the light direction L,
+// so the filter's texels all lie in front of it. The face's view projects it
+// into its atlas layer, rendered with an unflipped viewport (clip y = -1 is
+// texel row 0).
+float calculateShadow(vec3 fragPos, vec3 n, vec3 L) {
     if (light.shadow_map == NO_SHADOW) return 1.0;
-    vec3 p = fragPos + n * (SHADOW_NORMAL_OFFSET * shadowTexel(fragPos));
-    View view = views[light.shadow_map + shadowFace(p)];
+    float cosTheta = clamp(dot(n, L), 0.0, 1.0);
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    float offset = 0.5 + SHADOW_FILTER_RADIUS * sinTheta;
+    vec3 p = fragPos;
+    uint face;
+    if (LIGHT_TYPE == LIGHT_DIRECTIONAL) {
+        // the cascade sets the texel size, so pick it before the offset
+        face = shadowFace(p);
+        if (face == NO_SHADOW) return 1.0;
+        p += n * (offset * shadowTexel(p, views[light.shadow_map + face]));
+    } else {
+        // the texel size doesn't depend on the face; the offset may cross one
+        p += n * (offset * shadowTexel(p, views[light.shadow_map]));
+        face = shadowFace(p);
+    }
+    View view = views[light.shadow_map + face];
     vec4 lightSpacePos = view.view_projection * vec4(p, 1.0);
     vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
     shadowCoord.xy = shadowCoord.xy * 0.5 + 0.5;
@@ -144,9 +211,15 @@ float calculateShadow(vec3 fragPos, vec3 n) {
         return 1.0;
     }
     shadowCoord.z = clamp(shadowCoord.z, 0.0, 1.0);
-    // the compare sampler filters the depth test over 2x2 texels
-    float lit = texture(sampler2DArrayShadow(shadow_maps, samplers[SAMPLER_SHADOW_COMPARE]), vec4(shadowCoord.xy, float(view.layer), shadowCoord.z));
-    return mix(SHADOW_FLOOR, 1.0, lit);
+    vec2 texel = vec2(1.0 / shadowMapSize());
+    float lit = 0.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 uv = shadowCoord.xy + vec2(x, y) * texel;
+            lit += texture(sampler2DArrayShadow(shadow_maps, samplers[SAMPLER_SHADOW_COMPARE]), vec4(uv, float(view.layer), shadowCoord.z));
+        }
+    }
+    return mix(SHADOW_FLOOR, 1.0, lit / 9.0);
 }
 
 float attenuation(vec3 fragPos) {
@@ -196,17 +269,26 @@ void main() {
     View camera = views[camera_index];
     vec2 uv = gl_FragCoord.xy / camera.extent;
 
-    float depth = texelFetch(sampler2D(textures[camera.attachments[ATTACHMENT_DEPTH]], samplers[SAMPLER_NEAREST_CLAMP]), ivec2(gl_FragCoord.xy), 0).r;
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    float depth = sceneDepth(camera, pixel);
     vec3 fragPos = worldPosition(camera, uv, depth);
-    vec3 normal = normalize(texture(sampler2D(textures[camera.attachments[ATTACHMENT_NORMAL]], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz * 2.0 - 1.0);
+    // unfiltered: a blend across a silhouette is no surface's normal
+    vec3 normal = normalize(texelFetch(sampler2D(textures[camera.attachments[ATTACHMENT_NORMAL]], samplers[SAMPLER_NEAREST_CLAMP]), pixel, 0).xyz * 2.0 - 1.0);
     vec3 albedo = texture(sampler2D(textures[camera.attachments[ATTACHMENT_ALBEDO]], samplers[SAMPLER_LINEAR_CLAMP]), uv).rgb;
     vec2 mr = texture(sampler2D(textures[camera.attachments[ATTACHMENT_METALLIC_ROUGHNESS]], samplers[SAMPLER_LINEAR_CLAMP]), uv).rg;
 
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.08, 1.0);
 
+    vec3 L = lightDirection(fragPos);
+    // facing away, the BRDF is zero: skip the shadow lookup
+    if (dot(normal, L) <= 0.0) {
+        outColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
     vec3 V = normalize(camera.position.xyz - fragPos);
-    float shadowFactor = calculateShadow(fragPos, normal);
+    vec3 surfaceNormal = geometricNormal(camera, pixel, fragPos, depth, normal);
+    float shadowFactor = calculateShadow(fragPos, surfaceNormal, L);
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, fragPos);
 
     outColor = vec4(direct * shadowFactor, 1.0);

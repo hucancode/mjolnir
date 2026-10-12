@@ -58,6 +58,10 @@ GraphicsPipelineDesc :: struct {
   topology:          vk.PrimitiveTopology,
   polygon_mode:      vk.PolygonMode,
   cull_mode:         vk.CullModeFlags,
+  // clamp depth instead of clipping at the near and far planes
+  depth_clamp:       b32,
+  // constant and slope-scaled depth bias factors; zero disables the bias
+  depth_bias:        [2]f32,
   depth:             vk.PipelineDepthStencilStateCreateInfo,
   blend:             []vk.PipelineColorBlendAttachmentState,
   color_formats:     []vk.Format,
@@ -109,9 +113,13 @@ create_graphics_pipeline :: proc(
   raster := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = desc.polygon_mode,
-    cullMode    = desc.cull_mode,
-    frontFace   = .COUNTER_CLOCKWISE,
-    lineWidth   = 1,
+    cullMode                = desc.cull_mode,
+    frontFace               = .COUNTER_CLOCKWISE,
+    lineWidth               = 1,
+    depthClampEnable        = desc.depth_clamp,
+    depthBiasEnable         = b32(desc.depth_bias != {}),
+    depthBiasConstantFactor = desc.depth_bias[0],
+    depthBiasSlopeFactor    = desc.depth_bias[1],
   }
   multisample := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,

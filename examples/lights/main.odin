@@ -44,7 +44,7 @@ elapsed: f32
 
 dir_light: world.NodeHandle
 dir_enabled: bool = true
-dir_intensity: mu.Real = 0.5
+dir_intensity: mu.Real = 5.0
 
 point_enabled: bool = true
 point_intensity: mu.Real = 2.0
@@ -102,6 +102,7 @@ setup :: proc(app: ^App) {
   world.scale(&app.scene, cube, 0.6)
 
   dir_light = world.spawn(&app.scene, {6, 10, 6})
+  world.rotate(&app.scene, dir_light, linalg.quaternion_between_two_vector3_f32({0, 0, 1}, linalg.normalize([3]f32{-6, -10, -6})))
   render.attach(&app.renderer, dir_light.index, render.directional_light_attachment(color = {1, 1, 1, f32(dir_intensity)}, shadow_radius = 12.0, cast_shadow = true))
 
   // Glowing marker so each light's position is visible.

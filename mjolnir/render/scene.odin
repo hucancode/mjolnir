@@ -29,20 +29,21 @@ LightType :: enum u16 {
 // Attached to a slot it shines from the slot's transform along its forward
 // axis: render fills position, direction, shadow_map and shadow_texel each
 // frame. Point lights ignore direction and angles; directional lights shade
-// with neither position, radius nor angles, which place and size their
-// shadow map. AMBIENT is the environment light render adds itself.
+// with neither position, radius nor angles, and their shadow map covers
+// radius in front of the main camera. AMBIENT is the environment light render
+// adds itself.
 Light :: struct {
   color:        [4]f32, // RGB + intensity
   position:     [3]f32,
-  // range of a point or spot light; half extent of a directional light's
-  // shadow box centered on the light
+  // range of a point or spot light; shadow distance of a directional light
+  // from the main camera
   radius:       f32,
   direction:    [3]f32, // normalized
   angle_inner:  f32, // spot cone angles
   angle_outer:  f32,
   // view table index of the shadow map's first face, NO_SHADOW without one
   shadow_map:   u32,
-  // world size of a shadow texel; per unit of view depth for point and spot
+  // world size of a shadow texel per unit of view depth, for point and spot
   shadow_texel: f32,
   // the shaders' last u32, which they don't read
   type:         LightType,

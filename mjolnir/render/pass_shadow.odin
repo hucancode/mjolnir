@@ -6,6 +6,7 @@ import vk "vendor:vulkan"
 
 SHADOW_DEPTH_VERT :: #load("shader/shadow/vert.spv")
 SHADOW_MAP_FORMAT :: vk.Format.D32_SFLOAT
+SHADOW_SLOPE_BIAS :: 1.5
 
 // Node flags of a shadow caster; its material type also needs
 // MATERIAL_PIPELINES[type].shadow.
@@ -15,7 +16,7 @@ SHADOW_CASTER_FLAGS :: NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
 // (views from SHADOW_VIEW_BASE) and appends the visible casters to one draw
 // list, each draw tagged with its view; one layered draw then renders every
 // view into its atlas layer. A frame's shadow atlas is a 2D depth array with
-// one layer per shadow view; a map takes len(SHADOW_FACES[type]) layers.
+// one layer per shadow view; a map takes SHADOW_FACE_COUNT[type] layers.
 
 // Draw tags: first_instance = node | view << 16.
 #assert(MAX_NODES_IN_SCENE <= 1 << 16)
@@ -55,6 +56,8 @@ shadow_init :: proc(r: ^Manager) -> vk.Result {
       vertex_attributes = VERTEX_ATTRIBUTE_DESCRIPTIONS[:1],
       topology = .TRIANGLE_LIST,
       cull_mode = {.BACK},
+      depth_clamp = r.gctx.depth_clamp,
+      depth_bias = {0, SHADOW_SLOPE_BIAS},
       depth = gpu.READ_WRITE_DEPTH_STATE,
       depth_format = SHADOW_MAP_FORMAT,
       layout = r.scene.layout,

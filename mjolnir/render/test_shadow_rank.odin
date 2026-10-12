@@ -106,9 +106,10 @@ test_shadow_layers_packed_by_type :: proc(t: ^testing.T) {
 	testing.expect_value(t, dst[3].type, LightType.DIRECTIONAL)
 	// stable: the unshadowed point light stays ahead of the shadowed one
 	testing.expect_value(t, dst[0].shadow_map, NO_SHADOW)
-	// one shadow view per face: the point light's six, then one each
+	// one shadow view per face: the point light's six, the spot light's one,
+	// then the directional light's cascades
 	testing.expect_value(t, dst[1].shadow_map, SHADOW_VIEW_BASE + 0)
 	testing.expect_value(t, dst[2].shadow_map, SHADOW_VIEW_BASE + 6)
 	testing.expect_value(t, dst[3].shadow_map, SHADOW_VIEW_BASE + 7)
-	testing.expect_value(t, layers, 8)
+	testing.expect_value(t, layers, 7 + SHADOW_CASCADES)
 }
