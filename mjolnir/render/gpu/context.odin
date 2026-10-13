@@ -15,6 +15,7 @@ when ODIN_OS == .Darwin {
   @(require, extra_linker_flags = "-rpath /usr/local/lib")
   foreign import __ "system:System.framework"
 }
+// FRAMES_IN_FLIGHT is the number of frames the CPU may record ahead of the GPU.
 FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 
 // not yet in vendor bindings (needs vulkan header >= 315)
@@ -31,14 +32,19 @@ DEVICE_EXTENSIONS :: []cstring {
   "VK_KHR_unified_image_layouts",
 }
 
+// ENABLE_VALIDATION_LAYERS turns on the Khronos validation layer; on by default in debug builds.
+@(private = "file")
 ENABLE_VALIDATION_LAYERS :: #config(ENABLE_VALIDATION_LAYERS, ODIN_DEBUG)
 
 when ENABLE_VALIDATION_LAYERS {
+  @(private = "file")
   VALIDATION_LAYERS :: []cstring{"VK_LAYER_KHRONOS_validation"}
 } else {
+  @(private = "file")
   VALIDATION_LAYERS :: []cstring{}
 }
 
+// GPUContext owns the Vulkan instance, device, queues, pools and per-frame sync state.
 GPUContext :: struct {
   instance:             vk.Instance,
   device:               vk.Device,
@@ -57,23 +63,20 @@ GPUContext :: struct {
   device_properties:    vk.PhysicalDeviceProperties,
   trash:                [dynamic]TrashItem, // loose vk resources awaiting deferred destruction
   uploads:              Uploads, // staged writes for the next command buffer
-  // Timeline semaphores signalled with the frame serial + 1 when that
-  // frame's graphics / compute submission completes.
+  // signalled with frame serial + 1 when that frame's submission completes
   graphics_timeline:    vk.Semaphore,
   compute_timeline:     vk.Semaphore,
   frame_serial:         u64, // frames submitted so far
   depth_clamp: b32,
 }
 
-// Compute work is recorded and submitted separately only when the device has
-// a dedicated compute queue family.
+// only a dedicated compute queue family submits compute separately
+@(private = "file")
 has_async_compute :: proc(self: ^GPUContext) -> bool {
   return self.compute_family != self.graphics_family
 }
 
-// Fill a create info's sharing fields. With async compute, resources both
-// queues access are CONCURRENT across the graphics and compute families, so
-// they need no ownership transfers.
+// CONCURRENT sharing across the families avoids ownership transfers.
 @(private)
 set_sharing :: proc(self: ^GPUContext, info: ^$T, shared: bool, families: ^[2]u32) {
   families^ = {self.graphics_family, self.compute_family}
@@ -86,13 +89,11 @@ set_sharing :: proc(self: ^GPUContext, info: ^$T, shared: bool, families: ^[2]u3
   }
 }
 
-// Global context for debug callback
+@(private = "file")
 g_context: runtime.Context
 
-// First init phase: load Vulkan through `get_instance_proc_addr`
-// (vkGetInstanceProcAddr) and create the instance with the extensions the
-// windowing layer needs. Create `self.surface` from `self.instance` next, then
-// call device_init.
+// instance_init loads Vulkan through get_instance_proc_addr and creates the instance with the
+// windowing layer's extensions. Create self.surface from self.instance next, then call device_init.
 instance_init :: proc(
   self: ^GPUContext,
   app_name: cstring,
@@ -106,8 +107,7 @@ instance_init :: proc(
   return vulkan_instance_init(self, app_name, instance_extensions)
 }
 
-// Second init phase: pick a device that can present to `self.surface` and
-// create queues and command pools.
+// device_init picks a device that can present to self.surface and creates queues and command pools.
 device_init :: proc(self: ^GPUContext) -> vk.Result {
   physical_device_init(self) or_return
   logical_device_init(self) or_return
@@ -131,6 +131,7 @@ timelines_init :: proc(self: ^GPUContext) -> vk.Result {
   return .SUCCESS
 }
 
+// shutdown destroys every object the context owns, including the device, surface and instance.
 shutdown :: proc(self: ^GPUContext) {
   vk.DeviceWaitIdle(self.device)
   deferred_flush(self)
@@ -222,8 +223,7 @@ vulkan_instance_init :: proc(
   return .SUCCESS
 }
 
-// What `surface` supports on `physical_device`; the slices are in the temp
-// allocator.
+// the slices are in the temp allocator
 @(private)
 query_swapchain_support :: proc(
   physical_device: vk.PhysicalDevice,
@@ -391,7 +391,7 @@ find_queue_families :: proc(
     if present_support {
       maybe_present_family = idx
     }
-    // Prefer dedicated compute queue (COMPUTE but not GRAPHICS)
+    // prefer a dedicated compute queue
     if .COMPUTE in family.queueFlags && .GRAPHICS not_in family.queueFlags {
       maybe_compute_family = idx
     }
@@ -403,7 +403,6 @@ find_queue_families :: proc(
   }
   if g_fam, ok_g := maybe_graphics_family.?; ok_g {
     if p_fam, ok_p := maybe_present_family.?; ok_p {
-      // Without a dedicated queue, compute runs on the graphics queue.
       return g_fam, p_fam, maybe_compute_family.? or_else g_fam, .SUCCESS
     }
   }
@@ -432,7 +431,6 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     sType               = vk.StructureType(1000527000),
     unifiedImageLayouts = true,
   }
-  // Enable descriptor indexing features
   vulkan_13_features := vk.PhysicalDeviceVulkan13Features {
     sType                          = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
     dynamicRendering               = true,
@@ -440,7 +438,6 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     shaderDemoteToHelperInvocation = true,
     pNext                          = &unified_layouts_features,
   }
-  // self.depth_clamp = features.depthClamp
   basic_features := vk.PhysicalDeviceFeatures {
     multiDrawIndirect         = true, // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
     drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
@@ -498,9 +495,8 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   return .SUCCESS
 }
 
-// Create the shared descriptor pool that allocate_descriptor_set draws
-// from, sized by the caller (the renderer knows its sets). Sets live as long
-// as the pool.
+// descriptor_pool_init creates the shared pool allocate_descriptor_set draws from, sized by the
+// caller. Sets live as long as the pool.
 descriptor_pool_init :: proc(
   self: ^GPUContext,
   pool_sizes: []vk.DescriptorPoolSize,
@@ -540,6 +536,7 @@ command_pool_init :: proc(self: ^GPUContext) -> vk.Result {
   return .SUCCESS
 }
 
+@(private)
 create_shader_module :: proc(
   device: vk.Device,
   code: []u8,
@@ -561,9 +558,8 @@ create_shader_module :: proc(
   return
 }
 
-// A one-off command buffer, submitted and waited for by
-// end_single_time_command. It starts with every queued upload, so the
-// recorded work sees them.
+// begin_single_time_command returns a one-off command buffer, submitted and waited for by
+// end_single_time_command. It starts with every queued upload.
 begin_single_time_command :: proc(
   self: ^GPUContext,
 ) -> (
@@ -582,6 +578,7 @@ begin_single_time_command :: proc(
   return cmd_buffer, .SUCCESS
 }
 
+// end_single_time_command submits a command buffer from begin_single_time_command and waits for it.
 end_single_time_command :: proc(
   self: ^GPUContext,
   cmd_buffer: ^vk.CommandBuffer,

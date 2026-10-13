@@ -1,3 +1,4 @@
+// Compute-driven particle system.
 package main
 
 import "../../mjolnir"

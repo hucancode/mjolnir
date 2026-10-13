@@ -1,13 +1,13 @@
 package detour
 
-
-@(private)
+@(private = "file")
 Data_Validation_Result :: struct {
   valid:       bool,
   error_count: int,
   errors:      [16]string,
 }
 
+// validate_tile_data checks raw tile bytes for a consistent header and sizes and collects errors.
 validate_tile_data :: proc(data: []u8) -> (result: Data_Validation_Result) {
   result.valid = true
   add_error :: proc(result: ^Data_Validation_Result, message: string) {

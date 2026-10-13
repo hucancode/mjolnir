@@ -2,10 +2,8 @@ package gpu
 
 import vk "vendor:vulkan"
 
-// A buffer shared by the graphics and compute queues. Host-visible buffers
-// are persistently mapped at `mapped`; device-local ones (mapped = nil) are
-// written through queue_buffer_write. A host-cached buffer is fast for the CPU
-// to read back as well as write, where the device has such memory.
+// Buffer is shared by the graphics and compute queues. Host-visible buffers are persistently
+// mapped at `mapped`; device-local ones (mapped = nil) are written through queue_buffer_write.
 Buffer :: struct {
   buffer: vk.Buffer,
   memory: vk.DeviceMemory,
@@ -13,6 +11,7 @@ Buffer :: struct {
   size:   vk.DeviceSize,
 }
 
+// buffer_create allocates a buffer and its memory, persistently mapped when host_visible.
 buffer_create :: proc(
   gctx: ^GPUContext,
   size: vk.DeviceSize,
@@ -49,11 +48,12 @@ buffer_create :: proc(
   return buffer, .SUCCESS
 }
 
-// Descriptor info covering the whole buffer.
+// buffer_info returns descriptor info covering the whole buffer.
 buffer_info :: proc(buffer: ^Buffer) -> vk.DescriptorBufferInfo {
   return {buffer = buffer.buffer, range = buffer.size}
 }
 
+// buffer_destroy unmaps and frees buffer immediately.
 buffer_destroy :: proc(device: vk.Device, buffer: ^Buffer) {
   if buffer.mapped != nil do vk.UnmapMemory(device, buffer.memory)
   vk.DestroyBuffer(device, buffer.buffer, nil)
@@ -61,29 +61,18 @@ buffer_destroy :: proc(device: vk.Device, buffer: ^Buffer) {
   buffer^ = {}
 }
 
-// `count` elements of `T` from byte `offset` of a mapped buffer; count < 0
-// takes every whole element to the end.
+// mapped views count elements of T from byte offset of a mapped buffer; count < 0 takes every whole element to the end.
 mapped :: proc(buffer: ^Buffer, $T: typeid, offset: vk.DeviceSize = 0, count := -1) -> []T {
   count := count
   if count < 0 do count = int((buffer.size - offset) / size_of(T))
   return ([^]T)(&buffer.mapped[offset])[:count]
 }
 
-// Deferred GPU-resource destruction. A resource freed at runtime may still be
-// read by frames already submitted to the GPU, so destroying its vk handles
-// inline is a use-after-free. Instead enqueue the handles; deferred_tick
-// destroys them RETIRE_GRACE frames later.
-//
-// Pool-managed resources (textures, meshes) defer through their pool's
-// retirement grace, which also holds back their bindless index. This queue is
-// for resources with no owning pool.
-
-// Frames (submissions, counted by frame_serial) a freed GPU resource or pool
-// slot waits before it is destroyed or reused: the frames in flight, plus one
-// because async compute culls a frame ahead (graphics n+1 draws the lists
-// compute n built).
+// RETIRE_GRACE is the frames a freed resource or pool slot waits before it is
+// destroyed or reused: frames in flight plus one for async compute.
 RETIRE_GRACE :: FRAMES_IN_FLIGHT + 1
 
+// Trash is a resource that defer_destroy can queue; pool-managed resources retire through their pool instead.
 Trash :: union {
   Buffer,
   vk.ImageView,
@@ -95,7 +84,7 @@ TrashItem :: struct {
   trash: Trash,
 }
 
-// Queue `trash` for destruction once no frame in flight can use it.
+// defer_destroy queues trash for destruction RETIRE_GRACE frames later, once no frame in flight can use it.
 defer_destroy :: proc(gctx: ^GPUContext, trash: Trash) {
   append(&gctx.trash, TrashItem{gctx.frame_serial + RETIRE_GRACE, trash})
 }
@@ -110,8 +99,7 @@ destroy_item :: proc(device: vk.Device, item: ^TrashItem) {
   }
 }
 
-// deferred_tick destroys every queued resource whose grace has elapsed. Call
-// once per frame, after wait_frame.
+// deferred_tick destroys every queued resource whose grace has elapsed. Call once per frame, after wait_frame.
 deferred_tick :: proc(gctx: ^GPUContext) {
   i := 0
   for i < len(gctx.trash) {
@@ -124,8 +112,7 @@ deferred_tick :: proc(gctx: ^GPUContext) {
   }
 }
 
-// deferred_flush destroys every queued resource now, ignoring grace. Use only
-// after vkDeviceWaitIdle (teardown/shutdown), where no frame is in flight.
+// deferred_flush destroys every queued resource now. Only after vkDeviceWaitIdle.
 deferred_flush :: proc(gctx: ^GPUContext) {
   discard_uploads(gctx)
   for &item in gctx.trash do destroy_item(gctx.device, &item)

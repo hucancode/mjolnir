@@ -1,3 +1,4 @@
+// Spawning + despawning at scale.
 package main
 
 import "../../mjolnir"

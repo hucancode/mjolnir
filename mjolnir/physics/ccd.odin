@@ -53,7 +53,6 @@ swept_box_box :: proc(
   half_extents_a, half_extents_b: [3]f32,
   velocity_a: [3]f32,
 ) -> (t: f32, hit: bool) {
-  // Minkowski sum: A's center sweeps against B grown by A's half extents
   sum := half_extents_a + half_extents_b
   return sweep_point_aabb(pos_a, velocity_a, {pos_b - sum, pos_b + sum})
 }

@@ -11,7 +11,7 @@ ALIGN_FACTOR := [Align]f32 {
   .END    = 1,
 }
 
-// Lay every node out in `viewport`, where the roots sit as absolute
+// layout lays every node out in `viewport`, where the roots sit as absolute
 // children: a fixed sequence of passes over the nodes in tree order. Widths
 // resolve before text wraps, heights after.
 layout :: proc(self: ^UI, viewport: Rect, f: ^font.Font) {

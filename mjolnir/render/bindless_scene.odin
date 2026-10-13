@@ -6,6 +6,7 @@ import vk "vendor:vulkan"
 
 // Bindings of the scene set (set 0), one descriptor each of the type in
 // SCENE_BINDING_TYPES. Shaders repeat these numbers as literals.
+@(private)
 SceneBinding :: enum u32 {
   VIEWS,
   NODES,
@@ -23,6 +24,7 @@ SceneBinding :: enum u32 {
   DEBUG_LINES,
 }
 
+@(private)
 SCENE_BINDING_TYPES := [SceneBinding]vk.DescriptorType {
   .VIEWS           = .STORAGE_BUFFER,
   .NODES           = .STORAGE_BUFFER,
@@ -39,13 +41,13 @@ SCENE_BINDING_TYPES := [SceneBinding]vk.DescriptorType {
   .DEBUG_LINES     = .STORAGE_BUFFER,
 }
 
-// Every scene pipeline uses one layout, {scene set, textures set} with this
-// push-constant range, so both sets are bound once per command buffer and
-// stay bound across pipeline switches.
+// One layout for every scene pipeline, so both sets stay bound across pipeline switches.
+@(private = "file")
 PUSH_CONSTANT_SIZE :: 128
+@(private)
 SCENE_STAGES :: vk.ShaderStageFlags{.VERTEX, .FRAGMENT, .COMPUTE}
 
-// Render's two descriptor sets and the one pipeline layout over them.
+// SceneDescriptors are the scene and bindless descriptor sets with the pipeline layout over them.
 SceneDescriptors :: struct {
   // set 0: the scene buffers, one set per frame in flight
   set_layout:      vk.DescriptorSetLayout,
@@ -58,9 +60,7 @@ SceneDescriptors :: struct {
 }
 
 
-// Create the scene set layout, one set per frame in flight pointing at the
-// scene buffers, and the shared pipeline layout. Call after every scene buffer
-// and the bindless set exist.
+@(private)
 scene_descriptors_init :: proc(self: ^Renderer) -> (ret: vk.Result) {
   gctx := &self.gctx
   scene := &self.scene
@@ -85,14 +85,15 @@ scene_descriptors_init :: proc(self: ^Renderer) -> (ret: vk.Result) {
   return .SUCCESS
 }
 
+@(private)
 scene_descriptors_shutdown :: proc(self: ^SceneDescriptors, gctx: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(gctx.device, self.layout, nil)
   vk.DestroyDescriptorSetLayout(gctx.device, self.set_layout, nil)
   self.layout, self.set_layout = 0, 0
 }
 
-// Point binding `b` of frame `frame_index`'s scene set at its current buffer.
-// The caller guarantees no submitted work still uses that set.
+// The caller guarantees no submitted work still uses the set.
+@(private)
 scene_write_binding :: proc(self: ^Renderer, b: SceneBinding, frame_index: int) {
   atlas := &self.shadow_atlas[frame_index]
   layout := &self.arena_layout
@@ -109,7 +110,7 @@ scene_write_binding :: proc(self: ^Renderer, b: SceneBinding, frame_index: int) 
   gpu.write_descriptor(&self.gctx, self.scene.sets[frame_index], u32(b), 0, SCENE_BINDING_TYPES[b], info)
 }
 
-// Bind the scene and bindless sets of `frame_index` to `bind_point`.
+@(private)
 bind_scene_sets :: proc(
   self: ^Renderer,
   cmd: vk.CommandBuffer,
@@ -123,13 +124,13 @@ bind_scene_sets :: proc(
   vk.CmdBindDescriptorSets(cmd, bind_point, self.scene.layout, 0, len(sets), raw_data(sets[:]), 0, nil)
 }
 
-// Push `data` at offset 0 of the push-constant range every pipeline shares.
+@(private)
 push_constants :: proc(self: ^Renderer, cmd: vk.CommandBuffer, data: ^$T) {
   #assert(size_of(T) <= PUSH_CONSTANT_SIZE)
   vk.CmdPushConstants(cmd, self.scene.layout, SCENE_STAGES, 0, size_of(T), data)
 }
 
-// Bind the mesh arena's vertex and index buffers.
+@(private)
 bind_mesh_buffers :: proc(self: ^Renderer, cmd: vk.CommandBuffer) {
   gpu.bind_vertex_index_buffers(
     cmd,

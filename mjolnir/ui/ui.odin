@@ -1,19 +1,18 @@
-// Retained 2D layout: a tree of nodes in one flat pool, laid out by flex
-// rows and columns, anchors, text wrapping, clipping and scrolling, plus hit
-// testing. ui draws nothing: the application turns rects and text lines
-// into whatever its renderer draws (render's 2D overlay commands, say).
 package ui
 
 import cont "../containers"
 import "core:strings"
 
+// NodeHandle identifies a UI node; stale after destroy_node.
 NodeHandle :: distinct cont.Handle
 
+// Direction is the axis a node's flow children are placed along.
 Direction :: enum u8 {
   ROW, // children flow along x
   COLUMN, // children flow along y
 }
 
+// SizeKind says how a Size is resolved.
 SizeKind :: enum u8 {
   FIT, // wraps the content: flow children, text, padding
   FIXED, // `value` pixels
@@ -21,23 +20,26 @@ SizeKind :: enum u8 {
   PERCENT, // `value` (0..1) of the parent's content box
 }
 
+// Size is one axis of a node's size: a kind and its value.
 Size :: struct {
   kind:  SizeKind,
   value: f32,
 }
 
+// Align places content within a box on one axis.
 Align :: enum u8 {
   START,
   CENTER,
   END,
 }
 
+// Position says whether a node takes part in its parent's flow.
 Position :: enum u8 {
   FLOW, // placed after the previous flow sibling
   ABSOLUTE, // placed by anchor and offset in the parent's rect
 }
 
-// One node. Its layout inputs are what the application sets; ui writes its
+// Node is one UI node. The application sets its layout inputs; ui writes its
 // rect, clip and text lines on layout.
 Node :: struct {
   // the node this one sits in; none for a root, which sits in the viewport
@@ -73,11 +75,12 @@ Node :: struct {
   wrap:        bool,
 }
 
+// Rect is an axis-aligned rectangle: top-left `pos` and `size`, in pixels.
 Rect :: struct {
   pos, size: [2]f32,
 }
 
-// One laid-out line of a text node: text[start:end], `width` wide, its
+// Line is one laid-out line of a text node: text[start:end], `width` wide, its
 // top-left at `pos`.
 Line :: struct {
   start, end: int,
@@ -85,22 +88,20 @@ Line :: struct {
   width:      f32,
 }
 
+// UI is a node tree with its layout output and input state. Set up with init, free with destroy.
 UI :: struct {
   nodes:        cont.Pool(Node),
   next_order:   i32,
-  // ---------- layout output, by node index ----------
   rects:        [dynamic]Rect,
   clips:        [dynamic]Rect, // where the node is visible
   line_ranges:  [dynamic][2]int, // the node's lines in `lines`
   lines:        [dynamic]Line,
   // shown nodes, back to front: what to draw, in order
   draw_order:   [dynamic]NodeHandle,
-  // ---------- input state (update_input) ----------
   hovered:      NodeHandle, // interactive-or-within node under the cursor
   pressed:      NodeHandle, // node pressed on, until every button releases
   clicked:      NodeHandle, // node released on this tick, the one pressed
   focused:      NodeHandle, // focusable node last pressed
-  // ---------- layout scratch ----------
   topo:         [dynamic]u32, // node indices, parents before children
   children:     [dynamic]u32, // CSR child lists in flow order
   child_first:  [dynamic]u32,
@@ -110,10 +111,12 @@ UI :: struct {
   depth_z:      [dynamic]i32,
 }
 
+// init prepares `self` to hold up to `max_nodes` nodes.
 init :: proc(self: ^UI, max_nodes: u32 = 4096) {
   cont.init(&self.nodes, max_nodes)
 }
 
+// destroy frees everything `self` owns.
 destroy :: proc(self: ^UI) {
   cont.destroy(&self.nodes, proc(n: ^Node) {delete(n.text)})
   delete(self.rects)
@@ -131,7 +134,7 @@ destroy :: proc(self: ^UI) {
   self^ = {}
 }
 
-// Add `n`; its text is copied and its order is the next one. Laid out by the
+// create adds `n`; its text is copied and its order is the next one. Laid out by the
 // next layout.
 create :: proc(self: ^UI, n: Node) -> (handle: NodeHandle, ok: bool) #optional_ok {
   slot: ^Node
@@ -143,7 +146,7 @@ create :: proc(self: ^UI, n: Node) -> (handle: NodeHandle, ok: bool) #optional_o
   return handle, true
 }
 
-// Remove a node and its subtree.
+// destroy_node removes a node and its subtree.
 destroy_node :: proc(self: ^UI, handle: NodeHandle) {
   n, ok := cont.get(self.nodes, handle)
   if !ok do return
@@ -153,12 +156,13 @@ destroy_node :: proc(self: ^UI, handle: NodeHandle) {
   for child, h in cont.next(&it, NodeHandle) do if child.parent == handle do destroy_node(self, h)
 }
 
-// The node behind `handle`, to edit in place; nil when stale. Change text
+// node returns the node behind `handle`, to edit in place; nil when stale. Change text
 // with set_text.
 node :: proc(self: ^UI, handle: NodeHandle) -> ^Node {
   return cont.get(self.nodes, handle)
 }
 
+// set_text replaces a node's text with a copy of `text`.
 set_text :: proc(self: ^UI, handle: NodeHandle, text: string) {
   n, ok := cont.get(self.nodes, handle)
   if !ok do return
@@ -166,22 +170,25 @@ set_text :: proc(self: ^UI, handle: NodeHandle, text: string) {
   n.text = strings.clone(text)
 }
 
-// Layout output of a live node; zero before its first layout.
+// rect returns the laid-out rect of a live node; zero before its first layout.
 rect :: proc(self: ^UI, handle: NodeHandle) -> Rect {
   return self.rects[handle.index] if int(handle.index) < len(self.rects) else {}
 }
 
+// clip returns the region where a node is visible; zero before its first layout.
 clip :: proc(self: ^UI, handle: NodeHandle) -> Rect {
   return self.clips[handle.index] if int(handle.index) < len(self.clips) else {}
 }
 
+// lines returns the laid-out text lines of a node.
 lines :: proc(self: ^UI, handle: NodeHandle) -> []Line {
   if int(handle.index) >= len(self.line_ranges) do return nil
   r := self.line_ranges[handle.index]
   return self.lines[r[0]:][:r[1]]
 }
 
-// Whether `handle` is `node` or one of its ancestors; false for none.
+// within reports whether `handle` is `node` or one of its ancestors; false for none.
+@(private)
 within :: proc(self: ^UI, node, handle: NodeHandle) -> bool {
   if handle == {} do return false
   h := node

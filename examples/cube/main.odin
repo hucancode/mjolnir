@@ -1,3 +1,4 @@
+// Hello world!
 package main
 
 import "core:log"

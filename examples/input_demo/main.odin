@@ -1,3 +1,4 @@
+// Keyboard, mouse, scroll event plumbing.
 package main
 
 import "../../mjolnir"

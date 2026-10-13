@@ -7,6 +7,7 @@ import "gpu"
 import "mesh"
 import vk "vendor:vulkan"
 
+// Primitive names a builtin mesh in Renderer.builtin_meshes.
 Primitive :: enum {
   CUBE,
   SPHERE,
@@ -24,8 +25,7 @@ MeshFlag :: enum u32 {
 @(private)
 MeshFlagSet :: bit_set[MeshFlag;u32]
 
-// A mesh's ranges of the mesh arena and its bounds, as the cull shader reads
-// it from the mesh table.
+// as the cull shader reads it from the mesh table
 @(private)
 MeshData :: struct {
   aabb_min:        [3]f32,
@@ -38,9 +38,7 @@ MeshData :: struct {
   vertex_count:    u32,
 }
 
-// The mesh arena: one buffer per stream, sub-allocated by its slab. Vertices
-// and indices are bound as vertex/index buffers; skinning is a storage
-// buffer read by the vertex shader through the scene set.
+// One buffer per stream, sub-allocated by its slab; skinning is read through the scene set.
 @(private)
 MeshStream :: enum {
   VERTEX,
@@ -88,8 +86,7 @@ MESH_STREAMS := [MeshStream]struct {
   .SKINNING = {VERTEX_SLAB_CONFIG, size_of(mesh.SkinningData), {.STORAGE_BUFFER}},
 }
 
-// Buffer capacities come from the slab configs, so a slab can never hand out
-// an offset past the end of its buffer.
+// capacities come from the slab configs, so no offset can pass the end of a buffer
 @(private)
 mesh_arena_init :: proc(r: ^Renderer) -> vk.Result {
   for stream, s in MESH_STREAMS {
@@ -106,8 +103,7 @@ mesh_arena_destroy :: proc(r: ^Renderer) {
   for &slab in r.mesh_slabs do cont.slab_destroy(&slab)
 }
 
-// Copy `data` into a range of the stream's buffer taken from its slab; its
-// first element index. Empty data takes no range; a failed copy frees its range.
+// Returns the first element index; empty data takes no range.
 @(private = "file")
 mesh_arena_upload :: proc(r: ^Renderer, stream: MeshStream, data: []$T) -> (offset: u32, ret: vk.Result) {
   if len(data) == 0 do return 0, .SUCCESS
@@ -120,8 +116,6 @@ mesh_arena_upload :: proc(r: ^Renderer, stream: MeshStream, data: []$T) -> (offs
   return
 }
 
-// Free the arena ranges of a mesh: its vertex and index ranges when it has
-// vertices and indices, its skinning range when skinned.
 @(private)
 free_mesh :: proc(r: ^Renderer, m: MeshData) {
   if m.vertex_count > 0 do cont.slab_free(&r.mesh_slabs[.VERTEX], u32(m.vertex_offset))
@@ -129,10 +123,12 @@ free_mesh :: proc(r: ^Renderer, m: MeshData) {
   if .SKINNED in m.flags do cont.slab_free(&r.mesh_slabs[.SKINNING], m.skinning_offset)
 }
 
+@(private)
 VERTEX_BINDING_DESCRIPTION := [?]vk.VertexInputBindingDescription {
   {binding = 0, stride = size_of(mesh.Vertex), inputRate = .VERTEX},
 }
 
+@(private)
 VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
   {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(mesh.Vertex, position))},
   {location = 1, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(mesh.Vertex, normal))},
@@ -141,9 +137,7 @@ VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
   {location = 4, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(mesh.Vertex, tangent))},
 }
 
-// Upload a geometry into the mesh arena and describe it in `m` and in
-// mesh_data_buffer at `index`. On failure the ranges taken so far are freed.
-// tick_resource_pools frees the ranges once the mesh is retired.
+// On failure the ranges taken so far are freed.
 @(private)
 upload_mesh :: proc(
   render: ^Renderer,
@@ -169,8 +163,8 @@ upload_mesh :: proc(
   return gpu.queue_buffer_write(gctx, &render.mesh_data_buffer, []MeshData{m^}, int(index))
 }
 
-// Creates a mesh. Geometry ownership is transferred: it is uploaded into the
-// mesh arena and deleted.
+// create_mesh uploads geometry_data into the mesh arena.
+// Ownership of the geometry transfers: it is deleted.
 create_mesh :: proc(
   self: ^Renderer,
   geometry_data: mesh.Geometry,
@@ -190,8 +184,7 @@ create_mesh :: proc(
   return handle, true
 }
 
-// The handle is invalid at once; the arena ranges are freed once no frame
-// in flight draws the mesh.
+// destroy_mesh invalidates handle at once; the arena ranges are freed once no frame in flight draws it.
 destroy_mesh :: proc(self: ^Renderer, handle: MeshHandle) {
   sync.recursive_mutex_lock(&self.mutex)
   defer sync.recursive_mutex_unlock(&self.mutex)

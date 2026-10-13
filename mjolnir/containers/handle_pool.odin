@@ -49,7 +49,6 @@ init :: proc(pool: ^Pool($T), capacity: u32 = 0, grace: u64 = 0) {
 // and leaves the pool zeroed.
 destroy :: proc(pool: ^Pool($T), destroy_proc: proc(_: ^T) = nil) {
   for &entry in pool.entries {
-    // Only deinit entries that are still active
     if destroy_proc != nil && entry.generation > 0 && entry.active {
       destroy_proc(&entry.item)
     }
@@ -65,7 +64,6 @@ destroy :: proc(pool: ^Pool($T), destroy_proc: proc(_: ^T) = nil) {
 alloc :: proc(pool: ^Pool($T), $HT: typeid) -> (handle: HT, item: ^T, ok: bool) {
   MAX_CONSECUTIVE_ERROR :: 20
   @(static) error_count := 0
-  // Try to reuse a freed slot
   if len(pool.free_indices) > 0 {
     index := pop(&pool.free_indices)
     entry := &pool.entries[index]
@@ -73,7 +71,6 @@ alloc :: proc(pool: ^Pool($T), $HT: typeid) -> (handle: HT, item: ^T, ok: bool) 
     error_count = 0
     return HT{index, entry.generation}, &entry.item, true
   }
-  // Allocate a new slot
   index := u32(len(pool.entries))
   if pool.capacity > 0 && index >= pool.capacity {
     error_count += 1
@@ -107,9 +104,7 @@ free :: proc(pool: ^Pool($T), handle: $HT) -> (item: ^T, freed: bool) {
   if !entry.active || entry.generation != handle.generation {
     return nil, false
   }
-  // Return pointer to item before marking as freed
   item = &entry.item
-  // Mark as freed and increment generation
   entry.active = false
   entry.generation += 1
   if entry.generation == 0 {
@@ -226,6 +221,7 @@ Iterator :: struct($T: typeid) {
   index: int,
 }
 
+// iterator returns an Iterator over pool's active items.
 iterator :: proc "contextless" (pool: ^Pool($T)) -> Iterator(T) {
   return {pool = pool}
 }

@@ -4,21 +4,21 @@ package render
 import "gpu"
 import vk "vendor:vulkan"
 
+@(private)
 MAX_DEPTH_MIPS_LEVEL :: 16
 // Mip 0 texels a depth pyramid group reduces per side (depth_reduce.comp).
 @(private = "file")
 PYRAMID_TILE :: 32
 
-// Pyramid slots: camera slot c's pyramid of frame f takes slot
-// c * FRAMES_IN_FLIGHT + f, which owns counter `slot` and storage images
-// [slot * MAX_DEPTH_MIPS_LEVEL, (slot + 1) * MAX_DEPTH_MIPS_LEVEL).
+// Camera slot c's pyramid of frame f takes slot c * FRAMES_IN_FLIGHT + f, which owns
+// counter `slot` and storage images [slot * MAX_DEPTH_MIPS_LEVEL, (slot + 1) * MAX_DEPTH_MIPS_LEVEL).
+@(private)
 MAX_PYRAMID_SLOTS :: MAX_ACTIVE_CAMERAS * gpu.FRAMES_IN_FLIGHT
 
-// One view of the scene: a camera, or a face of a shadow map. Rendered
-// shaders project with it; the cull shader tests nodes against it. A drawn
-// node goes to list type * list_stride of draw lists `draw_list`: a camera
-// keeps one list per material type (stride 1), the shadow views share one
-// list for every type (stride 0) and tell their draws apart by instance_tag.
+// A camera or a shadow map face. A drawn node goes to list type * list_stride of
+// `draw_list`: cameras keep one list per material type (stride 1); shadow views share one
+// list (stride 0) and tell draws apart by instance_tag.
+@(private)
 ViewGPU :: struct {
   view:                matrix[4, 4]f32,
   projection:          matrix[4, 4]f32,
@@ -29,7 +29,6 @@ ViewGPU :: struct {
   position:            [4]f32,
   extent:              [2]f32,
   near, far:           f32,
-  // this frame's bindless images of a camera view
   attachments:         [AttachmentType]u32,
   // bindless depth pyramid
   pyramid:         u32,
@@ -51,16 +50,20 @@ ViewGPU :: struct {
 }
 #assert(size_of(ViewGPU) == 448)
 
-// View table layout: one view per camera slot, then the shadow views.
+@(private)
 CAMERA_VIEW_BASE :: 0
+@(private)
 SHADOW_VIEW_BASE :: MAX_ACTIVE_CAMERAS
+@(private)
 MAX_VIEWS :: MAX_ACTIVE_CAMERAS + MAX_SHADOW_VIEWS
 
+@(private = "file")
 CullPushConstants :: struct {
   node_count: u32,
   first_view: u32,
 }
 
+@(private = "file")
 DepthReducePushConstants :: struct {
   depth_index: u32,
   mip_count:   u32,
@@ -68,10 +71,9 @@ DepthReducePushConstants :: struct {
   slot:        u32,
 }
 
-// Hierarchical max-depth buffer at half the camera's resolution, with a
-// storage view per mip. The views enter the storage image array at the next
-// flush of the pyramid's frame (occlusion_bind_pyramid), once no frame in
-// flight still reads the slot's previous views.
+// DepthPyramid is a max-depth buffer at half the camera's resolution, with a storage view per mip.
+// The views enter the storage image array at the next flush of the pyramid's frame
+// (occlusion_bind_pyramid), once no frame in flight reads the slot's previous views.
 DepthPyramid :: struct {
   texture: TextureHandle,
   views:   [MAX_DEPTH_MIPS_LEVEL]vk.ImageView,
@@ -79,8 +81,7 @@ DepthPyramid :: struct {
   bound:   bool,
 }
 
-// Frustum + occlusion culling of nodes against views into the bindless draw
-// lists, and the depth reduction that builds the pyramids it tests against.
+@(private)
 occlusion_init :: proc(r: ^Renderer) -> vk.Result {
   layout := r.scene.layout
   r.pipelines[.CULL] = gpu.create_compute_pipeline(&r.gctx, #load("shader/occlusion_culling/cull.spv"), layout) or_return
@@ -88,8 +89,7 @@ occlusion_init :: proc(r: ^Renderer) -> vk.Result {
   return .SUCCESS
 }
 
-// Create the pyramid texture of pyramid slot `slot` for a camera of `extent`
-// and its per-mip views.
+@(private)
 occlusion_setup_pyramid :: proc(
   r: ^Renderer,
   pyramid: ^DepthPyramid,
@@ -116,8 +116,8 @@ occlusion_setup_pyramid :: proc(
   return .SUCCESS
 }
 
-// Write the pyramid's mip views into its storage image slots. Call when no
-// frame in flight reads the slots: in the flush of the pyramid's frame.
+// Call when no frame in flight reads the slots.
+@(private)
 occlusion_bind_pyramid :: proc(r: ^Renderer, pyramid: ^DepthPyramid) {
   if pyramid.bound do return
   pyramid.bound = true
@@ -134,15 +134,15 @@ occlusion_bind_pyramid :: proc(r: ^Renderer, pyramid: ^DepthPyramid) {
   }
 }
 
+@(private)
 occlusion_destroy_pyramid :: proc(r: ^Renderer, pyramid: ^DepthPyramid) {
   for view in pyramid.views do if view != 0 do gpu.defer_destroy(&r.gctx, view)
   destroy_texture(r, pyramid.texture)
   pyramid^ = {}
 }
 
-// Reduce depth image `depth_index` into every mip of `pyramid` in one
-// dispatch. The caller binds the reduce pipeline and orders the dispatch
-// before the cull.
+// The caller binds the reduce pipeline and orders the dispatch before the cull.
+@(private)
 occlusion_build_pyramid :: proc(
   r: ^Renderer,
   cmd: vk.CommandBuffer,
@@ -165,10 +165,8 @@ occlusion_build_pyramid :: proc(
   vk.CmdDispatch(cmd, groups.x, groups.y, 1)
 }
 
-// Cull every node against views [first_view, first_view + view_count) into
-// each view's draw lists: one dispatch of node groups by views. The caller
-// zeroes the lists' counts first (draw_lists_clear) and orders the clear
-// before this.
+// The caller zeroes the counts first (draw_lists_clear) and orders the clear before this.
+@(private)
 occlusion_cull :: proc(r: ^Renderer, cmd: vk.CommandBuffer, first_view, view_count: u32) {
   if u32(len(r.attachments)) == 0 || view_count == 0 do return
   vk.CmdBindPipeline(cmd, .COMPUTE, r.pipelines[.CULL])
@@ -180,14 +178,14 @@ occlusion_cull :: proc(r: ^Renderer, cmd: vk.CommandBuffer, first_view, view_cou
   vk.CmdDispatch(cmd, (u32(len(r.attachments)) + 63) / 64, view_count, 1)
 }
 
-// Counts at the head of a draw list buffer, one per list; commands follow.
+// counts at the head of a buffer, one per list; commands follow
+@(private)
 DRAW_LIST_HEADER :: 8
 #assert(len(MaterialType) <= DRAW_LIST_HEADER)
 @(private)
 DRAW_COMMAND_SIZE :: size_of(vk.DrawIndexedIndirectCommand)
 
-// Bindless draw list slots: camera slot c takes c * FRAMES_IN_FLIGHT + frame,
-// the shadow lists take the slots after every camera's.
+// camera slot c takes c * FRAMES_IN_FLIGHT + frame; shadow lists take the slots after every camera's
 @(private)
 CAMERA_DRAW_SLOT_BASE :: 0
 @(private)
@@ -195,18 +193,16 @@ SHADOW_DRAW_SLOT_BASE :: MAX_ACTIVE_CAMERAS * gpu.FRAMES_IN_FLIGHT
 @(private)
 MAX_DRAW_LIST_SLOTS :: SHADOW_DRAW_SLOT_BASE + gpu.FRAMES_IN_FLIGHT
 
-// Per-frame indirect draw lists: one device-local buffer per frame in flight
-// holding up to DRAW_LIST_HEADER lists, each `capacity` draws. A cull pass
-// writes them through the bindless draw list array (slot `slot + frame`), and
-// vkCmdDrawIndexedIndirectCount consumes them straight from the buffer: list
-// i has its count at u32 i and its commands from DRAW_LIST_HEADER u32s plus
-// i * capacity commands. A frame's lists hold garbage until its first cull.
+// DrawLists are per-frame indirect draw lists: one device-local buffer per frame in flight
+// holding up to DRAW_LIST_HEADER lists of `capacity` draws; list i has its count at u32 i.
+// A frame's lists hold garbage until its first cull.
 DrawLists :: struct {
   buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
   slot:     u32,
   capacity: u32, // draws per list
 }
 
+@(private)
 draw_lists_init :: proc(
   self: ^DrawLists,
   r: ^Renderer,
@@ -231,19 +227,20 @@ draw_lists_init :: proc(
   return .SUCCESS
 }
 
-// Queue the buffers for destruction once no frame in flight reads them.
+@(private)
 draw_lists_destroy :: proc(self: ^DrawLists, gctx: ^gpu.GPUContext) {
   for buffer in self.buffers do if buffer.buffer != 0 do gpu.defer_destroy(gctx, buffer)
   self^ = {}
 }
 
-// Zero frame `frame_index`'s counts so the cull can append. Order earlier
-// indirect reads of the lists before it and the cull after it.
+// Order earlier indirect reads before it and the cull after it.
+@(private)
 draw_lists_clear :: proc(self: ^DrawLists, cmd: vk.CommandBuffer, frame_index: u32) {
   vk.CmdFillBuffer(cmd, self.buffers[frame_index].buffer, 0, DRAW_LIST_HEADER * size_of(u32), 0)
 }
 
-// Draw list `list` of frame `frame_index`. Call inside a render scope.
+// Call inside a render scope.
+@(private)
 draw_lists_draw :: proc(self: ^DrawLists, cmd: vk.CommandBuffer, frame_index: u32, list: u32) {
   buffer := self.buffers[frame_index].buffer
   vk.CmdDrawIndexedIndirectCount(
@@ -257,16 +254,13 @@ draw_lists_draw :: proc(self: ^DrawLists, cmd: vk.CommandBuffer, frame_index: u3
   )
 }
 
-// Copy frame `frame_index`'s counts into `dst` once the draws that read
-// them are recorded.
+@(private)
 draw_lists_copy_counts :: proc(self: ^DrawLists, cmd: vk.CommandBuffer, frame_index: u32, dst: ^gpu.Buffer) {
   gpu.memory_barrier(cmd, {.SHADER_WRITE}, {.TRANSFER_READ}, {.COMPUTE_SHADER, .DRAW_INDIRECT}, {.TRANSFER})
   region := vk.BufferCopy{size = DRAW_LIST_HEADER * size_of(u32)}
   vk.CmdCopyBuffer(cmd, self.buffers[frame_index].buffer, dst.buffer, 1, &region)
 }
 
-// Make the draw lists written by cull compute passes readable as indirect
-// args.
 @(private)
 indirect_barrier :: proc(cmd: vk.CommandBuffer) {
   gpu.memory_barrier(cmd, {.SHADER_WRITE}, {.INDIRECT_COMMAND_READ}, {.COMPUTE_SHADER}, {.DRAW_INDIRECT})

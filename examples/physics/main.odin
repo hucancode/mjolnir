@@ -1,3 +1,4 @@
+// Basic physics engine, support primitives shape (sphere, cube, cylinder, capsule).
 package main
 
 import "../../mjolnir"

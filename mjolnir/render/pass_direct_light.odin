@@ -4,12 +4,14 @@ package render
 import "gpu"
 import vk "vendor:vulkan"
 
+@(private = "file")
 LIGHTING_SHADER_VERT :: #load("shader/lighting/vert.spv")
+@(private = "file")
 LIGHTING_SHADER_FRAG :: #load("shader/lighting/frag.spv")
+@(private = "file")
 AMBIENT_SHADER_FRAG :: #load("shader/lighting_ambient/frag.spv")
 
-// Pushed once per camera, read by every lighting pipeline. The camera's view
-// holds its G-buffer.
+@(private = "file")
 LightingPushConstants :: struct {
   camera_index:     u32,
   irradiance:       u32,
@@ -20,12 +22,8 @@ LightingPushConstants :: struct {
   skybox_blur:      f32,
 }
 
-// The volume each light type rasterizes, one instance per light, and the
-// fragment shader shading it. Point and spot draw their builtin volume mesh's
-// back faces where the scene lies in front of them; directional and ambient
-// lights (no volume) cover the screen with the vertex shader's clip-space
-// triangle on the far plane, directional only where the scene lies in front
-// of it.
+// Point and spot draw the back faces of a volume mesh; directional and ambient cover the
+// screen with a far-plane triangle, directional only where the scene lies in front of it.
 @(private = "file")
 DRAW_STATE := [LightType]struct {
   depth_compare: vk.CompareOp,
@@ -39,6 +37,7 @@ DRAW_STATE := [LightType]struct {
   .AMBIENT     = {.ALWAYS, {.BACK}, nil, AMBIENT_SHADER_FRAG},
 }
 
+@(private)
 direct_light_init :: proc(r: ^Renderer) -> vk.Result {
   gctx := &r.gctx
   light_type_entry := vk.SpecializationMapEntry{constantID = 0, size = size_of(u32)}
@@ -75,9 +74,7 @@ direct_light_init :: proc(r: ^Renderer) -> vk.Result {
   return .SUCCESS
 }
 
-// Record one camera's lighting: every light as one instance of its type's
-// volume, additively over the cleared color image and depth-tested against
-// the G-buffer depth. record_camera_passes orders it with the other passes.
+@(private)
 lighting_record :: proc(r: ^Renderer, frame_index: u32, cam_index: u32, cam: ^Camera) {
   cmd := r.command_buffers[frame_index]
   final_image := texture_image(r, cam.attachments[.FINAL_IMAGE][frame_index])
@@ -85,8 +82,7 @@ lighting_record :: proc(r: ^Renderer, frame_index: u32, cam_index: u32, cam: ^Ca
   gpu.begin_rendering(
     cmd,
     depth_texture.extent,
-    // read-only: light volumes depth-test against it and the shaders
-    // sample it to rebuild positions
+    // read-only: volumes depth-test against it and shaders sample it
     gpu.create_depth_attachment(depth_texture.view, .LOAD, .NONE),
     gpu.create_color_attachment(final_image.view),
   )

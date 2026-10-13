@@ -8,7 +8,7 @@ import "../input"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 
-// A GLFW window that writes device events into `input`. Must not move after
+// Platform is a GLFW window that writes device events into `input`. Must not move after
 // init (the window callbacks keep a pointer to it).
 Platform :: struct {
   window:   glfw.WindowHandle,
@@ -16,6 +16,7 @@ Platform :: struct {
   context_: runtime.Context,
 }
 
+// init opens a window `width` by `height` titled `title`; false on failure.
 init :: proc(self: ^Platform, width, height: u32, title: string) -> bool {
   if !glfw.Init() {
     log.errorf("Failed to initialize GLFW")
@@ -44,35 +45,38 @@ init :: proc(self: ^Platform, width, height: u32, title: string) -> bool {
   return true
 }
 
+// shutdown destroys the window and terminates GLFW.
 shutdown :: proc(self: ^Platform) {
   glfw.DestroyWindow(self.window)
   glfw.Terminate()
 }
 
+// should_close reports whether the user asked to close the window.
 should_close :: proc(self: ^Platform) -> bool {
   return bool(glfw.WindowShouldClose(self.window))
 }
 
-// Pump window events into the input accumulator. Main thread only.
+// poll_events pumps window events into the input accumulator. Main thread only.
 poll_events :: proc(self: ^Platform) {
   glfw.PollEvents()
 }
 
-// Take this tick's input snapshot from the events polled so far.
+// read_input takes this tick's input snapshot from the events polled so far.
 read_input :: proc(self: ^Platform, s: ^input.State) {
   input.new_frame(s, &self.input)
 }
 
-// Instance extensions the window surface needs.
+// vulkan_instance_extensions returns the instance extensions the window surface needs.
 vulkan_instance_extensions :: proc() -> []cstring {
   return glfw.GetRequiredInstanceExtensions()
 }
 
+// vulkan_get_instance_proc_addr returns GLFW's vkGetInstanceProcAddr.
 vulkan_get_instance_proc_addr :: proc() -> rawptr {
   return rawptr(glfw.GetInstanceProcAddress)
 }
 
-// Create a Vulkan surface for the window. `platform` is the ^Platform; the
+// create_surface creates a Vulkan surface for the window. `platform` is the ^Platform; the
 // erased pointer lets a renderer take this proc as a callback without
 // importing platform.
 create_surface :: proc(platform: rawptr, instance: vk.Instance) -> (surface: vk.SurfaceKHR, ret: vk.Result) {
@@ -81,12 +85,13 @@ create_surface :: proc(platform: rawptr, instance: vk.Instance) -> (surface: vk.
   return
 }
 
+// framebuffer_size returns the framebuffer size in pixels.
 framebuffer_size :: proc(self: ^Platform) -> [2]u32 {
   w, h := glfw.GetFramebufferSize(self.window)
   return {u32(w), u32(h)}
 }
 
-// Content scale (DPI factor) of the window.
+// dpi_scale returns the content scale (DPI factor) of the window.
 dpi_scale :: proc(self: ^Platform) -> f32 {
   sw, sh := glfw.GetWindowContentScale(self.window)
   if sw != sh {

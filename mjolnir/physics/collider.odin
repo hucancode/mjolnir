@@ -4,20 +4,23 @@ import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
+// SphereCollider is a sphere of the given radius centered on the body.
 SphereCollider :: struct {
   radius: f32,
 }
 
+// BoxCollider is a box given by its half extents in body space.
 BoxCollider :: struct {
   half_extents: [3]f32,
 }
 
-// Axis is local Y.
+// CylinderCollider is a cylinder whose axis is local Y.
 CylinderCollider :: struct {
   radius: f32,
   height: f32,
 }
 
+// Collider is the shape of a Body: sphere, box or cylinder.
 Collider :: union {
   SphereCollider,
   BoxCollider,

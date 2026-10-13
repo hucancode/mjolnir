@@ -4,8 +4,7 @@ import "../../geometry"
 import "core:math/linalg"
 import "core:slice"
 
-// CPU mesh data in the renderer's vertex format: what render.create_mesh
-// uploads and the builtin primitives are built from.
+// Vertex is the renderer's vertex format.
 Vertex :: struct {
   position: [3]f32,
   normal:   [3]f32,
@@ -14,25 +13,27 @@ Vertex :: struct {
   tangent:  [4]f32, // xyz = tangent, w = handedness (for bitangent reconstruction)
 }
 
+// SkinningData holds the four joint indices and weights that deform one vertex.
 SkinningData :: struct {
   joints:  [4]u32,
   weights: [4]f32,
 }
 
+// Geometry is a CPU triangle mesh; skinnings is empty or parallel to vertices.
 Geometry :: struct {
   vertices:  []Vertex,
   skinnings: []SkinningData,
   indices:   []u32,
 }
 
+// make_geometry wraps vertices and indices into a Geometry, generating tangents if missing.
 make_geometry :: proc(
   vertices: []Vertex,
   indices: []u32,
   skinnings: []SkinningData = nil,
 ) -> Geometry {
-  // Calculate tangents if missing (all zeros)
+  // tangents are missing when all zero
   if len(vertices) > 0 && vertices[0].tangent == {} {
-    // Accumulate tangents per triangle
     for i in 0 ..< len(indices) / 3 {
       i0 := indices[i * 3 + 0]
       i1 := indices[i * 3 + 1]
@@ -53,15 +54,12 @@ make_geometry :: proc(
       det := linalg.cross(deltaUV1, deltaUV2)
       if abs(det) < 1e-12 do continue // degenerate UVs contribute no tangent
       tangent := (deltaUV2.y * edge1 - deltaUV1.y * edge2) / det
-      // Accumulate tangent
-      ids := [3]u32{i0, i1, i2}
+        ids := [3]u32{i0, i1, i2}
       for idx in ids {
         vertices[idx].tangent.xyz += tangent
       }
     }
-    // Normalize tangents and set handedness to +1. Vertices touching only
-    // degenerate triangles (sphere poles, cone tip) get any vector
-    // perpendicular to the normal.
+    // vertices touching only degenerate triangles (poles, cone tip) get any vector perpendicular to the normal
     for &v in vertices {
       tangent_vec := v.tangent.xyz
       if linalg.length2(tangent_vec) < 1e-12 {
@@ -76,17 +74,18 @@ make_geometry :: proc(
   return {vertices = vertices, skinnings = skinnings, indices = indices}
 }
 
+// delete_geometry frees the arrays of a Geometry.
 delete_geometry :: proc(geometry: Geometry) {
   delete(geometry.vertices)
   delete(geometry.skinnings)
   delete(geometry.indices)
 }
 
-// Bounding box of the vertex positions. Flat axes (a quad) are widened to
-// AABB_MIN_EXTENT so culling never sees a zero-thickness box.
+// flat axes are widened so culling never sees a zero-thickness box
 @(private)
 AABB_MIN_EXTENT :: 0.1
 
+// aabb_from_vertices returns the bounding box of the vertex positions, flat axes widened to AABB_MIN_EXTENT.
 aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: geometry.Aabb) {
   if len(vertices) == 0 {
     return
@@ -102,17 +101,15 @@ aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: geometry.Aabb) {
   return ret
 }
 
-// Vertex positions, for consumers that only need positions (physics,
-// navigation). Allocated with `allocator`.
+// positions returns the vertex positions, allocated with allocator.
 positions :: proc(self: Geometry, allocator := context.allocator) -> [][3]f32 {
   out := make([][3]f32, len(self.vertices), allocator)
   for v, i in self.vertices do out[i] = v.position
   return out
 }
 
-// Renderable geometry from a bare triangle mesh (an OBJ file, navmesh debug
-// triangles): smooth normals averaged from face normals, white color and
-// planar xz UVs. The input arrays are copied.
+// from_triangles builds renderable geometry from a bare triangle mesh: smooth normals,
+// white color and planar xz UVs. The input arrays are copied.
 from_triangles :: proc(positions: [][3]f32, indices: []u32) -> Geometry {
   n := len(positions)
   vertices := make([]Vertex, n)

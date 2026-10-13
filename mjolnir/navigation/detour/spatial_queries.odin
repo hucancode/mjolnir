@@ -5,12 +5,14 @@ import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 
+// Query_Filter selects polygons by include/exclude flags and weighs traversal by per-area cost.
 Query_Filter :: struct {
   area_cost:     [DT_MAX_AREAS]f32,
   include_flags: u16,
   exclude_flags: u16,
 }
 
+// Raycast_Hit is a raycast result: hit parameter t, wall normal and the polygons visited.
 Raycast_Hit :: struct {
   t:              f32,
   hit_normal:     [3]f32,
@@ -20,12 +22,12 @@ Raycast_Hit :: struct {
   path_cost:      f32,
 }
 
-@(private)
+@(private = "file")
 Raycast_Options :: enum u8 {
   Use_Costs = 0x01,
 }
 
-@(private)
+@(private = "file")
 Poly_Query :: struct {
   process:   proc(
     ref: Poly_Ref,
@@ -36,6 +38,7 @@ Poly_Query :: struct {
   user_data: rawptr,
 }
 
+// query_filter_init resets a filter to include all flags, exclude none and use unit area costs.
 query_filter_init :: proc(filter: ^Query_Filter) {
   filter.include_flags = 0xffff
   filter.exclude_flags = 0
@@ -75,7 +78,7 @@ query_filter_get_cost :: proc(
   return cost
 }
 
-// Find nearest polygon to given position
+// find_nearest_poly returns the polygon nearest to center within half_extents, and the closest point on it.
 find_nearest_poly :: proc(
   query: ^Nav_Mesh_Query,
   center: [3]f32,
@@ -128,6 +131,7 @@ find_nearest_poly :: proc(
   return {.Success}, nearest_ref, nearest_pt
 }
 
+// query_polygons collects polygons overlapping the box around center that pass the filter.
 query_polygons :: proc(
   query: ^Nav_Mesh_Query,
   center: [3]f32,
@@ -164,6 +168,7 @@ query_polygons :: proc(
   return {.Success}, poly_count
 }
 
+// raycast walks the mesh from start_pos toward end_pos and reports the first wall hit.
 raycast :: proc(
   query: ^Nav_Mesh_Query,
   start_ref: Poly_Ref,
@@ -285,8 +290,7 @@ raycast :: proc(
   return {.Success}, hit, path_count
 }
 
-// Find random point on navigation mesh
-@(private)
+@(private = "file")
 find_random_point :: proc(
   query: ^Nav_Mesh_Query,
   filter: ^Query_Filter,
@@ -296,8 +300,6 @@ find_random_point :: proc(
   ret: Status,
 ) {
   ref = INVALID_POLY_REF
-  // For simplicity, find first walkable polygon
-  // A full implementation would properly sample based on polygon areas
   for i in 0 ..< query.nav_mesh.max_tiles {
     tile := &query.nav_mesh.tiles[i]
     if tile.header == nil {
@@ -318,8 +320,7 @@ find_random_point :: proc(
   return
 }
 
-// Find random point around given position
-@(private)
+@(private = "file")
 find_random_point_around_circle :: proc(
   query: ^Nav_Mesh_Query,
   start_ref: Poly_Ref,
@@ -337,12 +338,7 @@ find_random_point_around_circle :: proc(
     ret = {.Invalid_Param}
     return
   }
-  // Proper random sampling: uniform distribution in circle using polar coordinates
-  // Use proper random number generation for non-deterministic results
-  // Generate random angle [0, 2pi)
   angle := math.PI * 2.0 * f64(rand.float32())
-  // Generate random radius with uniform area distribution
-  // sqrt ensures uniform point distribution (area scales with r²)
   radius_factor := f32(math.sqrt(f64(rand.float32())))
   radius := max_radius * radius_factor
   offset := [3]f32 {
@@ -351,13 +347,12 @@ find_random_point_around_circle :: proc(
     f32(math.sin(angle)) * radius,
   }
   target := start_pos + offset
-  // Find nearest polygon to target
   half_extents := [3]f32{max_radius, max_radius, max_radius}
   ret, ref, pt = find_nearest_poly(query, target, half_extents, filter)
   return
 }
 
-@(private)
+@(private = "file")
 query_polygons_in_tile :: proc(
   nav_mesh: ^Nav_Mesh,
   tile: ^Mesh_Tile,
@@ -390,7 +385,7 @@ query_polygons_in_tile :: proc(
   return count
 }
 
-@(private)
+@(private = "file")
 query_polygons_in_tile_bv :: proc(
   nav_mesh: ^Nav_Mesh,
   tile: ^Mesh_Tile,
@@ -445,6 +440,7 @@ query_polygons_in_tile_bv :: proc(
   return count
 }
 
+// closest_point_on_polygon returns the point of a tile polygon nearest to pos and whether pos is inside it.
 closest_point_on_polygon :: proc(
   tile: ^Mesh_Tile,
   poly: ^Poly,
@@ -479,6 +475,7 @@ closest_point_on_polygon :: proc(
   return closest, false
 }
 
+// get_poly_height returns the surface height of polygon ref.
 get_poly_height :: proc(
   query: ^Nav_Mesh_Query,
   ref: Poly_Ref,
@@ -523,6 +520,7 @@ get_poly_height :: proc(
   return center.y, {.Success}
 }
 
+// find_distance_to_wall finds the nearest wall within max_radius of center_pos.
 find_distance_to_wall :: proc(
   query: ^Nav_Mesh_Query,
   start_ref: Poly_Ref,
@@ -602,7 +600,7 @@ find_distance_to_wall :: proc(
   return hit_dist, hit_pos, hit_normal, {.Success}
 }
 
-// Find local neighborhood of polygons
+// find_local_neighbourhood collects polygons reachable within radius of center.
 find_local_neighbourhood :: proc(
   query: ^Nav_Mesh_Query,
   start_ref: Poly_Ref,
@@ -620,10 +618,8 @@ find_local_neighbourhood :: proc(
     return 0, {.Invalid_Param}
   }
   result_count = 0
-  // Use a simple flood fill within radius
   visited := make(map[Poly_Ref]bool)
   defer delete(visited)
-  // Queue for BFS
   queue := make([]struct {
       ref:    Poly_Ref,
       parent: Poly_Ref,
@@ -640,16 +636,13 @@ find_local_neighbourhood :: proc(
       cur.ref,
     )
     if !status_succeeded(poly_status) do continue
-    // Check if polygon center is within radius
     center := calc_poly_center(tile, poly)
     if linalg.length2(center - center_pos) > radius * radius {
       continue
     }
-    // Add to results
     result_ref[result_count] = cur.ref
     result_parent[result_count] = cur.parent
     result_count += 1
-    // Check all neighbors
     for i in 0 ..< int(poly.vert_count) {
       poly_idx := get_poly_index(query.nav_mesh, cur.ref)
       link := get_first_link(tile, i32(poly_idx))
@@ -682,7 +675,7 @@ find_local_neighbourhood :: proc(
   return result_count, {.Success}
 }
 
-// Find polygons within circular area using Dijkstra search
+// find_polys_around_circle collects polygons overlapping a circle, using Dijkstra search.
 find_polys_around_circle :: proc(
   query: ^Nav_Mesh_Query,
   start_ref: Poly_Ref,
@@ -700,7 +693,6 @@ find_polys_around_circle :: proc(
   if !is_valid_poly_ref(query.nav_mesh, start_ref) || max_result <= 0 {
     return 0, {.Invalid_Param}
   }
-  // Check if result arrays have sufficient capacity
   if i32(len(result_ref)) < max_result ||
      i32(len(result_parent)) < max_result ||
      i32(len(result_cost)) < max_result {
@@ -708,10 +700,8 @@ find_polys_around_circle :: proc(
   }
   result_count = 0
   radius_sqr := radius * radius
-  // Clear node pool for search
   pathfinding_context_clear(&query.pf_context)
   node_queue_clear(&query.open_list)
-  // Initialize start node
   start_node := create_node(&query.pf_context, start_ref)
   if start_node == nil {
     return 0, {.Out_Of_Nodes}
@@ -734,19 +724,17 @@ find_polys_around_circle :: proc(
     &query.open_list,
     {start_ref, start_node.cost, start_node.total},
   )
-  // Dijkstra search with iteration limit to prevent hanging
-  MAX_ITERATIONS :: 100 // Much smaller limit for circle search
+  MAX_ITERATIONS :: 100
   it := 0
   for !node_queue_empty(&query.open_list) && it < MAX_ITERATIONS {
     it += 1
-    if result_count >= max_result do break // Found enough results
+    if result_count >= max_result do break
     best := node_queue_pop(&query.open_list)
     if best.ref == INVALID_POLY_REF do break
     current := get_node(&query.pf_context, best.ref)
     if current == nil || .Closed in current.flags do continue
     current.flags |= {.Closed}
     current.flags &= ~{.Open}
-    // Check if within radius
     dist_sqr := linalg.length2(current.pos - center_pos)
     if dist_sqr <= radius_sqr {
       if result_count < max_result {
@@ -756,7 +744,6 @@ find_polys_around_circle :: proc(
         result_count += 1
       }
     }
-    // Expand neighbors
     cur_tile, cur_poly, cur_status := get_tile_and_poly_by_ref(
       query.nav_mesh,
       current.id,
@@ -810,7 +797,7 @@ find_polys_around_circle :: proc(
   return result_count, {.Success}
 }
 
-// Find polygons within convex shape using Dijkstra search
+// find_polys_around_shape collects polygons overlapping a convex shape, using Dijkstra search.
 find_polys_around_shape :: proc(
   query: ^Nav_Mesh_Query,
   start_ref: Poly_Ref,
@@ -830,14 +817,11 @@ find_polys_around_shape :: proc(
     return 0, {.Invalid_Param}
   }
   result_count = 0
-  // Calculate shape center
   center: [3]f32
   for vert in verts do center += vert
   center /= f32(len(verts))
-  // Clear node pool for search
   pathfinding_context_clear(&query.pf_context)
   node_queue_clear(&query.open_list)
-  // Initialize start node
   start_node := create_node(&query.pf_context, start_ref)
   if start_node == nil do return 0, {.Out_Of_Nodes}
   start_tile, start_poly, poly_status := get_tile_and_poly_by_ref(
@@ -854,7 +838,6 @@ find_polys_around_shape :: proc(
     &query.open_list,
     {start_ref, start_node.cost, start_node.total},
   )
-  // Dijkstra search
   for !node_queue_empty(&query.open_list) {
     best := node_queue_pop(&query.open_list)
     if best.ref == INVALID_POLY_REF do break
@@ -864,7 +847,6 @@ find_polys_around_shape :: proc(
     }
     current.flags |= {.Closed}
     current.flags &= ~{.Open}
-    // Check if within shape
     if geometry.point_in_polygon_2d(current.pos, verts) {
       if result_count < max_result {
         result_ref[result_count] = current.id
@@ -873,7 +855,6 @@ find_polys_around_shape :: proc(
         result_count += 1
       }
     }
-    // Expand neighbors
     cur_tile, cur_poly, cur_status := get_tile_and_poly_by_ref(
       query.nav_mesh,
       current.id,
@@ -928,7 +909,7 @@ find_polys_around_shape :: proc(
   return result_count, {.Success}
 }
 
-// Get path from Dijkstra search results
+// get_path_from_dijkstra_search returns the polygon path from the search start to end_ref.
 get_path_from_dijkstra_search :: proc(
   query: ^Nav_Mesh_Query,
   end_ref: Poly_Ref,
@@ -954,7 +935,7 @@ get_path_from_dijkstra_search :: proc(
   return result_path_count, result_status
 }
 
-// Get wall segments for polygon
+// get_poly_wall_segments returns the non-portal edges of a polygon.
 get_poly_wall_segments :: proc(
   query: ^Nav_Mesh_Query,
   ref: Poly_Ref,
@@ -976,11 +957,10 @@ get_poly_wall_segments :: proc(
   for i in 0 ..< min(int(max_segments), int(poly.vert_count)) {
     va := tile.verts[poly.verts[i]]
     vb := tile.verts[poly.verts[(i + 1) % int(poly.vert_count)]]
-    // Find neighbor across this edge
     neighbor_ref := INVALID_POLY_REF
     link := poly.first_link
     link_iterations := 0
-    max_link_iterations := 32 // Safety limit to prevent infinite loops
+    max_link_iterations := 32
     for link != DT_NULL_LINK && link_iterations < max_link_iterations {
       link_iterations += 1
       if get_link_edge(tile, link) == u8(i) {
@@ -1002,7 +982,6 @@ get_poly_wall_segments :: proc(
       }
       link = get_next_link(tile, link)
     }
-    // Store segment
     segment_verts[segment_count] = {va.x, va.y, va.z, vb.x, vb.y, vb.z}
     segment_refs[segment_count] = neighbor_ref
     segment_count += 1
@@ -1010,8 +989,7 @@ get_poly_wall_segments :: proc(
   return segment_count, {.Success}
 }
 
-// Check if polygon is in closed list during pathfinding
-@(private)
+@(private = "file")
 is_in_closed_list :: proc(
   query: ^Nav_Mesh_Query,
   ref: Poly_Ref,

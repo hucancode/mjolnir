@@ -5,13 +5,9 @@ import "core:slice"
 import "core:sync"
 import vk "vendor:vulkan"
 
-// Uploads are written into host-visible staging blocks and recorded in bulk at
-// the start of the next command buffer by record_uploads, so uploading never
-// allocates per upload nor waits on the GPU. A block keeps taking uploads
-// until a recording drains it, then rests until no frame in flight can still
-// read it.
+@(private = "file")
 STAGING_BLOCK_SIZE :: 8 * 1024 * 1024
-// Satisfies the buffer-to-image offset rule of every color format.
+// satisfies the buffer-to-image offset rule of every color format
 @(private = "file")
 STAGING_ALIGNMENT :: 16
 
@@ -29,8 +25,7 @@ PendingCopy :: struct {
   region:   vk.BufferCopy,
 }
 
-// Mip 0 of `image` comes from `src` at `offset`; the other mips are blitted
-// down from it.
+// mip 0 comes from `src` at `offset`; the other mips are blitted down from it
 @(private)
 PendingImage :: struct {
   src:        vk.Buffer,
@@ -48,6 +43,8 @@ PendingFill :: struct {
   value:        u32,
 }
 
+// Uploads is the pending staged-write state of a GPUContext. Writes go into host-visible
+// staging blocks and are recorded in bulk by record_uploads, so uploading never waits on the GPU.
 Uploads :: struct {
   blocks: [dynamic]StagingBlock,
   copies: [dynamic]PendingCopy,
@@ -55,12 +52,10 @@ Uploads :: struct {
   images: [dynamic]PendingImage,
   // fresh images to move out of UNDEFINED
   inits:  [dynamic]ImageDiscard,
-  // queuing may happen on any thread; record_uploads drains on the render
-  // thread
+  // queuing may happen on any thread; record_uploads drains on the render thread
   mutex:  sync.Mutex,
 }
 
-// `size` bytes of staging memory for the next recording.
 @(private = "file")
 staging_alloc :: proc(
   gctx: ^GPUContext,
@@ -87,8 +82,7 @@ staging_alloc :: proc(
   return block.buffer.buffer, 0, block.buffer.mapped, .SUCCESS
 }
 
-// Stage `data` for `buffer` at element `index` (in elements of T). The copy lands when the next
-// command buffer records its uploads.
+// queue_buffer_write stages data for buffer at element index (in elements of T); the copy lands in the next recorded command buffer.
 queue_buffer_write :: proc(
   gctx: ^GPUContext,
   buffer: ^Buffer,
@@ -115,9 +109,8 @@ queue_buffer_write :: proc(
   return .SUCCESS
 }
 
-// Fill `size` bytes of `buffer` from byte `offset` with the u32 `value` on the
-// GPU when the next command buffer records its uploads. The range must not
-// overlap a queued write to the same buffer.
+// queue_buffer_fill fills size bytes of buffer from byte offset with the u32 value, in the next recorded command buffer.
+// The range must not overlap a queued write to the same buffer.
 queue_buffer_fill :: proc(
   gctx: ^GPUContext,
   buffer: ^Buffer,
@@ -129,9 +122,7 @@ queue_buffer_fill :: proc(
   append(&gctx.uploads.fills, PendingFill{buffer.buffer, offset, size, value})
 }
 
-// Stage `size` bytes of `data` as mip 0 of `img` and the rest of its mip
-// chain blitted down from it. The image is written when the next command
-// buffer records its uploads.
+// queue_image_write stages size bytes of data as mip 0 of img, the rest of the chain blitted down, in the next recorded command buffer.
 queue_image_write :: proc(
   gctx: ^GPUContext,
   img: ^Image,
@@ -155,17 +146,14 @@ queue_image_write :: proc(
   return .SUCCESS
 }
 
-// Move a fresh image out of UNDEFINED, ready for `init.access` at
-// `init.stage`, when the next command buffer records its uploads.
+// queue_image_init moves a fresh image out of UNDEFINED in the next recorded command buffer.
 queue_image_init :: proc(gctx: ^GPUContext, init: ImageDiscard) {
   sync.mutex_guard(&gctx.uploads.mutex)
   append(&gctx.uploads.inits, init)
 }
 
-// Record every queued image init, then every queued upload: the fills, one
-// copy command per staging block and destination buffer, one copy per image,
-// then each mip level of every image in one batch. Everything is made visible
-// to vertex input, indirect reads and shader access.
+// record_uploads records every queued image init and upload into cmd, and makes them visible
+// to vertex input, indirect reads and shader access. Call once per command buffer on the render thread.
 record_uploads :: proc(gctx: ^GPUContext, cmd: vk.CommandBuffer) {
   u := &gctx.uploads
   sync.mutex_guard(&u.mutex)
@@ -224,7 +212,6 @@ record_image_uploads :: proc(cmd: vk.CommandBuffer, images: []PendingImage) {
     vk.CmdCopyBufferToImage(cmd, img.src, img.image, .GENERAL, 1, &region)
   }
   for level in 1 ..< max_mips {
-    // The previous level's writes land before this level's blits read them.
     memory_barrier(cmd, {.TRANSFER_WRITE}, {.TRANSFER_READ}, {.TRANSFER}, {.TRANSFER})
     for img in images {
       if level >= img.mip_levels do continue
@@ -241,8 +228,7 @@ record_image_uploads :: proc(cmd: vk.CommandBuffer, images: []PendingImage) {
   }
 }
 
-// Drop queued uploads that were never recorded. Use only when no frame is in
-// flight.
+// only when no frame is in flight
 @(private)
 discard_uploads :: proc(gctx: ^GPUContext) {
   sync.mutex_guard(&gctx.uploads.mutex)

@@ -4,6 +4,7 @@ import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
+// RayHit is a raycast result; hit is false when nothing was hit.
 RayHit :: struct {
   body:   BodyHandle,
   t:      f32,
@@ -41,7 +42,7 @@ raycast_candidates :: proc(
   return
 }
 
-// Closest body hit by the ray; first_hit = true returns the first hit found
+// raycast returns the closest body hit by the ray; first_hit = true returns the first hit found
 // instead (early exit). Sensors are not hit.
 raycast :: proc(
   self: ^World,
@@ -60,7 +61,7 @@ raycast :: proc(
   return closest
 }
 
-// Bodies whose collider overlaps `collider` placed at position/rotation.
+// overlap collects the bodies whose collider overlaps `collider` placed at position/rotation.
 // Sensors are not reported. Appends to `results` after clearing it.
 overlap :: proc(
   self: ^World,
@@ -159,7 +160,6 @@ raycast_local_cylinder :: proc(
     return 0, -linalg.normalize(ray.direction), true
   }
   t = max(f32)
-  // Caps
   if math.abs(ray.direction.y) > 1e-8 {
     for side in ([2]f32{-1, 1}) {
       s := (side * half_h - ray.origin.y) / ray.direction.y

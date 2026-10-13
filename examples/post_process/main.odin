@@ -1,3 +1,4 @@
+// Bloom, DoF, fog, tonemap, outline, crosshatch.
 package main
 
 import "../../mjolnir"

@@ -1,3 +1,4 @@
+// Character controller, movement are powered by physics engine.
 package main
 
 import "../../mjolnir"

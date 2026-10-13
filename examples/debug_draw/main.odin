@@ -1,3 +1,4 @@
+// Line-strip primitives and debug bone overlay.
 package main
 
 import "../../mjolnir"

@@ -12,15 +12,10 @@ record_compute_commands :: proc(
   frame_index: u32,
   cmd: vk.CommandBuffer,
 ) {
-  // Compute for frame N builds pyramid[N] from frame N-1's depth and writes
-  // the draw lists of frame N+1, culled against pyramid[N].
+  // frame N builds pyramid[N] from N-1's depth and writes N+1's draw lists
   next_frame_index := (frame_index + 1) % gpu.FRAMES_IN_FLIGHT
   prev_frame_index := (frame_index + gpu.FRAMES_IN_FLIGHT - 1) % gpu.FRAMES_IN_FLIGHT
-  // Frame N-1's depth writes land before the pyramids read them, and the
-  // draws of the lists finish before they are cleared: the compute
-  // submission waits for graphics N-1 (gpu.submit_queue_and_present).
-  // Every camera's pyramid and list clear, then one cull over every camera
-  // slot; an empty slot's view draws nothing.
+  // ordering against graphics N-1 is in gpu.submit_queue_and_present
   vk.CmdBindPipeline(cmd, .COMPUTE, self.pipelines[.DEPTH_REDUCE])
   c: u32
   for i in cont.slots_next(&self.camera_slots, &c) {
@@ -45,10 +40,8 @@ record_compute_commands :: proc(
   occlusion_cull(self, cmd, CAMERA_VIEW_BASE + 1, self.camera_slots.high_water - 1)
 }
 
-// Record every camera's passes phase by phase, so one barrier orders each
-// phase after the previous one for every camera: G-buffer, lighting, then
-// forward (particles and transparency). Render scopes cannot hold barriers,
-// so the passes record only their scopes.
+// Phase by phase across cameras (G-buffer, lighting, forward) so one barrier
+// serves every camera; render scopes cannot hold barriers.
 @(private)
 record_camera_passes :: proc(self: ^Renderer, frame_index: u32) {
   cmd := self.command_buffers[frame_index]
@@ -59,14 +52,12 @@ record_camera_passes :: proc(self: ^Renderer, frame_index: u32) {
     for a in AttachmentType do append(&discards, gpu.attachment_discard(texture_image(self, cam.attachments[a][frame_index])))
   }
   if len(discards) == 0 do return
-  // The draw lists written by culling become indirect arguments.
   indirect_barrier(cmd)
-  // Last frame's lit images, which a material may sample (render to texture).
+  // render-to-texture: a material may sample last frame's lit image
   gpu.memory_barrier(cmd, {.COLOR_ATTACHMENT_WRITE}, {.SHADER_READ}, {.COLOR_ATTACHMENT_OUTPUT}, {.FRAGMENT_SHADER})
   gpu.image_discard_barrier(cmd, ..discards[:])
   c = 0
   for i in cont.slots_next(&self.camera_slots, &c) do material_pass_record(self, frame_index, i, &self.cameras[i], .GBUFFER)
-  // G-buffer and depth writes reach the lighting shaders and depth tests.
   gpu.memory_barrier(
     cmd,
     {.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
@@ -76,8 +67,6 @@ record_camera_passes :: proc(self: ^Renderer, frame_index: u32) {
   )
   c = 0
   for i in cont.slots_next(&self.camera_slots, &c) do lighting_record(self, frame_index, i, &self.cameras[i])
-  // The lit color reaches the forward blend; the previous frame's
-  // simulation wrote the particles the forward pass draws.
   gpu.memory_barrier(
     cmd,
     {.SHADER_WRITE, .COLOR_ATTACHMENT_WRITE},
@@ -94,7 +83,6 @@ record_camera_passes :: proc(self: ^Renderer, frame_index: u32) {
   )
   c = 0
   for i in cont.slots_next(&self.camera_slots, &c) do material_pass_record(self, frame_index, i, &self.cameras[i], .FORWARD)
-  // Depth reaches the depth pyramid build of the next compute work.
   gpu.memory_barrier(
     cmd,
     {.DEPTH_STENCIL_ATTACHMENT_WRITE},
@@ -104,11 +92,7 @@ record_camera_passes :: proc(self: ^Renderer, frame_index: u32) {
   )
 }
 
-// record_frame drives the entire per-frame command sequence: shadow maps,
-// per-camera passes (geometry, lighting, forward: particles and transparency), debug,
-// post-process, the 2D overlay (UI + debug UI), async compute, and the
-// final swapchain transition to PRESENT_SRC — the one layout transition
-// unified image layouts doesn't cover (the compositor is outside Vulkan).
+// PRESENT_SRC is the one layout transition unified image layouts do not cover.
 @(private)
 record_frame :: proc(self: ^Renderer, frame_index: u32, debug_ui_enabled: bool) -> vk.Result {
   cmd := self.command_buffers[frame_index]
@@ -125,7 +109,6 @@ record_frame :: proc(self: ^Renderer, frame_index: u32, debug_ui_enabled: bool) 
   main_cam, has_main := main_camera(self)
   if has_main {
     draw_lists_copy_counts(&main_cam.draws, cmd, frame_index, &self.draw_count_readback[frame_index])
-    // The lit image reaches post-processing, which writes the swapchain image.
     gpu.memory_barrier(cmd, {.COLOR_ATTACHMENT_WRITE}, {.SHADER_READ}, {.COLOR_ATTACHMENT_OUTPUT}, {.FRAGMENT_SHADER})
     gpu.image_discard_barrier(
       cmd,
@@ -142,14 +125,12 @@ record_frame :: proc(self: ^Renderer, frame_index: u32, debug_ui_enabled: bool) 
     )
   }
   overlay_record(self, cmd, swapchain_view, sc.extent, frame_index, has_main, debug_ui_enabled)
-  // Staged commands point into caller memory valid for this frame only.
+  // staged commands point into caller memory valid for this frame only
   self.ui.commands = nil
 
-  // Simulate after drawing: the next frame draws this frame's particles.
+  // after drawing: the next frame draws what this simulates
   particles_simulate(self, cmd)
-  // Culling and the depth pyramid in their own submission, on the async
-  // compute queue when there is one (ordering in
-  // gpu.submit_queue_and_present).
+  // separate submission, on the async compute queue when there is one
   compute_cmd := self.compute_command_buffers[frame_index]
   gpu.begin_record(compute_cmd) or_return
   bind_scene_sets(self, compute_cmd, .COMPUTE, frame_index)
@@ -178,13 +159,9 @@ record_frame :: proc(self: ^Renderer, frame_index: u32, debug_ui_enabled: bool) 
   return .SUCCESS
 }
 
-// Render and present one frame: close the debug UI opened by debug_ui (plus
-// the stats panel when `show_stats`), advance deferred destruction, write
-// this frame's render-generated tables, acquire a swapchain image, record,
-// submit and present. Then hand off: wait until the GPU is done with the
-// next frame's tables and carry this frame's writes over into them, so the
-// write frame is never in flight. An out-of-date swapchain is rebuilt at
-// `framebuffer_size`. Renders nothing while no level is set up. Returns
+// frame renders and presents one frame, closing the debug UI opened by debug_ui
+// (plus a stats panel when show_stats). An out-of-date swapchain is rebuilt at
+// framebuffer_size. It renders nothing while no level is set up, and returns
 // false on a GPU error.
 frame :: proc(
   self: ^Renderer,
@@ -193,13 +170,11 @@ frame :: proc(
   show_stats := false,
 ) -> bool {
   gctx := &self.gctx
-  // the write frame: the hand-off after the previous submission waited for it
   frame_index := write_frame(self)
   if show_stats do stats_panel(self)
   debug_ui_drawn := debug_ui_close(self)
   if !self.level_ready do return true
-  // Writers stay out until the next write frame is ready: from here until
-  // the hand-off the GPU may read this frame's tables.
+  // until hand_off the GPU may read this frame's tables
   sync.recursive_mutex_lock(&self.mutex)
   defer sync.recursive_mutex_unlock(&self.mutex)
   tick_resource_pools(self)

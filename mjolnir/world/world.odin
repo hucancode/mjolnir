@@ -5,6 +5,7 @@ import "../geometry"
 import "core:math/linalg"
 import "core:slice"
 
+// Node is one scene-graph entry: links, local transform, visibility and user tags.
 Node :: struct {
   parent:         NodeHandle,
   children:       [dynamic]NodeHandle,
@@ -30,15 +31,13 @@ NodeChange :: struct {
   visible:      bool, // own visibility and every ancestor's
 }
 
-// What changed during the last `update`. Consumers (renderers, audio, net)
-// read it after update; the next update replaces it. Node indices are stable
-// for a node's lifetime and safe to use as external slot ids.
-@(private)
+// ChangeFeed is what the last `update` changed; the next update replaces it.
 ChangeFeed :: struct {
   changed: [dynamic]NodeChange,
   removed: [dynamic]u32,
 }
 
+// World is the scene graph. Set up with init, free with shutdown.
 World :: struct {
   root:             NodeHandle,
   nodes:           cont.Pool(Node),
@@ -48,10 +47,12 @@ World :: struct {
   pending_removed: [dynamic]u32,
 }
 
+// node returns the node behind `h`; false when stale.
 node :: proc(w: ^World, h: NodeHandle) -> (^Node, bool) #optional_ok {
   return cont.get(w.nodes, h)
 }
 
+// valid reports whether `h` refers to a live node.
 valid :: proc(w: ^World, h: NodeHandle) -> bool {
   return cont.is_valid(w.nodes, h)
 }
@@ -62,14 +63,14 @@ node_count :: proc(w: ^World) -> int {
   return cont.count(w.nodes)
 }
 
-// Set user tag bits on a node. Returns false if node not found.
+// tag sets user tag bits on a node; false if the node is not found.
 tag :: proc(world: ^World, handle: NodeHandle, bits: u32) -> bool {
   node := cont.get(world.nodes, handle) or_return
   node.tags |= bits
   return true
 }
 
-// Clear user tag bits on a node. Returns false if node not found.
+// untag clears user tag bits on a node; false if the node is not found.
 untag :: proc(world: ^World, handle: NodeHandle, bits: u32) -> bool {
   node := cont.get(world.nodes, handle) or_return
   node.tags &~= bits
@@ -121,6 +122,7 @@ attach :: proc(nodes: cont.Pool(Node), parent_handle, child_handle: NodeHandle) 
   }
 }
 
+// spawn creates a node under the world root.
 spawn :: proc(
   self: ^World,
   position: [3]f32 = {0, 0, 0},
@@ -132,6 +134,7 @@ spawn :: proc(
   return spawn_child(self, self.root, position, name)
 }
 
+// spawn_child creates a node under `parent`.
 spawn_child :: proc(
   self: ^World,
   parent: NodeHandle,
@@ -150,6 +153,7 @@ spawn_child :: proc(
   return handle, true
 }
 
+// init prepares `world` with its root node; false when the pool cannot allocate.
 init :: proc(world: ^World) -> bool {
   cont.init(&world.nodes, MAX_NODES_IN_SCENE, RETIRE_GRACE)
   root: ^Node
@@ -159,7 +163,7 @@ init :: proc(world: ^World) -> bool {
   return true
 }
 
-// Advance one tick: recompute world transforms and fill the change feed.
+// update advances one tick: recomputes world transforms and fills the change feed.
 update :: proc(world: ^World) {
   clear(&world.feed.changed)
   clear(&world.feed.removed)
@@ -169,14 +173,18 @@ update :: proc(world: ^World) {
   traverse(world)
 }
 
+// changed_nodes lists nodes whose world transform or visibility changed in the
+// last update. Node indices are stable for a node's lifetime: safe as external slot ids.
 changed_nodes :: proc(world: ^World) -> []NodeChange {
   return world.feed.changed[:]
 }
 
+// removed_nodes lists indices of nodes despawned since the previous update.
 removed_nodes :: proc(world: ^World) -> []u32 {
   return world.feed.removed[:]
 }
 
+// shutdown frees everything `world` owns.
 shutdown :: proc(world: ^World) {
   cont.flush(&world.nodes, nil, node_retire)
   cont.destroy(&world.nodes, node_destroy)
@@ -186,9 +194,8 @@ shutdown :: proc(world: ^World) {
   delete(world.pending_removed)
 }
 
-// Despawn every node under root. Slots are reclaimed immediately and the
-// removals are not reported: consumers keyed by node index must reset their
-// own slots alongside.
+// teardown despawns every node under root. Slots are reclaimed immediately and
+// removals are not reported: index-keyed consumers must reset their own slots.
 teardown :: proc(world: ^World) {
   root := cont.get(world.nodes, world.root)
   if root == nil do return
@@ -206,8 +213,7 @@ teardown :: proc(world: ^World) {
   clear(&world.feed.removed)
 }
 
-// Despawn a node and all its children recursively. Removals are reported by
-// the next update's `removed_nodes`.
+// despawn removes a node and its descendants; removed_nodes reports them after the next update.
 despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
   node := cont.get(world.nodes, handle) or_return
   detach(world.nodes, handle)
@@ -279,8 +285,8 @@ traverse :: proc(world: ^World) {
   }
 }
 
-// Place a node so its world pose is (position, rotation), whatever its
-// parent. Scale is kept.
+// set_world_pose places a node at a world (position, rotation) whatever its
+// parent; scale is kept.
 set_world_pose :: proc(
   world: ^World,
   handle: NodeHandle,
@@ -303,18 +309,20 @@ set_world_pose :: proc(
   node.transform.is_dirty = true
 }
 
-// Set a node's local transform from a matrix (decomposed into TRS).
+// set_local_matrix sets a node's local transform from a matrix (decomposed into TRS).
 set_local_matrix :: proc(world: ^World, handle: NodeHandle, m: matrix[4, 4]f32) {
   position, rotation, scale := geometry.decompose_matrix(m)
   set_local(world, handle, position, rotation, scale)
 }
 
+// world_matrix returns a node's world matrix as of the last update; identity when stale.
 world_matrix :: proc(world: ^World, handle: NodeHandle) -> matrix[4, 4]f32 {
   node, ok := cont.get(world.nodes, handle)
   if !ok do return linalg.MATRIX4F32_IDENTITY
   return node.transform.world_matrix
 }
 
+// set_visible shows or hides a node and its subtree.
 set_visible :: proc(world: ^World, handle: NodeHandle, visible: bool) {
   node := cont.get(world.nodes, handle)
   if node == nil do return

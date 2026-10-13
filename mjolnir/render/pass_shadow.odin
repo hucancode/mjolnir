@@ -4,24 +4,24 @@ package render
 import "gpu"
 import vk "vendor:vulkan"
 
+@(private = "file")
 SHADOW_DEPTH_VERT :: #load("shader/shadow/vert.spv")
+@(private = "file")
 SHADOW_MAP_FORMAT :: vk.Format.D32_SFLOAT
+@(private = "file")
 SHADOW_SLOPE_BIAS :: 1.5
 
-// Node flags of a shadow caster; its material type also needs to be in
-// GBUFFER_TYPES.
+// the material type must also be in GBUFFER_TYPES
+@(private)
 SHADOW_CASTER_FLAGS :: NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
 
-// One cull dispatch per frame tests every node against every shadow view
-// (views from SHADOW_VIEW_BASE) and appends the visible casters to one draw
-// list, each draw tagged with its view; one layered draw then renders every
-// view into its atlas layer. A frame's shadow atlas is a 2D depth array with
-// one layer per shadow view; a map takes SHADOW_FACE_COUNT[type] layers.
-
+// One cull dispatch tests every node against every shadow view and appends the visible
+// casters to one draw list; one layered draw renders every view into its atlas layer.
 // Draw tags: first_instance = node | view << 16.
 #assert(MAX_NODES_IN_SCENE <= 1 << 16)
 #assert(MAX_VIEWS < 1 << 16)
 
+@(private)
 shadow_atlas_create :: proc(gctx: ^gpu.GPUContext, layers: u32) -> (gpu.Image, vk.Result) {
   return gpu.image_create(
     gctx,
@@ -33,9 +33,8 @@ shadow_atlas_create :: proc(gctx: ^gpu.GPUContext, layers: u32) -> (gpu.Image, v
   )
 }
 
-// Grow frame `frame_index`'s atlas to hold `layers` layers, doubling up to
-// MAX_SHADOW_VIEWS, and rebind it. Called by flush, after the
-// frame's previous submission is done with it.
+// Doubles up to MAX_SHADOW_VIEWS and rebinds. Call once the frame's previous submission is done.
+@(private)
 shadow_atlas_reserve :: proc(r: ^Renderer, frame_index: u32, layers: u32) -> vk.Result {
   atlas := &r.shadow_atlas[frame_index]
   if layers <= atlas.layers do return .SUCCESS
@@ -46,6 +45,7 @@ shadow_atlas_reserve :: proc(r: ^Renderer, frame_index: u32, layers: u32) -> vk.
   return .SUCCESS
 }
 
+@(private)
 shadow_init :: proc(r: ^Renderer) -> vk.Result {
   draw_lists_init(&r.shadow_draws, r, SHADOW_DRAW_SLOT_BASE, 1, SHADOW_MAX_DRAWS) or_return
   r.pipelines[.SHADOW_DEPTH] = gpu.create_graphics_pipeline(
@@ -66,20 +66,14 @@ shadow_init :: proc(r: ^Renderer) -> vk.Result {
   return .SUCCESS
 }
 
-// Render every shadow map of this frame: cull every node against every shadow
-// view (written by collect_lights) in one dispatch, then draw the combined
-// list into the atlas in one layered draw. The maps are packed from layer 0,
-// so the views cover exactly the layers in use.
+@(private)
 shadow_record :: proc(r: ^Renderer, frame_index: u32) {
   cmd := r.command_buffers[frame_index]
   atlas := &r.shadow_atlas[frame_index]
-  // Every layer leaves UNDEFINED, including when nothing renders: lighting
-  // binds the whole atlas.
+  // lighting binds the whole atlas, so every layer leaves UNDEFINED even when nothing renders
   gpu.image_discard_barrier(cmd, gpu.attachment_discard(atlas))
   view_count := r.shadow_view_count
   if view_count == 0 do return
-  // Earlier draws of this list finish before the clear, the clear before the
-  // cull.
   gpu.memory_barrier(cmd, {}, {}, {.DRAW_INDIRECT}, {.TRANSFER})
   draw_lists_clear(&r.shadow_draws, cmd, frame_index)
   gpu.memory_barrier(cmd, {.TRANSFER_WRITE}, {.SHADER_READ, .SHADER_WRITE}, {.TRANSFER}, {.COMPUTE_SHADER})

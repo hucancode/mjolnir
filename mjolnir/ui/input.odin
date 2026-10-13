@@ -3,8 +3,9 @@ package ui
 import cont "../containers"
 import "../input"
 
-// The topmost shown node under `point`, inside its clip, that is interactive
+// pick returns the topmost shown node under `point`, inside its clip, that is interactive
 // or sits inside an interactive node; none when there is no such node.
+@(private)
 pick :: proc(self: ^UI, point: [2]f32) -> NodeHandle {
   #reverse for h in self.draw_order {
     if !contains(self.rects[h.index], point) || !contains(self.clips[h.index], point) do continue
@@ -22,7 +23,7 @@ contains :: proc(r: Rect, p: [2]f32) -> bool {
   return p.x >= r.pos.x && p.y >= r.pos.y && p.x <= r.pos.x + r.size.x && p.y <= r.pos.y + r.size.y
 }
 
-// Run one input tick against the last layout: hovered is the picked node; a
+// update_input runs one input tick against the last layout: hovered is the picked node; a
 // press makes it pressed (until every button releases) and focuses its
 // nearest focusable node, or clears focus over nothing; releasing over the
 // pressed node clicks it. Captures the mouse while a node is hovered or
@@ -53,23 +54,23 @@ update_input :: proc(self: ^UI, s: ^input.State) {
   if self.focused != {} do s.keyboard_captured = true
 }
 
-// Whether the cursor is over `h` or a node inside it.
+// hovered reports whether the cursor is over `h` or a node inside it.
 hovered :: proc(self: ^UI, h: NodeHandle) -> bool {
   return within(self, self.hovered, h)
 }
 
-// Whether the node held down is `h` or inside it.
+// pressed reports whether the node held down is `h` or inside it.
 pressed :: proc(self: ^UI, h: NodeHandle) -> bool {
   return within(self, self.pressed, h)
 }
 
-// Whether this tick released a press made on `h` (or inside it) over the
+// clicked reports whether this tick released a press made on `h` (or inside it) over the
 // same node.
 clicked :: proc(self: ^UI, h: NodeHandle) -> bool {
   return within(self, self.clicked, h)
 }
 
-// Whether `h` or a node inside it has keyboard focus. Read keys and text
+// focused reports whether `h` or a node inside it has keyboard focus. Read keys and text
 // from input.State while it does.
 focused :: proc(self: ^UI, h: NodeHandle) -> bool {
   return within(self, self.focused, h)

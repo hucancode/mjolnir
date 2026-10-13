@@ -2,13 +2,14 @@ package animation
 
 import "core:math/linalg"
 
+// Interpolation selects how a Track blends between keys.
 Interpolation :: enum u8 {
   LINEAR,
   STEP,
   CUBIC,
 }
 
-// Keyframed curve of any value over flat arrays. A track does not own its
+// Track is a keyframed curve of any value over flat arrays. A track does not own its
 // memory; it is a view (into a Clip, or into caller arrays).
 // CUBIC stores three values per key: in-tangent, value, out-tangent.
 Track :: struct($T: typeid) {
@@ -17,6 +18,7 @@ Track :: struct($T: typeid) {
   interpolation: Interpolation,
 }
 
+@(private)
 track_duration :: proc(track: Track($T)) -> f32 {
   return track.times[len(track.times) - 1] if len(track.times) > 0 else 0
 }
@@ -28,6 +30,7 @@ track_value :: #force_inline proc(track: Track($T), key: int) -> T {
 
 // Value of `track` at time `t`, clamped to the first and last key.
 // Returns `fallback` for an empty track.
+@(private)
 track_sample :: proc(track: Track($T), t: f32, fallback: T) -> T {
   n := len(track.times)
   if n == 0 do return fallback

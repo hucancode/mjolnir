@@ -5,7 +5,7 @@ import "core:math"
 import "core:math/linalg"
 import "detour"
 
-// A navigation mesh plus the query used for path and point lookups. This
+// NavMesh is a navigation mesh plus the query used for path and point lookups. This
 // package is the runtime and never imports the baker (navigation/bake), so a
 // game that loads pre-baked data ships without recast. The detour fields are
 // exposed for advanced use (e.g. navigation/crowd).
@@ -15,7 +15,7 @@ NavMesh :: struct {
   filter:      detour.Query_Filter,
 }
 
-// Initialize from baked single-tile navmesh data (see navigation/bake). Takes
+// init loads baked single-tile navmesh data (see navigation/bake). Takes
 // ownership of `data`, replacing any previous mesh.
 init :: proc(
   nav: ^NavMesh,
@@ -45,18 +45,19 @@ init :: proc(
   return true
 }
 
+// destroy frees the mesh, its query and the tile data.
 destroy :: proc(nav: ^NavMesh) {
   detour.nav_mesh_query_destroy(&nav.query)
   detour.nav_mesh_destroy(&nav.detour_mesh)
   nav^ = {}
 }
 
-// Write the mesh tiles to `path` in the detour .navmesh format.
+// save writes the mesh tiles to path in the detour .navmesh format.
 save :: proc(nav: ^NavMesh, path: string) -> bool {
   return detour.save_navmesh_to_file(&nav.detour_mesh, path)
 }
 
-// Load a mesh written by `save`, replacing any previous mesh.
+// load reads a mesh written by save, replacing any previous mesh.
 load :: proc(nav: ^NavMesh, path: string, max_query_nodes: i32 = 2048) -> bool {
   mesh := detour.load_navmesh_from_file(path) or_return
   destroy(nav)
@@ -71,7 +72,7 @@ load :: proc(nav: ^NavMesh, path: string, max_query_nodes: i32 = 2048) -> bool {
   return true
 }
 
-// Closest point on the mesh within `extents` of `position`.
+// nearest_point returns the closest mesh point within extents of position.
 nearest_point :: proc(
   nav: ^NavMesh,
   position: [3]f32,
@@ -85,7 +86,7 @@ nearest_point :: proc(
   return pos, true
 }
 
-// Nearest point where the ray `origin + t * dir` (0 < t < max_t) hits the
+// raycast returns the nearest point where the ray origin + t*dir (0 < t < max_t) hits the
 // mesh surface. Tests the detail triangles of every polygon.
 raycast :: proc(
   nav: ^NavMesh,
@@ -136,8 +137,7 @@ raycast :: proc(
   return origin + dir * best, true
 }
 
-// Two-sided Moller-Trumbore ray/triangle test.
-@(private)
+@(private = "file")
 ray_triangle :: proc "contextless" (origin, dir, v0, v1, v2: [3]f32) -> (t: f32, hit: bool) {
   e1 := v1 - v0
   e2 := v2 - v0
@@ -155,7 +155,7 @@ ray_triangle :: proc "contextless" (origin, dir, v0, v1, v2: [3]f32) -> (t: f32,
   return t, t > 0
 }
 
-// Straight-line waypoints from start to end; both ends snap to the mesh
+// find_path returns straight-line waypoints from start to end; both ends snap to the mesh
 // within `extents`. The caller deletes the path.
 find_path :: proc(
   nav: ^NavMesh,
@@ -204,7 +204,7 @@ find_path :: proc(
   return path, true
 }
 
-// Triangulated polygons of the built mesh, for debug drawing. Caller deletes
+// debug_triangles returns the triangulated mesh polygons for debug drawing. Caller deletes
 // both slices.
 debug_triangles :: proc(
   nav: ^NavMesh,

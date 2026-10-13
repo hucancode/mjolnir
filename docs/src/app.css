@@ -1,0 +1,172 @@
+/* palette: same variable names as daisyUI themes; light default, dark follows the OS */
+:root {
+  color-scheme: light dark;
+  --color-base-100: oklch(100% 0.03 0);
+  --color-base-200: oklch(97% 0.03 0);
+  --color-base-300: oklch(95% 0.04 0);
+  --color-base-content: oklch(20% 0 0);
+  --color-primary: oklch(20% 0.1 270);
+  --color-primary-content: oklch(98% 0.026 102.212);
+  --color-secondary: oklch(0% 0 0);
+  --color-secondary-content: oklch(100% 0 0);
+  --color-accent: oklch(40% 0.2 90);
+  --color-accent-content: oklch(100% 0 0);
+  --color-neutral: oklch(40% 0 0);
+  --color-neutral-content: oklch(90% 0 0);
+  --color-info: oklch(15% 0.2 270);
+  --color-info-content: oklch(97% 0.014 254.604);
+  --color-success: oklch(55% 0.15 160);
+  --color-success-content: oklch(100% 0 85.6);
+  --color-warning: oklch(100% 0.15 90);
+  --color-warning-content: oklch(25% 1 100);
+  --color-error: oklch(57% 0.245 27.325);
+  --color-error-content: oklch(97% 0.013 17.38);
+  --radius-selector: 2rem;
+  --radius-field: 0rem;
+  --radius-box: 0rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 0.5px;
+  --depth: 0;
+  --noise: 1;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-base-100: oklch(10% 0.05 0);
+    --color-base-200: oklch(20% 0.05 0);
+    --color-base-300: oklch(25% 0.05 0);
+    --color-base-content: oklch(96% 0.003 264.542);
+    --color-primary: oklch(90% 0.15 265);
+    --color-primary-content: oklch(30% 0.05 275);
+    --color-secondary: oklch(95% 0.05 270);
+    --color-secondary-content: oklch(30% 0.05 275);
+    --color-accent: oklch(50% 0.06 270);
+    --color-accent-content: oklch(98% 0.022 95.277);
+    --color-neutral: oklch(35% 0 256.802);
+    --color-neutral-content: oklch(98% 0.002 247.839);
+    --color-info: oklch(15% 0.2 270);
+    --color-info-content: oklch(97% 0.013 236.62);
+    --color-success: oklch(60% 0.1 100);
+    --color-success-content: oklch(98% 0.014 180.72);
+    --color-warning: oklch(99.4% 0.4 135);
+    --color-warning-content: oklch(30% 0.2 95);
+    --color-error: oklch(63% 0.237 25.331);
+    --color-error-content: oklch(97% 0.013 17.38);
+  }
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+* {
+  box-sizing: border-box;
+  border-radius: 0;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  color: var(--color-base-content);
+  background: var(--color-base-100);
+}
+
+a { color: var(--color-primary); }
+a:hover { color: var(--color-accent); }
+
+code, pre, kbd {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.85em;
+}
+
+pre {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  overflow: auto;
+  background: var(--color-base-200);
+  border: var(--border) solid var(--color-base-300);
+}
+
+table { border-collapse: collapse; width: 100%; }
+th, td {
+  text-align: left;
+  padding: 0.25rem 0.75rem;
+  border: var(--border) solid var(--color-base-300);
+}
+
+main { max-width: 72rem; margin: 0 auto; padding: 1rem 1.5rem 3rem; }
+
+.bar {
+  display: flex;
+  gap: 1.5rem;
+  align-items: baseline;
+  padding: 0.75rem 1.5rem;
+  background: var(--color-base-200);
+  border-bottom: var(--border) solid var(--color-base-300);
+}
+.bar b { margin-right: auto; }
+.bar a { text-decoration: none; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 1rem;
+}
+.grid .card {
+  background: var(--color-base-200);
+  border: var(--border) solid var(--color-base-300);
+}
+.grid video, .grid .missing {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: var(--color-base-300);
+}
+.grid .missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-neutral);
+}
+.grid figure { margin: 0; }
+figcaption { padding: 0.5rem 0.75rem; }
+figcaption small { display: block; color: var(--color-neutral); }
+details > summary { padding: 0.4rem 0.75rem; cursor: pointer; color: var(--color-neutral); }
+details pre { max-height: 24rem; border-width: var(--border) 0 0; }
+
+.sym { padding: 0.5rem 0; border-top: var(--border) solid var(--color-base-300); }
+.sym p { margin: 0.25rem 0 0 1rem; color: var(--color-neutral); white-space: pre-line; }
+.sym code { white-space: pre-wrap; word-break: break-word; }
+.hero { max-width: 100%; height: auto; border: var(--border) solid var(--color-base-300); }
+ul.cols { columns: 16rem; list-style: none; padding: 0; }
+
+.features article {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  align-items: center;
+  padding: 2.5rem 0;
+  border-top: var(--border) solid var(--color-base-300);
+}
+.features article.flip .text { order: 2; }
+.features h2 { margin-top: 0; }
+.features .art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  padding: 1rem;
+  text-align: center;
+  color: var(--color-neutral);
+  background: var(--color-base-200);
+  border: var(--border) solid var(--color-base-300);
+}
+@media (max-width: 40rem) {
+  .features article { grid-template-columns: 1fr; }
+  .features article.flip .text { order: 0; }
+}

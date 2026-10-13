@@ -6,13 +6,14 @@ import "core:math/linalg"
 import "core:mem"
 import "core:slice"
 
-// A skeleton plus the clips authored for it. Asset data, shared by every
+// Rig is a skeleton plus the clips authored for it. Asset data, shared by every
 // Animator that plays it.
 Rig :: struct {
   skeleton: Skeleton,
   clips:    [dynamic]Clip,
 }
 
+// rig_destroy frees the rig's skeleton and clips.
 rig_destroy :: proc(self: ^Rig) {
   skeleton_destroy(&self.skeleton)
   for &c in self.clips do clip_destroy(&c)
@@ -20,12 +21,13 @@ rig_destroy :: proc(self: ^Rig) {
   self^ = {}
 }
 
+// find_clip returns the index of the clip named name.
 find_clip :: proc(self: ^Rig, name: string) -> (index: int, ok: bool) #optional_ok {
   for c, i in self.clips do if c.name == name do return i, true
   return -1, false
 }
 
-// Per-instance animation state of one skeleton. Owns its layer stack and the
+// Animator is the per-instance animation state of one skeleton. Owns its layer stack and the
 // instance pose; the Skeleton definition stays shared and untouched.
 //   local     - per-bone local transform, rebuilt each update
 //   positions, rotations, scales
@@ -43,6 +45,7 @@ Animator :: struct {
   palette:    []matrix[4, 4]f32,
 }
 
+// animator_init allocates the pose arrays for rig and sets them to its rest pose.
 animator_init :: proc(self: ^Animator, rig: ^Rig) -> bool {
   skel := &rig.skeleton
   n := bone_count(skel)
@@ -65,6 +68,7 @@ animator_init :: proc(self: ^Animator, rig: ^Rig) -> bool {
   return true
 }
 
+// animator_destroy frees the animator's layers and pose storage.
 animator_destroy :: proc(self: ^Animator) {
   for &l in self.layers do layer_destroy(&l)
   delete(self.layers)
@@ -136,7 +140,7 @@ update_palette :: proc(self: ^Animator, skel: ^Skeleton) {
   }
 }
 
-// Advance every layer by `delta_time` and rebuild the pose. `root_world` is the
+// animator_update advances every layer by `delta_time` and rebuilds the pose. `root_world` is the
 // world matrix of the skinned object; world-space IK targets and procedural
 // modifiers use it. Returns the skinning palette (also in self.palette).
 animator_update :: proc(
@@ -154,7 +158,6 @@ animator_update :: proc(
     if fk.clip < 0 || fk.clip >= len(rig.clips) do continue
     playback_advance(fk, rig.clips[fk.clip].duration, delta_time)
   }
-  // FK: blend every clip layer into the local pose
   acc_pos := make([][3]f32, n, context.temp_allocator)
   acc_rot := make([]quaternion128, n, context.temp_allocator)
   acc_scl := make([][3]f32, n, context.temp_allocator)
@@ -185,7 +188,6 @@ animator_update :: proc(
     }
   }
   pose_model(self, skel)
-  // Procedural modifiers work on the skeleton-space pose
   moved := make([]bool, n, context.temp_allocator)
   any_moved := false
   for &layer in self.layers {
@@ -225,19 +227,19 @@ animator_update :: proc(
   return self.palette
 }
 
-// Skeleton-space matrix of a bone in the current pose.
+// bone_matrix returns the skeleton-space matrix of a bone in the current pose.
 bone_matrix :: proc(self: ^Animator, bone: u32) -> matrix[4, 4]f32 {
   if int(bone) >= len(self.positions) do return linalg.MATRIX4F32_IDENTITY
   return linalg.matrix4_from_trs(self.positions[bone], self.rotations[bone], self.scales[bone])
 }
 
-// Parent→child bone link for skeleton visualization.
+// BoneSegment is a parent-to-child bone link for skeleton visualization.
 BoneSegment :: struct {
   from, to: [3]f32,
   depth:    u32,
 }
 
-// World-space bone segments of the current pose. Caller deletes.
+// bone_segments returns the world-space bone segments of the current pose. Caller deletes.
 bone_segments :: proc(
   self: ^Animator,
   skel: ^Skeleton,
@@ -272,13 +274,13 @@ valid_layer :: #force_inline proc(self: ^Animator, index: int) -> bool {
   return index >= 0 && index < len(self.layers)
 }
 
-// Play clip `name` on layer 0, replacing whatever was there.
+// play plays clip `name` on layer 0, replacing whatever was there.
 play :: proc(self: ^Animator, rig: ^Rig, name: string, mode: PlayMode = .LOOP, speed: f32 = 1) -> bool {
   _, ok := add_clip_layer(self, rig, name, 1, mode, speed, 0)
   return ok
 }
 
-// Add (or replace at `layer_index`) a layer playing clip `name`.
+// add_clip_layer adds (or replaces at `layer_index`) a layer playing clip `name`.
 add_clip_layer :: proc(
   self: ^Animator,
   rig: ^Rig,
@@ -296,7 +298,7 @@ add_clip_layer :: proc(
   return add_clip_layer_index(self, clip, weight, mode, speed, layer_index, blend_mode), true
 }
 
-// Clip layer by clip index (see find_clip); skips the name lookup.
+// add_clip_layer_index is add_clip_layer by clip index (see find_clip); it skips the name lookup.
 add_clip_layer_index :: proc(
   self: ^Animator,
   clip: int,
@@ -317,6 +319,7 @@ add_clip_layer_index :: proc(
   )
 }
 
+// remove_layer destroys the layer at index and shifts later layers down; false if index is invalid.
 remove_layer :: proc(self: ^Animator, index: int) -> bool {
   if !valid_layer(self, index) do return false
   layer_destroy(&self.layers[index])
@@ -324,26 +327,28 @@ remove_layer :: proc(self: ^Animator, index: int) -> bool {
   return true
 }
 
+// clear_layers destroys every layer and cancels any transition.
 clear_layers :: proc(self: ^Animator) {
   for &l in self.layers do layer_destroy(&l)
   clear(&self.layers)
   self.transition = {}
 }
 
+// set_layer_weight sets the blend weight of the layer at index, clamped to [0, 1].
 set_layer_weight :: proc(self: ^Animator, index: int, weight: f32) -> bool {
   if !valid_layer(self, index) do return false
   self.layers[index].weight = clamp(weight, 0, 1)
   return true
 }
 
-// `mask` is borrowed; it must outlive the layer.
+// set_layer_mask restricts the layer to the bones enabled in `mask`, which is borrowed and must outlive the layer.
 set_layer_mask :: proc(self: ^Animator, index: int, mask: []bool) -> bool {
   if !valid_layer(self, index) do return false
   self.layers[index].bone_mask = mask
   return true
 }
 
-// Cross-fade from layer `from` to clip `name` played on layer `to`.
+// transition_to cross-fades from layer `from` to clip `name` played on layer `to`.
 // self.transition.state becomes COMPLETE when the fade ends.
 transition_to :: proc(
   self: ^Animator,
@@ -372,7 +377,7 @@ transition_to :: proc(
 
 // ---------- IK ----------
 
-// IK layer over `bones` (root first, ownership transfers to the layer).
+// add_ik_layer adds an IK layer over `bones` (root first, ownership transfers to the layer).
 // LOCAL targets are in skeleton space; WORLD targets are in world space and
 // converted with `root_world` on every update.
 add_ik_layer :: proc(
@@ -413,7 +418,7 @@ add_ik_layer :: proc(
   return put_layer(self, layer, layer_index), true
 }
 
-// IK layer over the chain from `root_name` down to `tip_name`.
+// add_ik_chain_layer adds an IK layer over the chain from `root_name` down to `tip_name`.
 add_ik_chain_layer :: proc(
   self: ^Animator,
   rig: ^Rig,
@@ -435,7 +440,7 @@ add_ik_chain_layer :: proc(
   return
 }
 
-// Target and pole in the space the layer was created with.
+// set_ik_target sets target and pole in the space the layer was created with.
 set_ik_target :: proc(self: ^Animator, index: int, target, pole: [3]f32) -> bool {
   if !valid_layer(self, index) do return false
   ik := (&self.layers[index].data.(IKTarget)) or_return
@@ -444,6 +449,7 @@ set_ik_target :: proc(self: ^Animator, index: int, target, pole: [3]f32) -> bool
   return true
 }
 
+// set_ik_enabled switches the IK layer at index on or off; false if it is not an IK layer.
 set_ik_enabled :: proc(self: ^Animator, index: int, enabled: bool) -> bool {
   if !valid_layer(self, index) do return false
   ik := (&self.layers[index].data.(IKTarget)) or_return
@@ -460,6 +466,7 @@ modifier :: proc(self: ^Animator, index: int, $T: typeid) -> (m: ^T, ok: bool) {
   return &p.modifier.(T)
 }
 
+// add_tail_layer adds a spring-driven tail over length bones starting at root_bone.
 add_tail_layer :: proc(
   self: ^Animator,
   rig: ^Rig,
@@ -492,6 +499,7 @@ add_tail_layer :: proc(
   return put_layer(self, layer, layer_index), true
 }
 
+// set_tail_params updates the tail layer at index; nil arguments are left unchanged.
 set_tail_params :: proc(
   self: ^Animator,
   index: int,
@@ -516,6 +524,7 @@ build_path_spline :: proc(path: [][3]f32, closed: bool) -> Spline([3]f32) {
   return spline
 }
 
+// add_path_layer adds a layer that moves a bone_length-bone chain from root_bone along path.
 add_path_layer :: proc(
   self: ^Animator,
   rig: ^Rig,
@@ -552,6 +561,7 @@ add_path_layer :: proc(
   return put_layer(self, layer, layer_index), true
 }
 
+// set_path_params updates the path layer at index; nil arguments are left unchanged.
 set_path_params :: proc(
   self: ^Animator,
   index: int,
@@ -575,7 +585,7 @@ set_path_params :: proc(
   return true
 }
 
-// Spider-leg layer, one leg per config. Each leg's chain starts at
+// add_spider_leg_layer adds a layer with one leg per config. Each leg's chain starts at
 // `config.root`; leg constraints transfer to the layer.
 add_spider_leg_layer :: proc(
   self: ^Animator,
@@ -611,12 +621,14 @@ add_spider_leg_layer :: proc(
   return put_layer(self, layer, layer_index), true
 }
 
+// spider_leg_target returns a pointer to the foot target of a leg so the caller can move it.
 spider_leg_target :: proc(self: ^Animator, index, leg: int) -> (target: ^[3]f32, ok: bool) {
   m := modifier(self, index, SpiderLegModifier) or_return
   if leg < 0 || leg >= len(m.legs) do return nil, false
   return &m.legs[leg].target, true
 }
 
+// set_spider_leg_params updates one leg's stepping parameters; nil arguments are left unchanged.
 set_spider_leg_params :: proc(
   self: ^Animator,
   index, leg: int,

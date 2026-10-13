@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build and run each example, recording a video clip via the
 # VK_LAYER_LUNARG_screenshot layer (one PPM per frame) and stitching the
-# frames into docs/videos/<example>.mp4 with ffmpeg.
+# frames into docs/static/videos/<example>.mp4 with ffmpeg.
 #
 # Per-example overrides live in examples/<name>/record.cfg as key=value lines.
 # Recognized keys:
@@ -21,7 +21,7 @@ set -u
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-OUT_DIR="${OUT_DIR:-docs/videos}"
+OUT_DIR="${OUT_DIR:-docs/static/videos}"
 LOG_DIR="${LOG_DIR:-artifacts/record}"
 BIN_DIR="${BIN_DIR:-bin}"
 TMP_ROOT="${TMP_ROOT:-artifacts/record/frames}"

@@ -1,3 +1,4 @@
+// Recast build + Detour pathfinding.
 package main
 
 import "../../mjolnir"

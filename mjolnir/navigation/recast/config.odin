@@ -4,6 +4,7 @@ import "../../geometry"
 import "core:math"
 import "core:math/linalg"
 
+// Config holds Recast build parameters: cell size, agent limits, region and mesh settings.
 Config :: struct {
   width:                    i32,
   height:                   i32,
@@ -26,18 +27,21 @@ Config :: struct {
   detail_sample_max_error:  f32,
 }
 
-@(private)
+@(private = "file")
 RC_MAX_LAYERS :: 32
+// RC_MAX_VERTS_PER_POLY is the maximum vertex count of a generated polygon.
 RC_MAX_VERTS_PER_POLY :: 6
 
-@(private)
+@(private = "file")
 RC_SPAN_HEIGHT_BITS :: 13
 @(private)
 RC_SPAN_MAX_HEIGHT :: (1 << RC_SPAN_HEIGHT_BITS) - 1
 @(private)
 RC_SPANS_PER_POOL :: 2048
 
+// RC_NULL_AREA is the area id of non-walkable surfaces.
 RC_NULL_AREA :: 0
+// RC_WALKABLE_AREA is the default walkable area id.
 RC_WALKABLE_AREA :: 63
 @(private)
 RC_NOT_CONNECTED :: 0x3f
@@ -52,9 +56,10 @@ RC_BORDER_VERTEX :: 0x10000
 RC_AREA_BORDER :: 0x20000
 @(private)
 RC_CONTOUR_REG_MASK :: 0xffff
+// RC_MESH_NULL_IDX marks an unused vertex slot in polygon arrays.
 RC_MESH_NULL_IDX :: 0xffff
 
-// Calculate bounds from vertices
+// calc_bounds returns the axis-aligned bounds of verts.
 calc_bounds :: proc(verts: [][3]f32) -> (bmin, bmax: [3]f32) {
   if len(verts) == 0 {
     return
@@ -68,38 +73,33 @@ calc_bounds :: proc(verts: [][3]f32) -> (bmin, bmax: [3]f32) {
   return
 }
 
-// Calculate grid size from bounds and cell size
+// calc_grid_size returns the cell grid dimensions covering bmin..bmax at cell size cs.
 calc_grid_size :: proc(bmin, bmax: [3]f32, cs: f32) -> (w, h: i32) {
   w = i32((bmax.x - bmin.x) / cs + 0.5)
   h = i32((bmax.z - bmin.z) / cs + 0.5)
   return
 }
 
-// Calculate grid size from config
-@(private)
+@(private = "file")
 calc_grid_size_from_config :: proc(cfg: ^Config) -> (width, height: i32) {
   width = i32((cfg.bmax.x - cfg.bmin.x) / cfg.cs + 0.5)
   height = i32((cfg.bmax.z - cfg.bmin.z) / cfg.cs + 0.5)
   return
 }
 
-// Validate configuration
-@(private)
+@(private = "file")
 validate_config :: proc(cfg: ^Config) -> bool {
-  // Check cell sizes
   if cfg.cs <= 0 || cfg.ch <= 0 {
     return false
   }
-  // Check bounds (allow zero bounds which indicates they haven't been set yet)
   if cfg.bmin == cfg.bmax && cfg.bmin != {0, 0, 0} {
-    return false // Same bounds but not zero (invalid)
+    return false
   }
   if cfg.bmin.x > cfg.bmax.x ||
      cfg.bmin.y > cfg.bmax.y ||
      cfg.bmin.z > cfg.bmax.z {
-    return false // Inverted bounds (invalid)
+    return false
   }
-  // Check agent parameters
   if cfg.walkable_height < 3 {
     return false
   }
@@ -109,11 +109,9 @@ validate_config :: proc(cfg: ^Config) -> bool {
   if cfg.walkable_slope < 0 || cfg.walkable_slope > math.PI * 0.5 {
     return false
   }
-  // Check region parameters
   if cfg.min_region_area < 0 || cfg.merge_region_area < 0 {
     return false
   }
-  // Check polygon parameters
   if cfg.max_verts_per_poly < 3 {
     return false
   }
@@ -123,8 +121,7 @@ validate_config :: proc(cfg: ^Config) -> bool {
   return true
 }
 
-// Create default configuration
-@(private)
+@(private = "file")
 config_create :: proc() -> Config {
   return Config {
     cs = 0.3,
@@ -145,8 +142,7 @@ config_create :: proc() -> Config {
   }
 }
 
-// Calculate tile bounds
-@(private)
+@(private = "file")
 calc_tile_bounds :: proc(cfg: ^Config, tx, ty: i32) -> (bmin, bmax: [3]f32) {
   bmin = cfg.bmin
   bmax = cfg.bmax
@@ -160,8 +156,7 @@ calc_tile_bounds :: proc(cfg: ^Config, tx, ty: i32) -> (bmin, bmax: [3]f32) {
   return
 }
 
-// Get tile count
-@(private)
+@(private = "file")
 get_tile_count :: proc(cfg: ^Config) -> (tw, th: i32) {
   if cfg.tile_size <= 0 {
     return 1, 1
@@ -172,28 +167,25 @@ get_tile_count :: proc(cfg: ^Config) -> (tw, th: i32) {
   return
 }
 
-// Calculate walkable threshold from angle
-@(private)
+@(private = "file")
 calc_walkable_threshold :: proc(walkable_slope: f32) -> f32 {
   return math.cos(walkable_slope)
 }
 
-// Area modification for marking areas
-@(private)
+@(private = "file")
 Area_Modification :: struct {
   area_id:   u8,
   mask_type: Area_Mask_Type,
 }
 
-@(private)
+@(private = "file")
 Area_Mask_Type :: enum {
   All,
   Walkable,
   Unwalkable,
 }
 
-// Convex volume for area marking
-@(private)
+@(private = "file")
 Convex_Volume :: struct {
   verts:   [][3]f32,
   hmin:    f32,
@@ -201,8 +193,7 @@ Convex_Volume :: struct {
   area_id: u8,
 }
 
-// Check if point is inside convex volume
-@(private)
+@(private = "file")
 point_in_convex_volume :: proc(pt: [3]f32, vol: ^Convex_Volume) -> bool {
   if pt.y < vol.hmin || pt.y > vol.hmax {
     return false

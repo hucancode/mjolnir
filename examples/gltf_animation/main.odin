@@ -1,3 +1,4 @@
+// Skinned glTF playback.
 package main
 
 import "../../mjolnir"

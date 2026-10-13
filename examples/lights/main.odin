@@ -1,3 +1,4 @@
+// Point, spot, directional lights + shadows.
 package main
 
 import "../../mjolnir"

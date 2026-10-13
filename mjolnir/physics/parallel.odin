@@ -18,8 +18,7 @@ pool_wait :: proc(pool: ^thread.Pool) {
   }
 }
 
-// fn handles items [start, end); task is the chunk index in [0, thread_count),
-// for per-task output slots.
+// RangeProc handles items [start, end) of chunk `task`, which indexes per-task output slots.
 RangeProc :: #type proc(world: ^World, ctx: rawptr, task, start, end: int)
 
 @(private = "file")
@@ -56,10 +55,6 @@ parallel_for :: proc(world: ^World, n: int, ctx: rawptr, fn: RangeProc, min_item
   }
   pool_wait(&world.thread_pool)
 }
-
-// ---------------------------------------------------------------------------
-// BVH refit
-// ---------------------------------------------------------------------------
 
 bvh_refit :: proc(world: ^World) {
   parallel_for(world, len(world.dynamic_bvh.primitives), nil, proc(world: ^World, _: rawptr, _, start, end: int) {

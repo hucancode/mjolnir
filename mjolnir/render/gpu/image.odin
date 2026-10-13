@@ -4,8 +4,7 @@ import "core:log"
 import "core:math"
 import vk "vendor:vulkan"
 
-// A device-local, optimal-tiling 2D or cube image with a view over every mip
-// and layer.
+// Image is a device-local, optimal-tiling 2D or cube image with a view over every mip and layer.
 Image :: struct {
   image:      vk.Image,
   memory:     vk.DeviceMemory,
@@ -31,11 +30,12 @@ infer_aspect_mask :: proc(format: vk.Format) -> vk.ImageAspectFlags {
   }
 }
 
-// Full mip chain length for the given dimensions.
+// calculate_mip_levels returns the full mip chain length for the given dimensions.
 calculate_mip_levels :: proc(width, height: u32) -> u32 {
   return u32(math.floor(math.log2(f32(max(width, height))))) + 1
 }
 
+// image_create allocates a device-local Image with a view, optionally mipmapped or a cube.
 image_create :: proc(
   gctx: ^GPUContext,
   extent: vk.Extent2D,
@@ -106,6 +106,7 @@ image_create :: proc(
   return img, .SUCCESS
 }
 
+// image_create_view creates a view of img over the given mip and layer range.
 image_create_view :: proc(
   device: vk.Device,
   img: ^Image,
@@ -137,6 +138,7 @@ image_create_view :: proc(
   return
 }
 
+// image_destroy frees the view, image and memory of img.
 image_destroy :: proc(device: vk.Device, img: ^Image) {
   vk.DestroyImageView(device, img.view, nil)
   vk.DestroyImage(device, img.image, nil)

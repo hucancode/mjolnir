@@ -8,6 +8,7 @@ import "core:slice"
 import "core:testing"
 import "core:time"
 
+@(private = "file")
 matrix4_almost_equal :: proc(
   t: ^testing.T,
   actual, expected: matrix[4, 4]f32,
@@ -156,6 +157,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   matrix4_almost_equal(t, actual, expected)
 }
 
+@(private = "file")
 create_scene :: proc(scene: ^World, max_node: int, max_depth: int) {
   target_nodes := max_node
   if scene.nodes.capacity > 0 {
@@ -224,6 +226,7 @@ traverse_scene_benchmark :: proc(
   return nil
 }
 
+@(private = "file")
 teardown_scene :: proc(
   options: ^time.Benchmark_Options,
   allocator := context.allocator,

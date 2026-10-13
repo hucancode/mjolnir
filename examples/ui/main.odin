@@ -1,3 +1,4 @@
+// ui layout (flex, anchors, wrap, clip, scroll) drawn through the 2D overlay.
 package main
 
 import "../../mjolnir"

@@ -5,8 +5,7 @@ import "core:mem"
 import "gpu"
 import vk "vendor:vulkan"
 
-// Starting bone size classes, about 16 MB per frame in flight. Every class
-// doubles when one runs out (grow_bones); classes with no blocks never grow.
+// About 16 MB per frame in flight; classes double on exhaustion (grow_bones).
 @(private)
 BONE_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
   block_size, block_count: u32,
@@ -21,16 +20,8 @@ BONE_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
   {block_size = 0, block_count = 0},
 }
 
-// The scene tables the CPU writes live in host-visible memory, one copy per
-// frame in flight: every fixed-size table in one arena buffer, at the offsets
-// arena_layout computes, and the bone table, which grows with the bone slab,
-// in a buffer of its own.
-//
-// The copy of the frame recorded next (write_frame) is the only one the CPU
-// writes, in place. Render-owned tables (views, lights, debug lines) are
-// rewritten every frame. Every other write marks the regions it touched
-// (mark_dirty), and after each submission hand_off carries the marked
-// regions over into the next frame's copy.
+// One copy of each CPU-written table per frame in flight; only the write frame
+// is written, and mark_dirty + hand_off carry writes into the next copy.
 @(private)
 FrameTable :: struct {
   binding:  SceneBinding,
@@ -49,8 +40,7 @@ FRAME_TABLES := [?]FrameTable {
   {.DEBUG_LINES, size_of(DebugLineSegment), MAX_SEGMENTS},
 }
 
-// Byte range of each arena table; zero for bindings that are not in the
-// arena.
+// Zero for bindings not in the arena.
 @(private)
 ArenaLayout :: struct {
   offset: [SceneBinding]vk.DeviceSize,
@@ -58,9 +48,7 @@ ArenaLayout :: struct {
   size:   vk.DeviceSize,
 }
 
-// Dirty tracking splits every table into REGION_COUNT equal byte regions.
-// Writing a region sets its debt to the frames in flight that miss the write;
-// each hand-off copies the regions in debt and pays one off.
+// A write sets its regions' debt to the frames that miss it; each hand_off pays one off.
 @(private)
 REGION_COUNT :: 64
 @(private)
@@ -79,40 +67,34 @@ arena_layout :: proc(alignment: vk.DeviceSize) -> (layout: ArenaLayout) {
   return
 }
 
-// The frame in flight the CPU writes: the one recorded next.
 @(private)
 write_frame :: #force_inline proc(self: ^Renderer) -> u32 {
   return u32(self.gctx.frame_serial % gpu.FRAMES_IN_FLIGHT)
 }
 
-// Bytes of the bone table: the bone slab's capacity.
 @(private)
 bone_table_size :: proc(self: ^Renderer) -> int {
   return int(self.bone_matrix_slab.capacity) * size_of(matrix[4, 4]f32)
 }
 
-// Frame `frame_index`'s copy of table `b` as bytes.
 @(private)
 table_bytes :: proc(self: ^Renderer, b: SceneBinding, frame_index: u32) -> []u8 {
   if b == .BONES do return self.bone_buffers[frame_index].mapped[:bone_table_size(self)]
   return self.frame_arena[frame_index].mapped[self.arena_layout.offset[b]:][:self.arena_layout.range[b]]
 }
 
-// Frame `frame_index`'s copy of table `b` as `T`s.
 @(private)
 frame_table :: proc(self: ^Renderer, b: SceneBinding, $T: typeid, frame_index: u32) -> []T {
   bytes := table_bytes(self, b, frame_index)
   return ([^]T)(raw_data(bytes))[:len(bytes) / size_of(T)]
 }
 
-// The copy of table `b` the CPU writes. Mark what you change with mark_dirty.
+// Callers mark what they change with mark_dirty.
 @(private)
 write_table :: #force_inline proc(self: ^Renderer, b: SceneBinding, $T: typeid) -> []T {
   return frame_table(self, b, T, write_frame(self))
 }
 
-// Mark `count` `T`s from `index` of table `b` written, so they reach every
-// other frame in flight.
 @(private)
 mark_dirty :: proc(self: ^Renderer, b: SceneBinding, $T: typeid, index: int, count := 1) {
   size := bone_table_size(self) if b == .BONES else int(self.arena_layout.range[b])
@@ -122,16 +104,13 @@ mark_dirty :: proc(self: ^Renderer, b: SceneBinding, $T: typeid, index: int, cou
   for r in first ..= last do self.region_debt[b][r] = gpu.FRAMES_IN_FLIGHT - 1
 }
 
-// Make the frame recorded next the write frame: wait until the GPU is done
-// with it, then copy every region in debt from frame `from`, which holds
-// every write so far, and pay off one frame of each debt. Call right after
-// the submission of `from`.
+// Call right after submitting `from`, which holds every write so far.
 @(private)
 hand_off :: proc(self: ^Renderer, from: u32) -> vk.Result {
   gpu.wait_frame(&self.gctx) or_return
   to := write_frame(self)
   if int(self.bone_buffers[to].size) < bone_table_size(self) {
-    // every bone region is in debt since the slab grew
+    // the grown buffer is empty: every bone region is in debt
     grow_bone_buffer(self, to) or_return
   }
   for b in SceneBinding {
@@ -153,9 +132,7 @@ create_bone_buffer :: proc(self: ^Renderer) -> (gpu.Buffer, vk.Result) {
   return gpu.buffer_create(&self.gctx, vk.DeviceSize(bone_table_size(self)), {.STORAGE_BUFFER}, host_cached = true)
 }
 
-// Replace frame `frame_index`'s bone buffer with one of the slab's capacity
-// and rebind it. The caller guarantees no submitted work still uses it, and
-// fills it.
+// The caller guarantees the old buffer is idle, and fills the new one.
 @(private)
 grow_bone_buffer :: proc(self: ^Renderer, frame_index: u32) -> vk.Result {
   grown := create_bone_buffer(self) or_return
@@ -165,10 +142,6 @@ grow_bone_buffer :: proc(self: ^Renderer, frame_index: u32) -> vk.Result {
   return .SUCCESS
 }
 
-// Allocate the frame arenas and bone buffers (zeroed), the mesh table, the
-// pyramid counters and the particle buffers. Paired with
-// destroy_scene_buffers. Called once during render.init before
-// scene_descriptors_init binds them.
 @(private)
 init_scene_buffers :: proc(
   self: ^Renderer,

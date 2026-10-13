@@ -1,3 +1,4 @@
+// FABRIK with bend-cone constraints.
 package main
 
 import "../../mjolnir"

@@ -8,6 +8,7 @@ import "core:math"
 import "core:math/linalg"
 import vk "vendor:vulkan"
 
+// AttachmentType names the images a camera renders into.
 AttachmentType :: enum {
   FINAL_IMAGE        = 0,
   NORMAL             = 1,
@@ -22,18 +23,19 @@ PerspectiveProjection :: struct {
   fov: f32,
 }
 
+// OrthographicProjection is a parallel projection of the given view size.
 OrthographicProjection :: struct {
   width:  f32,
   height: f32,
 }
 
+// CameraProjection is the projection of a Camera.
 CameraProjection :: union {
   PerspectiveProjection,
   OrthographicProjection,
 }
 
-// A view into the scene: pose + projection, plus the GPU resources it renders
-// into (attachments, indirect draw buffers, depth pyramid, descriptor sets)
+// Camera is a view into the scene: pose and projection, plus the GPU resources it renders into.
 Camera :: struct {
   position:                     [3]f32,
   rotation:                     quaternion128,
@@ -42,19 +44,12 @@ Camera :: struct {
   near, far:                    f32,
   extent:                       [2]u32, // width, height
   attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]TextureHandle,
-  // One indirect draw list per MaterialType per frame in flight. Frame N's
-  // culling writes the lists frame N+1 draws; frame N draws the lists frame
-  // N-1's culling wrote.
+  // frame N's culling writes the lists frame N+1 draws
   draws:                        DrawLists,
   depth_pyramid:                [gpu.FRAMES_IN_FLIGHT]DepthPyramid,
-  // First frame serial whose compute work may read the camera's depth and
-  // pyramids: the frame before it moved them out of UNDEFINED and rendered
-  // depth. Until then the camera is culled without occlusion, and frames
-  // before it draw none of its lists.
+  // first serial whose compute work may read depth and pyramids; until then no occlusion, no lists
   ready_serial:                 u64,
 }
-
-// ---------- pose + projection (CPU) ----------
 
 @(private)
 camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
@@ -84,10 +79,8 @@ camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   return linalg.MATRIX4F32_IDENTITY
 }
 
-// `up` is the desired world-up reference. Pass {0,0,0} (default) to auto-pick
-// a safe up that avoids gimbal lock — but that auto-pick switches axes
-// discretely near the poles and snaps the view. Callers that know a smooth,
-// view-orthogonal up (e.g. orbit derives one from yaw/pitch) should pass it.
+// camera_look_at aims the camera at to from from. Zero up auto-picks a gimbal-safe
+// up, which snaps near the poles; pass a smooth view-orthogonal up when known.
 camera_look_at :: proc(self: ^Camera, from, to: [3]f32, up: [3]f32 = {0, 0, 0}) {
   self.position = from
   forward := linalg.normalize(to - from)
@@ -111,9 +104,8 @@ camera_look_at :: proc(self: ^Camera, from, to: [3]f32, up: [3]f32 = {0, 0, 0}) 
   self.rotation = linalg.to_quaternion(rotation_matrix)
 }
 
-// Place the camera on a sphere around `target` and look at it. `yaw` turns
-// around the Y axis (0 = +X), `pitch` is elevation above the XZ plane. The up
-// vector follows yaw/pitch so the view stays smooth through the poles.
+// camera_orbit places the camera on a sphere around target, looking at it. yaw turns
+// around the Y axis (0 = +X); pitch is elevation above the XZ plane.
 camera_orbit :: proc(self: ^Camera, yaw, pitch, distance: f32, target: [3]f32 = {0, 0, 0}) {
   cp, sp := math.cos(pitch), math.sin(pitch)
   cy, sy := math.cos(yaw), math.sin(yaw)
@@ -121,8 +113,7 @@ camera_orbit :: proc(self: ^Camera, yaw, pitch, distance: f32, target: [3]f32 = 
   camera_look_at(self, position, target, {-sp * cy, cp, -sp * sy})
 }
 
-// The inverse of camera_orbit: yaw, pitch and distance of the camera's
-// current pose around `target`.
+// camera_orbit_state is the inverse of camera_orbit for the current pose.
 camera_orbit_state :: proc(self: ^Camera, target: [3]f32 = {0, 0, 0}) -> (yaw, pitch, distance: f32) {
   offset := self.position - target
   distance = max(linalg.length(offset), 0.001)
@@ -131,33 +122,32 @@ camera_orbit_state :: proc(self: ^Camera, target: [3]f32 = {0, 0, 0}) -> (yaw, p
   return
 }
 
-// Blend the camera's transform toward a pose: position lerps, rotation slerps
-// along the short arc. t = 1 snaps; call every tick with
-// `1 - exp(-speed * dt)` for frame-rate independent smoothing.
+// camera_lerp blends the camera toward a pose: position lerps, rotation slerps the short arc.
+// t = 1 snaps; pass 1 - exp(-speed * dt) every tick for frame-rate independent smoothing.
 camera_lerp :: proc(self: ^Camera, position: [3]f32, rotation: quaternion128, t: f32) {
   self.position = linalg.lerp(self.position, position, t)
   self.rotation = linalg.quaternion_slerp(self.rotation, rotation, t)
 }
 
-// camera_lerp toward the pose of a camera at `from` looking at `to`.
+// camera_lerp_look_at is camera_lerp toward a camera at from looking at to.
 camera_lerp_look_at :: proc(self: ^Camera, from, to: [3]f32, t: f32, up: [3]f32 = {0, 0, 0}) {
   goal := Camera{}
   camera_look_at(&goal, from, to, up)
   camera_lerp(self, goal.position, goal.rotation, t)
 }
 
-// camera_lerp toward a world matrix (see camera_set_transform).
+// camera_lerp_transform is camera_lerp toward a world matrix (see camera_set_transform).
 camera_lerp_transform :: proc(self: ^Camera, world_matrix: matrix[4, 4]f32, t: f32) {
   camera_lerp(self, world_matrix[3].xyz, linalg.quaternion_from_matrix4_f32(world_matrix), t)
 }
 
-// Place a camera with a world matrix (e.g. a node's world transform when the
-// camera follows a logical entity). The camera looks down the matrix's -Z.
+// camera_set_transform places the camera with a world matrix; it looks down the matrix's -Z.
 camera_set_transform :: proc(self: ^Camera, world_matrix: matrix[4, 4]f32) {
   self.position = world_matrix[3].xyz
   self.rotation = linalg.quaternion_from_matrix4_f32(world_matrix)
 }
 
+// camera_set_perspective switches the camera to a perspective projection.
 camera_set_perspective :: proc(
   self: ^Camera,
   fov: f32 = math.PI / 3,
@@ -169,6 +159,7 @@ camera_set_perspective :: proc(
   self.far = far
 }
 
+// camera_set_orthographic switches the camera to an orthographic projection.
 camera_set_orthographic :: proc(
   self: ^Camera,
   width, height: f32,
@@ -183,9 +174,8 @@ camera_set_orthographic :: proc(
   self.far = far
 }
 
-// World-space ray from the main camera through `cursor`, in window
-// coordinates as input.State reports them; the window DPI scale is applied
-// here.
+// cursor_ray returns the world-space ray from the main camera through cursor, given in
+// window coordinates as input.State reports them (the DPI scale is applied here).
 cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (origin, dir: [3]f32, ok: bool) {
   cam := main_camera(self) or_return
   p := cursor * self.ui.dpi_scale
@@ -196,19 +186,19 @@ cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (origin, dir: [3]f32, ok:
   return cam.position, dir, true
 }
 
-// ---------- camera pool ----------
-
+// camera returns the camera of handle, or false if it is not live.
 camera :: proc(self: ^Renderer, handle: CameraHandle) -> (^Camera, bool) #optional_ok {
   if !cont.slots_live(&self.camera_slots, u32(handle)) do return nil, false
   return &self.cameras[handle], true
 }
 
+// main_camera returns the camera presented to the swapchain.
 main_camera :: proc(self: ^Renderer) -> (^Camera, bool) #optional_ok {
   return camera(self, self.main_camera)
 }
 
-// Create a perspective camera with its own render targets. Cameras are drawn
-// every frame; the main camera is presented to the swapchain.
+// create_camera creates a perspective camera with its own render targets.
+// Every camera is drawn each frame; the main camera is presented to the swapchain.
 create_camera :: proc(
   self: ^Renderer,
   width, height: u32,
@@ -238,8 +228,7 @@ create_camera :: proc(
   return handle, true
 }
 
-// The camera's slot is reused only once no frame in flight reads its draw
-// lists and pyramid slots.
+// destroy_camera frees the camera; its slot is reused once no frame in flight reads it.
 destroy_camera :: proc(self: ^Renderer, handle: CameraHandle) {
   cam := camera(self, handle)
   if cam == nil do return
@@ -249,8 +238,7 @@ destroy_camera :: proc(self: ^Renderer, handle: CameraHandle) {
   if handle == self.main_camera do self.main_camera = 0
 }
 
-// Look up a camera's attachment texture for `frame_index` (default: the
-// frame recorded next).
+// camera_attachment returns a camera's attachment texture for frame_index (default: the frame recorded next).
 camera_attachment :: proc(
   self: ^Renderer,
   handle: CameraHandle,
@@ -264,8 +252,7 @@ camera_attachment :: proc(
   return cam.attachments[attachment_type][frame_index.? or_else u32(self.gctx.frame_serial % gpu.FRAMES_IN_FLIGHT)], true
 }
 
-// Resize a camera's render targets; a perspective projection follows the new
-// aspect ratio.
+// resize_camera resizes a camera's render targets; a perspective projection follows the new aspect ratio.
 resize_camera :: proc(
   self: ^Renderer,
   handle: CameraHandle,
@@ -281,10 +268,7 @@ resize_camera :: proc(
   return .SUCCESS
 }
 
-// ---------- GPU targets ----------
-
-// The image behind each camera attachment. Pipelines drawing into an
-// attachment take its format from here.
+// Pipelines drawing into an attachment take its format from here.
 @(private)
 ATTACHMENTS := [AttachmentType]struct {
   format: vk.Format,
@@ -322,8 +306,7 @@ create_targets :: proc(
       ) or_return
     }
   }
-  // The depth images leave UNDEFINED at the start of the next recorded frame;
-  // the compute work of the frame after it is the first to read them.
+  // depth leaves UNDEFINED next frame; compute of the frame after is the first reader
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
     depth := texture_image(self, camera.attachments[.DEPTH][frame])
     gpu.queue_image_init(gctx, {depth.image, {.DEPTH}, {.DEPTH_STENCIL_ATTACHMENT_READ}, {.EARLY_FRAGMENT_TESTS}})
@@ -342,7 +325,7 @@ destroy_targets :: proc(self: ^Renderer, camera: ^Camera) {
   for &pyramid in camera.depth_pyramid do occlusion_destroy_pyramid(self, &pyramid)
 }
 
-// Look the main camera at `to` from `from`.
+// main_camera_look_at aims the main camera at to from from.
 main_camera_look_at :: proc(self: ^Renderer, from, to: [3]f32) {
   cam := main_camera(self)
   if cam == nil do return

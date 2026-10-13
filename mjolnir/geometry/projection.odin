@@ -2,10 +2,8 @@ package geometry
 
 import "core:math"
 
-// Vulkan RH perspective: clip-y down, clip-z in [0, 1], front along -z in view
-// space.
-// matches camera/look_at convention used elsewhere in the engine (Odin linalg
-// look_at default flip_z_axis=true).
+// make_perspective_matrix builds a Vulkan right-handed perspective matrix
+// (clip-y down, clip-z in [0, 1], view looks along -z).
 make_perspective_matrix :: proc "contextless" (
   fovy, aspect, near, far: f32,
 ) -> matrix[4, 4]f32 {
@@ -18,8 +16,7 @@ make_perspective_matrix :: proc "contextless" (
   }
 }
 
-// Vulkan orthographic: clip-y down, clip-z in [0, 1], front along -z in view
-// space.
+// make_ortho_matrix builds a Vulkan orthographic matrix (clip-y down, clip-z in [0, 1]).
 make_ortho_matrix :: proc "contextless" (
   left, right, bottom, top, near, far: f32,
 ) -> matrix[4, 4]f32 {

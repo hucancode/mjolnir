@@ -1,3 +1,4 @@
+// Wireframe rendering pipeline.
 package main
 
 import "../../mjolnir"

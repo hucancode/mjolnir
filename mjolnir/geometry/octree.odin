@@ -2,6 +2,7 @@ package geometry
 
 import "core:slice"
 
+@(private)
 OctreeNode :: struct($T: typeid) {
   bounds:      Aabb,
   center:      [3]f32,
@@ -11,6 +12,7 @@ OctreeNode :: struct($T: typeid) {
   total_items: i32,
 }
 
+@(private)
 Octree :: struct($T: typeid) {
   root:        ^OctreeNode(T),
   max_depth:   i32,
@@ -20,6 +22,7 @@ Octree :: struct($T: typeid) {
   point_func:  proc(t: T) -> [3]f32,
 }
 
+@(private)
 octree_init :: proc(
   octree: ^Octree($T),
   bounds: Aabb,
@@ -35,6 +38,7 @@ octree_init :: proc(
   octree.min_size = min_vec3(aabb_size(bounds)) / f32(shift_val)
 }
 
+@(private)
 octree_destroy :: proc(octree: ^Octree($T)) {
   node_destroy(octree.root)
   free(octree.root)
@@ -126,6 +130,7 @@ should_subdivide :: proc(octree: ^Octree($T), node: ^OctreeNode(T)) -> bool {
   return true
 }
 
+@(private)
 octree_insert :: proc(octree: ^Octree($T), item: T) -> bool {
   bounds := octree.bounds_func(item)
   if !aabb_contains(octree.root.bounds, bounds) do return false
@@ -204,6 +209,7 @@ node_insert_to_children_internal :: proc(
   }
 }
 
+@(private)
 octree_query_aabb :: proc(
   octree: ^Octree($T),
   query_bounds: Aabb,
@@ -213,6 +219,7 @@ octree_query_aabb :: proc(
   node_query_aabb(octree, octree.root, query_bounds, results)
 }
 
+@(private)
 octree_query_aabb_limited :: proc(
   octree: ^Octree($T),
   query_bounds: Aabb,
@@ -281,6 +288,7 @@ node_query_aabb_limited :: proc(
   }
 }
 
+@(private)
 octree_query_sphere :: proc(
   octree: ^Octree($T),
   center: [3]f32,
@@ -313,6 +321,7 @@ node_query_sphere :: proc(
   }
 }
 
+@(private)
 octree_query_disc :: proc(
   octree: ^Octree($T),
   center: [3]f32,
@@ -354,6 +363,7 @@ node_query_disc :: proc(
   }
 }
 
+@(private)
 octree_query_ray :: proc(
   octree: ^Octree($T),
   ray: Ray,
@@ -444,6 +454,7 @@ node_query_ray :: proc(
   }
 }
 
+@(private)
 octree_raycast :: proc(
   octree: ^Octree($T),
   ray: Ray,
@@ -480,6 +491,7 @@ octree_raycast :: proc(
   return best_hit
 }
 
+@(private)
 octree_raycast_single :: proc(
   octree: ^Octree($T),
   ray: Ray,
@@ -513,6 +525,7 @@ octree_raycast_single :: proc(
   )
 }
 
+@(private)
 octree_raycast_multi :: proc(
   octree: ^Octree($T),
   ray: Ray,
@@ -755,6 +768,7 @@ node_raycast_multi :: proc(
   }
 }
 
+@(private)
 octree_remove :: proc(octree: ^Octree($T), item: T) -> bool {
   bounds := octree.bounds_func(item)
   return node_remove(octree, octree.root, item, bounds)
@@ -816,6 +830,7 @@ collect_items_recursive :: proc(node: ^OctreeNode($T), results: ^[dynamic]T) {
   }
 }
 
+@(private)
 octree_update :: proc(octree: ^Octree($T), old_item: T, new_item: T) -> bool {
   old_bounds := octree.bounds_func(old_item)
   new_bounds := octree.bounds_func(new_item)
@@ -827,6 +842,7 @@ octree_update :: proc(octree: ^Octree($T), old_item: T, new_item: T) -> bool {
     octree_insert(octree, new_item)
 }
 
+@(private)
 octree_get_stats :: proc(octree: ^Octree($T)) -> OctreeStats {
   stats: OctreeStats
   if octree.root != nil {
@@ -835,6 +851,7 @@ octree_get_stats :: proc(octree: ^Octree($T)) -> OctreeStats {
   return stats
 }
 
+@(private)
 OctreeStats :: struct {
   total_nodes:    i32,
   leaf_nodes:     i32,

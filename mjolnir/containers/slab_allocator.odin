@@ -50,16 +50,12 @@ slab_alloc :: proc(
   index: u32,
   ok: bool,
 ) #optional_ok {
-  // Zero-size allocation is a no-op
   if count == 0 do return 0, true
-  // Find the first class that can fit count items
   for &class in allocator.classes do if class.block_size >= count {
-    // Try recycled indices first
     if len(class.free_list) > 0 {
       idx := pop(&class.free_list)
       return idx, true
     }
-    // Allocate a fresh index if space available
     if class.next < class.base + class.block_size * class.block_count {
       defer class.next += class.block_size
       return class.next, true
@@ -70,7 +66,6 @@ slab_alloc :: proc(
 
 // slab_free returns an index to the free list for later reuse.
 slab_free :: proc(allocator: ^SlabAllocator, index: u32) {
-  // Find which class this index belongs to
   found := false
   for &class in allocator.classes {
     if class.block_size == 0 do continue // Skip empty classes
@@ -84,7 +79,7 @@ slab_free :: proc(allocator: ^SlabAllocator, index: u32) {
   // If index doesn't belong to any class, it's from a zero-size allocation (no-op)
 }
 
-// Capacity of the block at `index`; 0 when no class holds it.
+// slab_block_size returns the capacity of the block at `index`; 0 when no class holds it.
 slab_block_size :: proc(allocator: ^SlabAllocator, index: u32) -> u32 {
   for class in allocator.classes {
     if index >= class.base && index < class.base + class.block_size * class.block_count do return class.block_size

@@ -1,3 +1,4 @@
+// IBL + physically based rendering showcase.
 package main
 
 import "../../mjolnir"

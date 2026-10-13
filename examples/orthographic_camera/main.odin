@@ -1,3 +1,4 @@
+// Orthographic projection setup.
 package main
 
 import "../../mjolnir"

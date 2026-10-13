@@ -3,7 +3,7 @@ package animation
 import "core:math/linalg"
 import "core:strings"
 
-// Location of one track's keys inside a Clip's flat arrays. count = 0 means
+// TrackRange locates one track's keys inside a Clip's flat arrays. count = 0 means
 // the component is not animated.
 TrackRange :: struct {
   time_offset:   u32,
@@ -12,12 +12,12 @@ TrackRange :: struct {
   interpolation: Interpolation,
 }
 
-// Animated components of one target (a bone, or any caller-defined slot).
+// Channel holds the animated components of one target (a bone, or any caller-defined slot).
 Channel :: struct {
   position, rotation, scale: TrackRange,
 }
 
-// A set of channels sharing one timeline. All keys live in flat arrays; each
+// Clip is a set of channels sharing one timeline. All keys live in flat arrays; each
 // channel refers to its slice by range.
 Clip :: struct {
   name:      string,
@@ -29,7 +29,7 @@ Clip :: struct {
   scales:    [dynamic][3]f32,
 }
 
-// Initialise an empty clip; any previous contents of `self` are discarded, not freed.
+// clip_init initialises an empty clip; any previous contents of `self` are discarded, not freed.
 clip_init :: proc(self: ^Clip, channel_count: int, name: string = "", duration: f32 = 0) {
   self^ = {}
   self.name = strings.clone(name)
@@ -37,6 +37,7 @@ clip_init :: proc(self: ^Clip, channel_count: int, name: string = "", duration: 
   self.channels = make([]Channel, channel_count)
 }
 
+// clip_destroy frees the clip's name, channels and key arrays.
 clip_destroy :: proc(self: ^Clip) {
   delete(self.name)
   delete(self.channels)
@@ -67,16 +68,18 @@ clip_append :: proc(
   return r
 }
 
-// Copy keys into the clip. For CUBIC, `values` holds 3 entries per key
+// clip_set_positions copies keys into the clip. For CUBIC, `values` holds 3 entries per key
 // (in-tangent, value, out-tangent).
 clip_set_positions :: proc(self: ^Clip, channel: int, times: []f32, values: [][3]f32, interpolation: Interpolation = .LINEAR) {
   self.channels[channel].position = clip_append(self, &self.positions, times, values, interpolation)
 }
 
+// clip_set_rotations copies rotation keys into channel, like clip_set_positions.
 clip_set_rotations :: proc(self: ^Clip, channel: int, times: []f32, values: []quaternion128, interpolation: Interpolation = .LINEAR) {
   self.channels[channel].rotation = clip_append(self, &self.rotations, times, values, interpolation)
 }
 
+// clip_set_scales copies scale keys into channel, like clip_set_positions.
 clip_set_scales :: proc(self: ^Clip, channel: int, times: []f32, values: [][3]f32, interpolation: Interpolation = .LINEAR) {
   self.channels[channel].scale = clip_append(self, &self.scales, times, values, interpolation)
 }
@@ -92,19 +95,23 @@ track_view :: #force_inline proc(r: TrackRange, times: []f32, values: []$T) -> T
   }
 }
 
+@(private)
 clip_position_track :: proc(self: ^Clip, channel: int) -> Track([3]f32) {
   return track_view(self.channels[channel].position, self.times[:], self.positions[:])
 }
 
+@(private)
 clip_rotation_track :: proc(self: ^Clip, channel: int) -> Track(quaternion128) {
   return track_view(self.channels[channel].rotation, self.times[:], self.rotations[:])
 }
 
+@(private)
 clip_scale_track :: proc(self: ^Clip, channel: int) -> Track([3]f32) {
   return track_view(self.channels[channel].scale, self.times[:], self.scales[:])
 }
 
 // Sample one channel; a component is nil when the channel does not animate it.
+@(private)
 clip_sample_channel :: proc(
   self: ^Clip,
   channel: int,
@@ -123,6 +130,7 @@ clip_sample_channel :: proc(
 }
 
 // Sample a channel into `out`, keeping components the channel does not animate.
+@(private)
 clip_sample_trs :: proc(self: ^Clip, channel: int, t: f32, out: ^TRS) {
   p, r, s := clip_sample_channel(self, channel, t)
   if v, ok := p.?; ok do out.position = v
@@ -130,7 +138,7 @@ clip_sample_trs :: proc(self: ^Clip, channel: int, t: f32, out: ^TRS) {
   if v, ok := s.?; ok do out.scale = v
 }
 
-// Advance `self` by `delta_time`, sample `channel` of `clip` over `rest`, and
+// clip_player_update advances `self` by `delta_time`, samples `channel` of `clip` over `rest`, and
 // return the resulting local matrix. Components the channel does not animate
 // keep their `rest` value.
 clip_player_update :: proc(

@@ -8,7 +8,6 @@ import "core:math/linalg"
 // Forces are held for the whole frame (cleared in step finalize) so each
 // substep integrates them with the substep dt — the TGS scheme. Kinematic
 // bodies keep their velocity.
-// start/end index into world.awake_list (dense, prefiltered)
 integrate_velocities_range :: proc(world: ^World, start, end: int, h: f32) {
   pool := &world.bodies
   list := world.awake_list[:]

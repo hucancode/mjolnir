@@ -21,11 +21,11 @@ MaterialType :: enum u32 {
 
 @(private)
 FIRST_FORWARD_TYPE :: MaterialType.TRANSPARENT
-// Bit t set for every G-buffer type t: the types the cull shader tests
-// against a camera's pyramid and draws into shadow maps.
+// bit t set for every G-buffer type t
 @(private)
 GBUFFER_TYPES :: u32(1) << u32(FIRST_FORWARD_TYPE) - 1
 
+// Color names a builtin solid-color material in Renderer.builtin_materials.
 Color :: enum {
   WHITE,
   BLACK,
@@ -122,6 +122,7 @@ material_pbr :: proc(
   )
 }
 
+// material_wireframe creates a wireframe material of the given color.
 material_wireframe :: proc(
   self: ^Renderer,
   base_color: [4]f32 = {1, 1, 1, 1},
@@ -129,6 +130,7 @@ material_wireframe :: proc(
   return create_material(self, type = .WIREFRAME, base_color_factor = base_color)
 }
 
+// material_transparent creates an alpha-blended material of the given color.
 material_transparent :: proc(
   self: ^Renderer,
   base_color: [4]f32 = {1, 1, 1, 0.5},
@@ -165,6 +167,7 @@ set_sprite_frame :: proc(self: ^Renderer, handle: MaterialHandle, frame: u32) ->
   return true
 }
 
+// destroy_material frees the material slot; false if handle is not live.
 destroy_material :: proc(self: ^Renderer, handle: MaterialHandle) -> bool {
   sync.recursive_mutex_lock(&self.mutex)
   defer sync.recursive_mutex_unlock(&self.mutex)
@@ -187,7 +190,6 @@ primitive :: proc(
   }
 }
 
-// The builtin solid-color materials. Call once the frame tables exist.
 @(private)
 init_builtin_materials :: proc(self: ^Renderer) {
   colors := [Color][4]f32 {
@@ -206,13 +208,7 @@ init_builtin_materials :: proc(self: ^Renderer) {
   }
 }
 
-// ---------- pipelines ----------
-// Each MaterialType's pipeline draws inside the render scope of its
-// MaterialPass, so it is built against that scope's targets
-// (MATERIAL_PASS_TARGETS): the formats, blend and depth state the scope's
-// attachments need.
-
-// The two render scopes a camera draws materials in.
+// Each MaterialType's pipeline is built against the targets of its pass (MATERIAL_PASS_TARGETS).
 @(private)
 MaterialPass :: enum {
   // writes the G-buffer and depth, lit by the lighting pass
@@ -221,12 +217,10 @@ MaterialPass :: enum {
   FORWARD,
 }
 
-// The geometry pass's vertex shader; its outputs feed every mesh fragment
-// shader.
+// its outputs feed every mesh fragment shader
 @(private = "file")
 MESH_VERT :: #load("shader/gbuffer/vert.spv")
 
-// Shaders and raster state of each type; zero is filled, unculled polygons.
 @(private)
 MATERIAL_SHADERS := [MaterialType]struct {
   vert, frag:   []u8,
@@ -240,8 +234,7 @@ MATERIAL_SHADERS := [MaterialType]struct {
   .SPRITE       = {vert = #load("shader/sprite/vert.spv"), frag = #load("shader/sprite/frag.spv")},
 }
 
-// The render targets of each pass's scope, which every pipeline drawing in it
-// matches: `colors` and the camera depth, all loaded with `load`.
+// `colors` and the camera depth, all loaded with `load`.
 @(private)
 MaterialPassTargets :: struct {
   colors: []AttachmentType,
@@ -266,14 +259,12 @@ MATERIAL_PASS_TARGETS := [MaterialPass]MaterialPassTargets {
   },
 }
 
-// The material types each pass draws.
 @(private)
 MATERIAL_PASS_TYPES := [MaterialPass][2]MaterialType {
   .GBUFFER = {MaterialType(0), FIRST_FORWARD_TYPE},
   .FORWARD = {FIRST_FORWARD_TYPE, MaterialType(len(MaterialType))},
 }
 
-// Set `desc`'s render target state to `pass`'s scope.
 @(private)
 material_pass_desc :: proc(pass: MaterialPass, desc: ^gpu.GraphicsPipelineDesc) {
   t := &MATERIAL_PASS_TARGETS[pass]
@@ -312,10 +303,7 @@ material_pipelines_init :: proc(r: ^Renderer) -> vk.Result {
   return .SUCCESS
 }
 
-// Record one camera's render scope of `pass`: the forward pass draws the
-// particles first, then every material type drawn by `pass` draws its list
-// from the camera's draw lists, in MaterialType order. A camera draws no list
-// until a cull has written them. record_camera_passes orders the scopes.
+// The forward pass draws particles first. A camera draws nothing until a cull has written its lists.
 @(private)
 material_pass_record :: proc(
   r: ^Renderer,

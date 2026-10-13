@@ -5,6 +5,7 @@ import "core:log"
 import "gpu"
 import vk "vendor:vulkan"
 
+@(private = "file")
 TEXTURE_LUT_GGX :: #load("assets/lut_ggx.png")
 
 // The environment light's data, drawn as the AMBIENT light. ibl_intensity
@@ -20,6 +21,7 @@ AmbientRenderer :: struct {
   skybox_blur:      f32,
 }
 
+@(private)
 ambient_setup :: proc(r: ^Renderer) -> vk.Result {
   self := &r.ambient
   self.brdf_lut = create_texture_from_data(r, TEXTURE_LUT_GGX) or_return
@@ -29,9 +31,7 @@ ambient_setup :: proc(r: ^Renderer) -> vk.Result {
   return .SUCCESS
 }
 
-// Replace the environment map with the equirectangular HDR image at `path`
-// and precompute IBL from it. Without an environment map IBL and the skybox
-// are black.
+@(private)
 ambient_load_environment :: proc(r: ^Renderer, path: string) -> (ret: vk.Result) {
   self := &r.ambient
   ambient_free_environment(r)
@@ -50,39 +50,48 @@ ambient_free_environment :: proc(r: ^Renderer) {
   self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
 }
 
-// The textures go with the level's textures.
+@(private)
 ambient_teardown :: proc(r: ^Renderer) {
   r.ambient.environment_map, r.ambient.irradiance_cube, r.ambient.prefilter_cube, r.ambient.brdf_lut = 0, 0, 0, 0
 }
 
+@(private = "file")
 PrecomputeShader :: enum {
   EQUIRECT,
   IRRADIANCE,
   PREFILTER,
 }
 
+@(private = "file")
 PRECOMPUTE_SHADERS := [PrecomputeShader][]u8 {
   .EQUIRECT   = #load("shader/ibl/equirect_to_cube.spv"),
   .IRRADIANCE = #load("shader/ibl/irradiance.spv"),
   .PREFILTER  = #load("shader/ibl/prefilter.spv"),
 }
 
+@(private = "file")
 ENV_CUBE_SIZE :: 512
+@(private = "file")
 IRRADIANCE_SIZE :: 32
+@(private = "file")
 PREFILTER_SIZE :: 128
+@(private = "file")
 PREFILTER_MIPS :: 5
+@(private = "file")
 PREFILTER_SAMPLES :: 1024
+@(private = "file")
 IRRADIANCE_SAMPLE_DELTA :: f32(0.025)
+@(private = "file")
 CUBE_FORMAT :: vk.Format.R16G16B16A16_SFLOAT
 
-// Storage-image slots of the precompute targets, after the depth pyramids':
-// dispatch i writes the cube level bound at PRECOMPUTE_STORAGE_BASE + i.
+// dispatch i writes the cube level bound at PRECOMPUTE_STORAGE_BASE + i, after the depth pyramids' slots
+@(private)
 PRECOMPUTE_STORAGE_BASE :: MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS_LEVEL
+@(private)
 PRECOMPUTE_DISPATCHES :: 2 + PREFILTER_MIPS
 
-// Push constants of the precompute shaders: read texture `src` (2D for the
-// equirect step, a cube otherwise), write all six faces of storage image
-// `dst`. `value` is the irradiance sample delta or the prefilter roughness.
+// `src` is 2D for the equirect step, a cube otherwise; `value` is the irradiance sample delta or the prefilter roughness.
+@(private = "file")
 PrecomputePush :: struct {
   src:          u32,
   dst:          u32,
@@ -91,11 +100,9 @@ PrecomputePush :: struct {
   sample_count: u32,
 }
 
-// Precompute IBL cubemaps from an equirectangular HDR source texture in one
-// one-shot command buffer: equirect to an intermediate env cube (freed before
-// returning), then irradiance and every prefilter mip from it. The shaders
-// run on the scene layout, reading the bindless textures and writing the
-// precompute storage-image slots. The caller owns the two cubes.
+// One one-shot command buffer: equirect to a temporary env cube, then irradiance and every
+// prefilter mip from it. The caller owns the two output cubes.
+@(private = "file")
 ambient_precompute :: proc(
   r: ^Renderer,
   equirect: TextureHandle,
@@ -162,7 +169,6 @@ ambient_precompute :: proc(
 
   cmd := gpu.begin_single_time_command(gctx) or_return
   vk.CmdBindDescriptorSets(cmd, .COMPUTE, layout, 1, 1, &r.scene.bindless_set, 0, nil)
-  // The cubes were just allocated; move out of UNDEFINED for storage write.
   gpu.image_discard_barrier(
     cmd,
     {texture_image(r, env_cube).image, {.COLOR}, {.SHADER_WRITE}, {.COMPUTE_SHADER}},

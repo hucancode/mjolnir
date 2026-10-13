@@ -1,3 +1,4 @@
+// Detour crowd agents navigating a navmesh.
 package main
 
 import "../../mjolnir"

@@ -21,6 +21,7 @@ NavMeshConfig :: struct {
   quality:         NavMeshQuality,
 }
 
+// DEFAULT_NAVMESH_CONFIG is a humanoid-sized agent at medium quality.
 DEFAULT_NAVMESH_CONFIG :: NavMeshConfig {
   agent_height    = 2.0,
   agent_radius    = 0.6,

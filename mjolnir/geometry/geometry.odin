@@ -3,15 +3,19 @@ package geometry
 import "core:math"
 import "core:math/linalg"
 
+// VEC_FORWARD, VEC_BACKWARD, VEC_UP, VEC_DOWN, VEC_LEFT and VEC_RIGHT are unit axes: forward +Z, up +Y, right +X.
 VEC_FORWARD :: [3]f32{0.0, 0.0, 1.0}
 VEC_BACKWARD :: [3]f32{0.0, 0.0, -1.0}
 VEC_UP :: [3]f32{0.0, 1.0, 0.0}
 VEC_DOWN :: [3]f32{0.0, -1.0, 0.0}
 VEC_LEFT :: [3]f32{-1.0, 0.0, 0.0}
 VEC_RIGHT :: [3]f32{1.0, 0.0, 0.0}
+@(private)
 F32_MIN :: -3.40282347E+38
+@(private)
 F32_MAX :: 3.40282347E+38
 
+// vector_equal reports whether a and b differ by less than epsilon on every axis.
 vector_equal :: proc "contextless" (
   a, b: [3]f32,
   epsilon: f32 = 0.0001,
@@ -20,6 +24,7 @@ vector_equal :: proc "contextless" (
   return diff.x < epsilon && diff.y < epsilon && diff.z < epsilon
 }
 
+// calculate_polygon_min_extent_2d returns the polygon's smallest width on the XZ plane.
 calculate_polygon_min_extent_2d :: proc(verts: [][3]f32) -> f32 {
   nverts := len(verts)
   if nverts < 3 do return 0
@@ -39,7 +44,7 @@ calculate_polygon_min_extent_2d :: proc(verts: [][3]f32) -> f32 {
   return math.sqrt(min_dist)
 }
 
-// Calculate squared distance from point to line segment in 2D (XZ plane)
+// point_segment_distance2_2d returns the squared distance from p to segment a-b in the XZ plane.
 point_segment_distance2_2d :: proc "contextless" (
   p, a, b: [3]f32,
 ) -> (
@@ -56,7 +61,7 @@ point_segment_distance2_2d :: proc "contextless" (
   return linalg.length2((p - pt).xz), t
 }
 
-// Find closest point on line segment in 2D (XZ plane)
+// closest_point_on_segment_2d returns the point on segment a-b nearest p in the XZ plane.
 closest_point_on_segment_2d :: proc "contextless" (p, a, b: [3]f32) -> [3]f32 {
   ab := b - a
   ap := p - a
@@ -68,7 +73,7 @@ closest_point_on_segment_2d :: proc "contextless" (p, a, b: [3]f32) -> [3]f32 {
   return linalg.mix(a, b, t)
 }
 
-// Ray-segment intersection test (2D XZ plane)
+// ray_segment_intersect_2d tests a ray against a segment in the XZ plane.
 ray_segment_intersect_2d :: proc "contextless" (
   ray_start, ray_dir, seg_start, seg_end: [3]f32,
 ) -> (
@@ -87,6 +92,7 @@ ray_segment_intersect_2d :: proc "contextless" (
   return
 }
 
+// segment_segment_intersect_2d reports whether segments p0-p1 and a-b cross on the XZ plane.
 segment_segment_intersect_2d :: proc "contextless" (
   p0, p1, a, b: [3]f32,
 ) -> bool {
@@ -100,28 +106,26 @@ segment_segment_intersect_2d :: proc "contextless" (
   return t1 >= 0.0 && t1 <= 1.0 && t2 >= 0.0 && t2 <= 1.0
 }
 
-// Calculate perpendicular cross product in 2D (XZ plane)
+// perpendicular_cross_2d returns the XZ cross product of (b - a) and (c - a).
 perpendicular_cross_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
   return linalg.cross(b.xz - a.xz, c.xz - a.xz)
 }
 
-// Check if point is inside triangle in 2D (XZ plane)
+// point_in_triangle_2d reports whether p lies inside triangle abc in the XZ plane.
 point_in_triangle_2d :: proc "contextless" (
   p, a, b, c: [3]f32,
   epsilon: f32 = 0.0,
 ) -> bool {
-  // Use edge testing method - point is inside if it's on the same side of all edges
   cross1 := linalg.cross(b.xz - a.xz, p.xz - a.xz)
   cross2 := linalg.cross(c.xz - b.xz, p.xz - b.xz)
   cross3 := linalg.cross(a.xz - c.xz, p.xz - c.xz)
-  // Check if all cross products have the same sign
   return(
     (cross1 >= -epsilon && cross2 >= -epsilon && cross3 >= -epsilon) ||
     (cross1 <= epsilon && cross2 <= epsilon && cross3 <= epsilon) \
   )
 }
 
-// Calculate barycentric coordinates for a point in a triangle (2D XZ plane)
+// barycentric_2d returns the barycentric coordinates of p in triangle abc (XZ plane).
 barycentric_2d :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
   v0 := b.xz - a.xz
   v1 := c.xz - a.xz
@@ -141,7 +145,7 @@ barycentric_2d :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
   return {u, v, w}
 }
 
-// Point in polygon test (2D XZ plane)
+// point_in_polygon_2d reports whether pt lies inside the polygon in the XZ plane.
 point_in_polygon_2d :: proc "contextless" (
   pt: [3]f32,
   verts: [][3]f32,
@@ -161,7 +165,7 @@ point_in_polygon_2d :: proc "contextless" (
   return c
 }
 
-// Calculate triangle normal
+// calc_tri_normal returns the normal of triangle v0 v1 v2.
 calc_tri_normal :: proc "contextless" (v0, v1, v2: [3]f32) -> (norm: [3]f32) {
   e0 := v1 - v0
   e1 := v2 - v0
@@ -171,11 +175,12 @@ calc_tri_normal :: proc "contextless" (v0, v1, v2: [3]f32) -> (norm: [3]f32) {
 
 // Direction utilities
 
-// Calculate area of triangle in 2D (XZ plane)
+// signed_triangle_area_2d returns the signed area of triangle abc in the XZ plane.
 signed_triangle_area_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
   return linalg.cross(b.xz - a.xz, c.xz - a.xz) * 0.5
 }
 
+@(private)
 aabb_disc_intersects :: proc "contextless" (
   aabb: Aabb,
   center: [3]f32,
@@ -193,8 +198,7 @@ aabb_disc_intersects :: proc "contextless" (
   return projected_dist_sq <= radius * radius
 }
 
-// Distance squared from point to line segment in 3D
-// Returns the squared distance for performance
+// point_segment_distance_sq returns the squared distance from pt to segment va-vb.
 point_segment_distance_sq :: proc "contextless" (pt, va, vb: [3]f32) -> f32 {
   segment := vb - va
   to_pt := pt - va
@@ -202,13 +206,12 @@ point_segment_distance_sq :: proc "contextless" (pt, va, vb: [3]f32) -> f32 {
   if segment_length_sq < math.F32_EPSILON {
     return linalg.length2(to_pt)
   }
-  // Project point onto segment
   t := linalg.saturate(linalg.dot(to_pt, segment) / segment_length_sq)
   closest := va + segment * t
   return linalg.length2(pt - closest)
 }
 
-// Distance squared from point to triangle in 3D
+// point_to_triangle_distance_sq returns the squared distance from p to a triangle.
 point_to_triangle_distance_sq :: proc "contextless" (
   p: [3]f32,
   a: [3]f32,
@@ -252,6 +255,7 @@ point_to_triangle_distance_sq :: proc "contextless" (
   return min_dist_sq
 }
 
+// safe_normalize normalizes v in place, leaving near-zero vectors untouched.
 safe_normalize :: proc(v: ^[3]f32) {
   sq_mag := v.x * v.x + v.y * v.y + v.z * v.z
   if sq_mag <= math.F32_EPSILON do return

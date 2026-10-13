@@ -9,13 +9,11 @@ import vk "vendor:vulkan"
 @(private)
 MAX_SEGMENTS :: 65536
 
-// A queued line, and the GPU record the debug line shader pulls its two
-// vertices from. debug_line_add stamps `expiry` and `bypass_depth`.
+// Also the GPU record the debug line shader pulls its two vertices from.
 @(private)
 DebugLineSegment :: struct {
   a:            [3]f32,
-  // render clock time the segment is dropped at; ONE_FRAME_EXPIRY draws it
-  // once
+  // render clock time the segment is dropped at
   expiry:       f32,
   b:            [3]f32,
   // drawn over the scene instead of depth-tested
@@ -52,8 +50,7 @@ debug_line_init :: proc(r: ^Renderer) -> vk.Result {
 @(private)
 ONE_FRAME_EXPIRY :: f32(-1.0)
 
-// Queue `segs` (a, b and color set) for `life` seconds of the render clock,
-// one frame when zero. The oldest segments make room past MAX_SEGMENTS.
+// The oldest segments make room past MAX_SEGMENTS.
 @(private)
 debug_line_add :: proc(self: ^Renderer, life: f32, bypass_depth: bool, segs: ..DebugLineSegment) {
   if len(segs) == 0 do return
@@ -78,8 +75,6 @@ debug_line_add :: proc(self: ^Renderer, life: f32, bypass_depth: bool, segs: ..D
   }
 }
 
-// Draw the queued segments over the main camera's image `color_view`:
-// depth-tested ones against `depth_image`, then the bypass_depth ones on top.
 @(private)
 debug_line_record :: proc(
   r: ^Renderer,
@@ -94,8 +89,7 @@ debug_line_record :: proc(
   defer sync.mutex_unlock(&r.debug_mutex)
   if len(r.debug_lines) == 0 do return
   table := frame_table(r, .DEBUG_LINES, DebugLineSegment, frame_index)
-  // Depth-tested lines pack from the front, overlay lines from the back.
-  // Expired and one-frame segments are dropped while compacting in place.
+  // depth-tested lines pack from the front, bypass_depth from the back; expired ones are dropped
   front, back := 0, MAX_SEGMENTS
   write := 0
   for seg in r.debug_lines {
@@ -123,7 +117,6 @@ debug_line_record :: proc(
   camera_index := camera_index
   push_constants(r, cmd, &camera_index)
   vk.CmdBindPipeline(cmd, .GRAPHICS, r.pipelines[.DEBUG_LINE])
-  // two vertices per segment
   if front > 0 {
     vk.CmdSetDepthTestEnable(cmd, true)
     vk.CmdDraw(cmd, u32(2 * front), 1, 0, 0)
@@ -135,7 +128,7 @@ debug_line_record :: proc(
   vk.CmdEndRendering(cmd)
 }
 
-// Debug line colors.
+// DEBUG_* are the stock debug line colors.
 DEBUG_WHITE :: [4]f32{1, 1, 1, 1}
 DEBUG_BLACK :: [4]f32{0, 0, 0, 1}
 DEBUG_GRAY :: [4]f32{0.5, 0.5, 0.5, 1}
@@ -147,6 +140,7 @@ DEBUG_CYAN :: [4]f32{0, 1, 1, 1}
 DEBUG_MAGENTA :: [4]f32{1, 0, 1, 1}
 DEBUG_ORANGE :: [4]f32{1, 0.5, 0, 1}
 
+@(private = "file")
 CIRCLE_SEGMENTS :: 24
 
 // n must be normalized.
@@ -174,6 +168,7 @@ fill_circle :: proc(
   }
 }
 
+// debug_segment queues a line from a to b; life is seconds to live, 0 for one frame.
 debug_segment :: proc(
   self: ^Renderer,
   a, b: [3]f32,
@@ -184,6 +179,7 @@ debug_segment :: proc(
   debug_line_add(self, life, bypass_depth, {a = a, b = b, color = color})
 }
 
+// debug_aabb queues the wireframe of the box lo..hi.
 debug_aabb :: proc(
   self: ^Renderer,
   lo, hi: [3]f32,
@@ -204,6 +200,7 @@ debug_aabb :: proc(
   push_box_edges(self, c, color, life, bypass_depth)
 }
 
+// debug_cube queues a wireframe cube at center with the given rotation and size.
 debug_cube :: proc(
   self: ^Renderer,
   center: [3]f32,
@@ -251,6 +248,7 @@ push_box_edges :: proc(
   debug_line_add(self, life, bypass_depth, ..segs[:])
 }
 
+// debug_circle queues a circle around center in the plane perpendicular to normal.
 debug_circle :: proc(
   self: ^Renderer,
   center, normal: [3]f32,
@@ -265,6 +263,7 @@ debug_circle :: proc(
   debug_line_add(self, life, bypass_depth, ..segs[:])
 }
 
+// debug_sphere queues three orthogonal circles around center.
 debug_sphere :: proc(
   self: ^Renderer,
   center: [3]f32,
@@ -283,6 +282,7 @@ debug_sphere :: proc(
   debug_line_add(self, life, bypass_depth, ..segs[:])
 }
 
+// debug_arrow queues an arrow from from to to.
 debug_arrow :: proc(
   self: ^Renderer,
   from, to: [3]f32,
@@ -308,6 +308,7 @@ debug_arrow :: proc(
   debug_line_add(self, life, bypass_depth, ..segs[:])
 }
 
+// debug_axes queues RGB axis lines at origin, rotated and scaled.
 debug_axes :: proc(
   self: ^Renderer,
   origin: [3]f32,
@@ -319,7 +320,7 @@ debug_axes :: proc(
   x := linalg.quaternion_mul_vector3(rotation, [3]f32{scale, 0, 0})
   y := linalg.quaternion_mul_vector3(rotation, [3]f32{0, scale, 0})
   z := linalg.quaternion_mul_vector3(rotation, [3]f32{0, 0, scale})
-  // Canonical axis colors (pure RGB) — independent of DEBUG_BLUE, which is tinted.
+  // pure RGB, unlike the tinted DEBUG_BLUE
   segs := [3]DebugLineSegment {
     {a = origin, b = origin + x, color = {1, 0, 0, 1}},
     {a = origin, b = origin + y, color = {0, 1, 0, 1}},
@@ -328,6 +329,7 @@ debug_axes :: proc(
   debug_line_add(self, life, bypass_depth, ..segs[:])
 }
 
+// debug_point queues a small cross at p.
 debug_point :: proc(
   self: ^Renderer,
   p: [3]f32,

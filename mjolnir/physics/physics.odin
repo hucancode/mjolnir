@@ -9,31 +9,39 @@ import si "core:sys/info"
 import "core:thread"
 import "core:time"
 
-// Dynamic bodies that fall below this height are destroyed by `step` and
-// reported in `World.killed`.
+// KILL_Y is the height below which `step` destroys dynamic bodies (see World.killed).
 KILL_Y :: #config(PHYSICS_KILL_Y, -50.0)
+@(private = "file")
 NUM_SUBSTEPS :: 4
+@(private = "file")
 SLEEP_LINEAR_THRESHOLD :: 0.05
+@(private = "file")
 SLEEP_ANGULAR_THRESHOLD :: 0.05
+@(private = "file")
 SLEEP_LINEAR_THRESHOLD_SQ :: SLEEP_LINEAR_THRESHOLD * SLEEP_LINEAR_THRESHOLD
+@(private = "file")
 SLEEP_ANGULAR_THRESHOLD_SQ :: SLEEP_ANGULAR_THRESHOLD * SLEEP_ANGULAR_THRESHOLD
+@(private = "file")
 SLEEP_TIME_THRESHOLD :: 0.5
+@(private = "file")
 ENABLE_VERBOSE_LOG :: #config(PHYSICS_VERBOSE_LOG, false)
-// Millisecond timings in PerfFrame cost a dozen clock reads per step; compile
-// them out with -define:PHYSICS_PERF_STATS=false. Counters are always filled.
+// PHYSICS_PERF_STATS enables the PerfFrame millisecond timings; set false to compile them out.
 PHYSICS_PERF_STATS :: #config(PHYSICS_PERF_STATS, true)
+@(private)
 MAX_LINEAR_SPEED :: #config(PHYSICS_MAX_LINEAR_SPEED, 400.0)
+@(private)
 MAX_ROTATION_PER_STEP :: 0.25 * math.PI
-// Contacts are created while shapes are still this far apart:
-// the solver's speculative branch stops approach exactly at touch, preventing
-// tunneling at moderate speeds without CCD.
+// Contacts form while shapes are still this far apart, preventing tunneling without CCD.
+@(private)
 SPECULATIVE_DISTANCE :: 0.02
-// Destroyed moving bodies stay in the dynamic BVH as stale entries (their
-// handles no longer resolve); rebuild once this many accumulate.
+// Stale BVH entries of destroyed bodies accumulate to this count before a rebuild.
+@(private = "file")
 BVH_REBUILD_THRESHOLD :: #config(PHYSICS_BVH_REBUILD_THRESHOLD, 512)
 
+// BodyHandle is a generational handle to a Body in a World.
 BodyHandle :: distinct cont.Handle
 
+// PerfFrame holds the millisecond timings (see PHYSICS_PERF_STATS) and counters of the last step.
 PerfFrame :: struct {
   total_ms:               f32,
   warmstart_prep_ms:      f32,
@@ -59,7 +67,7 @@ PerfFrame :: struct {
   rebuilt_static_bvh:     bool,
 }
 
-// One solver point of a contact manifold
+// ContactPoint is one solver point of a contact manifold.
 // base_separation: signed separation from narrowphase (negative =
 // penetrating); current separation is recovered per substep from body
 // position deltas.
@@ -77,7 +85,7 @@ ContactPoint :: struct {
   r_b:                [3]f32,
 }
 
-// Up to 4 normal points plus one manifold-level friction constraint (coupled
+// Contact is up to 4 normal points plus one manifold-level friction constraint (coupled
 // 2D tangent at the centroid + twist about the normal). Body A is always
 // dynamic; b_dynamic tells whether body B is too.
 Contact :: struct {
@@ -99,18 +107,20 @@ Contact :: struct {
   twist_mass:      f32,
 }
 
+// SensorOverlap pairs a sensor body with a body overlapping it.
 SensorOverlap :: struct {
   sensor: BodyHandle,
   body:   BodyHandle,
 }
 
-// A body destroyed by `step` for falling below KILL_Y. `body` is already
+// KilledBody is a body destroyed by `step` for falling below KILL_Y. `body` is already
 // freed; `user` is its caller link, e.g. the scene node to despawn.
 KilledBody :: struct {
   body: BodyHandle,
   user: cont.Handle,
 }
 
+// World owns the bodies, broad-phase BVHs and per-step contact state; create with init, free with shutdown.
 World :: struct {
   bodies:               cont.Pool(Body),
   gravity:              [3]f32,
@@ -147,6 +157,7 @@ BroadPhaseEntry :: struct {
   bounds: geometry.Aabb,
 }
 
+// init prepares the world and its thread pool.
 // thread_count: worker threads for step; 0 = one per physical CPU core minus
 // one (the caller's thread joins in while waiting), 1 = no pool. The solver
 // spin-waits at barriers, so oversubscribing cores stalls every worker.
@@ -174,6 +185,7 @@ default_thread_count :: proc() -> int {
   return ok ? max(1, physical - 1) : 1
 }
 
+// shutdown stops the thread pool and frees everything the world owns.
 shutdown :: proc(self: ^World) {
   if self.thread_count > 1 {
     thread.pool_join(&self.thread_pool)
@@ -194,7 +206,7 @@ shutdown :: proc(self: ^World) {
   self^ = {}
 }
 
-// Destroys every body; the world stays ready for reuse.
+// teardown destroys every body; the world stays ready for reuse.
 teardown :: proc(self: ^World) {
   it := cont.iterator(&self.bodies)
   for _, handle in cont.next(&it, BodyHandle) do destroy_body(self, handle)
@@ -207,7 +219,7 @@ teardown :: proc(self: ^World) {
   self.static_bvh_dirty = true
 }
 
-// mass > 0 makes a dynamic body; mass = 0 an infinite-mass one (static
+// create_body adds a body: mass > 0 makes it dynamic, mass = 0 an infinite-mass one (static
 // until moved, see Body). A sensor ignores mass.
 create_body :: proc(
   self: ^World,
@@ -228,6 +240,7 @@ create_body :: proc(
   return handle, true
 }
 
+// destroy_body frees the body behind handle; a stale handle is ignored.
 destroy_body :: proc(self: ^World, handle: BodyHandle) {
   body := get_body(self, handle) or_else nil
   if body == nil do return
@@ -238,6 +251,7 @@ destroy_body :: proc(self: ^World, handle: BodyHandle) {
   cont.free(&self.bodies, handle)
 }
 
+// get_body returns the body behind handle, or false if the handle is stale.
 get_body :: #force_inline proc(self: ^World, handle: BodyHandle) -> (ret: ^Body, ok: bool) #optional_ok {
   return cont.get(self.bodies, handle)
 }
@@ -261,7 +275,7 @@ start_moving :: proc(self: ^World, body: ^Body) {
   self.static_bvh_dirty = true
 }
 
-// Teleports the body and wakes it. A static body becomes kinematic.
+// set_pose teleports the body and wakes it. A static body becomes kinematic.
 set_pose :: proc(self: ^World, handle: BodyHandle, position: [3]f32, rotation: quaternion128) {
   body, ok := get_body(self, handle)
   if !ok do return
@@ -273,7 +287,7 @@ set_pose :: proc(self: ^World, handle: BodyHandle, position: [3]f32, rotation: q
   wake_up(body)
 }
 
-// Also resets the inertia to the new shape at the current mass.
+// set_collider replaces the body's collider and resets the inertia to the new shape at the current mass.
 set_collider :: proc(self: ^World, handle: BodyHandle, collider: Collider) {
   body, ok := get_body(self, handle)
   if !ok do return
@@ -284,7 +298,7 @@ set_collider :: proc(self: ^World, handle: BodyHandle, collider: Collider) {
   if !body.moving do self.static_bvh_dirty = true
 }
 
-// mass > 0 makes the body dynamic, mass = 0 freezes it as kinematic.
+// set_mass makes the body dynamic for mass > 0, or kinematic for mass = 0.
 // Recomputes the inertia from the collider. Ignored for sensors.
 set_mass :: proc(self: ^World, handle: BodyHandle, mass: f32) {
   body, ok := get_body(self, handle)
@@ -299,7 +313,7 @@ set_mass :: proc(self: ^World, handle: BodyHandle, mass: f32) {
   update_inertia(body)
 }
 
-// Velocity setters wake the body. A static body becomes kinematic.
+// set_velocity sets the body's velocity and wakes it. A static body becomes kinematic.
 set_velocity :: proc(self: ^World, handle: BodyHandle, velocity: [3]f32) {
   body, ok := get_body(self, handle)
   if !ok do return
@@ -308,6 +322,7 @@ set_velocity :: proc(self: ^World, handle: BodyHandle, velocity: [3]f32) {
   wake_up(body)
 }
 
+// set_angular_velocity sets the body's angular velocity and wakes it, like set_velocity.
 set_angular_velocity :: proc(self: ^World, handle: BodyHandle, angular_velocity: [3]f32) {
   body, ok := get_body(self, handle)
   if !ok do return
@@ -316,7 +331,7 @@ set_angular_velocity :: proc(self: ^World, handle: BodyHandle, angular_velocity:
   wake_up(body)
 }
 
-// The force is held for the next `step` and cleared after it. Only dynamic
+// apply_force holds the force for the next `step`, cleared after it. Only dynamic
 // bodies respond.
 apply_force :: proc(self: ^World, handle: BodyHandle, force: [3]f32) {
   body, ok := get_body(self, handle)
@@ -326,6 +341,7 @@ apply_force :: proc(self: ^World, handle: BodyHandle, force: [3]f32) {
   wake_up(body)
 }
 
+// apply_impulse changes a dynamic body's velocity by impulse / mass and wakes it.
 apply_impulse :: proc(self: ^World, handle: BodyHandle, impulse: [3]f32) {
   body, ok := get_body(self, handle)
   if !ok do return
@@ -334,13 +350,14 @@ apply_impulse :: proc(self: ^World, handle: BodyHandle, impulse: [3]f32) {
   wake_up(body)
 }
 
+// BodyPose is a body's position and rotation together with its user link.
 BodyPose :: struct {
   user:     cont.Handle,
   position: [3]f32,
   rotation: quaternion128,
 }
 
-// Poses of awake moving bodies that have a `user` link, for copying back
+// body_poses returns the poses of awake moving bodies that have a `user` link, for copying back
 // into a scene graph after `step`.
 body_poses :: proc(self: ^World, allocator := context.temp_allocator) -> []BodyPose {
   poses := make([dynamic]BodyPose, 0, len(self.awake_list), allocator)
@@ -414,7 +431,6 @@ step_island_sleep :: proc(self: ^World, dt: f32) -> (awake_count, sleeping_count
   find :: proc(parent: []i32, x: i32) -> i32 {
     root := x
     for parent[root] != root do root = parent[root]
-    // path compression
     cur := x
     for parent[cur] != root {
       next := parent[cur]
@@ -429,7 +445,6 @@ step_island_sleep :: proc(self: ^World, dt: f32) -> (awake_count, sleeping_count
     rb := find(parent, i32(c.body_b.index))
     if ra != rb do parent[rb] = ra
   }
-  // Per-body quiet timers and island-minimum quiet time
   island_min := make([]f32, n, context.temp_allocator)
   for i in 0 ..< n do island_min[i] = math.F32_MAX
   it := cont.iterator(&self.bodies)
@@ -490,6 +505,7 @@ step_sensors :: proc(self: ^World) {
   }
 }
 
+// step advances the simulation by dt seconds.
 // Millisecond timing blocks compile out with PHYSICS_PERF_STATS=false;
 // the durations then stay zero.
 step :: proc(self: ^World, dt: f32) {
@@ -539,8 +555,7 @@ step :: proc(self: ^World, dt: f32) {
     collision_detection(self)
     when PHYSICS_PERF_STATS do broadphase_time = time.since(mark)
 
-    // Narrowphase may have woken sleeping bodies — build the dense awake
-    // list only now
+    // built after narrowphase, which can wake sleeping bodies
     clear(&self.awake_list)
     awake_it := cont.iterator(&self.bodies)
     for body, handle in cont.next(&awake_it, BodyHandle) {
@@ -560,7 +575,6 @@ step :: proc(self: ^World, dt: f32) {
       mark = time.now()
     }
 
-    // Finalize: refresh spatial caches once per frame
     for index in self.awake_list {
       body := &self.bodies.entries[index].item
       body.force = {}

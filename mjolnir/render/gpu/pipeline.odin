@@ -2,21 +2,25 @@ package gpu
 
 import vk "vendor:vulkan"
 
+// READ_WRITE_DEPTH_STATE tests and writes depth with LESS_OR_EQUAL.
 READ_WRITE_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
   depthTestEnable  = true,
   depthWriteEnable = true,
   depthCompareOp   = .LESS_OR_EQUAL,
 }
 
+// READ_ONLY_DEPTH_STATE tests depth with LESS_OR_EQUAL without writing it.
 READ_ONLY_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
   depthTestEnable = true,
   depthCompareOp  = .LESS_OR_EQUAL,
 }
 
+// BLEND_OVERRIDE writes color with no blending.
 BLEND_OVERRIDE := vk.PipelineColorBlendAttachmentState {
   colorWriteMask = {.R, .G, .B, .A},
 }
 
+// BLEND_ALPHA is standard source-alpha blending.
 BLEND_ALPHA := vk.PipelineColorBlendAttachmentState {
   blendEnable         = true,
   srcColorBlendFactor = .SRC_ALPHA,
@@ -28,6 +32,7 @@ BLEND_ALPHA := vk.PipelineColorBlendAttachmentState {
   colorWriteMask      = {.R, .G, .B, .A},
 }
 
+// BLEND_ADDITIVE adds source color to the target.
 BLEND_ADDITIVE := vk.PipelineColorBlendAttachmentState {
   blendEnable         = true,
   srcColorBlendFactor = .ONE,
@@ -39,17 +44,14 @@ BLEND_ADDITIVE := vk.PipelineColorBlendAttachmentState {
   colorWriteMask      = {.R, .G, .B, .A},
 }
 
+// HDR_COLOR_FORMAT is the format of the scene color target.
 HDR_COLOR_FORMAT :: vk.Format.R16G16B16A16_SFLOAT
 
-// Everything that varies between the engine's graphics pipelines, as the raw
-// Vulkan values create_graphics_pipeline writes into GraphicsPipelineCreateInfo.
-// Shader stages are SPIR-V code with entry point "main"; `frag` is optional
-// (empty).
-// Front faces wind counter-clockwise; zero `polygon_mode` and `cull_mode`
-// fill both faces. `depth` needs no sType. `depth` applies only when
-// `depth_format` is set; `blend` holds one entry per color format. Empty
-// `dynamic_states` means viewport + scissor. Pipelines target dynamic
-// rendering with one sample per pixel.
+// GraphicsPipelineDesc is everything that varies between the engine's graphics pipelines.
+// Shaders are SPIR-V with entry point "main"; `frag` may be empty. Front faces wind
+// counter-clockwise; zero `polygon_mode` and `cull_mode` fill both faces. `depth` applies only
+// when `depth_format` is set; `blend` has one entry per color format. Empty `dynamic_states`
+// means viewport + scissor.
 GraphicsPipelineDesc :: struct {
   vert, frag:        []u8,
   specialization:    ^vk.SpecializationInfo,
@@ -70,6 +72,7 @@ GraphicsPipelineDesc :: struct {
   layout:            vk.PipelineLayout,
 }
 
+// create_graphics_pipeline builds a dynamic-rendering pipeline from desc.
 create_graphics_pipeline :: proc(
   gctx: ^GPUContext,
   desc: GraphicsPipelineDesc,
@@ -164,6 +167,7 @@ create_graphics_pipeline :: proc(
   return pipeline, .SUCCESS
 }
 
+// begin_record resets and begins command_buffer, one-time submit by default.
 begin_record :: proc(
   command_buffer: vk.CommandBuffer,
   flags: vk.CommandBufferUsageFlags = {.ONE_TIME_SUBMIT},
@@ -175,6 +179,7 @@ begin_record :: proc(
   )
 }
 
+// allocate_descriptor_set allocates one set of layout from the context pool.
 allocate_descriptor_set :: proc(
   gctx: ^GPUContext,
   ret: ^vk.DescriptorSet,
@@ -192,7 +197,7 @@ allocate_descriptor_set :: proc(
   )
 }
 
-// Allocate primary command buffers from `pool` (default: the graphics pool).
+// allocate_command_buffer allocates primary command buffers from pool (default: the graphics pool).
 allocate_command_buffer :: proc(
   gctx: ^GPUContext,
   out_commands: []vk.CommandBuffer,
@@ -210,23 +215,22 @@ allocate_command_buffer :: proc(
   )
 }
 
-// The resource one descriptor points at.
+// DescriptorInfo is the resource one descriptor points at.
 DescriptorInfo :: union {
   vk.DescriptorBufferInfo,
   vk.DescriptorImageInfo,
 }
 
-// One binding of a descriptor set layout: `count` descriptors of `type`.
+// DescriptorBinding is one binding of a descriptor set layout: count descriptors of type.
 DescriptorBinding :: struct {
   type:   vk.DescriptorType,
   count:  u32,
   stages: vk.ShaderStageFlags,
 }
 
-// Layout whose binding i is bindings[i]. Every binding is PARTIALLY_BOUND,
-// so slots never written stay legal as long as shaders do not read them, and
-// UPDATE_UNUSED_WHILE_PENDING, so a slot no submitted work uses may be
-// written while the set is in use. Fill slots with write_descriptor.
+// create_descriptor_layout creates a layout whose binding i is bindings[i]. Every binding is
+// PARTIALLY_BOUND and UPDATE_UNUSED_WHILE_PENDING: unwritten slots are legal while unread,
+// and a slot no submitted work uses may be written while the set is in use.
 create_descriptor_layout :: proc(
   gctx: ^GPUContext,
   bindings: ..DescriptorBinding,
@@ -265,7 +269,7 @@ create_descriptor_layout :: proc(
   return
 }
 
-// Point slot `index` of binding `binding` of `set` at `info`.
+// write_descriptor points slot index of binding of set at info.
 write_descriptor :: proc(
   gctx: ^GPUContext,
   set: vk.DescriptorSet,
@@ -293,8 +297,7 @@ write_descriptor :: proc(
 }
 
 
-// Discard of one image, all mips and layers: UNDEFINED → GENERAL, ready for
-// `access` at `stage`.
+// ImageDiscard moves every mip and layer of one image from UNDEFINED to GENERAL, ready for access at stage.
 ImageDiscard :: struct {
   image:  vk.Image,
   aspect: vk.ImageAspectFlags,
@@ -302,14 +305,14 @@ ImageDiscard :: struct {
   stage:  vk.PipelineStageFlags2,
 }
 
-// Discard of an attachment image, ready for its color or depth writes.
+// attachment_discard returns the ImageDiscard of an attachment image, ready for its color or depth writes.
 attachment_discard :: proc(img: ^Image) -> ImageDiscard {
   aspect := infer_aspect_mask(img.format)
   if .COLOR in aspect do return {img.image, aspect, {.COLOR_ATTACHMENT_WRITE}, {.COLOR_ATTACHMENT_OUTPUT}}
   return {img.image, aspect, {.DEPTH_STENCIL_ATTACHMENT_WRITE}, {.EARLY_FRAGMENT_TESTS}}
 }
 
-// Discard every image of `discards` in one dependency.
+// image_discard_barrier records every discard in one dependency.
 image_discard_barrier :: proc(command_buffer: vk.CommandBuffer, discards: ..ImageDiscard) {
   barriers := make([]vk.ImageMemoryBarrier2, len(discards), context.temp_allocator)
   for d, i in discards {
@@ -338,6 +341,7 @@ image_discard_barrier :: proc(command_buffer: vk.CommandBuffer, discards: ..Imag
   vk.CmdPipelineBarrier2(command_buffer, &dep)
 }
 
+// memory_barrier records a global memory dependency between the given stages and accesses.
 memory_barrier :: proc(
   command_buffer: vk.CommandBuffer,
   src_access: vk.AccessFlags2,
@@ -360,7 +364,7 @@ memory_barrier :: proc(
   vk.CmdPipelineBarrier2(command_buffer, &dep)
 }
 
-// Compute pipeline from SPIR-V `code` with entry point "main".
+// create_compute_pipeline builds a compute pipeline from SPIR-V code with entry point "main".
 create_compute_pipeline :: proc(
   gctx: ^GPUContext,
   code: []u8,
@@ -387,6 +391,7 @@ create_compute_pipeline :: proc(
   return pipeline, .SUCCESS
 }
 
+// bind_vertex_index_buffers binds one vertex and one index buffer.
 bind_vertex_index_buffers :: proc(
   command_buffer: vk.CommandBuffer,
   vertex_buffer: vk.Buffer,
@@ -407,8 +412,7 @@ bind_vertex_index_buffers :: proc(
   vk.CmdBindIndexBuffer(command_buffer, index_buffer, index_offset, index_type)
 }
 
-// Viewport and scissor covering `extent`. Clip-space y points down, as the
-// projections in geometry build it.
+// create_color_attachment describes a color attachment for begin_rendering.
 create_color_attachment :: proc(
   view: vk.ImageView,
   load_op: vk.AttachmentLoadOp = .CLEAR,
@@ -425,6 +429,7 @@ create_color_attachment :: proc(
   }
 }
 
+// create_depth_attachment describes a depth attachment for begin_rendering.
 create_depth_attachment :: proc(
   view: vk.ImageView,
   load_op: vk.AttachmentLoadOp = .CLEAR,
@@ -441,8 +446,7 @@ create_depth_attachment :: proc(
   }
 }
 
-// Begin a dynamic rendering scope over `extent`, its viewport and scissor
-// covering it.
+// begin_rendering begins a dynamic rendering scope over extent, with viewport and scissor covering it.
 begin_rendering :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
@@ -460,7 +464,6 @@ begin_rendering :: proc(
     pColorAttachments = raw_data(color_attachments),
   }
   vk.CmdBeginRendering(command_buffer, &render_info)
-  // every pipeline's viewport and scissor are dynamic: cover the render area
   viewport := vk.Viewport{width = f32(extent.width), height = f32(extent.height), maxDepth = 1}
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &render_info.renderArea)

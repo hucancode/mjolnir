@@ -77,7 +77,7 @@ capture: build
 	echo "Screenshots saved to $$OUT_DIR/"
 
 record: shader
-	@mkdir -p docs/videos artifacts/record
+	@mkdir -p docs/static/videos artifacts/record
 	./examples/record.sh $(EXAMPLE)
 
 clean:
@@ -108,8 +108,8 @@ long-file:
 long-example:
 	find examples -type f -name "main.odin" -exec wc -l {} + | sort -rn | head -n20
 
-doc:
-	pandoc docs/home.md -s -c style.css -o docs/index.html
+doc: shader
+	cd docs && npm ci && npm run build
 
 compare-physics:
 	git stash -u
@@ -121,4 +121,4 @@ compare-physics:
 	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt
 	perf report -i perf.data --stdio --no-children -n --percent-limit 1 >perf_report_after.txt
 
-.PHONY: build build-debug run run-max debug shader check clean vtest examples golden capture long-proc long-file long-example doc record compare-physics
+.PHONY: build build-debug run run-max debug shader check clean vtest examples golden capture long-proc long-file long-example doc doc-dev record compare-physics

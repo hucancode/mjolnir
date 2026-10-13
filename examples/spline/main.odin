@@ -1,3 +1,4 @@
+// Spline evaluation and visualization.
 package main
 
 import "../../mjolnir"

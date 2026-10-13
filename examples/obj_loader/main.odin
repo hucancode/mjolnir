@@ -1,3 +1,4 @@
+// Wavefront OBJ import.
 package main
 
 import "../../mjolnir"

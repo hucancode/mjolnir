@@ -14,6 +14,7 @@ Transform :: struct {
   world_matrix: matrix[4, 4]f32,
 }
 
+@(private)
 TRANSFORM_IDENTITY :: Transform {
   rotation     = linalg.QUATERNIONF32_IDENTITY,
   scale        = {1, 1, 1},
@@ -21,32 +22,36 @@ TRANSFORM_IDENTITY :: Transform {
   world_matrix = linalg.MATRIX4F32_IDENTITY,
 }
 
+// translate sets a node's local position, from x/y/z or a vector.
 translate :: proc {
   translate_xyz,
   translate_vec,
 }
 
+// rotate sets a node's local rotation, from a quaternion or angle (and axis, default Y).
 rotate :: proc {
   rotate_quaternion,
   rotate_angle,
 }
 
+// rotate_by composes a rotation onto a node's local rotation, from a quaternion or angle (and axis, default Y).
 rotate_by :: proc {
   rotate_by_quaternion,
   rotate_by_angle,
 }
 
+// scale sets a node's local scale, uniform or per axis.
 scale :: proc {
   scale_uniform,
   scale_vec,
 }
 
-@(private)
+@(private = "file")
 translate_xyz :: proc(world: ^World, handle: NodeHandle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
   translate_vec(world, handle, {x, y, z})
 }
 
-@(private)
+@(private = "file")
 translate_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
   node := cont.get(world.nodes, handle)
   if node == nil do return
@@ -54,7 +59,7 @@ translate_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
   node.transform.is_dirty = true
 }
 
-@(private)
+@(private = "file")
 rotate_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128) {
   node := cont.get(world.nodes, handle)
   if node == nil do return
@@ -62,7 +67,7 @@ rotate_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128) {
   node.transform.is_dirty = true
 }
 
-@(private)
+@(private = "file")
 rotate_angle :: proc(
   world: ^World,
   handle: NodeHandle,
@@ -72,7 +77,7 @@ rotate_angle :: proc(
   rotate_quaternion(world, handle, linalg.quaternion_angle_axis(angle, axis))
 }
 
-@(private)
+@(private = "file")
 rotate_by_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128) {
   node := cont.get(world.nodes, handle)
   if node == nil do return
@@ -80,7 +85,7 @@ rotate_by_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128
   node.transform.is_dirty = true
 }
 
-@(private)
+@(private = "file")
 rotate_by_angle :: proc(
   world: ^World,
   handle: NodeHandle,
@@ -90,12 +95,12 @@ rotate_by_angle :: proc(
   rotate_by_quaternion(world, handle, linalg.quaternion_angle_axis(angle, axis))
 }
 
-@(private)
+@(private = "file")
 scale_uniform :: proc(world: ^World, handle: NodeHandle, s: f32) {
   scale_vec(world, handle, {s, s, s})
 }
 
-@(private)
+@(private = "file")
 scale_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
   node := cont.get(world.nodes, handle)
   if node == nil do return
@@ -103,11 +108,12 @@ scale_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
   node.transform.is_dirty = true
 }
 
+// scale_xyz sets a node's local scale per axis (unset axes are 1).
 scale_xyz :: proc(world: ^World, handle: NodeHandle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
   scale_vec(world, handle, {x, y, z})
 }
 
-// Set a node's whole local transform.
+// set_local sets a node's whole local transform.
 set_local :: proc(
   world: ^World,
   handle: NodeHandle,

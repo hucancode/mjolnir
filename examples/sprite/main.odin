@@ -1,3 +1,4 @@
+// Sprite sheets with frame animation.
 package main
 
 import "../../mjolnir"

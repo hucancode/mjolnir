@@ -1,3 +1,4 @@
+// Destroying resources and reloading a level.
 package main
 
 import "../../mjolnir"

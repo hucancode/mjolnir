@@ -1,4 +1,3 @@
-// glTF skin and animation import into animation rigs.
 package gltf_animation
 
 import anim ".."
@@ -8,7 +7,7 @@ import "core:math/linalg"
 import "core:slice"
 import "vendor:cgltf"
 
-// Build a rig from a parsed glTF skin: its joint hierarchy as the skeleton,
+// load_rig builds a rig from a parsed glTF skin: its joint hierarchy as the skeleton,
 // and every animation in `data` as a clip over those joints. Free with
 // anim.rig_destroy.
 load_rig :: proc(data: ^cgltf.data, skin: ^cgltf.skin) -> (rig: anim.Rig, ok: bool) {

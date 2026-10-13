@@ -1,3 +1,4 @@
+// Physics engine via vendor:box3d.
 package main
 
 import "../../mjolnir"

@@ -1,9 +1,3 @@
-// 2D overlay renderer. Draws two producers into the swapchain image after
-// post-processing, with one pipeline and one vertex stream:
-// - draw2d commands staged by the app (its UI), sorted by z_order and
-//   clipped per command;
-// - the microui debug context, clipped per microui clip rect and scaled by
-//   the window DPI.
 package render
 
 import "../font"
@@ -13,10 +7,10 @@ import "core:slice"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-// ---------- draw2d commands: what a 2D producer (the app's UI) hands in ----------
-// Positions are framebuffer pixels. Every command draws inside its `clip`
-// rect (x, y, width, height), the whole framebuffer when it is zero.
+// Command positions are framebuffer pixels. Each draws inside its `clip`
+// rect (x, y, width, height), the whole framebuffer when zero.
 
+// DrawQuadCommand draws a solid or textured rectangle.
 DrawQuadCommand :: struct {
   position:   [2]f32,
   size:       [2]f32,
@@ -34,6 +28,7 @@ DrawTextCommand :: struct {
   clip:    [4]f32,
 }
 
+// Vertex2D is one vertex of a DrawMeshCommand.
 Vertex2D :: struct {
   pos:        [2]f32,
   uv:         [2]f32,
@@ -41,6 +36,7 @@ Vertex2D :: struct {
   texture_id: u32,
 }
 
+// DrawMeshCommand draws an indexed 2D triangle mesh offset by position.
 DrawMeshCommand :: struct {
   position:   [2]f32,
   vertices:   []Vertex2D,
@@ -50,6 +46,7 @@ DrawMeshCommand :: struct {
   clip:       [4]f32,
 }
 
+// RenderCommand is one 2D draw staged through DrawList.
 RenderCommand :: union {
   DrawQuadCommand,
   DrawTextCommand,
@@ -65,13 +62,12 @@ DrawList :: struct {
   atlas_size: [2]u32,
 }
 
-// ---------- renderer ----------
-
 @(private)
 UI_MAX_VERTICES :: 65536
 @(private)
 UI_MAX_INDICES :: 98304
 
+@(private = "file")
 VERTEX2D_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
   {binding = 0, location = 0, format = .R32G32_SFLOAT,  offset = u32(offset_of(Vertex2D, pos))},
   {binding = 0, location = 1, format = .R32G32_SFLOAT,  offset = u32(offset_of(Vertex2D, uv))},
@@ -79,6 +75,10 @@ VERTEX2D_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
   {binding = 0, location = 3, format = .R32_UINT,       offset = u32(offset_of(Vertex2D, texture_id))},
 }
 
+// OverlayRenderer draws 2D output into the swapchain image after
+// post-processing, with one pipeline and one vertex stream: draw2d commands
+// staged by the app (sorted by z_order, clipped per command) and the microui
+// debug context (clipped per microui clip rect, scaled by the window DPI).
 OverlayRenderer :: struct {
   vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
   index_buffers:   [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
@@ -101,8 +101,7 @@ OverlayRenderer :: struct {
   dpi_scale:       f32,
 }
 
-// A run of indices drawn under one scissor rect. Textures are per vertex
-// (bindless), so they never split a batch.
+// Textures are per vertex (bindless), so they never split a batch.
 @(private)
 DrawBatch :: struct {
   first_index: u32,
@@ -110,6 +109,7 @@ DrawBatch :: struct {
   scissor:     vk.Rect2D,
 }
 
+@(private)
 overlay_init :: proc(r: ^Renderer, dpi_scale: f32) -> vk.Result {
   self := &r.ui
   self.batches = make([dynamic]DrawBatch, 0, 64)
@@ -136,7 +136,7 @@ overlay_init :: proc(r: ^Renderer, dpi_scale: f32) -> vk.Result {
   return .SUCCESS
 }
 
-// Level-lifetime overlay textures and buffers. Paired with overlay_teardown.
+@(private)
 overlay_setup :: proc(r: ^Renderer) -> vk.Result {
   self := &r.ui
   white_pixel := [4]u8{255, 255, 255, 255}
@@ -149,7 +149,7 @@ overlay_setup :: proc(r: ^Renderer) -> vk.Result {
   return .SUCCESS
 }
 
-// The textures go with the level's textures.
+@(private)
 overlay_teardown :: proc(r: ^Renderer) {
   self := &r.ui
   for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
@@ -161,8 +161,7 @@ overlay_teardown :: proc(r: ^Renderer) {
   self.debug_atlas = 0
 }
 
-// Upload R8 coverage that samples as white with alpha = coverage, so the
-// shader multiplies every texture sample with the vertex color.
+// R8 coverage samples as white with alpha = coverage, so the shader multiplies every sample with the vertex color.
 @(private)
 allocate_alpha_texture :: proc(r: ^Renderer, pixels: []u8, width, height: u32) -> (TextureHandle, vk.Result) {
   return allocate_texture(
@@ -175,9 +174,7 @@ allocate_alpha_texture :: proc(r: ^Renderer, pixels: []u8, width, height: u32) -
   )
 }
 
-// Record the overlay into `color_view` inside its own rendering scope. Draws
-// the staged draw2d commands when `draw_commands` is set and the debug UI
-// when `draw_debug` is set.
+@(private)
 overlay_record :: proc(
   r: ^Renderer,
   command_buffer: vk.CommandBuffer,
@@ -236,7 +233,7 @@ end_batch :: proc(self: ^OverlayRenderer) {
   last.index_count = self.index_count - last.first_index
 }
 
-// Append one axis-aligned quad. Quads beyond the buffer capacity are dropped.
+// quads beyond the buffer capacity are dropped
 @(private)
 push_quad :: proc(
   self: ^OverlayRenderer,
@@ -304,7 +301,6 @@ batch_commands :: proc(self: ^OverlayRenderer, extent: vk.Extent2D, frame_index:
   }
 }
 
-// The scissor of a command clip; zero clips nothing.
 @(private)
 clip_scissor :: proc(clip: [4]f32, extent: vk.Extent2D) -> vk.Rect2D {
   if clip == {} do return {extent = extent}
@@ -339,8 +335,7 @@ push_mesh :: proc(self: ^OverlayRenderer, frame_index: u32, mesh: DrawMeshComman
   }
 }
 
-// Convert the microui command list to quads in pixels. microui works in
-// window coordinates; positions and clip rects are scaled by dpi_scale.
+// microui works in window coordinates; scaled by dpi_scale
 @(private)
 batch_debug_ui :: proc(self: ^OverlayRenderer, extent: vk.Extent2D, frame_index: u32) {
   atlas_size := [2]f32{mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT}

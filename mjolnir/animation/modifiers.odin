@@ -4,7 +4,7 @@ import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
-// Per-bone state for tail animation
+// TailBone is the per-bone state for tail animation.
 // position_world lags parent's tip via spring in true world space.
 // Bone orientation is derived in pass 2 by aiming at child's lagged position.
 TailBone :: struct {
@@ -13,6 +13,7 @@ TailBone :: struct {
   is_initialized:    bool,
 }
 
+// TailModifier holds the spring parameters and per-bone state of a tail.
 TailModifier :: struct {
   // 0..1, higher = stiffer spring = faster catch-up, faster oscillation
   propagation_speed: f32,
@@ -24,11 +25,11 @@ TailModifier :: struct {
   bones:             []TailBone,
 }
 
-// Max spring stiffness mapped from propagation_speed = 1.
-// Higher = snappier and faster oscillations.
+// Spring stiffness at propagation_speed = 1.
 @(private)
 TAIL_MAX_STIFFNESS :: f32(200.0)
 
+// PathModifier slides a bone chain along a spline.
 PathModifier :: struct {
   spline: Spline([3]f32),
   offset: f32,
@@ -38,7 +39,7 @@ PathModifier :: struct {
   closed: bool, // True if spline was built closed (see spline_build_closed)
 }
 
-// One leg of a spider rig: its bone chain and stepping parameters.
+// SpiderLegConfig describes one leg of a spider rig: its bone chain and stepping parameters.
 SpiderLegConfig :: struct {
   root:           string, // first bone of the chain, resolved by add_spider_leg_layer
   chain_length:   u32, // bones in the chain, root first
@@ -50,7 +51,7 @@ SpiderLegConfig :: struct {
   time_offset:    f32, // phase shift of the step cycle
 }
 
-// Leg config plus stepping state. Positions are in world space.
+// SpiderLeg is a leg config plus stepping state. Positions are in world space.
 SpiderLeg :: struct {
   using config: SpiderLegConfig,
   chain_start:  u32, // first entry of this leg in the layer's bone_indices
@@ -61,16 +62,19 @@ SpiderLeg :: struct {
   time:         f32,
 }
 
+// SpiderLegModifier drives a set of procedurally stepping legs.
 SpiderLegModifier :: struct {
   legs: []SpiderLeg,
 }
 
+// Modifier is the procedural behaviour of a ProceduralLayer.
 Modifier :: union {
   TailModifier,
   PathModifier,
   SpiderLegModifier,
 }
 
+// ProceduralLayer applies a Modifier to a chain of bones.
 ProceduralLayer :: struct {
   bone_indices: []u32,
   modifier:     Modifier,
@@ -134,7 +138,6 @@ spider_leg_update_with_root :: proc(self: ^SpiderLeg, delta_time: f32, root_posi
     root_velocity = (root_position - self.last_root) / delta_time
   }
   self.target = root_position + self.offset + root_velocity * self.lift_duration
-  // First update: plant the foot at its target
   if self.time == 0.0 && delta_time > 0.0 {
     self.last_target = self.target
     self.position = self.target
@@ -205,7 +208,6 @@ tail_modifier_update :: proc(
     pos_damp := -bone_state.position_velocity * damping_coeff
     bone_state.position_velocity += (pos_spring + pos_damp) * delta_time
     bone_state.position_world += bone_state.position_velocity * delta_time
-    // Rigid hinge: pin position to bone_length distance from parent.
     if !params.stretch {
       delta := bone_state.position_world - parent_pos_world
       d := linalg.length(delta)
@@ -220,7 +222,6 @@ tail_modifier_update :: proc(
     lagged := transform_point(root_world_inv, bone_state.position_world)
     positions[bone_idx] = linalg.lerp(positions[bone_idx], lagged, layer_weight)
   }
-  // Pass 2: orient each parent bone toward its child's (lagged) position.
   for i in 0 ..< chain_length - 1 {
     bone_idx := bone_indices[i]
     aim_bone(rotations, bone_idx, positions[bone_indices[i + 1]] - positions[bone_idx], layer_weight)
@@ -261,7 +262,6 @@ path_modifier_update :: proc(
   if total_chain_length <= 0 do return
   segment_length :=
     params.length if params.length > 0 else spline_length - params.offset
-  // Position all bones along the path segment [offset, offset + segment_length]
   cumulative_length: f32 = 0
   for i in 0 ..< chain_length {
     bone_idx := bone_indices[i]
@@ -277,12 +277,10 @@ path_modifier_update :: proc(
       cumulative_length += bone_lengths[bone_indices[i + 1]]
     }
   }
-  // Orient each parent bone toward its child
   for i in 0 ..< chain_length - 1 {
     bone_idx := bone_indices[i]
     aim_bone(rotations, bone_idx, positions[bone_indices[i + 1]] - positions[bone_idx], layer_weight)
   }
-  // Last bone has no child: aim along the spline tangent
   bone_idx := bone_indices[chain_length - 1]
   s := params.offset + segment_length + 0.01
   s = math.mod_f32(s, spline_length) if params.loop else clamp(s, 0, spline_length)

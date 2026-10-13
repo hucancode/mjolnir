@@ -1,3 +1,4 @@
+// Order-dependent transparency.
 package main
 
 import "../../mjolnir"

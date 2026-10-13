@@ -5,15 +5,14 @@ import "core:math"
 import "core:math/linalg"
 import "core:mem/virtual"
 
-@(private)
+@(private = "file")
 Find_Path_Options :: enum u8 {
   Any_Angle = 0x02,
 }
 
-@(private)
+@(private = "file")
 H_SCALE :: 0.999
 
-// A* node with position, cost, and parent info
 @(private)
 Node :: struct {
   pos:       [3]f32,
@@ -24,24 +23,22 @@ Node :: struct {
   parent_id: Poly_Ref,
 }
 
-// Queue node for priority queue (minimal data)
-@(private)
+@(private = "file")
 Pathfinding_Node :: struct {
   ref:   Poly_Ref,
   cost:  f32,
   total: f32,
 }
 
-@(private)
+@(private = "file")
 Node_Flag :: enum u8 {
   Open            = 0,
   Closed          = 1,
   Parent_Detached = 2,
 }
-@(private)
+@(private = "file")
 Node_Flags :: bit_set[Node_Flag;u8]
 
-// Arena-based pathfinding context
 @(private)
 Pathfinding_Context :: struct {
   nodes: map[Poly_Ref]^Node,
@@ -53,7 +50,6 @@ Node_Queue :: struct {
   heap: priority_queue.Priority_Queue(Pathfinding_Node),
 }
 
-// Initialize pathfinding context
 @(private)
 pathfinding_context_init :: proc(
   ctx: ^Pathfinding_Context,
@@ -104,13 +100,11 @@ create_node :: proc(ctx: ^Pathfinding_Context, id: Poly_Ref) -> ^Node {
   return node
 }
 
-// Priority queue comparison (min-heap for A*)
-@(private)
+@(private = "file")
 pathfinding_node_compare :: proc(a, b: Pathfinding_Node) -> bool {
   return a.total < b.total
 }
 
-// Node queue operations
 @(private)
 node_queue_init :: proc(queue: ^Node_Queue, capacity: i32) -> Status {
   queue.heap = priority_queue.Priority_Queue(Pathfinding_Node){}
@@ -150,7 +144,7 @@ node_queue_empty :: proc(queue: ^Node_Queue) -> bool {
   return priority_queue.len(queue.heap) == 0
 }
 
-// Navigation mesh query system
+// Nav_Mesh_Query holds the state for path and spatial queries on one Nav_Mesh.
 Nav_Mesh_Query :: struct {
   nav_mesh:   ^Nav_Mesh,
   pf_context: Pathfinding_Context,
@@ -158,7 +152,7 @@ Nav_Mesh_Query :: struct {
   query_data: Query_Data,
 }
 
-@(private)
+@(private = "file")
 Query_Data :: struct {
   status:                Status,
   last_best:             ^Node,
@@ -171,6 +165,7 @@ Query_Data :: struct {
   raycast_limit_squared: f32,
 }
 
+// nav_mesh_query_init prepares a query with room for max_nodes search nodes.
 nav_mesh_query_init :: proc(
   query: ^Nav_Mesh_Query,
   nav_mesh: ^Nav_Mesh,
@@ -187,13 +182,14 @@ nav_mesh_query_init :: proc(
   return {.Success}
 }
 
+// nav_mesh_query_destroy frees the query's search buffers.
 nav_mesh_query_destroy :: proc(query: ^Nav_Mesh_Query) {
   node_queue_destroy(&query.open_list)
   pathfinding_context_destroy(&query.pf_context)
   query^ = {}
 }
 
-// A* pathfinding algorithm
+// find_path runs A* from start_ref to end_ref and returns the polygon corridor.
 find_path :: proc(
   query: ^Nav_Mesh_Query,
   start_ref, end_ref: Poly_Ref,
@@ -217,7 +213,6 @@ find_path :: proc(
     }
     return {.Buffer_Too_Small}, 0
   }
-  // Initialize search
   pathfinding_context_clear(&query.pf_context)
   node_queue_clear(&query.open_list)
   start_node := create_node(&query.pf_context, start_ref)
@@ -234,29 +229,24 @@ find_path :: proc(
   best_node := start_node
   best_dist := start_node.total
   iterations := 0
-  // A* search loop
   for !node_queue_empty(&query.open_list) && iterations < 1000 {
     iterations += 1
     best_pathfinding_node := node_queue_pop(&query.open_list)
     if best_pathfinding_node.ref == INVALID_POLY_REF do break
     current := get_node(&query.pf_context, best_pathfinding_node.ref)
     if current == nil || .Closed in current.flags do continue
-    // Skip stale entries
     if best_pathfinding_node.total != current.total do continue
     current.flags &= ~{.Open}
     current.flags |= {.Closed}
-    // Goal reached?
     if current.id == end_ref {
       best_node = current
       break
     }
-    // Expand neighbors
     cur_tile, cur_poly, tile_status := get_tile_and_poly_by_ref(
       query.nav_mesh,
       current.id,
     )
     if !status_succeeded(tile_status) do continue
-    // Iterate through polygon links
     link := cur_poly.first_link
     for link != DT_NULL_LINK {
       neighbor_ref := get_link_poly_ref(cur_tile, link)
@@ -272,7 +262,6 @@ find_path :: proc(
              neighbor_poly,
            ) {
           neighbor_node := get_node(&query.pf_context, neighbor_ref)
-          // Calculate neighbor position
           neighbor_pos: [3]f32
           if neighbor_node == nil {
             left, right, _, portal_status := get_portal_points(
@@ -295,11 +284,9 @@ find_path :: proc(
           } else {
             neighbor_pos = neighbor_node.pos
           }
-          // Calculate costs
           cost: f32
           heuristic: f32
           if neighbor_ref == end_ref {
-            // Special case for goal
             cur_cost := query_filter_get_cost(
               filter,
               current.pos,
@@ -350,7 +337,6 @@ find_path :: proc(
             heuristic = linalg.distance(neighbor_pos, end_pos) * H_SCALE
           }
           total := cost + heuristic
-          // Skip if worse than existing
           if neighbor_node != nil &&
              .Open in neighbor_node.flags &&
              total >= neighbor_node.total {
@@ -363,7 +349,6 @@ find_path :: proc(
             link = get_next_link(cur_tile, link)
             continue
           }
-          // Create or update node
           if neighbor_node == nil {
             neighbor_node = create_node(&query.pf_context, neighbor_ref)
             if neighbor_node == nil do break
@@ -381,7 +366,6 @@ find_path :: proc(
             &query.open_list,
             {neighbor_ref, neighbor_node.cost, neighbor_node.total},
           )
-          // Update best node if closer to goal
           if heuristic < best_dist {
             best_dist = heuristic
             best_node = neighbor_node
@@ -395,7 +379,6 @@ find_path :: proc(
   return get_path_to_node(query, best_node, path, max_path)
 }
 
-// Reconstruct path from end node back to start
 @(private)
 get_path_to_node :: proc(
   query: ^Nav_Mesh_Query,
@@ -406,7 +389,6 @@ get_path_to_node :: proc(
   status: Status,
   path_count: i32,
 ) {
-  // Count path length
   node := end_node
   length := i32(0)
   for node != nil {
@@ -415,7 +397,6 @@ get_path_to_node :: proc(
     node = get_node(&query.pf_context, node.parent_id)
   }
   if length > max_path do return {.Buffer_Too_Small}, 0
-  // Build path in reverse
   node = end_node
   for i := length - 1; i >= 0; i -= 1 {
     path[i] = node.id
@@ -425,7 +406,6 @@ get_path_to_node :: proc(
   return {.Success}, length
 }
 
-// Link traversal helpers
 @(private)
 get_first_link :: proc(tile: ^Mesh_Tile, poly: i32) -> u32 {
   if poly < 0 || poly >= i32(len(tile.polys)) do return DT_NULL_LINK
@@ -450,7 +430,7 @@ get_link_edge :: proc(tile: ^Mesh_Tile, link: u32) -> u8 {
   return tile.links[link].edge
 }
 
-@(private)
+@(private = "file")
 get_edge_mid_point :: proc(
   tile_a, tile_b: ^Mesh_Tile,
   poly_a, poly_b: ^Poly,
@@ -461,7 +441,7 @@ get_edge_mid_point :: proc(
   return linalg.mix(va0, va1, 0.5)
 }
 
-// Sliced pathfinding for large searches
+// init_sliced_find_path begins an A* search that update_sliced_find_path advances in bounded steps.
 init_sliced_find_path :: proc(
   query: ^Nav_Mesh_Query,
   start_ref: Poly_Ref,
@@ -500,6 +480,7 @@ init_sliced_find_path :: proc(
   return {.Success}
 }
 
+// update_sliced_find_path runs up to max_iter iterations of a sliced path search.
 update_sliced_find_path :: proc(
   query: ^Nav_Mesh_Query,
   max_iter: i32,
@@ -525,7 +506,6 @@ update_sliced_find_path :: proc(
       query.query_data.status = {.Success}
       return iterations, query.query_data.status
     }
-    // Expand neighbors (simplified version)
     cur_tile, cur_poly, tile_status := get_tile_and_poly_by_ref(
       query.nav_mesh,
       current.id,
@@ -611,6 +591,7 @@ update_sliced_find_path :: proc(
   return iterations, query.query_data.status
 }
 
+// finalize_sliced_find_path writes the result of a finished sliced search into path.
 finalize_sliced_find_path :: proc(
   query: ^Nav_Mesh_Query,
   path: []Poly_Ref,
@@ -624,6 +605,7 @@ finalize_sliced_find_path :: proc(
   return get_path_to_node(query, query.query_data.last_best, path, max_path)
 }
 
+// finalize_sliced_find_path_partial writes the best path found so far into path.
 finalize_sliced_find_path_partial :: proc(
   query: ^Nav_Mesh_Query,
   existing: []Poly_Ref,
@@ -637,8 +619,7 @@ finalize_sliced_find_path_partial :: proc(
   return get_path_to_node(query, query.query_data.last_best, path, max_path)
 }
 
-// Convenience function for complete sliced pathfinding
-@(private)
+@(private = "file")
 find_path_sliced :: proc(
   query: ^Nav_Mesh_Query,
   start_ref: Poly_Ref,

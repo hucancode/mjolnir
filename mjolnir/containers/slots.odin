@@ -21,6 +21,7 @@ Slots :: struct {
   capacity:   u32,
 }
 
+// slots_init sets up s for capacity indices (index 0 is reserved) with an optional reuse grace in ticks.
 slots_init :: proc(s: ^Slots, capacity: u32, grace: u64 = 0) {
   s.live = make([]u64, (capacity + 63) / 64)
   s.grace = grace
@@ -28,6 +29,7 @@ slots_init :: proc(s: ^Slots, capacity: u32, grace: u64 = 0) {
   s.high_water = 1
 }
 
+// slots_destroy frees the memory held by s and zeroes it.
 slots_destroy :: proc(s: ^Slots) {
   delete(s.live)
   delete(s.free)
@@ -35,7 +37,7 @@ slots_destroy :: proc(s: ^Slots) {
   s^ = {}
 }
 
-// A live index; false when every index is taken.
+// slots_alloc returns a live index; false when every index is taken.
 slots_alloc :: proc(s: ^Slots) -> (index: u32, ok: bool) #optional_ok {
   if len(s.free) > 0 {
     index = pop(&s.free)
@@ -50,7 +52,7 @@ slots_alloc :: proc(s: ^Slots) -> (index: u32, ok: bool) #optional_ok {
   return index, true
 }
 
-// Release `index` at once; it is reused after the grace.
+// slots_free releases `index` at once; it is reused after the grace.
 slots_free :: proc(s: ^Slots, index: u32) -> bool {
   if !slots_live(s, index) do return false
   s.live[index / 64] &~= 1 << (index % 64)
@@ -60,11 +62,12 @@ slots_free :: proc(s: ^Slots, index: u32) -> bool {
   return true
 }
 
+// slots_live reports whether index is currently allocated.
 slots_live :: #force_inline proc "contextless" (s: ^Slots, index: u32) -> bool {
   return index < s.capacity && s.live[index / 64] & (1 << (index % 64)) != 0
 }
 
-// Advance one tick and reuse the indices freed `grace` ticks ago. Returns
+// slots_tick advances one tick and reuses the indices freed `grace` ticks ago. Returns
 // them, valid until the next slots_tick or slots_flush, so the caller can
 // release what its storage holds there.
 slots_tick :: proc(s: ^Slots) -> []Retiring {
@@ -72,7 +75,7 @@ slots_tick :: proc(s: ^Slots) -> []Retiring {
   return reclaim(s, s.tick)
 }
 
-// Reuse every retiring index now, ignoring the grace. Use once no consumer
+// slots_flush reuses every retiring index now, ignoring the grace. Use once no consumer
 // can still read them (teardown).
 slots_flush :: proc(s: ^Slots) -> []Retiring {
   return reclaim(s, max(u64))
@@ -90,7 +93,7 @@ reclaim :: proc(s: ^Slots, tick: u64) -> []Retiring {
   return s.retiring[:s.reclaimed]
 }
 
-// Walk the live indices in order:
+// slots_next walks the live indices in order:
 //   cursor: u32
 //   for index in slots_next(&slots, &cursor) { ... }
 slots_next :: proc "contextless" (s: ^Slots, cursor: ^u32) -> (index: u32, ok: bool) {

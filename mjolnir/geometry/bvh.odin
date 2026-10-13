@@ -10,6 +10,7 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
+// BVHNode is a flattened BVH node; a leaf has left_child < 0 and owns primitive_count primitives from primitive_start.
 BVHNode :: struct {
   bounds:          Aabb,
   left_child:      i32,
@@ -18,6 +19,7 @@ BVHNode :: struct {
   primitive_count: i32,
 }
 
+// BVH is a bounding volume hierarchy over items of type T, bounded by bounds_func.
 BVH :: struct($T: typeid) {
   nodes:       [dynamic]BVHNode,
   primitives:  [dynamic]T,
@@ -27,6 +29,7 @@ BVH :: struct($T: typeid) {
   max_depth:   i32,
 }
 
+// bvh_destroy frees the memory held by bvh.
 bvh_destroy :: proc(bvh: ^BVH($T)) {
   delete(bvh.nodes)
   delete(bvh.primitives)
@@ -36,6 +39,7 @@ bvh_destroy :: proc(bvh: ^BVH($T)) {
   delete(bvh.node_levels)
 }
 
+@(private = "file")
 BVHBuildNode :: struct {
   bounds:     Aabb,
   left:       ^BVHBuildNode,
@@ -44,6 +48,7 @@ BVHBuildNode :: struct {
   prim_count: i32,
 }
 
+@(private = "file")
 BVHPrimitive :: struct {
   index:    i32,
   bounds:   Aabb,
@@ -51,11 +56,15 @@ BVHPrimitive :: struct {
 }
 
 // Parallel BVH build configuration
+@(private = "file")
 PARALLEL_BUILD_THRESHOLD :: 1000 // Min items for parallelism
+@(private = "file")
 PARALLEL_TASK_THRESHOLD :: 250 // Min items to spawn subtasks
+@(private = "file")
 PARALLEL_DEPTH_THRESHOLD :: 4 // Max depth for parallel tasks
 
 // Task data for parallel recursive build
+@(private = "file")
 BVH_Build_Task_Data :: struct {
   prims:         []BVHPrimitive,
   start:         i32,
@@ -67,16 +76,15 @@ BVH_Build_Task_Data :: struct {
   thread_pool:   ^thread.Pool,
 }
 
+// bvh_build rebuilds bvh over items; leaves hold at most max_leaf_size items.
 bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
   if bvh == nil do return
   if bvh.bounds_func == nil do return
   clear(&bvh.nodes)
   clear(&bvh.primitives)
   if len(items) == 0 do return
-  // Pre-reserve capacity for better performance
   reserve(&bvh.primitives, len(items))
   append(&bvh.primitives, ..items)
-  // Use virtual arena allocator for build operations - grows as needed
   arena: virtual.Arena
   if err := virtual.arena_init_growing(&arena); err != nil {
     log.error("Failed to init arena:", err)
@@ -100,7 +108,6 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
     max_leaf_size,
     arena_allocator,
   )
-  // Reorder the primitives array to match the build_prims order
   for prim, i in build_prims {
     bvh.primitives[i] = items[prim.index]
   }
@@ -123,7 +130,6 @@ build_recursive :: proc(
   if prim_count <= max_leaf_size {
     node.prim_start = start
     node.prim_count = prim_count
-    // Recalculate bounds from actual primitives in this leaf node
     node.bounds = AABB_UNDEFINED
     for i in start ..< end {
       node.bounds = aabb_union(node.bounds, prims[i].bounds)
@@ -134,7 +140,6 @@ build_recursive :: proc(
   if axis < 0 || split_pos <= 0 || split_pos >= prim_count {
     node.prim_start = start
     node.prim_count = prim_count
-    // Recalculate bounds from actual primitives in this fallback leaf node
     node.bounds = AABB_UNDEFINED
     for i in start ..< end {
       node.bounds = aabb_union(node.bounds, prims[i].bounds)
@@ -146,11 +151,11 @@ build_recursive :: proc(
   node.right = build_recursive(prims, mid, end, max_leaf_size, allocator)
   node.prim_start = -1
   node.prim_count = 0
-  // Update bounds to be union of child bounds (this is correct for internal nodes)
   node.bounds = aabb_union(node.left.bounds, node.right.bounds)
   return node
 }
 
+@(private = "file")
 SAHBin :: struct {
   bounds: Aabb,
   count:  i32,
@@ -175,7 +180,6 @@ split_sah_binned :: proc(
   extent := node_bounds.max - node_bounds.min
   #unroll for ax in 0 ..< 3 {
     if extent[ax] < 0.0001 {
-      // Skip degenerate axes
     } else {
     bins := make([]SAHBin, NUM_BINS, context.temp_allocator)
     for &bin in bins {
@@ -260,12 +264,10 @@ split_median :: proc(
   axis: i32,
   split_pos: i32,
 ) {
-  // Choose the axis with the largest extent
   extent := node_bounds.max - node_bounds.min
   best_axis := 0
   if extent[1] > extent[0] do best_axis = 1
   if extent[2] > extent[best_axis] do best_axis = 2
-  // Sort by the chosen axis
   if best_axis == 0 {
     slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
       return a.centroid[0] < b.centroid[0]
@@ -346,6 +348,7 @@ flatten_node :: proc(
   return node_idx
 }
 
+// bvh_query_aabb replaces results with the items whose bounds overlap query_bounds.
 bvh_query_aabb :: proc(
   bvh: ^BVH($T),
   query_bounds: Aabb,
@@ -378,7 +381,6 @@ bvh_query_aabb :: proc(
           }
         }
       } else {
-        // Callback path (no SIMD) - for types without cached bounds
         if bvh.bounds_func == nil do continue
         for i in prim_start ..< prim_end {
           prim := bvh.primitives[i]
@@ -389,7 +391,6 @@ bvh_query_aabb :: proc(
         }
       }
     } else {
-      // Internal node - push children
       stack[stack_size] = node.left_child
       stack_size += 1
       stack[stack_size] = node.right_child
@@ -410,12 +411,9 @@ ray_aabb_intersection_safe :: proc(
   t_max := [3]f32{F32_MAX, F32_MAX, F32_MAX}
   #unroll for i in 0 ..< 3 {
     if math.abs(direction[i]) < 1e-6 {
-      // Ray is parallel to this axis
       if origin[i] < aabb.min[i] || origin[i] > aabb.max[i] {
-        // Ray is outside the slab, no intersection
         return F32_MAX, -F32_MAX
       }
-      // Ray is inside the slab, keep the infinite range for this axis
     } else {
       inv_d := 1.0 / direction[i]
       t1 := (aabb.min[i] - origin[i]) * inv_d
@@ -426,11 +424,11 @@ ray_aabb_intersection_safe :: proc(
   }
   t_near = max(t_min.x, t_min.y, t_min.z)
   t_far = min(t_max.x, t_max.y, t_max.z)
-  // Valid intersection if t_far >= t_near
   if t_far < t_near do return F32_MAX, -F32_MAX
   return
 }
 
+// bvh_query_ray replaces results with the items whose bounds the ray crosses within max_dist.
 bvh_query_ray :: proc(
   bvh: ^BVH($T),
   ray: Ray,
@@ -462,7 +460,6 @@ bvh_query_ray :: proc(
       prim_end := node.primitive_start + node.primitive_count
 
       when intrinsics.type_has_field(T, "bounds") {
-        // Fast path - direct field access
         #no_bounds_check for i in prim_start ..< prim_end {
           prim := bvh.primitives[i]
           prim_t_near, prim_t_far := ray_aabb_intersection_safe(
@@ -475,7 +472,6 @@ bvh_query_ray :: proc(
           }
         }
       } else {
-        // Callback path
         if bvh.bounds_func == nil do continue
         for i in prim_start ..< prim_end {
           prim := bvh.primitives[i]
@@ -491,7 +487,6 @@ bvh_query_ray :: proc(
         }
       }
     } else {
-      // Internal node - push children
       stack[stack_size] = node.left_child
       stack_size += 1
       stack[stack_size] = node.right_child
@@ -500,12 +495,14 @@ bvh_query_ray :: proc(
   }
 }
 
+// RayHit is a ray query result: the primitive hit, the hit distance t, and whether anything was hit.
 RayHit :: struct($T: typeid) {
   primitive: T,
   t:         f32,
   hit:       bool,
 }
 
+// bvh_refit recomputes node bounds bottom-up after items moved, keeping the tree shape.
 bvh_refit :: proc(bvh: ^BVH($T)) {
   for i := len(bvh.nodes) - 1; i >= 0; i -= 1 {
     node := &bvh.nodes[i]
@@ -549,21 +546,19 @@ compute_bvh_levels :: proc(bvh: ^BVH($T)) {
   }
 }
 
-// Pair of overlapping primitives from self-collision detection
+// BVHOverlapPair is a pair of overlapping primitives found by bvh_find_all_overlaps.
 BVHOverlapPair :: struct($T: typeid) {
   a: T,
   b: T,
 }
 
-// Pair of overlapping primitives from cross-tree collision detection
+// BVHCrossPair is a pair of overlapping primitives found by bvh_find_cross_overlaps.
 BVHCrossPair :: struct($T: typeid, $U: typeid) {
   a: T,
   b: U,
 }
 
-// Find all overlapping pairs within a single BVH (self-collision)
-// This is O(N + K) where K is the number of overlapping pairs
-// Much faster than N * O(log N) individual queries
+// bvh_find_all_overlaps finds all overlapping pairs within a single BVH in O(N + K).
 bvh_find_all_overlaps :: proc(
   bvh: ^BVH($T),
   results: ^[dynamic]BVHOverlapPair(T),
@@ -572,7 +567,6 @@ bvh_find_all_overlaps :: proc(
   if len(bvh.nodes) == 0 do return
   if bvh.bounds_func == nil do return
 
-  // Start self-collision detection from root
   find_overlaps_recursive(bvh, 0, 0, results)
 }
 
@@ -586,27 +580,22 @@ find_overlaps_recursive :: proc(
   node_a := &bvh.nodes[node_a_idx]
   node_b := &bvh.nodes[node_b_idx]
 
-  // Early out if bounds don't overlap
   if !aabb_intersects(node_a.bounds, node_b.bounds) do return
 
   a_is_leaf := node_a.primitive_count > 0
   b_is_leaf := node_b.primitive_count > 0
 
-  // Both are leaf nodes - test all primitive pairs
   if a_is_leaf && b_is_leaf {
     prim_a_start := node_a.primitive_start
     prim_a_end := node_a.primitive_start + node_a.primitive_count
     prim_b_start := node_b.primitive_start
     prim_b_end := node_b.primitive_start + node_b.primitive_count
 
-    // Compile-time specialization based on type
     when intrinsics.type_has_field(T, "bounds") {
-      // Fast path - direct field access
       #no_bounds_check for i in prim_a_start ..< prim_a_end {
         prim_a := bvh.primitives[i]
         bounds_a := prim_a.bounds
 
-        // Determine the starting index for the inner loop
         // If same node, start after current index to avoid duplicates
         j_start := prim_b_start if node_a_idx != node_b_idx else i + 1
 
@@ -620,12 +609,10 @@ find_overlaps_recursive :: proc(
         }
       }
     } else {
-      // Callback path - for types without cached bounds
       for i in prim_a_start ..< prim_a_end {
         prim_a := bvh.primitives[i]
         bounds_a := bvh.bounds_func(prim_a)
 
-        // Determine the starting index for the inner loop
         // If same node, start after current index to avoid duplicates
         j_start := prim_b_start if node_a_idx != node_b_idx else i + 1
 
@@ -642,25 +629,18 @@ find_overlaps_recursive :: proc(
     return
   }
 
-  // One or both are internal nodes - recurse on children
   if a_is_leaf {
-    // Only split node_b
     find_overlaps_recursive(bvh, node_a_idx, node_b.left_child, results)
     find_overlaps_recursive(bvh, node_a_idx, node_b.right_child, results)
   } else if b_is_leaf {
-    // Only split node_a
     find_overlaps_recursive(bvh, node_a.left_child, node_b_idx, results)
     find_overlaps_recursive(bvh, node_a.right_child, node_b_idx, results)
   } else {
-    // Both are internal - split both and test all combinations
-    // When testing the same node against itself, avoid redundant tests
     if node_a_idx == node_b_idx {
-      // Self-test: only test unique combinations
       find_overlaps_recursive(bvh, node_a.left_child, node_a.left_child, results)
       find_overlaps_recursive(bvh, node_a.left_child, node_a.right_child, results)
       find_overlaps_recursive(bvh, node_a.right_child, node_a.right_child, results)
     } else {
-      // Different nodes: test all combinations
       find_overlaps_recursive(bvh, node_a.left_child, node_b.left_child, results)
       find_overlaps_recursive(bvh, node_a.left_child, node_b.right_child, results)
       find_overlaps_recursive(bvh, node_a.right_child, node_b.left_child, results)
@@ -669,8 +649,7 @@ find_overlaps_recursive :: proc(
   }
 }
 
-// Find all overlapping pairs between two different BVHs (cross-tree collision)
-// This is O(N + M + K) where K is the number of overlapping pairs
+// bvh_find_cross_overlaps finds all overlapping pairs between two BVHs in O(N + M + K).
 bvh_find_cross_overlaps :: proc(
   bvh_a: ^BVH($T),
   bvh_b: ^BVH($U),
@@ -692,23 +671,19 @@ find_cross_overlaps_recursive :: proc(
   node_a := &bvh_a.nodes[node_a_idx]
   node_b := &bvh_b.nodes[node_b_idx]
 
-  // Early out if bounds don't overlap
   if !aabb_intersects(node_a.bounds, node_b.bounds) do return
 
   a_is_leaf := node_a.primitive_count > 0
   b_is_leaf := node_b.primitive_count > 0
 
-  // Both are leaf nodes - test all primitive pairs
   if a_is_leaf && b_is_leaf {
     prim_a_start := node_a.primitive_start
     prim_a_end := node_a.primitive_start + node_a.primitive_count
     prim_b_start := node_b.primitive_start
     prim_b_end := node_b.primitive_start + node_b.primitive_count
 
-    // Compile-time specialization for both types
     when intrinsics.type_has_field(T, "bounds") &&
          intrinsics.type_has_field(U, "bounds") {
-      // Both fast
       #no_bounds_check for i in prim_a_start ..< prim_a_end {
         prim_a := bvh_a.primitives[i]
         bounds_a := prim_a.bounds
@@ -723,7 +698,6 @@ find_cross_overlaps_recursive :: proc(
         }
       }
     } else when intrinsics.type_has_field(T, "bounds") {
-      // A fast, B callback
       #no_bounds_check for i in prim_a_start ..< prim_a_end {
         prim_a := bvh_a.primitives[i]
         bounds_a := prim_a.bounds
@@ -738,7 +712,6 @@ find_cross_overlaps_recursive :: proc(
         }
       }
     } else when intrinsics.type_has_field(U, "bounds") {
-      // A callback, B fast
       for i in prim_a_start ..< prim_a_end {
         prim_a := bvh_a.primitives[i]
         bounds_a := bvh_a.bounds_func(prim_a)
@@ -753,7 +726,6 @@ find_cross_overlaps_recursive :: proc(
         }
       }
     } else {
-      // Both callback
       for i in prim_a_start ..< prim_a_end {
         prim_a := bvh_a.primitives[i]
         bounds_a := bvh_a.bounds_func(prim_a)
@@ -771,17 +743,13 @@ find_cross_overlaps_recursive :: proc(
     return
   }
 
-  // One or both are internal nodes - recurse on children
   if a_is_leaf {
-    // Only split node_b
     find_cross_overlaps_recursive(bvh_a, bvh_b, node_a_idx, node_b.left_child, results)
     find_cross_overlaps_recursive(bvh_a, bvh_b, node_a_idx, node_b.right_child, results)
   } else if b_is_leaf {
-    // Only split node_a
     find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.left_child, node_b_idx, results)
     find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.right_child, node_b_idx, results)
   } else {
-    // Both are internal - test all combinations
     find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.left_child, node_b.left_child, results)
     find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.left_child, node_b.right_child, results)
     find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.right_child, node_b.left_child, results)
@@ -822,18 +790,15 @@ parallel_prepare_primitives :: proc(
 bvh_build_task :: proc(task: thread.Task) {
   data := (^BVH_Build_Task_Data)(task.data)
 
-  // Create node for this subtree
   node := new(BVHBuildNode, data.allocator)
   node.bounds = AABB_UNDEFINED
 
-  // Compute bounds for this node
   for i in data.start ..< data.end {
     node.bounds = aabb_union(node.bounds, data.prims[i].bounds)
   }
 
   prim_count := data.end - data.start
 
-  // Check if we should create a leaf node
   if prim_count <= data.max_leaf_size {
     node.prim_start = data.start
     node.prim_count = prim_count
@@ -845,10 +810,8 @@ bvh_build_task :: proc(task: thread.Task) {
     return
   }
 
-  // Compute SAH split
   axis, split_pos := split_sah(data.prims[data.start:data.end], node.bounds, data.allocator)
 
-  // Fallback to leaf if split failed
   if axis < 0 || split_pos <= 0 || split_pos >= prim_count {
     node.prim_start = data.start
     node.prim_count = prim_count
@@ -862,9 +825,7 @@ bvh_build_task :: proc(task: thread.Task) {
 
   mid := data.start + split_pos
 
-  // Check if we should cutover to sequential build
   if data.depth >= PARALLEL_DEPTH_THRESHOLD || prim_count < PARALLEL_TASK_THRESHOLD {
-    // Sequential fallback
     node.left = build_recursive(
       data.prims,
       data.start,
@@ -886,7 +847,6 @@ bvh_build_task :: proc(task: thread.Task) {
     return
   }
 
-  // Spawn parallel subtasks
   left_result: ^BVHBuildNode = nil
   right_result: ^BVHBuildNode = nil
 
@@ -926,7 +886,6 @@ bvh_build_task :: proc(task: thread.Task) {
     &right_task_data,
     0,
   )
-  // Wait for both subtasks to complete
   for sync.atomic_load(&left_result) == nil || sync.atomic_load(&right_result) == nil {
     if queued_task, ok := thread.pool_pop_waiting(data.thread_pool); ok {
       thread.pool_do_work(data.thread_pool, queued_task)
@@ -972,7 +931,6 @@ parallel_build_recursive :: proc(
     0,
   )
 
-  // Wait for root task to complete
   for sync.atomic_load(&result) == nil {
     if queued_task, ok := thread.pool_pop_waiting(pool); ok {
       thread.pool_do_work(pool, queued_task)
@@ -984,7 +942,7 @@ parallel_build_recursive :: proc(
   return result
 }
 
-// Main parallel BVH build function
+// bvh_build_parallel builds the BVH on the thread pool, falling back to a sequential build for small inputs.
 bvh_build_parallel :: proc(
   bvh: ^BVH($T),
   items: []T,
@@ -999,13 +957,11 @@ bvh_build_parallel :: proc(
   clear(&bvh.primitives)
   if len(items) == 0 do return
 
-  // Fallback to sequential for small datasets or no thread pool
   if len(items) < parallel_threshold || thread_pool == nil || !thread_pool.is_running || len(thread_pool.threads) == 0 {
     bvh_build(bvh, items, max_leaf_size)
     return
   }
 
-  // Pre-reserve capacity for better performance
   reserve(&bvh.primitives, len(items))
   append(&bvh.primitives, ..items)
 
@@ -1016,14 +972,12 @@ bvh_build_parallel :: proc(
   arena: virtual.Arena
   if err := virtual.arena_init_growing(&arena); err != nil {
     log.error("Failed to init arena:", err)
-    // Fallback to sequential
     bvh_build(bvh, items, max_leaf_size)
     return
   }
   defer virtual.arena_free_all(&arena)
   arena_allocator := virtual.arena_allocator(&arena)
 
-  // Phase 1: Parallel primitive preparation
   build_prims := parallel_prepare_primitives(
     items,
     bvh.bounds_func,
@@ -1032,7 +986,6 @@ bvh_build_parallel :: proc(
     arena_allocator,
   )
 
-  // Phase 2: Parallel recursive build
   root := parallel_build_recursive(
     build_prims[:],
     max_leaf_size,
@@ -1040,11 +993,9 @@ bvh_build_parallel :: proc(
     thread_pool,
   )
 
-  // Phase 3: Reorder primitives (sequential)
   for prim, i in build_prims {
     bvh.primitives[i] = items[prim.index]
   }
 
-  // Phase 4: Flatten tree (sequential)
   flatten_bvh(bvh, root)
 }

@@ -1,3 +1,4 @@
+// Area-of-effect query over static bodies.
 package main
 
 import "../../mjolnir"

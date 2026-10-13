@@ -2,20 +2,15 @@ package input
 
 import "core:unicode/utf8"
 
-// Frame-coherent input.
-//
-// A window writes device events into an Accumulator as they arrive. Once per
-// tick `new_frame` drains it into a State snapshot, so every query below is
-// stable for the whole tick, independent of how often events are polled.
-// Presses and releases are recorded per event: a tap that starts and ends
-// between two ticks still reports both edges.
-
+// KeySet holds one flag per key, indexed by Key.
 KeySet :: [MAX_KEYS]bool
+// ButtonSet is a set of held or edged mouse buttons.
 ButtonSet :: bit_set[MouseButton]
 
+// TEXT_CAPACITY is the bytes of typed text kept per tick.
 TEXT_CAPACITY :: 128
 
-// Raw device state written by the window. Only the window and new_frame
+// Accumulator is raw device state written by the window. Only the window and new_frame
 // touch it.
 Accumulator :: struct {
   keys:             KeySet,
@@ -31,7 +26,7 @@ Accumulator :: struct {
   text_len:         int,
 }
 
-// One tick of input.
+// State is one tick of input.
 State :: struct {
   keys:             KeySet,
   keys_pressed:     KeySet,
@@ -52,7 +47,7 @@ State :: struct {
   keyboard_captured: bool,
 }
 
-// Drain the accumulator into this tick's snapshot. Call once per tick, before
+// new_frame drains the accumulator into this tick's snapshot. Call once per tick, before
 // any query.
 new_frame :: proc(self: ^State, acc: ^Accumulator) {
   prev_cursor := self.cursor if self.primed else acc.cursor
@@ -80,8 +75,7 @@ new_frame :: proc(self: ^State, acc: ^Accumulator) {
   acc.text_len = 0
 }
 
-// ---- accumulator writers, called by the window ----
-
+// on_key records a key event.
 on_key :: proc(acc: ^Accumulator, key: Key, action: Action) {
   if !key_valid(key) do return
   k := int(key)
@@ -97,6 +91,7 @@ on_key :: proc(acc: ^Accumulator, key: Key, action: Action) {
   }
 }
 
+// on_button records a mouse button event.
 on_button :: proc(acc: ^Accumulator, button: MouseButton, action: Action) {
   if button < min(MouseButton) || button > max(MouseButton) do return
   if action == .RELEASE {
@@ -108,15 +103,17 @@ on_button :: proc(acc: ^Accumulator, button: MouseButton, action: Action) {
   }
 }
 
+// on_cursor records the cursor position in window pixels.
 on_cursor :: proc(acc: ^Accumulator, x, y: f32) {
   acc.cursor = {x, y}
 }
 
+// on_scroll adds a scroll offset, summed until the next tick.
 on_scroll :: proc(acc: ^Accumulator, dx, dy: f32) {
   acc.scroll += {dx, dy}
 }
 
-// Append a typed character; dropped when the tick's text buffer is full.
+// on_char appends a typed character; dropped when the tick's text buffer is full.
 on_char :: proc(acc: ^Accumulator, ch: rune) {
   bytes, size := utf8.encode_rune(ch)
   if acc.text_len + size > TEXT_CAPACITY do return
@@ -124,61 +121,67 @@ on_char :: proc(acc: ^Accumulator, ch: rune) {
   acc.text_len += size
 }
 
-// ---- queries, pure functions of the snapshot ----
-
+// key_down reports whether `key` is held.
 key_down :: proc(self: ^State, key: Key) -> bool {
   return key_valid(key) && self.keys[key]
 }
 
+// key_pressed reports whether `key` went down this tick.
 key_pressed :: proc(self: ^State, key: Key) -> bool {
   return key_valid(key) && self.keys_pressed[key]
 }
 
+// key_released reports whether `key` went up this tick.
 key_released :: proc(self: ^State, key: Key) -> bool {
   return key_valid(key) && self.keys_released[key]
 }
 
-// OS key auto-repeat fired this tick (the key is held).
+// key_repeated reports OS key auto-repeat fired this tick (the key is held).
 key_repeated :: proc(self: ^State, key: Key) -> bool {
   return key_valid(key) && self.keys_repeated[key]
 }
 
+// mouse_down reports whether `button` is held.
 mouse_down :: proc(self: ^State, button: MouseButton) -> bool {
   return button in self.buttons
 }
 
+// mouse_pressed reports whether `button` went down this tick.
 mouse_pressed :: proc(self: ^State, button: MouseButton) -> bool {
   return button in self.buttons_pressed
 }
 
+// mouse_released reports whether `button` went up this tick.
 mouse_released :: proc(self: ^State, button: MouseButton) -> bool {
   return button in self.buttons_released
 }
 
-// Cursor position in window pixels.
+// cursor returns the cursor position in window pixels.
 cursor :: proc(self: ^State) -> [2]f32 {
   return self.cursor
 }
 
+// mouse_delta returns the cursor movement since the previous tick.
 mouse_delta :: proc(self: ^State) -> [2]f32 {
   return self.mouse_delta
 }
 
+// scroll returns the scroll offset summed this tick.
 scroll :: proc(self: ^State) -> [2]f32 {
   return self.scroll
 }
 
-// UTF-8 text typed this tick.
+// text returns the UTF-8 text typed this tick.
 text :: proc(self: ^State) -> string {
   return string(self.text_buf[:self.text_len])
 }
 
-// -1 while only `neg` is held, +1 while only `pos` is held, else 0.
+// axis returns -1 while only `neg` is held, +1 while only `pos` is held, else 0.
 axis :: proc(self: ^State, neg, pos: Key) -> f32 {
   return f32(int(key_down(self, pos))) - f32(int(key_down(self, neg)))
 }
 
-// Iterate this tick's key edges. A key with both edges this tick yields them
+// next_key_edge iterates this tick's key edges. A key with both edges this tick yields them
 // in the order that leaves it in its current state.
 //   it := 0
 //   for key, pressed in input.next_key_edge(&s, &it) {...}

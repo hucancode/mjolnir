@@ -5,6 +5,7 @@ import "core:math"
 import "core:math/linalg"
 import "../detour"
 
+@(private)
 Path_Corridor :: struct {
 	pos:      [3]f32,
 	target:   [3]f32,
@@ -13,6 +14,7 @@ Path_Corridor :: struct {
 	max_path: int,
 }
 
+@(private)
 create_path_corridor :: proc(max_path: int, allocator := context.allocator) -> (corridor: ^Path_Corridor, ok: bool) {
 	if max_path <= 0 {
 		return nil, false
@@ -25,12 +27,14 @@ create_path_corridor :: proc(max_path: int, allocator := context.allocator) -> (
 	return corridor, true
 }
 
+@(private)
 destroy_path_corridor :: proc(corridor: ^Path_Corridor) {
 	if corridor == nil do return
 	delete(corridor.path)
 	free(corridor)
 }
 
+@(private)
 path_corridor_reset :: proc(corridor: ^Path_Corridor, ref: detour.Poly_Ref, pos: [3]f32) {
 	corridor.pos = pos
 	corridor.target = pos
@@ -38,6 +42,7 @@ path_corridor_reset :: proc(corridor: ^Path_Corridor, ref: detour.Poly_Ref, pos:
 	corridor.npath = 1
 }
 
+@(private)
 path_corridor_find_corners :: proc(corridor: ^Path_Corridor, corner_verts: [][3]f32,
                                     corner_flags: []u8, corner_polys: []detour.Poly_Ref,
                                     max_corners: int, query: ^detour.Nav_Mesh_Query,
@@ -94,6 +99,7 @@ path_corridor_find_corners :: proc(corridor: ^Path_Corridor, corner_verts: [][3]
 	return ncorners_result
 }
 
+@(private)
 path_corridor_optimize_path_visibility :: proc(corridor: ^Path_Corridor, next: [3]f32,
                                                 path_optimization_range: f32,
                                                 query: ^detour.Nav_Mesh_Query,
@@ -122,6 +128,7 @@ path_corridor_optimize_path_visibility :: proc(corridor: ^Path_Corridor, next: [
 	}
 }
 
+@(private)
 path_corridor_optimize_path_topology :: proc(corridor: ^Path_Corridor, query: ^detour.Nav_Mesh_Query,
                                               filter: ^detour.Query_Filter) -> bool {
 	if corridor.npath < 3 do return false
@@ -151,6 +158,7 @@ path_corridor_optimize_path_topology :: proc(corridor: ^Path_Corridor, query: ^d
 	return false
 }
 
+@(private)
 path_corridor_move_position :: proc(corridor: ^Path_Corridor, npos: [3]f32,
                                      query: ^detour.Nav_Mesh_Query,
                                      filter: ^detour.Query_Filter) -> bool {
@@ -178,6 +186,7 @@ path_corridor_move_position :: proc(corridor: ^Path_Corridor, npos: [3]f32,
 	return false
 }
 
+@(private = "file")
 path_corridor_move_target_position :: proc(corridor: ^Path_Corridor, npos: [3]f32,
                                             query: ^detour.Nav_Mesh_Query,
                                             filter: ^detour.Query_Filter) -> bool {
@@ -199,6 +208,7 @@ path_corridor_move_target_position :: proc(corridor: ^Path_Corridor, npos: [3]f3
 	return false
 }
 
+@(private)
 path_corridor_set_corridor :: proc(corridor: ^Path_Corridor, target: [3]f32,
                                     path: []detour.Poly_Ref) {
 	corridor.target = target
@@ -207,6 +217,7 @@ path_corridor_set_corridor :: proc(corridor: ^Path_Corridor, target: [3]f32,
 	corridor.npath = n
 }
 
+@(private = "file")
 path_corridor_is_valid :: proc(corridor: ^Path_Corridor, max_look_ahead: int,
                                 query: ^detour.Nav_Mesh_Query,
                                 filter: ^detour.Query_Filter) -> bool {
@@ -219,28 +230,34 @@ path_corridor_is_valid :: proc(corridor: ^Path_Corridor, max_look_ahead: int,
 	return true
 }
 
+@(private = "file")
 path_corridor_get_pos :: proc(corridor: ^Path_Corridor) -> [3]f32 {
 	return corridor.pos
 }
 
+@(private)
 path_corridor_get_target :: proc(corridor: ^Path_Corridor) -> [3]f32 {
 	return corridor.target
 }
 
+@(private)
 path_corridor_get_first_poly :: proc(corridor: ^Path_Corridor) -> detour.Poly_Ref {
 	if corridor.npath > 0 do return corridor.path[0]
 	return detour.INVALID_POLY_REF
 }
 
+@(private)
 path_corridor_get_last_poly :: proc(corridor: ^Path_Corridor) -> detour.Poly_Ref {
 	if corridor.npath > 0 do return corridor.path[corridor.npath-1]
 	return detour.INVALID_POLY_REF
 }
 
+@(private = "file")
 path_corridor_get_path :: proc(corridor: ^Path_Corridor) -> []detour.Poly_Ref {
 	return corridor.path[:corridor.npath]
 }
 
+@(private)
 merge_corridor_start_moved :: proc(path: []detour.Poly_Ref, npath: int, max_path: int,
                                     visited: []detour.Poly_Ref, nvisited: int) -> int {
 	furthest_path := -1
@@ -276,6 +293,7 @@ merge_corridor_start_moved :: proc(path: []detour.Poly_Ref, npath: int, max_path
 	return req + size
 }
 
+@(private)
 merge_corridor_end_moved :: proc(path: []detour.Poly_Ref, npath: int, max_path: int,
                                   visited: []detour.Poly_Ref, nvisited: int) -> int {
 	furthest_path := -1
@@ -304,6 +322,7 @@ merge_corridor_end_moved :: proc(path: []detour.Poly_Ref, npath: int, max_path: 
 	return ppos + count
 }
 
+@(private)
 merge_corridor_start_shortcut :: proc(path: []detour.Poly_Ref, npath: int, max_path: int,
                                        visited: []detour.Poly_Ref, nvisited: int) -> int {
 	furthest_path := -1

@@ -4,7 +4,7 @@ import cont "../containers"
 import "../geometry"
 import "core:math/linalg"
 
-// Mass decides the role: inv_mass > 0 is dynamic (fully simulated);
+// Body is a rigid body. Mass decides the role: inv_mass > 0 is dynamic (fully simulated);
 // inv_mass == 0 is infinite mass. An infinite-mass body is static until it is
 // first moved with set_pose/set_velocity; from then on it is kinematic —
 // moved by its velocity, pushing dynamic bodies, never pushed back.

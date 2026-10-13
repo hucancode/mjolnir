@@ -5,20 +5,22 @@ import "core:math/linalg"
 import "core:slice"
 import "core:strings"
 
-// Local transform of one bone.
+// TRS is the local transform of one bone.
 TRS :: struct {
   position: [3]f32,
   rotation: quaternion128,
   scale:    [3]f32,
 }
 
+// TRS_IDENTITY is the transform that leaves a bone unchanged.
 TRS_IDENTITY :: TRS{rotation = linalg.QUATERNIONF32_IDENTITY, scale = {1, 1, 1}}
 
+// trs_matrix returns t as a 4x4 matrix.
 trs_matrix :: #force_inline proc "contextless" (t: TRS) -> matrix[4, 4]f32 {
   return linalg.matrix4_from_trs(t.position, t.rotation, t.scale)
 }
 
-// Bone hierarchy definition, shared by every instance animated with it.
+// Skeleton is the bone hierarchy definition, shared by every instance animated with it.
 // Immutable after skeleton_init. One flat array per attribute, indexed by
 // bone; bone indices match the skin's joint order.
 Skeleton :: struct {
@@ -32,7 +34,7 @@ Skeleton :: struct {
   depths:       []u32, // root = 0
 }
 
-// Build a skeleton from parent indices and inverse bind matrices (copied).
+// skeleton_init builds a skeleton from parent indices and inverse bind matrices (copied).
 // Fails if the parent links contain a cycle or out-of-range index.
 skeleton_init :: proc(
   self: ^Skeleton,
@@ -84,6 +86,7 @@ skeleton_init :: proc(
   return true
 }
 
+// skeleton_destroy frees the skeleton's arrays.
 skeleton_destroy :: proc(self: ^Skeleton) {
   for name in self.names do delete(name)
   delete(self.names)
@@ -97,16 +100,18 @@ skeleton_destroy :: proc(self: ^Skeleton) {
   self^ = {}
 }
 
+// bone_count returns the number of bones in the skeleton.
 bone_count :: #force_inline proc "contextless" (self: ^Skeleton) -> int {
   return len(self.parents)
 }
 
+// find_bone returns the index of the bone named name.
 find_bone :: proc(self: ^Skeleton, name: string) -> (index: u32, ok: bool) #optional_ok {
   for n, i in self.names do if n == name do return u32(i), true
   return 0, false
 }
 
-// Indices of the named bones. Fails if any name is missing.
+// find_bones returns the indices of the named bones. Fails if any name is missing.
 find_bones :: proc(
   self: ^Skeleton,
   names: []string,
@@ -127,7 +132,7 @@ find_bones :: proc(
   return indices, true
 }
 
-// Chain from `root_name` down to `tip_name` (root first). Fails if tip does
+// bone_chain returns the chain from `root_name` down to `tip_name` (root first). Fails if tip does
 // not descend from root.
 bone_chain :: proc(
   self: ^Skeleton,
@@ -153,7 +158,7 @@ bone_chain :: proc(
   return indices, true
 }
 
-// Chain of up to `length` bones starting at `root_name`, following each bone's
+// bone_chain_down returns a chain of up to `length` bones starting at `root_name`, following each bone's
 // first child. Fails when fewer than 2 bones are found.
 bone_chain_down :: proc(
   self: ^Skeleton,
@@ -179,14 +184,14 @@ bone_chain_down :: proc(
   return slice.clone(chain[:], allocator), true
 }
 
-// Mask enabling the named bones.
+// bone_mask returns a mask enabling the named bones.
 bone_mask :: proc(self: ^Skeleton, names: []string, allocator := context.allocator) -> []bool {
   mask := make([]bool, bone_count(self), allocator)
   for name in names do if idx, ok := find_bone(self, name); ok do mask[idx] = true
   return mask
 }
 
-// Mask enabling a bone and all its descendants.
+// bone_subtree_mask returns a mask enabling a bone and all its descendants.
 bone_subtree_mask :: proc(
   self: ^Skeleton,
   root_name: string,
@@ -202,13 +207,13 @@ bone_subtree_mask :: proc(
   return mask, true
 }
 
-// Rest-pose position of a bone in skeleton space.
+// rest_position returns the rest-pose position of a bone in skeleton space.
 rest_position :: proc(self: ^Skeleton, name: string) -> (pos: [3]f32, ok: bool) #optional_ok {
   idx := find_bone(self, name) or_return
   return self.bind[idx][3].xyz, true
 }
 
-// Rest-pose offset (tip - root) in skeleton space.
+// rest_offset returns the rest-pose offset (tip - root) in skeleton space.
 rest_offset :: proc(self: ^Skeleton, root_name, tip_name: string) -> (offset: [3]f32, ok: bool) #optional_ok {
   root := rest_position(self, root_name) or_return
   tip := rest_position(self, tip_name) or_return

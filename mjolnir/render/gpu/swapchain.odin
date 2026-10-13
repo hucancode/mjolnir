@@ -5,6 +5,7 @@ import "core:math"
 import "core:slice"
 import vk "vendor:vulkan"
 
+// Swapchain holds the presentation images and their per-frame semaphores.
 Swapchain :: struct {
   handle:                      vk.SwapchainKHR,
   format:                      vk.SurfaceFormatKHR,
@@ -16,6 +17,7 @@ Swapchain :: struct {
   render_finished_semaphores:  []vk.Semaphore, // Per swapchain image (for presentation sync)
 }
 
+// swapchain_init creates the swapchain, image views and semaphores for framebuffer_size.
 swapchain_init :: proc(
   self: ^Swapchain,
   gctx: ^GPUContext,
@@ -138,7 +140,6 @@ swapchain_init :: proc(
       &self.views[i],
     ) or_return
   }
-  // Allocate per-swapchain-image semaphores for presentation
   self.render_finished_semaphores = make([]vk.Semaphore, swapchain_image_count)
   defer if ret != .SUCCESS do delete(self.render_finished_semaphores)
   semaphore_info := vk.SemaphoreCreateInfo {
@@ -164,21 +165,19 @@ swapchain_init :: proc(
   return
 }
 
+// swapchain_destroy destroys the swapchain views, semaphores and handle.
 swapchain_destroy :: proc(self: ^Swapchain, device: vk.Device) {
   for view in self.views do vk.DestroyImageView(device, view, nil)
   delete(self.views)
   self.views = nil
-  // TODO: destroying image will make app crash
-  // for image in self.images do vk.DestroyImage(device, image, nil)
+  // the images belong to the swapchain: destroying them crashes
   delete(self.images)
   self.images = nil
-  // Destroy per-swapchain-image semaphores
   for semaphore in self.render_finished_semaphores {
     vk.DestroySemaphore(device, semaphore, nil)
   }
   delete(self.render_finished_semaphores)
   self.render_finished_semaphores = nil
-  // Destroy per-frame-in-flight resources
   for semaphore in self.image_available_semaphores {
     vk.DestroySemaphore(device, semaphore, nil)
   }
@@ -187,10 +186,8 @@ swapchain_destroy :: proc(self: ^Swapchain, device: vk.Device) {
 }
 
 
-// Block until the GPU has finished the submissions that last used the next
-// frame-in-flight slot (frame_serial % FRAMES_IN_FLIGHT), so its per-frame
-// buffers and command buffers may be rewritten. Submission s signals s + 1 on
-// the graphics and the compute timeline.
+// wait_frame blocks until the GPU has finished the submissions that last used the next
+// frame-in-flight slot (frame_serial % FRAMES_IN_FLIGHT), so its per-frame buffers may be rewritten.
 wait_frame :: proc(gctx: ^GPUContext) -> vk.Result {
   if gctx.frame_serial < FRAMES_IN_FLIGHT do return .SUCCESS
   value := gctx.frame_serial - FRAMES_IN_FLIGHT + 1
@@ -205,7 +202,7 @@ wait_frame :: proc(gctx: ^GPUContext) -> vk.Result {
   return vk.WaitSemaphores(gctx.device, &wait_info, math.max(u64))
 }
 
-// Acquire the next swapchain image. Call after wait_frame.
+// acquire_next_image acquires the next swapchain image. Call after wait_frame.
 acquire_next_image :: proc(
   device: vk.Device,
   self: ^Swapchain,
@@ -225,13 +222,9 @@ acquire_next_image :: proc(
   return
 }
 
-// Submit this frame's compute and graphics work, then present. Compute for
-// frame n culls for frame n+1, so with a dedicated compute queue the queues
-// overlap within a frame; either way the submissions chain across frames:
-//   compute n waits graphics n-1 (it reads depth n-1 and rewrites the draw
-//   lists graphics n-1 drew from)
-//   graphics n waits compute n-1 (it draws the lists compute n-1 wrote and
-//   rewrites the depth compute n-1 read)
+// submit_queue_and_present submits this frame's compute and graphics work, then presents.
+// Submissions chain across frames: compute n waits graphics n-1 (depth, draw lists),
+// graphics n waits compute n-1 (the lists it draws, the depth it rewrites).
 submit_queue_and_present :: proc(
   gctx: ^GPUContext,
   self: ^Swapchain,
@@ -310,7 +303,6 @@ submit_queue_and_present :: proc(
   present_info := vk.PresentInfoKHR {
     sType              = .PRESENT_INFO_KHR,
     waitSemaphoreCount = 1,
-    // Use image_index for presentation sync (tied to swapchain image)
     pWaitSemaphores    = &self.render_finished_semaphores[self.image_index],
     swapchainCount     = 1,
     pSwapchains        = &self.handle,

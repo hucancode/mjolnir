@@ -3,6 +3,7 @@ package crowd
 
 import "core:math"
 
+@(private)
 Proximity_Grid :: struct {
 	cell_size:     f32,
 	inv_cell_size: f32,
@@ -12,6 +13,7 @@ Proximity_Grid :: struct {
 	bounds:        [4]i32,
 }
 
+@(private = "file")
 Grid_Item :: struct {
 	id:   u16,
 	x:    i16,
@@ -19,6 +21,7 @@ Grid_Item :: struct {
 	next: u16,
 }
 
+@(private)
 create_proximity_grid :: proc(pool_size: int, cell_size: f32, allocator := context.allocator) -> (grid: ^Proximity_Grid, ok: bool) {
 	if pool_size <= 0 || cell_size <= 0 {
 		return nil, false
@@ -33,6 +36,7 @@ create_proximity_grid :: proc(pool_size: int, cell_size: f32, allocator := conte
 	return grid, true
 }
 
+@(private)
 destroy_proximity_grid :: proc(grid: ^Proximity_Grid) {
 	if grid == nil do return
 	delete(grid.pool)
@@ -40,6 +44,7 @@ destroy_proximity_grid :: proc(grid: ^Proximity_Grid) {
 	free(grid)
 }
 
+@(private)
 proximity_grid_clear :: proc(grid: ^Proximity_Grid) {
 	clear(&grid.pool)
 	grid.pool_head = 0
@@ -47,6 +52,7 @@ proximity_grid_clear :: proc(grid: ^Proximity_Grid) {
 	grid.bounds = {0, 0, 0, 0}
 }
 
+@(private)
 proximity_grid_add_item :: proc(grid: ^Proximity_Grid, id: u16, minx: f32, miny: f32, maxx: f32, maxy: f32) {
 	iminx := i32(math.floor(minx * grid.inv_cell_size))
 	iminy := i32(math.floor(miny * grid.inv_cell_size))
@@ -95,6 +101,7 @@ proximity_grid_add_item :: proc(grid: ^Proximity_Grid, id: u16, minx: f32, miny:
 	}
 }
 
+@(private)
 proximity_grid_query_items :: proc(grid: ^Proximity_Grid, minx: f32, miny: f32, maxx: f32, maxy: f32,
                                    ids: []u16, max_ids: int) -> int {
 	iminx := i32(math.floor(minx * grid.inv_cell_size))
@@ -136,6 +143,7 @@ proximity_grid_query_items :: proc(grid: ^Proximity_Grid, minx: f32, miny: f32, 
 	return n
 }
 
+@(private)
 proximity_grid_get_item_count_at :: proc(grid: ^Proximity_Grid, x: i32, y: i32) -> int {
 	if x < grid.bounds[0] || x > grid.bounds[2] do return 0
 	if y < grid.bounds[1] || y > grid.bounds[3] do return 0

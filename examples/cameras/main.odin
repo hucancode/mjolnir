@@ -1,3 +1,4 @@
+// Orbit, free-fly and follow cameras built from render camera primitives (orbit, look_at, lerp).
 package main
 
 import "../../mjolnir"

@@ -10,7 +10,7 @@ import "core:slice"
 
 #assert(recast.RC_MAX_VERTS_PER_POLY <= detour.DT_VERTS_PER_POLYGON)
 
-// Create navigation mesh data from Recast polygon mesh
+@(private)
 create_nav_mesh_data :: proc(
   params: ^Create_Nav_Mesh_Data_Params,
 ) -> (
@@ -31,32 +31,27 @@ create_nav_mesh_data :: proc(
   nvp := pmesh.nvp
   cs := pmesh.cs
   ch := pmesh.ch
-  // Classify off-mesh connection points and count how many we'll store
   off_mesh_con_class := make([]u8, params.off_mesh_con_count * 2)
   defer delete(off_mesh_con_class)
   stored_off_mesh_con_count := i32(0)
   off_mesh_con_link_count := i32(0)
   if params.off_mesh_con_count > 0 {
     classify_off_mesh_connections(pmesh, params, off_mesh_con_class)
-    // Count connections that start from this tile and links needed
     for i in 0 ..< params.off_mesh_con_count {
       if off_mesh_con_class[i * 2 + 0] == 0xff {
         stored_off_mesh_con_count += 1
-        off_mesh_con_link_count += 1 // Start endpoint link
+        off_mesh_con_link_count += 1
       }
       if off_mesh_con_class[i * 2 + 1] == 0xff {
-        off_mesh_con_link_count += 1 // End endpoint link
+        off_mesh_con_link_count += 1
       }
     }
   }
-  // Count vertices and polygons
   total_vert_count := i32(0)
   total_poly_count := i32(0)
   max_link_count := i32(0)
-  // Polygon mesh vertices and polygons
   total_vert_count += i32(len(pmesh.verts))
   total_poly_count += pmesh.npolys
-  // Calculate maximum link count per polygon
   edge_count := i32(0)
   portal_count := i32(0)
   for i in 0 ..< pmesh.npolys {
@@ -65,8 +60,7 @@ create_nav_mesh_data :: proc(
       if pmesh.polys[poly_base + j] == recast.RC_MESH_NULL_IDX {
         break
       }
-      edge_count += 1 // Count all edges for internal connections
-      // Count portal edges (external connections)
+      edge_count += 1
       if pmesh.polys[poly_base + nvp + j] & 0x8000 != 0 {
         dir := pmesh.polys[poly_base + nvp + j] & 0xf
         if dir != 0xf {
@@ -75,13 +69,10 @@ create_nav_mesh_data :: proc(
       }
     }
   }
-  // maxLinkCount = all edges + portal edges*2 (bidirectional)
   max_link_count = edge_count + portal_count * 2
-  // Off-mesh connections (only those that start from this tile)
   total_vert_count += stored_off_mesh_con_count * 2
   total_poly_count += stored_off_mesh_con_count
   max_link_count += off_mesh_con_link_count
-  // Detail mesh triangles and vertices
   detail_mesh_count := i32(0)
   detail_vert_count := i32(0)
   detail_tri_count := i32(0)
@@ -90,8 +81,6 @@ create_nav_mesh_data :: proc(
     detail_vert_count = i32(len(dmesh.verts)) - i32(len(pmesh.verts))
     detail_tri_count = i32(len(dmesh.tris))
   }
-  // Calculate data size using validated format specification
-  // Data format: [Header][Vertices][Polygons][Links][DetailMeshes][DetailVerts][DetailTris][BVTree][OffMeshConnections]
   header_size := size_of(detour.Mesh_Header)
   verts_size := size_of([3]f32) * int(total_vert_count)
   polys_size := size_of(detour.Poly) * int(total_poly_count)
@@ -99,7 +88,6 @@ create_nav_mesh_data :: proc(
   detail_meshes_size := size_of(detour.Poly_Detail) * int(detail_mesh_count)
   detail_verts_size := size_of([3]f32) * int(detail_vert_count)
   detail_tris_size := size_of(u8) * int(detail_tri_count) * 4
-  // Calculate BV tree size - simple implementation creates one node per polygon
   bv_node_count := total_poly_count
   bv_tree_size := size_of(detour.BV_Node) * int(bv_node_count)
   off_mesh_cons_size :=
@@ -114,10 +102,8 @@ create_nav_mesh_data :: proc(
     detail_tris_size +
     bv_tree_size +
     off_mesh_cons_size
-  // Allocate data
   data := make([]u8, total_size)
   offset := 0
-  // Setup header
   header := cast(^detour.Mesh_Header)(raw_data(data)[offset:])
   offset += header_size
   header.magic = detour.DT_NAVMESH_MAGIC
@@ -141,7 +127,6 @@ create_nav_mesh_data :: proc(
   header.bmin = pmesh.bmin
   header.bmax = pmesh.bmax
   header.bv_quant_factor = 1.0 / cs
-  // Copy vertices - first data section per navmesh format specification
   verts := slice.from_ptr(
     cast(^[3]f32)(raw_data(data)[offset:]),
     int(total_vert_count),
@@ -151,7 +136,6 @@ create_nav_mesh_data :: proc(
     verts[i] =
       pmesh.bmin + [3]f32{f32(v[0]) * cs, f32(v[1]) * ch, f32(v[2]) * cs}
   }
-  // Add off-mesh connection vertices (only for connections starting from this tile)
   vert_idx := len(pmesh.verts)
   for i in 0 ..< params.off_mesh_con_count {
     if off_mesh_con_class[i * 2 + 0] == 0xff {
@@ -161,7 +145,6 @@ create_nav_mesh_data :: proc(
       vert_idx += 2
     }
   }
-  // Copy polygons - second data section per navmesh format specification
   polys := slice.from_ptr(
     cast(^detour.Poly)(raw_data(data)[offset:]),
     int(total_poly_count),
@@ -190,20 +173,16 @@ create_nav_mesh_data :: proc(
       )
       poly.verts[poly.vert_count] = pmesh.polys[poly_base + j]
       if pmesh.polys[poly_base + nvp + j] & 0x8000 != 0 {
-        // External edge
         poly.neis[poly.vert_count] = 0
       } else if pmesh.polys[poly_base + nvp + j] != recast.RC_MESH_NULL_IDX {
-        // Internal edge - store Recast polygon index + 1 (0 means no neighbor)
-        // This will be converted to Detour polygon index in connect_int_links
+        // Recast poly index + 1 (0 = no neighbor); resolved to Detour index in connect_int_links
         poly.neis[poly.vert_count] = pmesh.polys[poly_base + nvp + j] + 1
       } else {
-        // Boundary edge
         poly.neis[poly.vert_count] = 0
       }
       poly.vert_count += 1
     }
   }
-  // Add off-mesh connection polygons (only for connections starting from this tile)
   poly_idx := pmesh.npolys
   vert_base := len(pmesh.verts)
   for i in 0 ..< params.off_mesh_con_count {
@@ -220,9 +199,7 @@ create_nav_mesh_data :: proc(
       vert_base += 2
     }
   }
-  // Skip links for now (will be allocated at runtime)
   offset += links_size
-  // Copy detail meshes
   if dmesh != nil {
     detail_meshes := slice.from_ptr(
       cast(^detour.Poly_Detail)(raw_data(data)[offset:]),
@@ -237,7 +214,6 @@ create_nav_mesh_data :: proc(
       detail.vert_count = u8(mesh_info[1])
       detail.tri_count = u8(mesh_info[3])
     }
-    // Copy detail vertices (skip shared vertices)
     detail_verts := slice.from_ptr(
       cast(^[3]f32)(raw_data(data)[offset:]),
       int(detail_vert_count),
@@ -246,7 +222,6 @@ create_nav_mesh_data :: proc(
     for i in 0 ..< detail_vert_count {
       detail_verts[i] = dmesh.verts[len(pmesh.verts) + int(i)]
     }
-    // Copy detail triangles
     detail_tris := slice.from_ptr(
       cast(^[4]u8)(raw_data(data)[offset:]),
       int(detail_tri_count),
@@ -256,7 +231,6 @@ create_nav_mesh_data :: proc(
       detail_tris[i] = dmesh.tris[i]
     }
   }
-  // Build BV tree if nodes exist
   if bv_node_count > 0 {
     bv_tree := slice.from_ptr(
       cast(^detour.BV_Node)(raw_data(data)[offset:]),
@@ -265,7 +239,6 @@ create_nav_mesh_data :: proc(
     build_bv_tree(pmesh, bv_tree, bv_node_count, dmesh)
   }
   offset += bv_tree_size
-  // Copy off-mesh connections (only those starting from this tile)
   if stored_off_mesh_con_count > 0 {
     off_mesh_cons := slice.from_ptr(
       cast(^detour.Off_Mesh_Connection)(raw_data(data)[offset:]),
@@ -276,7 +249,6 @@ create_nav_mesh_data :: proc(
       if off_mesh_con_class[i * 2 + 0] == 0xff {
         con := &off_mesh_cons[con_idx]
         con.poly = u16(pmesh.npolys + i32(con_idx))
-        // Copy connection endpoints
         conn := params.off_mesh_con_verts[i]
         con.start = conn.start
         con.end = conn.end
@@ -292,7 +264,6 @@ create_nav_mesh_data :: proc(
       }
     }
   }
-  // Final validation step - verify the created data can be properly parsed
   validation_result := detour.validate_tile_data(data)
   if !validation_result.valid {
     log.errorf("Created tile data failed validation:")
@@ -301,13 +272,11 @@ create_nav_mesh_data :: proc(
     }
     return nil, {.Invalid_Param}
   }
-  // Additional integrity check - ensure the data layout matches our expectations
   parsed_header, parse_status := detour.parse_mesh_header(data)
   if !detour.status_succeeded(parse_status) {
     log.errorf("Created tile data failed header parsing: %v", parse_status)
     return nil, {.Invalid_Param}
   }
-  // Verify the header values match what we set
   if parsed_header.poly_count != total_poly_count ||
      parsed_header.vert_count != total_vert_count ||
      parsed_header.max_link_count != max_link_count {
@@ -322,7 +291,6 @@ create_nav_mesh_data :: proc(
     )
     return nil, {.Invalid_Param}
   }
-  // Navigation mesh tile created successfully
   log.infof(
     "Navigation mesh tile created successfully (size: %d bytes)",
     len(data),
@@ -330,36 +298,33 @@ create_nav_mesh_data :: proc(
   return data, {.Success}
 }
 
+@(private = "file")
 Off_Mesh_Connection_Verts :: struct {
   start: [3]f32,
   end:   [3]f32,
 }
 
-// Parameters for creating navigation mesh data
+@(private)
 Create_Nav_Mesh_Data_Params :: struct {
-  // Polygon mesh from Recast
   poly_mesh:            ^recast.Poly_Mesh,
   poly_mesh_detail:     ^recast.Poly_Mesh_Detail,
-  // Off-mesh connections
-  off_mesh_con_verts:   []Off_Mesh_Connection_Verts, // Connection endpoints
-  off_mesh_con_rad:     []f32, // [nOffMeshCons]
-  off_mesh_con_flags:   []u16, // [nOffMeshCons]
-  off_mesh_con_areas:   []u8, // [nOffMeshCons]
-  off_mesh_con_dir:     []u8, // [nOffMeshCons]
-  off_mesh_con_user_id: []u32, // [nOffMeshCons]
+  off_mesh_con_verts:   []Off_Mesh_Connection_Verts,
+  off_mesh_con_rad:     []f32,
+  off_mesh_con_flags:   []u16,
+  off_mesh_con_areas:   []u8,
+  off_mesh_con_dir:     []u8,
+  off_mesh_con_user_id: []u32,
   off_mesh_con_count:   i32,
-  // Tile parameters
   user_id:              u32,
   tile_x:               i32,
   tile_y:               i32,
   tile_layer:           i32,
-  // Agent parameters
   walkable_height:      f32,
   walkable_radius:      f32,
   walkable_climb:       f32,
 }
 
-// Classify off-mesh connection endpoints to determine which side of tile boundary they're on
+@(private = "file")
 classify_off_mesh_connections :: proc(
   pmesh: ^recast.Poly_Mesh,
   params: ^Create_Nav_Mesh_Data_Params,
@@ -368,10 +333,8 @@ classify_off_mesh_connections :: proc(
   if params.off_mesh_con_count == 0 {
     return
   }
-  // Find tight height bounds for culling off-mesh connections
   hmin := f32(math.F32_MAX)
   hmax := f32(-math.F32_MAX)
-  // Calculate height bounds from polygon mesh vertices
   for v in pmesh.verts {
     h := pmesh.bmin[1] + f32(v[1]) * pmesh.ch
     hmin = min(hmin, h)
@@ -380,17 +343,12 @@ classify_off_mesh_connections :: proc(
   // Expand bounds by walkable climb to account for connection tolerance
   hmin -= params.walkable_climb
   hmax += params.walkable_climb
-  // Create bounds for classification (copy tile bounds but use expanded height)
   bmin := [3]f32{pmesh.bmin[0], hmin, pmesh.bmin[2]}
   bmax := [3]f32{pmesh.bmax[0], hmax, pmesh.bmax[2]}
-  // Classify each off-mesh connection endpoint
   for i in 0 ..< params.off_mesh_con_count {
     conn := params.off_mesh_con_verts[i]
-    // Classify both endpoints
     class[i * 2 + 0] = classify_off_mesh_point(conn.start, bmin, bmax)
     class[i * 2 + 1] = classify_off_mesh_point(conn.end, bmin, bmax)
-    // Zero out off-mesh start positions that are outside height bounds
-    // This prevents connections that can never be reached due to height constraints
     if class[i * 2 + 0] == 0xff {
       if conn.start[1] < bmin[1] || conn.start[1] > bmax[1] {
         class[i * 2 + 0] = 0
@@ -399,52 +357,45 @@ classify_off_mesh_connections :: proc(
   }
 }
 
-// Classify a single off-mesh point relative to tile boundaries
-// Returns 0-7 for the 8 directions around tile edges, or 0xff if inside tile
+@(private = "file")
 classify_off_mesh_point :: proc(pt: [3]f32, bmin: [3]f32, bmax: [3]f32) -> u8 {
-  // Bit flags for boundary classification
-  XP :: u8(1 << 0) // Beyond positive X boundary (East)
-  ZP :: u8(1 << 1) // Beyond positive Z boundary (North)
-  XM :: u8(1 << 2) // Beyond negative X boundary (West)
-  ZM :: u8(1 << 3) // Beyond negative Z boundary (South)
-  // Determine which boundaries the point crosses
+  XP :: u8(1 << 0)
+  ZP :: u8(1 << 1)
+  XM :: u8(1 << 2)
+  ZM :: u8(1 << 3)
   outcode := u8(0)
-  if pt[0] >= bmax[0] do outcode |= XP // East of tile
-  if pt[2] >= bmax[2] do outcode |= ZP // North of tile
-  if pt[0] < bmin[0] do outcode |= XM // West of tile
-  if pt[2] < bmin[2] do outcode |= ZM // South of tile
-  // Map boundary combinations to specific side values (0-7)
-  // This creates an 8-directional classification around the tile
+  if pt[0] >= bmax[0] do outcode |= XP
+  if pt[2] >= bmax[2] do outcode |= ZP
+  if pt[0] < bmin[0] do outcode |= XM
+  if pt[2] < bmin[2] do outcode |= ZM
   switch outcode {
   case XP:
-    return 0 // East
+    return 0
   case XP | ZP:
-    return 1 // Northeast
+    return 1
   case ZP:
-    return 2 // North
+    return 2
   case XM | ZP:
-    return 3 // Northwest
+    return 3
   case XM:
-    return 4 // West
+    return 4
   case XM | ZM:
-    return 5 // Southwest
+    return 5
   case ZM:
-    return 6 // South
+    return 6
   case XP | ZM:
-    return 7 // Southeast
+    return 7
   }
-  // Point is inside tile boundaries
   return 0xff
 }
 
-// Create navigation mesh from single tile
+@(private)
 create_nav_mesh :: proc(
   params: ^Create_Nav_Mesh_Data_Params,
 ) -> (
   ^detour.Nav_Mesh,
   detour.Status,
 ) {
-  // Create navigation mesh data
   data, status := create_nav_mesh_data(params)
   if !detour.status_succeeded(status) {
     return nil, status
@@ -463,7 +414,6 @@ create_nav_mesh :: proc(
     delete(data)
     return nil, status
   }
-  // Add the tile
   _, status = detour.nav_mesh_add_tile(nav_mesh, data, detour.DT_TILE_FREE_DATA)
   if !detour.status_succeeded(status) {
     detour.nav_mesh_destroy(nav_mesh)
@@ -473,7 +423,7 @@ create_nav_mesh :: proc(
   return nav_mesh, {.Success}
 }
 
-// Build BV tree for efficient spatial queries with optimized hierarchical construction
+@(private)
 build_bv_tree :: proc(
   pmesh: ^recast.Poly_Mesh,
   nodes: []detour.BV_Node,
@@ -485,18 +435,14 @@ build_bv_tree :: proc(
   }
   cs := pmesh.cs
   quant_factor := 1.0 / cs
-  // Use hierarchical structure for larger meshes, flat for smaller ones
   if pmesh.npolys <= 32 {
-    // Small meshes: flat structure is more efficient
     build_bv_tree_flat(pmesh, nodes, node_count, quant_factor, dmesh)
   } else {
-    // Large meshes: hierarchical structure for better query performance
     build_bv_tree_hierarchical(pmesh, nodes, node_count, quant_factor)
   }
 }
 
-// Optimized flat BV tree construction for small meshes
-@(private)
+@(private = "file")
 build_bv_tree_flat :: proc(
   pmesh: ^recast.Poly_Mesh,
   nodes: []detour.BV_Node,
@@ -508,24 +454,20 @@ build_bv_tree_flat :: proc(
   for i in 0 ..< int(min(node_count, pmesh.npolys)) {
     node := &nodes[i]
     if dmesh != nil {
-      // Use detail mesh bounds if available (more accurate)
       bounds := calc_detail_mesh_bounds(dmesh, i, pmesh.bmin, quant_factor)
       node.bmin = bounds.min
       node.bmax = bounds.max
     } else {
-      // Use polygon bounds with Y remapping
-      // IMPORTANT: polygons are stored as nvp*2 values (vertices + neighbors)
       poly_base := i32(i) * nvp * 2
       bounds := calc_polygon_bounds_fast(pmesh, poly_base, nvp, quant_factor)
       node.bmin = bounds.min
       node.bmax = bounds.max
     }
-    node.i = i32(i) // Leaf node (positive index)
+    node.i = i32(i)
   }
 }
 
-// Hierarchical BV tree construction with better spatial organization
-@(private)
+@(private = "file")
 build_bv_tree_hierarchical :: proc(
   pmesh: ^recast.Poly_Mesh,
   nodes: []detour.BV_Node,
@@ -533,15 +475,12 @@ build_bv_tree_hierarchical :: proc(
   quant_factor: f32,
 ) {
   nvp := pmesh.nvp
-  // Pre-calculate polygon centers and bounds for sorting
   poly_info := make([]BV_Poly_Info, pmesh.npolys)
   defer delete(poly_info)
   for i in 0 ..< pmesh.npolys {
     info := &poly_info[i]
     info.index = i
-    // IMPORTANT: polygons are stored as nvp*2 values (vertices + neighbors)
     poly_base := i * nvp * 2
-    // Calculate bounds and center efficiently
     bounds := calc_polygon_bounds_fast(pmesh, poly_base, nvp, quant_factor)
     info.bounds = bounds
     info.center = [3]u16 {
@@ -550,13 +489,11 @@ build_bv_tree_hierarchical :: proc(
       (bounds.min[2] + bounds.max[2]) / 2,
     }
   }
-  // Build hierarchy using recursive subdivision
   next_node_idx := i32(0)
   build_bv_node_recursive(poly_info, nodes, &next_node_idx, 0, pmesh.npolys)
 }
 
-// Recursive BV tree node construction
-@(private)
+@(private = "file")
 build_bv_node_recursive :: proc(
   poly_info: []BV_Poly_Info,
   nodes: []detour.BV_Node,
@@ -567,11 +504,10 @@ build_bv_node_recursive :: proc(
   node_idx := next_idx^
   next_idx^ += 1
   if node_idx >= i32(len(nodes)) {
-    return -1 // Out of space
+    return -1
   }
   node := &nodes[node_idx]
   poly_count := end - start
-  // Calculate combined bounds for this group
   if poly_count > 0 {
     node.bmin = poly_info[start].bounds.min
     node.bmax = poly_info[start].bounds.max
@@ -581,51 +517,44 @@ build_bv_node_recursive :: proc(
       node.bmax = linalg.max(node.bmax, info.bounds.max)
     }
   }
-  // Decide whether to make this a leaf or split further
-  MAX_LEAF_SIZE :: 8 // Optimal balance between tree depth and leaf size
+  MAX_LEAF_SIZE :: 8
   if poly_count <= MAX_LEAF_SIZE {
-    // Create leaf node - use escape sequence format for Detour
     if poly_count == 1 {
-      node.i = poly_info[start].index // Single polygon leaf
+      node.i = poly_info[start].index
     } else {
-      // Multiple polygons - use first polygon index
-      // In a more sophisticated implementation, we could use a different encoding
       node.i = poly_info[start].index
     }
     return node_idx
   }
-  // Split polygons using best axis
   axis := find_best_split_axis(poly_info[start:end])
   mid := partition_polygons_by_axis(poly_info[start:end], axis) + start
-  // Ensure we don't create degenerate splits
   if mid == start || mid == end {
     mid = start + poly_count / 2
   }
-  // Build children recursively
   left_child := build_bv_node_recursive(poly_info, nodes, next_idx, start, mid)
   right_child := build_bv_node_recursive(poly_info, nodes, next_idx, mid, end)
-  // Use escape sequence encoding: negative value encodes next sibling
   if right_child >= 0 {
-    node.i = -(right_child + 1) // Escape sequence to right child
+    node.i = -(right_child + 1)
   } else {
-    node.i = poly_info[start].index // Fallback to leaf if children failed
+    node.i = poly_info[start].index
   }
   return node_idx
 }
 
-// Helper structures for BV tree construction
+@(private = "file")
 BV_Poly_Info :: struct {
   index:  i32,
   bounds: BV_Bounds_U16,
   center: [3]u16,
 }
 
+@(private = "file")
 BV_Bounds_U16 :: struct {
   min: [3]u16,
   max: [3]u16,
 }
 
-// Calculate bounds from detail mesh vertices
+@(private = "file")
 calc_detail_mesh_bounds :: proc(
   dmesh: ^recast.Poly_Mesh_Detail,
   poly_idx: int,
@@ -633,7 +562,6 @@ calc_detail_mesh_bounds :: proc(
   quant_factor: f32,
 ) -> BV_Bounds_U16 {
   bounds: BV_Bounds_U16
-  // Get detail mesh info for this polygon
   mesh_info := dmesh.meshes[poly_idx]
   vert_base := mesh_info[0]
   vert_count := mesh_info[1]
@@ -642,61 +570,50 @@ calc_detail_mesh_bounds :: proc(
     bounds.max = {1, 1, 1}
     return bounds
   }
-  // Initialize bounds with first vertex
   first_vert := dmesh.verts[vert_base]
   min_bounds := first_vert
   max_bounds := first_vert
-  // Process all detail vertices
   for j in 1 ..< vert_count {
     v := dmesh.verts[vert_base + j]
     min_bounds = linalg.min(min_bounds, v)
     max_bounds = linalg.max(max_bounds, v)
   }
-  // Quantize bounds - BV tree uses cs for all dimensions
   for k in 0 ..< 3 {
     quantized_min := i32((min_bounds[k] - bmin[k]) * quant_factor)
     quantized_max := i32((max_bounds[k] - bmin[k]) * quant_factor)
-    // Clamp to u16 range
     bounds.min[k] = u16(clamp(quantized_min, 0, 0xffff))
     bounds.max[k] = u16(clamp(quantized_max, 0, 0xffff))
   }
   return bounds
 }
 
-// Fast polygon bounds calculation with reduced coordinate transformations
+@(private)
 calc_polygon_bounds_fast :: proc(
   pmesh: ^recast.Poly_Mesh,
   poly_base: i32,
   nvp: i32,
   quant_factor: f32,
 ) -> BV_Bounds_U16 {
-  // Initialize with invalid bounds
   bounds: BV_Bounds_U16
   bounds.min = {65535, 65535, 65535}
   bounds.max = {0, 0, 0}
   vertex_count := 0
-  // Process all vertices in polygon
   for j in 0 ..< nvp {
     vert_idx := pmesh.polys[poly_base + j]
     if vert_idx == recast.RC_MESH_NULL_IDX {
       break
     }
-    // Vertices are already quantized in the polymesh
     v := pmesh.verts[vert_idx]
     quant_coords := [3]u16{v[0], v[1], v[2]}
-    // Update bounds
     bounds.min = linalg.min(bounds.min, quant_coords)
     bounds.max = linalg.max(bounds.max, quant_coords)
     vertex_count += 1
   }
-  // Handle empty polygons
   if vertex_count == 0 {
     bounds.min = {0, 0, 0}
     bounds.max = {1, 1, 1}
   } else {
     // CRITICAL: Remap Y coordinate as C++ does (lines 230-231 in DetourNavMeshBuilder.cpp)
-    // This is necessary when no detail mesh is present to account for different
-    // vertical scaling between cell height (ch) and cell size (cs)
     ch_cs_ratio := pmesh.ch / pmesh.cs
     bounds.min[1] = u16(math.floor(f32(bounds.min[1]) * ch_cs_ratio))
     bounds.max[1] = u16(math.ceil(f32(bounds.max[1]) * ch_cs_ratio))
@@ -704,16 +621,13 @@ calc_polygon_bounds_fast :: proc(
   return bounds
 }
 
-// Find the best axis for splitting polygons
-@(private)
+@(private = "file")
 find_best_split_axis :: proc(poly_info: []BV_Poly_Info) -> int {
   if len(poly_info) < 2 {
     return 0
   }
-  // Calculate variance along each axis
   variance := [3]f32{0, 0, 0}
   mean := [3]f32{0, 0, 0}
-  // Calculate mean
   for info in poly_info {
     for i in 0 ..< 3 {
       mean[i] += f32(info.center[i])
@@ -723,14 +637,12 @@ find_best_split_axis :: proc(poly_info: []BV_Poly_Info) -> int {
   for i in 0 ..< 3 {
     mean[i] *= inv_count
   }
-  // Calculate variance
   for info in poly_info {
     for i in 0 ..< 3 {
       diff := f32(info.center[i]) - mean[i]
       variance[i] += diff * diff
     }
   }
-  // Return axis with highest variance
   best_axis := 0
   for i in 1 ..< 3 {
     if variance[i] > variance[best_axis] {
@@ -740,8 +652,7 @@ find_best_split_axis :: proc(poly_info: []BV_Poly_Info) -> int {
   return best_axis
 }
 
-// Partition polygons around median value on given axis
-@(private)
+@(private = "file")
 partition_polygons_by_axis :: proc(
   poly_info: []BV_Poly_Info,
   axis: int,
@@ -749,7 +660,6 @@ partition_polygons_by_axis :: proc(
   if len(poly_info) < 2 {
     return 1
   }
-  // Simple median partitioning - sort by axis and split in middle
   if axis == 0 {
     slice.sort_by(poly_info, proc(a, b: BV_Poly_Info) -> bool {
       return a.center[0] < b.center[0]
@@ -766,14 +676,13 @@ partition_polygons_by_axis :: proc(
   return i32(len(poly_info) / 2)
 }
 
-// Create single-tile navigation mesh from Recast output and save to file
+@(private)
 bake_and_save_navmesh :: proc(
   pmesh: ^recast.Poly_Mesh,
   dmesh: ^recast.Poly_Mesh_Detail,
   walkable_height, walkable_radius, walkable_climb: f32,
   filepath: string,
 ) -> bool {
-  // Create navigation mesh data
   params := Create_Nav_Mesh_Data_Params {
     poly_mesh          = pmesh,
     poly_mesh_detail   = dmesh,
@@ -792,7 +701,6 @@ bake_and_save_navmesh :: proc(
     return false
   }
   defer delete(nav_data)
-  // Create and initialize navigation mesh
   nav_mesh := new(detour.Nav_Mesh)
   defer {
     detour.nav_mesh_destroy(nav_mesh)
@@ -823,6 +731,5 @@ bake_and_save_navmesh :: proc(
     delete(nav_data_copy)
     return false
   }
-  // Save to file
   return detour.save_navmesh_to_file(nav_mesh, filepath)
 }

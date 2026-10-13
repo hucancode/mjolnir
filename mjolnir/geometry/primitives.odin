@@ -3,11 +3,13 @@ package geometry
 import "core:math"
 import "core:math/linalg"
 
+// Sphere is a center and radius.
 Sphere :: struct {
   center: [3]f32,
   radius: f32,
 }
 
+// ray_sphere_intersection reports whether ray hits sphere within max_t, and the hit distance.
 ray_sphere_intersection :: proc "contextless" (
   ray: Ray,
   sphere: Sphere,

@@ -5,7 +5,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
-// Catmull-Rom cubic spline for smooth interpolation through control points
+// Spline is a Catmull-Rom cubic spline for smooth interpolation through control points
 // Automatically generates tangents using neighboring points
 Spline :: struct($T: typeid) {
   points:    []T,
@@ -13,7 +13,7 @@ Spline :: struct($T: typeid) {
   arc_table: Maybe(Spline_Arc_Length_Table(T)), // Optional arc-length table for uniform sampling
 }
 
-// Copy `points` and their key `times` into a spline. Fails without
+// spline_init copies `points` and their key `times` into a spline. Fails without
 // allocating unless there are at least 2 points, one time per point, and the
 // times are non-decreasing. Vector splines also get an arc-length table of
 // `samples` entries for spline_sample_uniform. Free with spline_destroy.
@@ -29,6 +29,7 @@ spline_create :: proc($T: typeid, count: int) -> Spline(T) {
   return Spline(T){points = make([]T, count), times = make([]f32, count)}
 }
 
+// spline_destroy frees the spline's points, times and arc-length table.
 spline_destroy :: proc(spline: ^Spline($T)) {
   delete(spline.points)
   delete(spline.times)
@@ -74,6 +75,7 @@ catmull_rom_tangent :: proc "contextless" (p_prev: $T, p_next: T) -> T {
   return (p_next - p_prev) * 0.5
 }
 
+// spline_sample evaluates the spline at time t, clamped to its first and last key.
 spline_sample :: proc(spline: Spline($T), t: f32) -> T {
   n := len(spline.points)
   if n == 0 {
@@ -82,7 +84,6 @@ spline_sample :: proc(spline: Spline($T), t: f32) -> T {
   if n == 1 {
     return slice.first(spline.points)
   }
-  // Clamp to valid range
   if t <= slice.first(spline.times) {
     return slice.first(spline.points)
   }
@@ -90,7 +91,6 @@ spline_sample :: proc(spline: Spline($T), t: f32) -> T {
     return slice.last(spline.points)
   }
 
-  // Binary search for segment containing t
   // Returns the index where t would be inserted (first element > t)
   cmp :: proc(item: f32, t: f32) -> slice.Ordering {
     return slice.Ordering.Less if item < t else slice.Ordering.Greater
@@ -99,16 +99,13 @@ spline_sample :: proc(spline: Spline($T), t: f32) -> T {
   // binary_search returns insertion point, we need the segment before it
   i := idx - 1
 
-  // Get segment endpoints
   p0 := spline.points[i]
   p1 := spline.points[i + 1]
   t0 := spline.times[i]
   t1 := spline.times[i + 1]
 
-  // Normalized parameter [0, 1] within segment
   u := (t - t0) / (t1 - t0)
 
-  // Calculate tangents using Catmull-Rom method
   // For endpoints, duplicate the endpoint or use zero tangent
   m0: T
   m1: T
@@ -127,7 +124,6 @@ spline_sample :: proc(spline: Spline($T), t: f32) -> T {
       m1 = catmull_rom_tangent(p0, spline.points[i + 2])
     }
 
-    // Scale tangents by time delta
     dt := t1 - t0
     m0_scaled := quaternion(
       x = m0.x * dt,
@@ -142,7 +138,6 @@ spline_sample :: proc(spline: Spline($T), t: f32) -> T {
       w = m1.w * dt,
     )
 
-    // Hermite interpolation
     h00 := hermite_h00(u)
     h10 := hermite_h10(u)
     h01 := hermite_h01(u)
@@ -157,7 +152,6 @@ spline_sample :: proc(spline: Spline($T), t: f32) -> T {
       ),
     )
   } else {
-    // For vectors and scalars
     if i == 0 {
       m0 = p1 - p0
     } else {
@@ -170,12 +164,10 @@ spline_sample :: proc(spline: Spline($T), t: f32) -> T {
       m1 = catmull_rom_tangent(p0, spline.points[i + 2])
     }
 
-    // Scale tangents by time delta
     dt := t1 - t0
     m0 *= dt
     m1 *= dt
 
-    // Hermite interpolation
     h00 := hermite_h00(u)
     h10 := hermite_h10(u)
     h01 := hermite_h01(u)
@@ -185,6 +177,7 @@ spline_sample :: proc(spline: Spline($T), t: f32) -> T {
   }
 }
 
+// spline_duration returns the time between the first and last key.
 spline_duration :: proc(spline: Spline($T)) -> f32 {
   if len(spline.times) == 0 {
     return 0
@@ -192,7 +185,7 @@ spline_duration :: proc(spline: Spline($T)) -> f32 {
   return slice.last(spline.times) - slice.first(spline.times)
 }
 
-// Arc-length lookup table for uniform spatial sampling
+// Spline_Arc_Length_Table is an arc-length lookup table for uniform spatial sampling.
 Spline_Arc_Length_Table :: struct($T: typeid) {
   arc_lengths: []f32, // Cumulative arc-lengths at sample points
   times:       []f32, // Corresponding time values
@@ -221,6 +214,7 @@ spline_build_arc_table :: proc(spline: ^Spline($T), samples := 200) {
   spline.arc_table = table
 }
 
+// spline_sample_uniform evaluates the spline at arc length s; without an arc table s is treated as time.
 spline_sample_uniform :: proc(spline: Spline($T), s: f32) -> T {
   // s: Arc-length parameter [0, total_length]
   table, ok := spline.arc_table.?
@@ -242,13 +236,14 @@ spline_sample_uniform :: proc(spline: Spline($T), s: f32) -> T {
   return spline_sample(spline, t)
 }
 
+// spline_arc_length returns the total arc length, or 0 without an arc table.
 spline_arc_length :: proc(spline: Spline($T)) -> f32 {
   table, has_table := spline.arc_table.?
   if !has_table do return 0
   return slice.last(table.arc_lengths) if len(table.arc_lengths) > 0 else 0
 }
 
-// Build a closed-loop Catmull-Rom spline from N base points (which must not
+// spline_build_closed builds a closed-loop Catmull-Rom spline from N base points (which must not
 // duplicate the seam — base[N-1] should differ from base[0]).
 //
 // The result has N+3 control points: a ghost-prepend of base[N-1], the N core

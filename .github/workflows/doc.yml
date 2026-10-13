@@ -6,6 +6,8 @@ on:
       - master
     paths:
       - 'docs/**'
+      - 'mjolnir/**'
+      - 'examples/**'
       - '.github/workflows/doc.yml'
   workflow_dispatch:
 
@@ -25,15 +27,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Pandoc
+      - name: Setup Odin
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Odin vendor libraries
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y pandoc
+          bash /home/runner/odin/vendor/stb/src/build_stb.sh
+          bash /home/runner/odin/vendor/cgltf/src/build_cgltf.sh
+          bash /home/runner/odin/vendor/box2d/build_box2d.sh
+          # build.sh also builds wasm, which may fail on the runner; only the native lib is needed
+          bash /home/runner/odin/vendor/box3d/src/build.sh || test -f /home/runner/odin/vendor/box3d/lib/linux-amd64/libbox3d.a
+
+      - name: Setup Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.309.0
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Build documentation
-        run: |
-          cd docs
-          make doc
+        run: make doc
+        env:
+          BASE_PATH: /mjolnir
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -41,7 +62,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'docs'
+          path: 'docs/build'
 
   deploy:
     environment:

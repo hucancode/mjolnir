@@ -10,21 +10,14 @@ import "core:mem"
 import "core:sync"
 import "core:thread"
 
-// TGS-soft contact solver
-// Collide once per frame; each substep: integrate velocities → warm start →
-// solve with soft bias → integrate positions → relax (solve without bias).
-// A restitution pass runs once after all substeps. Soft constraints replace
-// Baumgarte/pseudo-velocity position correction: the bias is a critically
-// tuned spring (contact hertz/damping) whose energy the relax pass removes.
-//
-// Body A of a contact is always dynamic. Body B may be static or kinematic:
-// its zero inverse mass/inertia drops its terms from the math, and
-// apply_impulse_at_point never writes it.
-RESTITUTION_THRESHOLD :: 1.0 // m/s approach speed below which no bounce
+// TGS-soft contact solver: collide once per frame, then per substep warm start,
+// solve with soft bias, integrate, relax. Body A of a contact is always dynamic;
+// body B may be static or kinematic (zero inverse mass, never written).
+
+RESTITUTION_THRESHOLD :: 1.0 // m/s
 CONTACT_HERTZ :: 30.0
 CONTACT_DAMPING_RATIO :: 10.0
-// Contacts against infinite-mass bodies are stiffer (2x hertz, half damping)
-// to resist push-through
+// Stiffer against infinite-mass bodies to resist push-through.
 STATIC_HERTZ_SCALE :: 2.0
 STATIC_DAMPING_SCALE :: 0.5
 CONTACT_MAX_PUSH_SPEED :: 3.0 // m/s cap on penetration recovery
@@ -77,10 +70,6 @@ spin_barrier_wait :: proc "contextless" (b: ^SpinBarrier, local_sense: ^bool, ex
   }
 }
 
-// ---------------------------------------------------------------------------
-// Graph coloring partition (parallel solve without locks)
-// ---------------------------------------------------------------------------
-
 // Static/kinematic bodies are never written by the solver, so only dynamic
 // bodies take color bits.
 build_solver_partition :: proc(world: ^World) {
@@ -115,10 +104,6 @@ build_solver_partition :: proc(world: ^World) {
     world.solver_color_count = max(world.solver_color_count, color + 1)
   }
 }
-
-// ---------------------------------------------------------------------------
-// Prepare
-// ---------------------------------------------------------------------------
 
 // Inverse of the coupled 2x2 tangent effective-mass matrix at the manifold
 // centroid. Coupling the two tangent directions keeps the friction cone
@@ -190,10 +175,6 @@ prepare_contacts :: proc(world: ^World) {
   }, min_items = 200)
 }
 
-// ---------------------------------------------------------------------------
-// Warm start (per substep)
-// ---------------------------------------------------------------------------
-
 @(private = "file")
 apply_pair_impulse :: #force_inline proc(a, b: ^Body, impulse, point: [3]f32) {
   apply_impulse_at_point(a, -impulse, point)
@@ -216,10 +197,6 @@ warmstart_contact :: proc(contact: ^Contact, body_a, body_b: ^Body) {
   apply_pair_impulse(body_a, body_b, impulse_t, body_a.position + contact.r_a_c)
   apply_pair_twist(body_a, body_b, contact.normal * contact.twist_impulse)
 }
-
-// ---------------------------------------------------------------------------
-// Velocity solve (bias and relax passes share this)
-// ---------------------------------------------------------------------------
 
 // Current separation: base + how much the anchors moved along the normal
 // since prepare (translation-only approximation of box3d's delta tracking).
@@ -266,7 +243,6 @@ resolve_velocity :: proc(
     total_normal_impulse += p.normal_impulse
     lever_sum += p.normal_impulse * linalg.length(p.point - centroid)
   }
-  // Coupled tangent friction at the manifold centroid, circular cone clamp
   rel := point_velocity(body_b, contact.r_b_c) - point_velocity(body_a, contact.r_a_c)
   vt := [2]f32{linalg.dot(rel, contact.tangent1), linalg.dot(rel, contact.tangent2)}
   old_t := contact.tangent_impulse
@@ -288,10 +264,6 @@ resolve_velocity :: proc(
   apply_pair_twist(body_a, body_b, contact.normal * (contact.twist_impulse - old_w))
 }
 
-// ---------------------------------------------------------------------------
-// Restitution pass (once, after all substeps)
-// ---------------------------------------------------------------------------
-
 // Applied separately so the soft bias never doubles as bounce, and gated on
 // max_normal_impulse so speculative points that never touched don't bounce.
 apply_restitution :: proc(contact: ^Contact, body_a, body_b: ^Body) {
@@ -306,10 +278,6 @@ apply_restitution :: proc(contact: ^Contact, body_a, body_b: ^Body) {
     apply_pair_impulse(body_a, body_b, contact.normal * (p.normal_impulse - old_impulse), p.point)
   }
 }
-
-// ---------------------------------------------------------------------------
-// Substep loop (graph colors + overflow; one thread solves in array order)
-// ---------------------------------------------------------------------------
 
 @(private = "file")
 SolverPass :: enum {
@@ -342,7 +310,6 @@ solve_contact :: #force_inline proc(
   }
 }
 
-// One pass over the contacts at `indices`.
 @(private = "file")
 run_pass :: proc(
   world: ^World,

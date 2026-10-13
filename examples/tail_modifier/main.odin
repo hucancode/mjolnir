@@ -1,3 +1,4 @@
+// Procedural tail follow-through.
 package main
 
 import "../../mjolnir"

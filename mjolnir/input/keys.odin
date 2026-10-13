@@ -1,6 +1,6 @@
 package input
 
-// Keyboard keys. Values match GLFW key codes.
+// Key is a keyboard key. Values match GLFW key codes.
 Key :: enum i32 {
   SPACE         = 32,
   APOSTROPHE    = 39,
@@ -124,6 +124,7 @@ Key :: enum i32 {
   MENU          = 348,
 }
 
+// MouseButton is a mouse button.
 MouseButton :: enum i32 {
   LEFT   = 0,
   RIGHT  = 1,
@@ -135,10 +136,12 @@ MouseButton :: enum i32 {
   BUTTON_8,
 }
 
+// Action is a key or button event kind.
 Action :: enum i32 {
   RELEASE = 0,
   PRESS   = 1,
   REPEAT  = 2,
 }
 
+// MAX_KEYS bounds Key values; KeySet has this many flags.
 MAX_KEYS :: 512

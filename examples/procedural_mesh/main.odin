@@ -1,3 +1,4 @@
+// Mesh generated at runtime.
 package main
 
 import "../../mjolnir"

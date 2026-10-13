@@ -4,8 +4,7 @@ import "../../geometry"
 import "core:math"
 import "core:math/linalg"
 
-// Axis enumeration for polygon division
-@(private)
+@(private = "file")
 Axis :: enum {
   X = 0,
   Y = 1,
@@ -22,7 +21,6 @@ add_span :: proc(
 ) -> bool {
   if x < 0 || x >= hf.width || z < 0 || z >= hf.height || smin > smax do return false
   column_index := x + z * hf.width
-  // Fast path: empty column
   if hf.spans[column_index] == nil {
     new_span := allocate_span(hf)
     if new_span == nil do return false
@@ -33,42 +31,33 @@ add_span :: proc(
     hf.spans[column_index] = new_span
     return true
   }
-  // Optimized merge with single pass
-  // Pre-allocate span to avoid allocation in critical path
   new_span := allocate_span(hf)
   if new_span == nil do return false
   new_span.smin = u32(smin)
   new_span.smax = u32(smax)
   new_span.area = u32(area_id)
-  // Track merge state
   merge_start: ^Span
   merge_end: ^Span
   insert_after: ^Span
   previous_span: ^Span
   current_span := hf.spans[column_index]
-  // Single pass to find merge range and insertion point
   for current_span != nil {
     if current_span.smin > new_span.smax {
-      // Found insertion point
       break
     }
     if current_span.smax < new_span.smin {
-      // No overlap yet, update insertion point
       insert_after = current_span
       previous_span = current_span
       current_span = current_span.next
       continue
     }
-    // Found overlap - mark merge range
     if merge_start == nil {
       merge_start = current_span
       insert_after = previous_span
     }
     merge_end = current_span
-    // Update merged span bounds
     new_span.smin = min(new_span.smin, current_span.smin)
     new_span.smax = max(new_span.smax, current_span.smax)
-    // Merge area flags
     if abs(i32(new_span.smax) - i32(current_span.smax)) <=
        flag_merge_threshold {
       new_span.area = max(new_span.area, current_span.area)
@@ -102,7 +91,7 @@ add_span :: proc(
   return true
 }
 
-@(private)
+@(private = "file")
 divide_poly :: proc(
   in_verts, out_verts1, out_verts2: [][3]f32,
   axis_offset: f32,
@@ -119,7 +108,6 @@ divide_poly :: proc(
   for in_vert_a, in_vert_b := 0, len(in_verts) - 1;
       in_vert_a < len(in_verts);
       in_vert_b, in_vert_a = in_vert_a, in_vert_a + 1 {
-    // If the two vertices are on the same side of the separating axis
     same_side :=
       (in_vert_axis_delta[in_vert_a] >= 0) ==
       (in_vert_axis_delta[in_vert_b] >= 0)
@@ -154,7 +142,7 @@ divide_poly :: proc(
   return
 }
 
-@(private)
+@(private = "file")
 rasterize_triangle_with_inverse_cs :: proc(
   v0, v1, v2: [3]f32,
   area_id: u8,
@@ -173,10 +161,8 @@ rasterize_triangle_with_inverse_cs :: proc(
   tri_rel_max := tri_bb_max - hf_bb_min
   z0 := i32(tri_rel_min.z * inverse_cell_size)
   z1 := i32(tri_rel_max.z * inverse_cell_size)
-  // use -1 rather than 0 to cut the polygon properly at the start of the tile
   z0 = clamp(z0, -1, h - 1)
   z1 = clamp(z1, 0, h - 1)
-  // Clip the triangle into all grid cells it touches
   buf: [7 * 4][3]f32
   in_buf := buf[0:7]
   in_row := buf[7:14]
@@ -188,7 +174,6 @@ rasterize_triangle_with_inverse_cs :: proc(
   nv_row: i32
   nv_in := i32(3)
   for z := z0; z <= z1; z += 1 {
-    // Clip polygon to row. Store the remaining polygon as well
     cell_z := hf_bb_min.z + f32(z) * cell_size
     nv_row, nv_in = divide_poly(
       in_buf[:nv_in],
@@ -213,7 +198,6 @@ rasterize_triangle_with_inverse_cs :: proc(
     nv: i32
     nv2 := nv_row
     for x := x0; x <= x1; x += 1 {
-      // Clip polygon to column. store the remaining polygon as well
       cx := hf_bb_min.x + f32(x) * cell_size
       nv, nv2 = divide_poly(in_row[:nv2], p1[:], p2[:], cx + cell_size, .X)
       in_row, p2 = p2, in_row
@@ -228,7 +212,6 @@ rasterize_triangle_with_inverse_cs :: proc(
       span_max -= hf_bb_min.y
       if span_max < 0.0 || span_min > by do continue
       span_min, span_max = max(span_min, 0.0), min(span_max, by)
-      // Snap the span to the heightfield height grid
       span_min_cell_index := u16(
         clamp(
           i32(math.floor(span_min * inverse_cell_height)),
@@ -257,7 +240,6 @@ rasterize_triangle_with_inverse_cs :: proc(
   return true
 }
 
-// Rasterize a single triangle
 @(private)
 rasterize_triangle :: proc(
   v0, v1, v2: [3]f32,
@@ -265,7 +247,6 @@ rasterize_triangle :: proc(
   hf: ^Heightfield,
   flag_merge_threshold: i32,
 ) -> bool {
-  // Rasterize the single triangle
   inverse_cell_size := 1.0 / hf.cs
   inverse_cell_height := 1.0 / hf.ch
   return rasterize_triangle_with_inverse_cs(
@@ -283,7 +264,7 @@ rasterize_triangle :: proc(
   )
 }
 
-// Rasterize triangles
+// rasterize_triangles rasterizes triangles into hf with per-triangle area ids.
 rasterize_triangles :: proc(
   verts: [][3]f32,
   indices: []i32,
@@ -315,7 +296,6 @@ rasterize_triangles :: proc(
   return true
 }
 
-// Clear unwalkable triangles (mark steep slopes as non-walkable)
 @(private)
 clear_unwalkable_triangles :: proc(
   walkable_slope: f32,
@@ -332,14 +312,12 @@ clear_unwalkable_triangles :: proc(
     v1 := verts[tri[1]]
     v2 := verts[tri[2]]
     norm = geometry.calc_tri_normal(v0, v1, v2)
-    // Check if the face is NOT walkable (steep slope)
     if norm.y <= walkable_thr {
       areas[i] = RC_NULL_AREA
     }
   }
 }
 
-// Mark triangles by their walkable slope
 @(private)
 mark_walkable_triangles :: proc(
   walkable_slope: f32,
@@ -356,7 +334,6 @@ mark_walkable_triangles :: proc(
     v1 := verts[tri[1]]
     v2 := verts[tri[2]]
     norm = geometry.calc_tri_normal(v0, v1, v2)
-    // Check if the face is walkable (only mark NULL areas)
     if norm.y > walkable_thr && areas[i] == RC_NULL_AREA {
       areas[i] = RC_WALKABLE_AREA
     }

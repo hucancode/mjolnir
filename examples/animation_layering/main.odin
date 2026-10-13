@@ -1,3 +1,4 @@
+// Bone-mask layer blending across multiple clips.
 package main
 
 import "../../mjolnir"

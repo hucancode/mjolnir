@@ -4,24 +4,27 @@ import "../../geometry"
 import "core:math"
 import "core:math/linalg"
 
+// Straight_Path_Point is one waypoint of a string-pulled path.
 Straight_Path_Point :: struct {
   pos:   [3]f32,
   flags: u8,
   ref:   Poly_Ref,
 }
 
-@(private)
+@(private = "file")
 Straight_Path_Flags :: enum u8 {
   Start               = 0x01,
   End                 = 0x02,
   Off_Mesh_Connection = 0x04,
 }
 
+// Straight_Path_Options selects extra waypoints find_straight_path inserts at area or polygon crossings.
 Straight_Path_Options :: enum u8 {
   Area_Crossings = 0x01,
   All_Crossings  = 0x02,
 }
 
+// find_straight_path string-pulls a polygon path into waypoints between start_pos and end_pos.
 find_straight_path :: proc(
   query: ^Nav_Mesh_Query,
   start_pos, end_pos: [3]f32,
@@ -39,7 +42,6 @@ find_straight_path :: proc(
   straight_path_count = 0
   if query == nil || query.nav_mesh == nil do return {.Invalid_Param}, 0
   if path_count == 0 || path[0] == INVALID_POLY_REF || max_straight_path <= 0 do return {.Invalid_Param}, 0
-  // Clamp start and end positions to polygon boundaries
   closest_start_pos, start_status := closest_point_on_poly_boundary(
     query,
     path[0],
@@ -52,7 +54,6 @@ find_straight_path :: proc(
     end_pos,
   )
   if !status_succeeded(end_status) do return {.Invalid_Param}, 0
-  // Add start point
   stat: Status
   n_straight_path := i32(0)
   if n_straight_path < max_straight_path {
@@ -65,7 +66,6 @@ find_straight_path :: proc(
   } else {
     stat |= {.Buffer_Too_Small}
   }
-  // Special case: single polygon
   if path_count == 1 {
     if n_straight_path < max_straight_path {
       straight_path[n_straight_path] = {
@@ -80,7 +80,6 @@ find_straight_path :: proc(
     straight_path_count = n_straight_path
     return stat | {.Success}, straight_path_count
   }
-  // Funnel algorithm for multi-polygon path
   portal_apex := closest_start_pos
   portal_left := closest_start_pos
   portal_right := closest_start_pos
@@ -94,7 +93,6 @@ find_straight_path :: proc(
     right: [3]f32
     to_type := u8(0)
     if i + 1 < path_count {
-      // Get portal between path[i] and path[i+1]
       from_type: u8
       portal_status: Status
       left, right, from_type, portal_status = get_portal_points(
@@ -103,7 +101,6 @@ find_straight_path :: proc(
         path[i + 1],
       )
       if !status_succeeded(portal_status) {
-        // Failed to get portal - add end point
         closest_on_poly, _ := closest_point_on_poly_boundary(
           query,
           path[i],
@@ -120,7 +117,6 @@ find_straight_path :: proc(
         straight_path_count = n_straight_path
         return stat | {.Success, .Partial_Result}, straight_path_count
       }
-      // Skip if starting very close to portal
       if i == 0 {
         dist_sqr, _ := geometry.point_segment_distance2_2d(
           portal_apex,
@@ -130,23 +126,19 @@ find_straight_path :: proc(
         if dist_sqr < 0.001 * 0.001 do continue
       }
     } else {
-      // End of path
       left = closest_end_pos
       right = closest_end_pos
       to_type = u8(Straight_Path_Flags.End)
     }
-    // Update right vertex
     if geometry.perpendicular_cross_2d(portal_apex, portal_right, right) <=
        0.0 {
       if geometry.vector_equal(portal_apex, portal_right) ||
          geometry.perpendicular_cross_2d(portal_apex, portal_left, right) >
            0.0 {
-        // Tighten funnel
         portal_right = right
         if i + 1 < path_count do right_poly_type = to_type
         right_index = i
       } else {
-        // Right over left - add left vertex and restart
         if n_straight_path == 0 ||
            !geometry.vector_equal(
                portal_left,
@@ -163,7 +155,6 @@ find_straight_path :: proc(
             stat |= {.Buffer_Too_Small}
           }
         }
-        // Advance apex and restart
         portal_apex = portal_left
         apex_index = left_index
         portal_left = portal_apex
@@ -176,17 +167,14 @@ find_straight_path :: proc(
         continue
       }
     }
-    // Update left vertex
     if geometry.perpendicular_cross_2d(portal_apex, portal_left, left) >= 0.0 {
       if geometry.vector_equal(portal_apex, portal_left) ||
          geometry.perpendicular_cross_2d(portal_apex, portal_right, left) <
            0.0 {
-        // Tighten funnel
         portal_left = left
         if i + 1 < path_count do left_poly_type = to_type
         left_index = i
       } else {
-        // Left over right - add right vertex and restart
         if n_straight_path < max_straight_path {
           straight_path[n_straight_path] = {
             pos   = portal_right,
@@ -197,7 +185,6 @@ find_straight_path :: proc(
         } else {
           stat |= {.Buffer_Too_Small}
         }
-        // Advance apex and restart
         portal_apex = portal_right
         apex_index = right_index
         portal_left = portal_apex
@@ -211,7 +198,6 @@ find_straight_path :: proc(
       }
     }
   }
-  // Add end point
   if n_straight_path < max_straight_path {
     straight_path[n_straight_path] = {
       pos   = closest_end_pos,
@@ -223,7 +209,6 @@ find_straight_path :: proc(
     stat |= {.Buffer_Too_Small}
   }
   straight_path_count = n_straight_path
-  // Copy to output arrays
   if straight_path_flags != nil {
     for i in 0 ..< n_straight_path {
       if int(i) < len(straight_path_flags) {
@@ -260,13 +245,11 @@ get_portal_points :: proc(
   if !status_succeeded(from_status) do return {}, {}, 0, from_status
   to_tile, to_poly, to_status := get_tile_and_poly_by_ref(query.nav_mesh, to)
   if !status_succeeded(to_status) do return {}, {}, 0, to_status
-  // Find link from 'from' to 'to'
   link := from_poly.first_link
   for link != DT_NULL_LINK {
     if int(link) >= len(from_tile.links) do break
     link_info := &from_tile.links[link]
     if link_info.ref == to {
-      // Found the connection - extract edge vertices
       link_edge := link_info.edge
       if int(link_edge) >= int(from_poly.vert_count) {
         link = link_info.next
@@ -281,7 +264,6 @@ get_portal_points :: proc(
       }
       v0_pos := from_tile.verts[v0_idx]
       v1_pos := from_tile.verts[v1_idx]
-      // Return vertices in correct order for portal
       left = v1_pos
       right = v0_pos
       portal_type = 0
@@ -289,7 +271,6 @@ get_portal_points :: proc(
     }
     link = link_info.next
   }
-  // Fallback: check neighbor references for same-tile polygons
   from_salt, from_tile_idx, from_poly_idx := decode_poly_id(
     query.nav_mesh,
     from,
@@ -332,6 +313,7 @@ calc_poly_center :: proc(tile: ^Mesh_Tile, poly: ^Poly) -> [3]f32 {
   return center
 }
 
+// move_along_surface slides from start_pos toward end_pos along the mesh and returns the reached position and visited polygons.
 move_along_surface :: proc(
   query: ^Nav_Mesh_Query,
   start_ref: Poly_Ref,
@@ -361,7 +343,6 @@ move_along_surface :: proc(
   if linalg.length2(dir) < 1e-6 * 1e-6 do return result_pos, visited_count, {.Success}
   cur_pos := start_pos
   cur_ref := start_ref
-  // Walk along surface using adaptive steps
   STEP_SIZE :: 0.1
   max_steps := i32(linalg.length(dir) / STEP_SIZE * 2)
   if max_steps < 10 do max_steps = 10
@@ -370,13 +351,10 @@ move_along_surface :: proc(
     remaining := end_pos - cur_pos
     distance := linalg.length(remaining)
     if distance < 1e-6 do break
-    // Take step toward goal
     step_size := min(STEP_SIZE, distance)
     step_dir := linalg.normalize(remaining)
     target_pos := cur_pos + step_dir * step_size
-    // Project to current polygon
     closest_pos := closest_point_on_poly(query, cur_ref, target_pos)
-    // Check if we left the current polygon
     if !point_in_polygon(query, cur_ref, closest_pos) {
       neighbor_ref, wall_hit := find_neighbor_across_edge(
         query,
@@ -401,9 +379,7 @@ move_along_surface :: proc(
   return result_pos, visited_count, {.Success}
 }
 
-// Closest point to `pos` on the polygon in the xz plane: `pos` itself when
-// inside, otherwise the nearest point on its boundary.
-@(private)
+@(private = "file")
 closest_point_on_poly_boundary :: proc(
   query: ^Nav_Mesh_Query,
   ref: Poly_Ref,
@@ -431,6 +407,7 @@ closest_point_on_poly_boundary :: proc(
   return result, {.Success}
 }
 
+// closest_point_on_poly returns the point of polygon ref nearest to pos, or pos if ref is invalid.
 closest_point_on_poly :: proc(
   query: ^Nav_Mesh_Query,
   ref: Poly_Ref,
@@ -444,13 +421,11 @@ closest_point_on_poly :: proc(
     verts[i] = tile.verts[poly.verts[i]]
   }
   if geometry.point_in_polygon_2d(pos, verts) {
-    // Inside - return with average Y
     avg_y := f32(0)
     for v in verts do avg_y += v.y
     avg_y /= f32(len(verts))
     return {pos.x, avg_y, pos.z}
   }
-  // Outside - find closest point on edges
   closest := pos
   closest_dist_sqr := f32(math.F32_MAX)
   for i in 0 ..< int(poly.vert_count) {
@@ -466,6 +441,7 @@ closest_point_on_poly :: proc(
   return closest
 }
 
+// point_in_polygon reports whether pos lies inside polygon ref in the XZ plane.
 point_in_polygon :: proc(
   query: ^Nav_Mesh_Query,
   ref: Poly_Ref,
@@ -481,7 +457,7 @@ point_in_polygon :: proc(
   return geometry.point_in_polygon_2d(pos, verts)
 }
 
-@(private)
+@(private = "file")
 find_neighbor_across_edge :: proc(
   query: ^Nav_Mesh_Query,
   ref: Poly_Ref,
@@ -518,7 +494,7 @@ find_neighbor_across_edge :: proc(
         }
         link = get_next_link(tile, link)
       }
-      return INVALID_POLY_REF, true // hit wall
+      return INVALID_POLY_REF, true
     }
   }
   return INVALID_POLY_REF, false

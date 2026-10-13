@@ -1,3 +1,4 @@
+// PBR material parameter sweep.
 package main
 
 import "../../mjolnir"

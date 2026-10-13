@@ -4,19 +4,21 @@ import "core:math"
 import "core:math/ease"
 import "core:math/linalg"
 
+// Status is the playback state of a ClipPlayer.
 Status :: enum {
   PLAYING,
   PAUSED,
   STOPPED,
 }
 
+// PlayMode selects what a ClipPlayer does when it reaches the end of its clip.
 PlayMode :: enum {
   LOOP,
   ONCE,
   PING_PONG,
 }
 
-// Play head over one clip. A plain value: `ClipPlayer{speed = 1}` loops
+// ClipPlayer is the play head over one clip. A plain value: `ClipPlayer{speed = 1}` loops
 // from the start. ONCE clamps at the clip's end and stops; PING_PONG flips
 // speed at either end.
 ClipPlayer :: struct {
@@ -43,6 +45,7 @@ playback_advance :: proc(self: ^ClipPlayer, duration, delta_time: f32) {
   }
 }
 
+// BlendMode selects how a layer combines with the layers accumulated before it.
 BlendMode :: enum {
   REPLACE,   // Default: weighted blend (current behavior)
   ADD,       // Add transforms on top of accumulated (additive blending)
@@ -50,12 +53,14 @@ BlendMode :: enum {
   OVERRIDE,  // Completely replace accumulated (weight acts as 0/1 gate)
 }
 
+// TransitionState is the phase of a cross-fade.
 TransitionState :: enum {
   NONE,     // No transition active
   ACTIVE,   // Transition in progress
   COMPLETE, // Transition finished
 }
 
+// Transition is a timed cross-fade between the weights of two layers.
 Transition :: struct {
   from_layer: int,  // Source layer index
   to_layer:   int,  // Target layer index
@@ -96,16 +101,13 @@ blend_position :: proc(
 ) -> [3]f32 {
   switch mode {
   case .REPLACE:
-    // Default weighted accumulation
     return accumulated + new_value * weight
   case .ADD:
-    // Additive blending: add on top of accumulated
     return accumulated + new_value * weight
   case .MULTIPLY:
     // Position ignored for multiply mode
     return accumulated
   case .OVERRIDE:
-    // Hard switch based on weight threshold
     return new_value if weight > 0.5 else accumulated
   }
   return accumulated
@@ -122,7 +124,6 @@ blend_rotation :: proc(
 ) -> quaternion128 {
   switch mode {
   case .REPLACE:
-    // Default SLERP accumulation
     if accumulated_weight > 0 {
       return linalg.quaternion_slerp(
         accumulated,
@@ -132,13 +133,11 @@ blend_rotation :: proc(
     }
     return new_value
   case .ADD:
-    // Additive blending: multiply quaternions
     return linalg.quaternion_mul_quaternion(accumulated, new_value)
   case .MULTIPLY:
     // Same as ADD for rotations
     return linalg.quaternion_mul_quaternion(accumulated, new_value)
   case .OVERRIDE:
-    // Hard switch based on weight threshold
     return new_value if weight > 0.5 else accumulated
   }
   return accumulated
@@ -154,33 +153,31 @@ blend_scale :: proc(
 ) -> [3]f32 {
   switch mode {
   case .REPLACE:
-    // Default weighted accumulation
     return accumulated + new_value * weight
   case .ADD:
-    // Additive blending
     return accumulated + new_value * weight
   case .MULTIPLY:
-    // Multiplicative blending
     return accumulated * (1 + (new_value - 1) * weight)
   case .OVERRIDE:
-    // Hard switch based on weight threshold
     return new_value if weight > 0.5 else accumulated
   }
   return accumulated
 }
 
-// Plays one clip of the rig (index into Rig.clips).
+// FKLayer plays one clip of the rig (index into Rig.clips).
 FKLayer :: struct {
   clip:         int,
   using player: ClipPlayer,
 }
 
+// LayerData is what a Layer plays: a clip, an IK chain, or a procedural modifier.
 LayerData :: union {
   FKLayer,
   IKTarget,
   ProceduralLayer,
 }
 
+// Layer is one weighted, optionally bone-masked source of pose data in an Animator.
 Layer :: struct {
   weight:     f32,           // Blend weight (0.0 to 1.0)
   blend_mode: BlendMode,

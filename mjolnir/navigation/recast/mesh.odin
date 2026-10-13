@@ -4,6 +4,7 @@ import "core:log"
 import "core:math/linalg"
 import "core:slice"
 
+// Poly_Mesh is the polygon mesh built from contours, in quantized cell coordinates.
 Poly_Mesh :: struct {
   verts:          [][3]u16,
   polys:          []u16,
@@ -21,6 +22,7 @@ Poly_Mesh :: struct {
   max_edge_error: f32,
 }
 
+// create_poly_mesh builds a polygon mesh of at most nvp vertices per polygon from contours, or nil on failure.
 create_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32) -> ^Poly_Mesh {
   pmesh := new(Poly_Mesh)
   if !build_poly_mesh(cset, nvp, pmesh) {
@@ -30,6 +32,7 @@ create_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32) -> ^Poly_Mesh {
   return pmesh
 }
 
+// destroy_poly_mesh frees the polygon mesh.
 destroy_poly_mesh :: proc(pmesh: ^Poly_Mesh) {
   if pmesh == nil do return
   delete(pmesh.verts)
@@ -40,11 +43,8 @@ destroy_poly_mesh :: proc(pmesh: ^Poly_Mesh) {
   free(pmesh)
 }
 
-// Check if three vertices form a left turn (counter-clockwise)
-@(private)
+@(private = "file")
 uleft :: proc(a, b, c: [3]i16) -> bool {
-  // 2D cross product in XZ plane: (b-a) * (c-a)
-  // return linalg.cross(b.xz - a.xz, c.xz - a.xz) < 0
   // the code above will cause integer overflow, we must use i32 to avoid it
   return(
     (i32(b.x) - i32(a.x)) * (i32(c.z) - i32(a.z)) -
@@ -53,9 +53,7 @@ uleft :: proc(a, b, c: [3]i16) -> bool {
   )
 }
 
-// Get merge value for two polygons
-// Returns shared edge indices and merge value (edge length squared)
-@(private)
+@(private = "file")
 get_poly_merge_value :: proc(
   pa, pb: []i32,
   verts: []Mesh_Vertex,
@@ -65,11 +63,9 @@ get_poly_merge_value :: proc(
 ) {
   na := i32(len(pa))
   nb := i32(len(pb))
-  // If merged polygon would be too big, cannot merge
   if na + nb - 2 > nvp {
     return -1, -1, -1
   }
-  // Check if polygons share an edge
   ea = -1
   eb = -1
   for i in 0 ..< na {
@@ -88,16 +84,12 @@ get_poly_merge_value :: proc(
     }
     if ea != -1 do break
   }
-  // No common edge, cannot merge
   if ea == -1 || eb == -1 {
     return -1, -1, -1
   }
-  // Check if merged polygon would be convex
-  // First check the two connection points
   va := pa[(ea + na - 1) % na]
   vb := pa[ea]
   vc := pb[(eb + 2) % nb]
-  // Extract vertices and check directly
   if va < 0 ||
      vb < 0 ||
      vc < 0 ||
@@ -115,7 +107,6 @@ get_poly_merge_value :: proc(
   va = pb[(eb + nb - 1) % nb]
   vb = pb[eb]
   vc = pa[(ea + 2) % na]
-  // Extract vertices and check directly
   if va < 0 ||
      vb < 0 ||
      vc < 0 ||
@@ -130,7 +121,6 @@ get_poly_merge_value :: proc(
   if !uleft(av2, bv2, cv2) {
     return -1, -1, -1
   }
-  // Calculate merge value (edge length squared)
   va = pa[ea]
   vb = pa[(ea + 1) % na]
   dx := i32(verts[va].x) - i32(verts[vb].x)
@@ -138,9 +128,7 @@ get_poly_merge_value :: proc(
   return ea, eb, dx * dx + dz * dz
 }
 
-// Merge two polygons along shared edge
-// Now uses temp_allocator for temporary array - no manual cleanup needed!
-@(private)
+@(private = "file")
 merge_poly_verts :: proc(
   pa, pb: ^Poly_Build,
   ea, eb: i32,
@@ -149,65 +137,52 @@ merge_poly_verts :: proc(
 ) {
   na := i32(len(pa.verts))
   nb := i32(len(pb.verts))
-  // Create temporary merged polygon using temp allocator - auto cleanup!
   tmp := make([]i32, nvp, allocator)
   for i in 0 ..< nvp do tmp[i] = -1
   n := 0
-  // Add vertices from pa (except shared edge)
   for i in 0 ..< na - 1 {
     tmp[n] = pa.verts[(ea + 1 + i) % na]
     n += 1
   }
-  // Add vertices from pb (except shared edge)
   for i in 0 ..< nb - 1 {
     tmp[n] = pb.verts[(eb + 1 + i) % nb]
     n += 1
   }
-  // Update pa with merged polygon
-  // Create new slice with the same allocator that was used for the original
   old_verts := pa.verts
   pa.verts = make([]i32, n, allocator)
   copy(pa.verts[:], tmp[:n])
-  // Free the old vertex array to prevent memory leak
   delete(old_verts, allocator)
-  // Free the temporary array
   delete(tmp, allocator)
 }
 
-// Mesh building constants
 @(private)
-RC_VERTEX_BUCKET_COUNT :: 1 << 12 // 4096 buckets for vertex hashing
+RC_VERTEX_BUCKET_COUNT :: 1 << 12
 
-// Vertex structure for mesh building
 @(private)
 Mesh_Vertex :: struct {
-  x, y, z: u16, // Vertex coordinates (quantized)
-  next:    i32, // Next vertex in hash bucket
+  x, y, z: u16,
+  next:    i32,
 }
 
-// Vertex bucket for efficient vertex lookup during welding
 @(private)
 Vertex_Bucket :: struct {
-  first: i32, // Index of first vertex in bucket
+  first: i32,
 }
 
-// Edge structure for polygon mesh building
-@(private)
+@(private = "file")
 Mesh_Edge :: struct {
-  vert:      [2]u16, // Vertex indices
-  poly:      [2]u16, // Polygon indices (or RC_MESH_NULL_IDX)
-  poly_edge: [2]u16, // Edge index within each polygon
+  vert:      [2]u16,
+  poly:      [2]u16,
+  poly_edge: [2]u16,
 }
 
-// Temporary structure for building polygons
-@(private)
+@(private = "file")
 Poly_Build :: struct {
-  verts: []i32, // Vertex indices
-  area:  u8, // Area type
-  reg:   u16, // Region ID
+  verts: []i32,
+  area:  u8,
+  reg:   u16,
 }
 
-// Hash function for vertices (simple multiplicative hash)
 @(private)
 vertex_hash :: proc "contextless" (x, y, z: u16) -> u32 {
   h1 := u32(x) * 0x8da6b343
@@ -216,17 +191,15 @@ vertex_hash :: proc "contextless" (x, y, z: u16) -> u32 {
   return (h1 + h2 + h3) & (RC_VERTEX_BUCKET_COUNT - 1)
 }
 
-// Add vertex to hash table, return index (existing or new)
 @(private)
 add_vertex :: proc(
   x, y, z: u16,
   verts: ^[dynamic]Mesh_Vertex,
   buckets: []Vertex_Bucket,
 ) -> i32 {
-  bucket := vertex_hash(x, 0, z) // Hash only uses x and z
-  // Search for existing vertex with cycle protection
+  bucket := vertex_hash(x, 0, z)
   i := buckets[bucket].first
-  max_search := i32(len(verts) + 100) // Protection against infinite loops
+  max_search := i32(len(verts) + 100)
   search_count := i32(0)
   for i != -1 && search_count < max_search {
     if i < 0 || i >= i32(len(verts)) {
@@ -246,15 +219,13 @@ add_vertex :: proc(
       "Vertex search exceeded maximum iterations, possible cycle in bucket chain",
     )
   }
-  // Add new vertex
   i = i32(len(verts))
   append(verts, Mesh_Vertex{x = x, y = y, z = z, next = buckets[bucket].first})
   buckets[bucket].first = i
   return i
 }
 
-// Check if diagonal from vertex a to vertex c is internal to polygon
-@(private)
+@(private = "file")
 diagonalie :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -262,17 +233,13 @@ diagonalie :: proc "contextless" (
 ) -> bool {
   a_idx := indices[a] & 0x0fffffff
   c_idx := indices[c] & 0x0fffffff
-  // log.infof("diagonalie: checking diagonal from %d to %d", a, c)
   for i in 0 ..< len(indices) {
     i1 := (i + 1) % len(indices)
-    // Skip edges incident to a or c
     if i == a || i1 == a || i == c || i1 == c {
-      // log.infof("  Skipping edge %d-%d (incident to diagonal)", i, i1)
       continue
     }
     b1_idx := indices[i] & 0x0fffffff
     b2_idx := indices[i1] & 0x0fffffff
-    // Also skip if vertices are equal
     va := verts[a_idx]
     vc := verts[c_idx]
     vb1 := verts[b1_idx]
@@ -290,8 +257,7 @@ diagonalie :: proc "contextless" (
   return true
 }
 
-// Check if diagonal is in cone of vertex a
-@(private)
+@(private = "file")
 in_cone_indexed :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -309,8 +275,7 @@ in_cone_indexed :: proc "contextless" (
   return in_cone(va0.xz, va1.xz, va2.xz, vb.xz)
 }
 
-// Check if diagonal from a to b is valid
-@(private)
+@(private = "file")
 diagonal :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -321,8 +286,7 @@ diagonal :: proc "contextless" (
   return cone_check && diag_check
 }
 
-// Loose versions for degenerate cases (more permissive)
-@(private)
+@(private = "file")
 diagonalie_loose :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -332,7 +296,6 @@ diagonalie_loose :: proc "contextless" (
   c_idx := indices[c] & 0x0fffffff
   for i in 0 ..< len(indices) {
     i1 := (i + 1) % len(indices)
-    // Skip edges incident to a or c
     if i == a || i1 == a || i == c || i1 == c {
       continue
     }
@@ -355,7 +318,7 @@ diagonalie_loose :: proc "contextless" (
   return true
 }
 
-@(private)
+@(private = "file")
 in_cone_loose :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -383,7 +346,7 @@ in_cone_loose :: proc "contextless" (
   }
 }
 
-@(private)
+@(private = "file")
 diagonal_loose :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -395,7 +358,6 @@ diagonal_loose :: proc "contextless" (
   )
 }
 
-// Triangulate polygon using ear clipping algorithm
 @(private)
 triangulate_polygon :: proc(
   verts: [][4]i32,
@@ -407,7 +369,6 @@ triangulate_polygon :: proc(
     append(triangles, indices[0], indices[1], indices[2])
     return true
   }
-  // Copy indices for manipulation and add ear marking bits
   MIDDLE_VERTEX_MASK :: 1 << 31
   work_indices := make([]u32, len(indices))
   defer delete(work_indices)
@@ -415,17 +376,14 @@ triangulate_polygon :: proc(
     work_indices[i] = u32(indices[i])
   }
   n := len(indices)
-  // Pre-mark all ears using bit flags
-  // The last bit of the index is used to indicate if the vertex can be removed
   for i in 0 ..< n {
     i1 := (i + 1) % n
     i2 := (i1 + 1) % n
     diag_result := diagonal(verts, work_indices, i, i2)
     if diag_result {
-      work_indices[i1] |= MIDDLE_VERTEX_MASK // Mark middle vertex as removable ear
+      work_indices[i1] |= MIDDLE_VERTEX_MASK
     }
   }
-  // Check if we found any ears for debugging purposes
   ear_count := 0
   for i in 0 ..< n {
     if work_indices[i] & MIDDLE_VERTEX_MASK != 0 {
@@ -433,19 +391,15 @@ triangulate_polygon :: proc(
     }
   }
   log.debugf("Initial ear count: %d out of %d vertices", ear_count, n)
-  // Remove ears until only triangle remains
   for n > 3 {
     min_len := -1
     mini := -1
-    // Find ear with shortest diagonal
     for i in 0 ..< n {
       i1 := (i + 1) % n
       if work_indices[i1] & MIDDLE_VERTEX_MASK != 0 {
-        // This is a marked ear, calculate diagonal length
         i2 := (i1 + 1) % n
         p0_idx := i32(work_indices[i] & 0x0fffffff)
         p2_idx := i32(work_indices[i2] & 0x0fffffff)
-        // Calculate squared distance in XZ plane
         p0 := verts[p0_idx]
         p2 := verts[p2_idx]
         length := linalg.length2(p2.xz - p0.xz)
@@ -457,7 +411,6 @@ triangulate_polygon :: proc(
     }
     if mini == -1 {
       // We might get here because the contour has overlapping segments
-      // Try to recover by loosening up the inCone test
       min_len = -1
       for i in 0 ..< n {
         i1 := (i + 1) % n
@@ -465,7 +418,6 @@ triangulate_polygon :: proc(
         if diagonal_loose(verts, work_indices, i, i2) {
           p0_idx := work_indices[i] & 0x0fffffff
           p2_idx := work_indices[(i2 + 1) % n] & 0x0fffffff
-          // Calculate squared distance in XZ plane
           p0 := verts[p0_idx]
           p2 := verts[p2_idx]
           length := linalg.length2(p2.xz - p0.xz)
@@ -476,35 +428,27 @@ triangulate_polygon :: proc(
         }
       }
       if mini == -1 {
-        // The contour is messed up. This sometimes happens
-        // if the contour simplification is too aggressive.
-        // Return negative triangle count to signal error
+        // contour simplification was too aggressive; negative count signals failure
         return false
       }
     }
-    // Remove the selected ear
     i := mini
     i1 := (i + 1) % n
     i2 := (i1 + 1) % n
-    // Add triangle (unmask indices)
     append(
       triangles,
       i32(work_indices[i] & 0x0fffffff),
       i32(work_indices[i1] & 0x0fffffff),
       i32(work_indices[i2] & 0x0fffffff),
     )
-    // Remove P[i1] by copying P[i+1]...P[n-1] left one index
     n -= 1
     for k in i1 ..< n {
       work_indices[k] = work_indices[k + 1]
     }
-    // Update indices after removal
     if i1 >= n do i1 = 0
     i = i1 - 1 >= 0 ? i1 - 1 : n - 1
-    // Update diagonal flags for adjacent vertices
     prev_i := i - 1 >= 0 ? i - 1 : n - 1
     next_i1 := (i1 + 1) % n
-    // Only check strict diagonal (not loose) for flag updates
     if diagonal(verts, work_indices, prev_i, i1) {
       work_indices[i] |= MIDDLE_VERTEX_MASK
     } else {
@@ -516,7 +460,6 @@ triangulate_polygon :: proc(
       work_indices[i1] &= 0x0fffffff
     }
   }
-  // Append the remaining triangle (unmask indices)
   append(
     triangles,
     i32(work_indices[0] & 0x0fffffff),
@@ -526,19 +469,14 @@ triangulate_polygon :: proc(
   return true
 }
 
-// Validate polygon mesh data
 @(private)
 validate_poly_mesh :: proc(pmesh: ^Poly_Mesh) -> bool {
   if pmesh == nil do return false
   if len(pmesh.verts) <= 0 || pmesh.npolys <= 0 do return false
   if pmesh.nvp < 3 do return false
-  // Check vertex bounds
-  // verts are now [][3]u16, so no need to check bounds
-  // Check polygon data
   for i in 0 ..< pmesh.npolys {
     pi := int(i) * int(pmesh.nvp) * 2
     if pi + int(pmesh.nvp) * 2 > len(pmesh.polys) do return false
-    // Check vertex indices
     for j in 0 ..< pmesh.nvp {
       vert_idx := pmesh.polys[pi + int(j)]
       if vert_idx != RC_MESH_NULL_IDX && int(vert_idx) >= len(pmesh.verts) {
@@ -549,11 +487,9 @@ validate_poly_mesh :: proc(pmesh: ^Poly_Mesh) -> bool {
   return true
 }
 
-// Copy polygon mesh
-@(private)
+@(private = "file")
 copy_poly_mesh :: proc(src: ^Poly_Mesh, dst: ^Poly_Mesh) -> bool {
   if src == nil || dst == nil do return false
-  // Copy header data
   dst.npolys = src.npolys
   dst.maxpolys = src.maxpolys
   dst.nvp = src.nvp
@@ -563,7 +499,6 @@ copy_poly_mesh :: proc(src: ^Poly_Mesh, dst: ^Poly_Mesh) -> bool {
   dst.ch = src.ch
   dst.border_size = src.border_size
   dst.max_edge_error = src.max_edge_error
-  // Copy arrays
   if len(src.verts) > 0 {
     dst.verts = slice.clone(src.verts)
   }
@@ -577,14 +512,12 @@ copy_poly_mesh :: proc(src: ^Poly_Mesh, dst: ^Poly_Mesh) -> bool {
   return true
 }
 
-// Merge two polygon meshes
-@(private)
+@(private = "file")
 merge_poly_meshes :: proc(meshes: []^Poly_Mesh, mesh: ^Poly_Mesh) -> bool {
   if len(meshes) == 0 do return false
   if len(meshes) == 1 {
     return copy_poly_mesh(meshes[0], mesh)
   }
-  // Calculate total sizes
   max_verts := 0
   max_polys := 0
   max_nvp := 0
@@ -595,7 +528,6 @@ merge_poly_meshes :: proc(meshes: []^Poly_Mesh, mesh: ^Poly_Mesh) -> bool {
     max_nvp = max(max_nvp, int(meshes[i].nvp))
   }
   if max_verts == 0 || max_polys == 0 do return false
-  // Use first mesh as template
   template := meshes[0]
   mesh.npolys = 0
   mesh.maxpolys = i32(max_polys)
@@ -606,30 +538,25 @@ merge_poly_meshes :: proc(meshes: []^Poly_Mesh, mesh: ^Poly_Mesh) -> bool {
   mesh.ch = template.ch
   mesh.border_size = template.border_size
   mesh.max_edge_error = template.max_edge_error
-  // Allocate arrays
   mesh.verts = make([][3]u16, max_verts)
   mesh.polys = make([]u16, max_polys * max_nvp * 2)
   mesh.regs = make([]u16, max_polys)
   mesh.flags = make([]u16, max_polys)
   mesh.areas = make([]u8, max_polys)
   slice.fill(mesh.polys, RC_MESH_NULL_IDX)
-  // Merge meshes
   next_vert := 0
   next_poly := 0
   for i in 0 ..< len(meshes) {
     src := meshes[i]
     if src == nil do continue
-    // Copy vertices
     vert_offset := next_vert
     for j in 0 ..< len(src.verts) {
       mesh.verts[next_vert] = src.verts[j]
       next_vert += 1
     }
-    // Copy polygons
     for j in 0 ..< src.npolys {
       pi_src := int(j) * int(src.nvp) * 2
       pi_dst := next_poly * int(mesh.nvp) * 2
-      // Copy vertex indices (adjust for vertex offset)
       for k in 0 ..< src.nvp {
         if src.polys[pi_src + int(k)] == RC_MESH_NULL_IDX {
           mesh.polys[pi_dst + int(k)] = RC_MESH_NULL_IDX
@@ -638,11 +565,9 @@ merge_poly_meshes :: proc(meshes: []^Poly_Mesh, mesh: ^Poly_Mesh) -> bool {
             src.polys[pi_src + int(k)] + u16(vert_offset)
         }
       }
-      // Copy neighbor data (needs adjustment)
       for k in 0 ..< src.nvp {
-        mesh.polys[pi_dst + int(mesh.nvp) + int(k)] = RC_MESH_NULL_IDX // Reset neighbors
+        mesh.polys[pi_dst + int(mesh.nvp) + int(k)] = RC_MESH_NULL_IDX
       }
-      // Copy polygon attributes
       mesh.regs[next_poly] = src.regs[j]
       mesh.flags[next_poly] = src.flags[j]
       mesh.areas[next_poly] = src.areas[j]
@@ -653,8 +578,7 @@ merge_poly_meshes :: proc(meshes: []^Poly_Mesh, mesh: ^Poly_Mesh) -> bool {
   return true
 }
 
-// Build edge list from polygon data (for neighbor finding)
-@(private)
+@(private = "file")
 build_mesh_edges :: proc(
   pmesh: ^Poly_Mesh,
   edges: ^[dynamic]Mesh_Edge,
@@ -663,7 +587,6 @@ build_mesh_edges :: proc(
   clear(edges)
   for i in 0 ..< pmesh.npolys {
     pi := int(i) * int(pmesh.nvp) * 2
-    // Find actual number of vertices in this polygon
     nverts := 0
     for j in 0 ..< pmesh.nvp {
       if pmesh.polys[pi + int(j)] != RC_MESH_NULL_IDX {
@@ -673,21 +596,17 @@ build_mesh_edges :: proc(
       }
     }
     if nverts < 3 do continue
-    // Add edges for this polygon
     for j in 0 ..< nverts {
       k := (j + 1) % nverts
       va := pmesh.polys[pi + j]
       vb := pmesh.polys[pi + k]
-      if va == vb do continue // Skip degenerate edges
-      // Ensure consistent edge ordering (smaller vertex first)
+      if va == vb do continue
       if va > vb {
         va, vb = vb, va
       }
-      // Look for existing edge
       found := false
       for idx in 0 ..< len(edges) {
         if edges[idx].vert[0] == va && edges[idx].vert[1] == vb {
-          // Found matching edge - this is a shared edge
           if edges[idx].poly[1] == RC_MESH_NULL_IDX {
             edges[idx].poly[1] = u16(i)
             edges[idx].poly_edge[1] = u16(j)
@@ -701,7 +620,6 @@ build_mesh_edges :: proc(
           log.warn("Mesh edge limit reached")
           return false
         }
-        // Add new edge
         append(
           edges,
           Mesh_Edge {
@@ -716,32 +634,26 @@ build_mesh_edges :: proc(
   return true
 }
 
-// Update polygon neighbor information from edge list
-@(private)
+@(private = "file")
 update_polygon_neighbors :: proc(pmesh: ^Poly_Mesh, edges: []Mesh_Edge) {
-  // Initialize all neighbors to null
   for i in 0 ..< pmesh.npolys {
     pi := int(i) * int(pmesh.nvp) * 2
     for j in 0 ..< pmesh.nvp {
       pmesh.polys[pi + int(pmesh.nvp) + int(j)] = RC_MESH_NULL_IDX
     }
   }
-  // Set neighbors from edges
   for edge in edges {
-    if edge.poly[1] == RC_MESH_NULL_IDX do continue // Not a shared edge
-    // Set neighbor for first polygon
+    if edge.poly[1] == RC_MESH_NULL_IDX do continue
     pi0 := int(edge.poly[0]) * int(pmesh.nvp) * 2
     edge_idx0 := int(edge.poly_edge[0])
     pmesh.polys[pi0 + int(pmesh.nvp) + edge_idx0] = edge.poly[1]
-    // Set neighbor for second polygon
     pi1 := int(edge.poly[1]) * int(pmesh.nvp) * 2
     edge_idx1 := int(edge.poly_edge[1])
     pmesh.polys[pi1 + int(pmesh.nvp) + edge_idx1] = edge.poly[0]
   }
 }
 
-// Optimized triangle merging - attempts to merge adjacent triangles into larger polygons
-@(private)
+@(private = "file")
 merge_triangles_into_polygons :: proc(
   triangles: []i32,
   polys: ^[dynamic]Poly_Build,
@@ -754,7 +666,6 @@ merge_triangles_into_polygons :: proc(
     return
   }
   if len(triangles) == 0 do return
-  // First, create all triangles as initial polygons
   temp_polys := make([dynamic]Poly_Build, 0, len(triangles) / 3)
   defer {
     for poly in temp_polys do delete(poly.verts)
@@ -771,7 +682,6 @@ merge_triangles_into_polygons :: proc(
     poly.verts[2] = triangles[i + 2]
     append(&temp_polys, poly)
   }
-  // Build adjacency information for merging
   Triangle_Edge :: struct {
     v0, v1:   i32,
     tri_idx:  int,
@@ -779,49 +689,40 @@ merge_triangles_into_polygons :: proc(
   }
   edges := make([dynamic]Triangle_Edge, 0, len(temp_polys) * 3)
   defer delete(edges)
-  // Collect all edges
   for tri, tri_idx in temp_polys {
     for edge_idx in 0 ..< 3 {
       v0 := tri.verts[edge_idx]
       v1 := tri.verts[(edge_idx + 1) % 3]
-      // Store edges in consistent order for matching
       if v0 > v1 do v0, v1 = v1, v0
       append(&edges, Triangle_Edge{v0, v1, tri_idx, edge_idx})
     }
   }
-  // Sort edges to find adjacent triangles
   slice.sort_by(edges[:], proc(a, b: Triangle_Edge) -> bool {
     if a.v0 != b.v0 do return a.v0 < b.v0
     return a.v1 < b.v1
   })
-  // Merge adjacent triangles into quads where beneficial
   merged := make([]bool, len(temp_polys))
   defer delete(merged)
   if max_verts >= 4 {
     for i in 0 ..< len(edges) - 1 {
       edge1 := edges[i]
       edge2 := edges[i + 1]
-      // Check if edges match (same vertices)
       if edge1.v0 == edge2.v0 && edge1.v1 == edge2.v1 {
         tri1_idx := edge1.tri_idx
         tri2_idx := edge2.tri_idx
-        // Skip if already merged
         if merged[tri1_idx] || merged[tri2_idx] do continue
         tri1 := &temp_polys[tri1_idx]
         tri2 := &temp_polys[tri2_idx]
-        // Merge tri2 into tri1
         merged_verts := merge_triangles_to_quad(
           tri1.verts[:],
           tri2.verts[:],
         ) or_continue
-        // Replace tri1 with merged quad
         delete(tri1.verts)
         tri1.verts = merged_verts
         merged[tri2_idx] = true
       }
     }
   }
-  // Add non-merged polygons to result
   for poly, idx in temp_polys {
     if !merged[idx] {
       final_poly := Poly_Build {
@@ -835,7 +736,7 @@ merge_triangles_into_polygons :: proc(
   }
 }
 
-@(private)
+@(private = "file")
 merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> (quad: []i32, ok: bool) {
   shared := make([dynamic]i32, 0, 2)
   defer delete(shared)
@@ -864,24 +765,18 @@ merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> (quad: []i32, ok: bool) {
   if unique1 == -1 || unique2 == -1 {
     return
   }
-  // Create quad in proper winding order
-  // Find the order of shared vertices in tri1 to maintain winding
-  // Find indices of shared vertices in tri1
   shared_idx1, shared_idx2 := i32(-1), i32(-1)
   for i in 0 ..< len(tri1) {
     if tri1[i] == shared[0] do shared_idx1 = i32(i)
     if tri1[i] == shared[1] do shared_idx2 = i32(i)
   }
   quad = make([]i32, 4)
-  // Determine winding order
   if (shared_idx1 + 1) % 3 == shared_idx2 {
-    // shared[0] -> shared[1] in tri1
     quad[0] = unique1
     quad[1] = shared[0]
     quad[2] = shared[1]
     quad[3] = unique2
   } else {
-    // shared[1] -> shared[0] in tri1
     quad[0] = unique1
     quad[1] = shared[1]
     quad[2] = shared[0]
@@ -891,8 +786,7 @@ merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> (quad: []i32, ok: bool) {
   return
 }
 
-// Main function to build polygon mesh from contour set
-@(private)
+@(private = "file")
 build_poly_mesh :: proc(
   cset: ^Contour_Set,
   nvp: i32,
@@ -901,7 +795,6 @@ build_poly_mesh :: proc(
   if cset == nil || pmesh == nil do return false
   if len(cset.conts) == 0 do return false
   if nvp < 3 do return false
-  // Initialize mesh
   pmesh.npolys = 0
   pmesh.maxpolys = 0
   pmesh.nvp = nvp
@@ -911,7 +804,6 @@ build_poly_mesh :: proc(
   pmesh.ch = cset.ch
   pmesh.border_size = cset.border_size
   pmesh.max_edge_error = cset.max_error
-  // Estimate sizes
   max_vertices := 0
   max_polygons := 0
   max_edges := 0
@@ -919,11 +811,10 @@ build_poly_mesh :: proc(
     cont := &cset.conts[i]
     if len(cont.verts) < 3 do continue
     max_vertices += len(cont.verts)
-    max_polygons += len(cont.verts) - 2 // Triangulation creates n-2 triangles
-    max_edges += len(cont.verts) * 3 // Conservative estimate
+    max_polygons += len(cont.verts) - 2
+    max_edges += len(cont.verts) * 3
   }
   if max_vertices == 0 do return false
-  // Allocate temporary structures
   verts := make([dynamic]Mesh_Vertex, 0, max_vertices)
   defer delete(verts)
   buckets := make([]Vertex_Bucket, RC_VERTEX_BUCKET_COUNT)
@@ -931,7 +822,6 @@ build_poly_mesh :: proc(
   for &bucket in buckets {
     bucket.first = -1
   }
-  // Track which vertices should be removed (border vertices)
   vflags := make([]bool, max_vertices)
   defer delete(vflags)
   polys := make([dynamic]Poly_Build, 0, max_polygons)
@@ -940,41 +830,32 @@ build_poly_mesh :: proc(
   defer delete(edges)
   triangles := make([dynamic]i32, 0, max_polygons * 3)
   defer delete(triangles)
-  indices := make([]i32, nvp) // Working buffer for polygon indices
+  indices := make([]i32, nvp)
   defer delete(indices)
-  // Process each contour
   for i in 0 ..< len(cset.conts) {
     cont := &cset.conts[i]
     if len(cont.verts) < 3 {
       continue
     }
-    // Create indices array for triangulation (0, 1, 2, ...)
     indices := make([]i32, len(cont.verts))
     defer delete(indices)
     for j in 0 ..< len(cont.verts) {
       indices[j] = i32(j)
     }
-    // Triangulate the contour FIRST
-    // Pass cont.verts directly - they're already [4]i32 with x, y, z, flags
     clear(&triangles)
     if !triangulate_polygon(cont.verts[:], indices, &triangles) {
-      // Bad triangulation, should not happen.
       log.warnf("Bad triangulation Contour %d. Verts: %d", i, len(cont.verts))
-      // Debug: print vertices
       for j in 0 ..< min(5, len(cont.verts)) {
         v := cont.verts[j]
         log.debugf("  Vert %d: [%d, %d, %d, %d]", j, v.x, v.y, v.z, v.w)
       }
       continue
     }
-    // NOW add vertices and merge duplicates AFTER triangulation
-    // Reuse indices array to store global vertex indices
     verts_before := len(verts)
     for j in 0 ..< len(cont.verts) {
       v := cont.verts[j]
       vert_idx := add_vertex(u16(v.x), u16(v.y), u16(v.z), &verts, buckets)
       indices[j] = vert_idx
-      // Mark vertex for removal if it's a border vertex
       if v.w & RC_BORDER_VERTEX != 0 {
         if int(vert_idx) < len(vflags) {
           vflags[vert_idx] = true
@@ -982,8 +863,6 @@ build_poly_mesh :: proc(
       }
     }
     verts_after := len(verts)
-    // new_verts := verts_after - verts_before
-    // Start with triangles as initial polygons
     region_polys: [dynamic]Poly_Build
     defer {
       for &poly in region_polys {
@@ -998,28 +877,23 @@ build_poly_mesh :: proc(
         area  = cont.area,
         reg   = cont.reg,
       }
-      // Use triangles as lookup into indices array
       poly.verts[0] = indices[triangles[base + 0]]
       poly.verts[1] = indices[triangles[base + 1]]
       poly.verts[2] = indices[triangles[base + 2]]
       append(&region_polys, poly)
     }
-    // Merge triangles into convex polygons
     if nvp > 3 {
       merge_count := 0
-      // Keep merging while possible
       for {
         best_merge_value := i32(0)
         best_pa := -1
         best_pb := -1
         best_ea := i32(-1)
         best_eb := i32(-1)
-        // Find best merge candidate
         for i in 0 ..< len(region_polys) {
           pa := &region_polys[i]
           for j in i + 1 ..< len(region_polys) {
             pb := &region_polys[j]
-            // Check if we can merge these polygons
             ea, eb, merge_value := get_poly_merge_value(
               pa.verts[:],
               pb.verts[:],
@@ -1035,7 +909,6 @@ build_poly_mesh :: proc(
             }
           }
         }
-        // No more merges possible
         if best_pa == -1 || best_pb == -1 {
           log.debugf(
             "    No more merges possible after %d merges",
@@ -1044,7 +917,6 @@ build_poly_mesh :: proc(
           break
         }
         merge_count += 1
-        // Merge the polygons
         merge_poly_verts(
           &region_polys[best_pa],
           &region_polys[best_pb],
@@ -1052,15 +924,11 @@ build_poly_mesh :: proc(
           best_eb,
           nvp,
         )
-        // Free the verts of the polygon being removed before removing it
         delete(region_polys[best_pb].verts)
-        // Remove the merged polygon
         ordered_remove(&region_polys, best_pb)
       }
     }
-    // Add merged polygons to result
     for poly in region_polys {
-      // Create a copy with proper allocation
       final_poly := Poly_Build {
         verts = make([]i32, len(poly.verts)),
         area  = poly.area,
@@ -1073,7 +941,6 @@ build_poly_mesh :: proc(
   if len(polys) == 0 {
     return false
   }
-  // Allocate final mesh arrays
   pmesh.npolys = i32(len(polys))
   pmesh.maxpolys = pmesh.npolys
   pmesh.verts = make([][3]u16, len(verts))
@@ -1082,28 +949,21 @@ build_poly_mesh :: proc(
   pmesh.flags = make([]u16, pmesh.npolys)
   pmesh.areas = make([]u8, pmesh.npolys)
   slice.fill(pmesh.polys, RC_MESH_NULL_IDX)
-  // Copy vertices to final mesh
   for i := 0; i < len(verts); i += 1 {
     vert := verts[i]
     pmesh.verts[i] = {vert.x, vert.y, vert.z}
   }
-  // Copy polygons to final mesh
   for i := 0; i < len(polys); i += 1 {
     poly := polys[i]
     pi := i * int(nvp) * 2
-    // Copy vertex indices
     for j in 0 ..< len(poly.verts) {
       pmesh.polys[pi + int(j)] = u16(poly.verts[j])
     }
-    // Set polygon attributes
     pmesh.regs[i] = poly.reg
     pmesh.areas[i] = poly.area
-    pmesh.flags[i] = 1 // Default walkable flag
-    // Clean up poly vertex memory
+    pmesh.flags[i] = 1
     delete(poly.verts)
   }
-  // Remove border vertices (marked during contour processing)
-  // This simplifies the mesh by removing unnecessary edge vertices
   for i := 0; i < len(pmesh.verts); {
     should_remove := false
     if i < len(vflags) {
@@ -1122,32 +982,26 @@ build_poly_mesh :: proc(
       log.errorf("Failed to remove edge vertex %d", i)
       return false
     }
-    // After removal, vertices shift down, so we need to update vflags
     // Note: pmesh.nverts is already decremented in remove_vertex
     for j in i ..< len(pmesh.verts) {
       if j + 1 < len(vflags) {
         vflags[j] = vflags[j + 1]
       }
     }
-    // Don't increment i, re-check this index since vertices shifted
   }
-  // Build edge connectivity
   if build_mesh_edges(pmesh, &edges, i32(max_edges)) {
     update_polygon_neighbors(pmesh, edges[:])
   }
-  // Validate final mesh
   if !validate_poly_mesh(pmesh) {
     return false
   }
   return true
 }
 
-// Check if a vertex can be removed from the mesh
-@(private)
+@(private = "file")
 can_remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16) -> bool {
   if pmesh == nil do return false
   nvp := int(pmesh.nvp)
-  // Count number of polygons to remove and touched vertices
   numTouchedVerts := 0
   numRemainingEdges := 0
   for i in 0 ..< pmesh.npolys {
@@ -1170,15 +1024,10 @@ can_remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16) -> bool {
       numRemainingEdges += numVerts - (numRemoved + 1)
     }
   }
-  // There would be too few edges remaining to create a polygon.
-  // This can happen for example when a tip of a triangle is marked
-  // as deletion, but there are no other polys that share the vertex.
-  // In this case, the vertex should not be removed.
+  // a triangle tip marked for removal with no other sharing polys must be kept
   if numRemainingEdges <= 2 {
     return false
   }
-  // Find edges which share the removed vertex
-  // Edge format: [vertex_a, vertex_b, share_count]
   Edge :: struct {
     a, b:   i32,
     shares: i32,
@@ -1193,27 +1042,22 @@ can_remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16) -> bool {
       if pmesh.polys[pi + j] == RC_MESH_NULL_IDX do break
       nv += 1
     }
-    // Collect edges which touch the removed vertex
     k := nv - 1
     for j in 0 ..< nv {
       if pmesh.polys[pi + j] == rem || pmesh.polys[pi + k] == rem {
-        // Arrange edge so that a=rem
         a := i32(pmesh.polys[pi + j])
         b := i32(pmesh.polys[pi + k])
         if b == i32(rem) {
           a, b = b, a
         }
-        // Check if the edge exists
         exists := false
         for &e in edges {
           if e.b == b {
-            // Exists, increment vertex share count
             e.shares += 1
             exists = true
             break
           }
         }
-        // Add new edge
         if !exists {
           append(&edges, Edge{a = a, b = b, shares = 1})
         }
@@ -1221,9 +1065,6 @@ can_remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16) -> bool {
       k = j
     }
   }
-  // There should be no more than 2 open edges.
-  // This catches the case that two non-adjacent polygons
-  // share the removed vertex. In that case, do not remove the vertex.
   numOpenEdges := 0
   for e in edges {
     if e.shares < 2 {
@@ -1236,12 +1077,10 @@ can_remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16) -> bool {
   return true
 }
 
-// Remove a vertex from the polygon mesh and re-triangulate the hole
-@(private)
+@(private = "file")
 remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
   if pmesh == nil do return false
   nvp := int(pmesh.nvp)
-  // Count number of polygons to remove
   numRemovedVerts := 0
   for i in 0 ..< pmesh.npolys {
     pi := int(i) * nvp * 2
@@ -1257,7 +1096,6 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
       }
     }
   }
-  // Edge format: [v0, v1, region, area]
   Edge :: struct {
     v0, v1: i32,
     reg:    u16,
@@ -1265,7 +1103,6 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
   }
   edges := make([dynamic]Edge, 0, numRemovedVerts * nvp)
   defer delete(edges)
-  // Collect edges that don't touch the removed vertex
   for i := 0; i < int(pmesh.npolys); {
     pi := i * nvp * 2
     nv := 0
@@ -1281,7 +1118,6 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
       }
     }
     if hasRem {
-      // Collect edges which don't touch the removed vertex
       k := nv - 1
       for j in 0 ..< nv {
         if pmesh.polys[pi + j] != rem && pmesh.polys[pi + k] != rem {
@@ -1297,35 +1133,29 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
         }
         k = j
       }
-      // Remove the polygon by swapping with last
       last_pi := int(pmesh.npolys - 1) * nvp * 2
       if pi != last_pi {
         for j in 0 ..< nvp * 2 {
           pmesh.polys[pi + j] = pmesh.polys[last_pi + j]
         }
       }
-      // Clear the last polygon
       for j in 0 ..< nvp {
         pmesh.polys[last_pi + nvp + j] = RC_MESH_NULL_IDX
       }
       pmesh.regs[i] = pmesh.regs[pmesh.npolys - 1]
       pmesh.areas[i] = pmesh.areas[pmesh.npolys - 1]
       pmesh.npolys -= 1
-      // Don't increment i, process same index again
     } else {
       i += 1
     }
   }
-  // Remove vertex by shifting all vertices down
   for i in int(rem) ..< len(pmesh.verts) - 1 {
     pmesh.verts[i] = pmesh.verts[i + 1]
   }
-  // Shrink vertex array
   new_verts := make([][3]u16, len(pmesh.verts) - 1)
   copy(new_verts, pmesh.verts[:len(pmesh.verts) - 1])
   delete(pmesh.verts)
   pmesh.verts = new_verts
-  // Adjust indices to match the removed vertex layout
   for i in 0 ..< pmesh.npolys {
     pi := int(i) * nvp * 2
     nv := 0
@@ -1344,20 +1174,16 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
     if edges[i].v1 > i32(rem) do edges[i].v1 -= 1
   }
   if len(edges) == 0 do return true
-  // Build hole boundary by connecting edges in order
   hole := make([dynamic]i32, 0, len(edges))
   defer delete(hole)
   hreg := make([dynamic]u16, 0, len(edges))
   defer delete(hreg)
   harea := make([dynamic]u8, 0, len(edges))
   defer delete(harea)
-  // Start with first edge
   append(&hole, edges[0].v0)
   append(&hreg, edges[0].reg)
   append(&harea, edges[0].area)
-  // Remove first edge from list
   unordered_remove(&edges, 0)
-  // Keep appending connected segments to the start and end of the hole
   for len(edges) > 0 {
     match := false
     for i := 0; i < len(edges); {
@@ -1367,30 +1193,25 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
       a := edges[i].area
       add := false
       if hole[0] == eb {
-        // Segment matches the beginning of the hole boundary
         inject_at(&hole, 0, ea)
         inject_at(&hreg, 0, r)
         inject_at(&harea, 0, a)
         add = true
       } else if hole[len(hole) - 1] == ea {
-        // Segment matches the end of the hole boundary
         append(&hole, eb)
         append(&hreg, r)
         append(&harea, a)
         add = true
       }
       if add {
-        // Edge segment was added, remove it
         unordered_remove(&edges, i)
         match = true
-        // Don't increment i, check same index again
       } else {
         i += 1
       }
     }
     if !match do break
   }
-  // Generate temp vertex array for triangulation
   tverts := make([][4]i32, len(hole))
   defer delete(tverts)
   tindices := make([]i32, len(hole))
@@ -1407,14 +1228,12 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
       tindices[i] = i32(i)
     }
   }
-  // Triangulate the hole
   triangles := make([dynamic]i32, 0, len(hole) * 3)
   defer delete(triangles)
   if !triangulate_polygon(tverts[:], tindices[:], &triangles) {
     log.warnf("removeVertex: triangulate() failed")
     return false
   }
-  // Build initial polygons from triangles
   Temp_Poly :: struct {
     verts: []u16,
     reg:   u16,
@@ -1433,7 +1252,6 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
       temp_polys[npolys].verts[0] = u16(hole[t[0]])
       temp_polys[npolys].verts[1] = u16(hole[t[1]])
       temp_polys[npolys].verts[2] = u16(hole[t[2]])
-      // Use region/area from hole
       if t[0] < i32(len(hreg)) {
         temp_polys[npolys].reg = hreg[t[0]]
         temp_polys[npolys].area = harea[t[0]]
@@ -1442,8 +1260,6 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
     }
   }
   if npolys == 0 do return true
-  // Merge polygons (if nvp > 3)
-  // Convert verts for merge checking
   mesh_verts := make([dynamic]Mesh_Vertex, len(pmesh.verts))
   defer delete(mesh_verts)
   for i in 0 ..< len(pmesh.verts) {
@@ -1457,7 +1273,6 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
   }
   if nvp > 3 {
     for {
-      // Find best polygons to merge
       bestMergeVal := i32(0)
       bestPa := -1
       bestPb := -1
@@ -1489,7 +1304,6 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
         }
       }
       if bestMergeVal <= 0 do break
-      // Merge polygons
       pa := &temp_polys[bestPa]
       pb := &temp_polys[bestPb]
       na := len(pa.verts)
@@ -1498,12 +1312,10 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
       defer delete(tmp)
       for i in 0 ..< nvp do tmp[i] = RC_MESH_NULL_IDX
       n := 0
-      // Add pa
       for i in 0 ..< na - 1 {
         tmp[n] = pa.verts[(int(bestEa) + 1 + i) % na]
         n += 1
       }
-      // Add pb
       for i in 0 ..< nb - 1 {
         tmp[n] = pb.verts[(int(bestEb) + 1 + i) % nb]
         n += 1
@@ -1512,7 +1324,6 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
       pa.verts = make([]u16, n)
       copy(pa.verts, tmp[:n])
       if pa.reg != pb.reg do pa.reg = RC_MULTIPLE_REGS
-      // Remove pb
       delete(pb.verts)
       for i in bestPb ..< npolys - 1 {
         temp_polys[i] = temp_polys[i + 1]
@@ -1520,7 +1331,6 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
       npolys -= 1
     }
   }
-  // Store polygons
   for i in 0 ..< npolys {
     if pmesh.npolys >= maxTris do break
     pi := int(pmesh.npolys) * nvp * 2
@@ -1546,53 +1356,42 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
   return true
 }
 
-// Build portal edges between tile boundaries
-@(private)
+@(private = "file")
 build_mesh_portal_edges :: proc(pmesh: ^Poly_Mesh) -> bool {
   if pmesh == nil do return false
   nvp := int(pmesh.nvp)
-  // Mark portal edges (edges on tile boundaries)
   for i in 0 ..< pmesh.npolys {
     pi := int(i) * nvp * 2
     for j in 0 ..< nvp {
       if pmesh.polys[pi + j] == RC_MESH_NULL_IDX do break
-      // Check if edge has no neighbor (boundary edge)
       if pmesh.polys[pi + nvp + j] == RC_MESH_NULL_IDX {
         k := (j + 1) % nvp
         if pmesh.polys[pi + k] == RC_MESH_NULL_IDX do continue
         va := pmesh.polys[pi + j]
         vb := pmesh.polys[pi + k]
-        // Check if edge is on tile boundary by comparing vertex positions
         if va < u16(len(pmesh.verts)) && vb < u16(len(pmesh.verts)) {
           ax := pmesh.verts[va].x
           az := pmesh.verts[va].z
           bx := pmesh.verts[vb].x
           bz := pmesh.verts[vb].z
-          // Check if edge aligns with tile boundary
-          // Vertices on boundary have x or z == 0 or borderSize*2
           border := u16(pmesh.border_size * 2)
           is_portal := false
-          // Check X boundaries
           if (ax == 0 || ax == border) &&
              (bx == 0 || bx == border) &&
              ax == bx {
             is_portal = true
           }
-          // Check Z boundaries
           if (az == 0 || az == border) &&
              (bz == 0 || bz == border) &&
              az == bz {
             is_portal = true
           }
           if is_portal {
-            // Mark as portal edge using upper bits of neighbor value
-            // Set portal direction based on which boundary
             dir := u16(0)
-            if ax == 0 {dir = 0} else // -X
-            if ax == border {dir = 1} else // +X
-            if az == 0 {dir = 2} else // -Z
-            if az == border {dir = 3}   // +Z
-            // Store portal info in upper bits
+            if ax == 0 {dir = 0} else
+            if ax == border {dir = 1} else
+            if az == 0 {dir = 2} else
+            if az == border {dir = 3}
             pmesh.polys[pi + nvp + j] = 0x8000 | (dir << 13)
           }
         }

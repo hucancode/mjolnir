@@ -4,32 +4,35 @@ import "core:log"
 import "core:thread"
 import "core:time"
 
+// RENDER_FPS is the target frame rate of Loop.frame (-define:RENDER_FPS=n).
 RENDER_FPS :: #config(RENDER_FPS, 60)
+@(private = "file")
 FRAME_TIME :: 1.0 / RENDER_FPS
+@(private = "file")
 FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
+// UPDATE_FPS is the tick rate of Loop.update (-define:UPDATE_FPS=n, default RENDER_FPS).
 UPDATE_FPS :: #config(UPDATE_FPS, RENDER_FPS)
+@(private = "file")
 UPDATE_FRAME_TIME :: 1.0 / UPDATE_FPS
+@(private = "file")
 UPDATE_FRAME_TIME_MILIS :: UPDATE_FRAME_TIME * 1_000.0
+@(private = "file")
 MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
+// USE_PARALLEL_UPDATE runs Loop.update on its own thread (-define:USE_PARALLEL_UPDATE=true).
 USE_PARALLEL_UPDATE :: #config(USE_PARALLEL_UPDATE, false)
+// FRAME_LIMIT stops run after this many frames; 0 means no limit (-define:FRAME_LIMIT=n).
 FRAME_LIMIT :: #config(FRAME_LIMIT, 0)
 
-// The application's callbacks. The loop knows nothing else about the app:
-// every module call, including the glue between modules, lives in them.
-//   should_close: polled once per loop iteration on the main thread.
-//   update:       UPDATE_FPS ticks; on its own thread with USE_PARALLEL_UPDATE.
-//   frame:        RENDER_FPS on the main thread (poll window events and render
-//                 here); return false on an error.
+// Loop holds the application callbacks run drives; it knows nothing else.
 Loop :: struct($T: typeid) {
   app:          ^T,
-  should_close: proc(app: ^T) -> bool,
-  update:       proc(app: ^T, dt: f32),
-  frame:        proc(app: ^T) -> bool,
+  should_close: proc(app: ^T) -> bool, // polled once per iteration, main thread
+  update:       proc(app: ^T, dt: f32), // UPDATE_FPS ticks; own thread with USE_PARALLEL_UPDATE
+  frame:        proc(app: ^T) -> bool, // RENDER_FPS, main thread: poll events, render; false on error
 }
 
-// Run on the calling thread (the one that created the window) until
-// should_close returns true, FRAME_LIMIT frames have been rendered,
-// or frame fails MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED times in a row.
+// run drives loop on the calling thread (the one that created the window)
+// until should_close, FRAME_LIMIT frames, or too many consecutive frame failures.
 run :: proc(loop: Loop($T)) {
   run_loop(transmute(Loop(byte))loop)
 }
@@ -97,7 +100,7 @@ run_loop :: proc(loop: Loop(byte)) {
   }
 }
 
-// Run one update when a tick is due; false when it was not.
+// tick runs one update when due; false when it was not.
 @(private = "file")
 tick :: proc(self: ^Ticker) -> bool {
   dt := f32(time.duration_seconds(time.since(self.last_update)))

@@ -1,3 +1,4 @@
+// Secondary camera rendered into a bindless texture.
 package main
 
 import "../../mjolnir"

@@ -1,3 +1,4 @@
+// Procedural bone modifier following a spline.
 package main
 
 import "../../mjolnir"

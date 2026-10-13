@@ -1,4 +1,3 @@
-// glTF mesh, material and texture import into render resources.
 package gltf_render
 
 import render ".."
@@ -11,10 +10,9 @@ import "core:slice"
 import "vendor:cgltf"
 import vk "vendor:vulkan"
 
-// Create a render mesh, material and textures for every glTF mesh a node
-// references. looks[i] draws data.meshes[i]; it is nil for meshes no node
-// uses or that failed to upload. Meshes used by a skinned node carry
-// skinning data. `gltf_path` resolves relative texture URIs.
+// load_meshes creates a render mesh, material and textures for every glTF mesh a node references.
+// looks[i] draws data.meshes[i]; it is nil for meshes no node uses or that failed to upload.
+// Meshes used by a skinned node carry skinning data. gltf_path resolves relative texture URIs.
 load_meshes :: proc(
   r: ^render.Renderer,
   data: ^cgltf.data,
@@ -138,7 +136,6 @@ load_material :: proc(
   return handle, true
 }
 
-// All primitives of a glTF mesh merged into one geometry.
 @(private = "file")
 load_geometry :: proc(gltf_mesh: ^cgltf.mesh, include_skinning: bool) -> mesh.Geometry {
   vertices := make([dynamic]mesh.Vertex, 0, context.allocator)
@@ -201,7 +198,6 @@ load_vertex_attributes :: proc(
   }
 }
 
-// Reads `n` floats per element of `items` into the field at byte `offset`.
 @(private = "file")
 read_floats :: proc(accessor: ^cgltf.accessor, items: []$T, offset: uintptr, n: uint) {
   for i in 0 ..< min(int(accessor.count), len(items)) {

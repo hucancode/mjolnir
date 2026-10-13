@@ -1,3 +1,4 @@
+// Static and dynamic bodies of every shape, moved and reshaped live.
 package main
 
 import "../../mjolnir"

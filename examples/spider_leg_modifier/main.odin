@@ -1,3 +1,4 @@
+// Procedural spider legs — IK + parabolic foot lift.
 package main
 
 import "../../mjolnir"

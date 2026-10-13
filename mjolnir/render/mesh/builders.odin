@@ -4,37 +4,32 @@ import "../../geometry"
 import "core:math"
 import "core:math/linalg"
 
+// make_cube builds a 2x2x2 cube centered at the origin with per-face normals.
 make_cube :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> Geometry {
   vertices := make([]Vertex, 24)
   indices := make([]u32, 36)
-  // Front face
   vertices[0] = {{-1, -1, 1}, geometry.VEC_FORWARD, color, {0, 1}, {}}
   vertices[1] = {{1, -1, 1}, geometry.VEC_FORWARD, color, {1, 1}, {}}
   vertices[2] = {{1, 1, 1}, geometry.VEC_FORWARD, color, {1, 0}, {}}
   vertices[3] = {{-1, 1, 1}, geometry.VEC_FORWARD, color, {0, 0}, {}}
-  // Back face
   vertices[4] = {{-1, 1, -1}, geometry.VEC_BACKWARD, color, {1, 1}, {}}
   vertices[5] = {{1, 1, -1}, geometry.VEC_BACKWARD, color, {0, 1}, {}}
   vertices[6] = {{1, -1, -1}, geometry.VEC_BACKWARD, color, {0, 0}, {}}
   vertices[7] = {{-1, -1, -1}, geometry.VEC_BACKWARD, color, {1, 0}, {}}
-  // Top face
   vertices[8] = {{1, 1, -1}, geometry.VEC_UP, color, {0, 1}, {}}
   vertices[9] = {{-1, 1, -1}, geometry.VEC_UP, color, {1, 1}, {}}
   vertices[10] = {{-1, 1, 1}, geometry.VEC_UP, color, {1, 0}, {}}
   vertices[11] = {{1, 1, 1}, geometry.VEC_UP, color, {0, 0}, {}}
-  // Bottom face
   vertices[12] = {{1, -1, 1}, geometry.VEC_DOWN, color, {0, 1}, {}}
   vertices[13] = {{-1, -1, 1}, geometry.VEC_DOWN, color, {1, 1}, {}}
   vertices[14] = {{-1, -1, -1}, geometry.VEC_DOWN, color, {1, 0}, {}}
   vertices[15] = {{1, -1, -1}, geometry.VEC_DOWN, color, {0, 0}, {}}
-  // Right face
   vertices[16] = {{1, -1, -1}, geometry.VEC_RIGHT, color, {0, 1}, {}}
   vertices[17] = {{1, 1, -1}, geometry.VEC_RIGHT, color, {1, 1}, {}}
   vertices[18] = {{1, 1, 1}, geometry.VEC_RIGHT, color, {1, 0}, {}}
   vertices[19] = {{1, -1, 1}, geometry.VEC_RIGHT, color, {0, 0}, {}}
-  // Left face
   vertices[20] = {{-1, -1, 1}, geometry.VEC_LEFT, color, {0, 1}, {}}
   vertices[21] = {{-1, 1, 1}, geometry.VEC_LEFT, color, {1, 1}, {}}
   vertices[22] = {{-1, 1, -1}, geometry.VEC_LEFT, color, {1, 0}, {}}
@@ -47,7 +42,7 @@ make_cube :: proc(
   return make_geometry(vertices, indices)
 }
 
-// Quad (on XZ plane, facing Y up)
+// make_quad builds a quad on the XZ plane facing +Y.
 make_quad :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> Geometry {
@@ -62,23 +57,22 @@ make_quad :: proc(
   return make_geometry(vertices, indices)
 }
 
-// Billboard Quad (on XY plane, facing Z forward, for camera-facing sprites)
+// make_billboard_quad builds a quad on the XY plane facing +Z, for camera-facing sprites.
 make_billboard_quad :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> Geometry {
   vertices := make([]Vertex, 4)
   indices := make([]u32, 6)
-  // Vertices in XY plane (Z=0), centered at origin
-  // Y axis is vertical, X axis is horizontal
-  vertices[0] = {{-1, -1, 0}, geometry.VEC_FORWARD, color, {0, 1}, {}} // Bottom-left
-  vertices[1] = {{1, -1, 0}, geometry.VEC_FORWARD, color, {1, 1}, {}} // Bottom-right
-  vertices[2] = {{1, 1, 0}, geometry.VEC_FORWARD, color, {1, 0}, {}} // Top-right
-  vertices[3] = {{-1, 1, 0}, geometry.VEC_FORWARD, color, {0, 0}, {}} // Top-left
+  vertices[0] = {{-1, -1, 0}, geometry.VEC_FORWARD, color, {0, 1}, {}}
+  vertices[1] = {{1, -1, 0}, geometry.VEC_FORWARD, color, {1, 1}, {}}
+  vertices[2] = {{1, 1, 0}, geometry.VEC_FORWARD, color, {1, 0}, {}}
+  vertices[3] = {{-1, 1, 0}, geometry.VEC_FORWARD, color, {0, 0}, {}}
   indices[0], indices[1], indices[2] = 0, 1, 2
   indices[3], indices[4], indices[5] = 2, 3, 0
   return make_geometry(vertices, indices)
 }
 
+// make_sphere builds a UV sphere of the given radius centered at the origin.
 make_sphere :: proc(
   segments: u32 = 16,
   rings: u32 = 16,
@@ -119,6 +113,7 @@ make_sphere :: proc(
   return make_geometry(vertices, indices)
 }
 
+// make_cone builds a cone along Y with a capped base and its tip at +height/2.
 make_cone :: proc(
   segments: u32 = 32,
   height: f32 = 2.0,
@@ -129,27 +124,23 @@ make_cone :: proc(
   idx_count := segments * 6
   vertices := make([]Vertex, vert_count)
   indices := make([]u32, idx_count)
-  // Tip vertex
   vertices[0] = Vertex {
     position = {0, height / 2, 0},
     normal   = {0, 1, 0},
     color    = color,
     uv       = {0.5, 1.0},
   }
-  // Base center
   vertices[1] = Vertex {
     position = {0, -height / 2, 0},
     normal   = {0, -1, 0},
     color    = color,
     uv       = {0.5, 0.0},
   }
-  // Base circle
   for i in 0 ..= segments {
     theta := 2.0 * math.PI * f32(i) / f32(segments)
     x := radius * math.cos(theta)
     z := radius * math.sin(theta)
-    // Side normal calculation
-    side_normal := linalg.normalize([3]f32{x, radius / height, z})
+      side_normal := linalg.normalize([3]f32{x, radius / height, z})
     vertices[2 + i] = Vertex {
       position = {x, -height / 2, z},
       normal   = side_normal,
@@ -157,7 +148,6 @@ make_cone :: proc(
       uv       = {0.5 + 0.5 * math.cos(theta), 0.5 + 0.5 * math.sin(theta)},
     }
   }
-  // Indices (side)
   idx := 0
   for i in 0 ..< segments {
     next := 2 + ((i + 1) % (segments + 1))
@@ -165,7 +155,6 @@ make_cone :: proc(
     p[0], p[1], p[2] = 0, next, 2 + i
     idx += 3
   }
-  // Indices (base)
   for i in 0 ..< segments {
     next := 2 + ((i + 1) % (segments + 1))
     p := indices[idx:]
@@ -175,8 +164,8 @@ make_cone :: proc(
   return make_geometry(vertices, indices)
 }
 
-// Capsule along Y: two hemispheres joined by a cylinder. V runs from 0 at
-// the top pole to 1 at the bottom pole.
+// make_capsule builds a capsule along Y: two hemispheres joined by a cylinder.
+// V runs from 0 at the top pole to 1 at the bottom pole.
 make_capsule :: proc(
   segments: u32 = 16,
   rings: u32 = 8,
@@ -248,6 +237,7 @@ make_capsule :: proc(
   return make_geometry(vertices, indices)
 }
 
+// make_torus builds a torus in the XY plane, around the Z axis.
 make_torus :: proc(
   segments: u32 = 32,
   sides: u32 = 16,
@@ -295,14 +285,14 @@ make_torus :: proc(
   return make_geometry(vertices, indices)
 }
 
+// make_cylinder builds a capped cylinder along Y centered at the origin.
 make_cylinder :: proc(
   segments: u32 = 32,
   height: f32 = 2.0,
   radius: f32 = 1.0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> Geometry {
-  // The body's top and bottom rings interleaved, then per cap its center and
-  // rim. Every ring repeats its first vertex for the UV seam.
+  // body rings interleaved, then each cap's center and rim; rings repeat their first vertex for the UV seam
   ring := segments + 1
   top_center := 2 * ring
   bottom_center := top_center + 1 + ring

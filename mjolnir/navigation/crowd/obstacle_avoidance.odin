@@ -5,10 +5,14 @@ import "core:math"
 import "core:math/linalg"
 import "../../geometry"
 
+@(private = "file")
 DT_PI :: math.PI
+@(private = "file")
 DT_MAX_PATTERN_DIVS :: 32
+@(private = "file")
 DT_MAX_PATTERN_RINGS :: 4
 
+@(private = "file")
 Obstacle_Circle :: struct {
 	p:    [3]f32,
 	vel:  [3]f32,
@@ -18,12 +22,14 @@ Obstacle_Circle :: struct {
 	np:   [3]f32,
 }
 
+@(private = "file")
 Obstacle_Segment :: struct {
 	p:     [3]f32,
 	q:     [3]f32,
 	touch: bool,
 }
 
+@(private)
 Obstacle_Avoidance_Params :: struct {
 	vel_bias:       f32,
 	weight_des_vel: f32,
@@ -37,6 +43,7 @@ Obstacle_Avoidance_Params :: struct {
 	adaptive_depth: u8,
 }
 
+@(private = "file")
 Obstacle_Avoidance_Debug_Data :: struct {
 	nsamples:    int,
 	max_samples: int,
@@ -49,6 +56,7 @@ Obstacle_Avoidance_Debug_Data :: struct {
 	tpen:        []f32,
 }
 
+@(private)
 Obstacle_Avoidance_Query :: struct {
 	params:        Obstacle_Avoidance_Params,
 	inv_horiz_time: f32,
@@ -62,6 +70,7 @@ Obstacle_Avoidance_Query :: struct {
 	nsegments:     int,
 }
 
+@(private = "file")
 create_obstacle_avoidance_debug_data :: proc(max_samples: int, allocator := context.allocator) -> ^Obstacle_Avoidance_Debug_Data {
 	context.allocator = allocator
 	data := new(Obstacle_Avoidance_Debug_Data)
@@ -76,6 +85,7 @@ create_obstacle_avoidance_debug_data :: proc(max_samples: int, allocator := cont
 	return data
 }
 
+@(private = "file")
 destroy_obstacle_avoidance_debug_data :: proc(data: ^Obstacle_Avoidance_Debug_Data) {
 	if data == nil do return
 	delete(data.vel)
@@ -88,6 +98,7 @@ destroy_obstacle_avoidance_debug_data :: proc(data: ^Obstacle_Avoidance_Debug_Da
 	free(data)
 }
 
+@(private)
 create_obstacle_avoidance_query :: proc(max_circles: int, max_segments: int, allocator := context.allocator) -> ^Obstacle_Avoidance_Query {
 	context.allocator = allocator
 	query := new(Obstacle_Avoidance_Query)
@@ -98,6 +109,7 @@ create_obstacle_avoidance_query :: proc(max_circles: int, max_segments: int, all
 	return query
 }
 
+@(private)
 destroy_obstacle_avoidance_query :: proc(query: ^Obstacle_Avoidance_Query) {
 	if query == nil do return
 	delete(query.circles)
@@ -105,11 +117,13 @@ destroy_obstacle_avoidance_query :: proc(query: ^Obstacle_Avoidance_Query) {
 	free(query)
 }
 
+@(private)
 obstacle_avoidance_query_reset :: proc(query: ^Obstacle_Avoidance_Query) {
 	query.ncircles = 0
 	query.nsegments = 0
 }
 
+@(private)
 obstacle_avoidance_query_add_circle :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, rad: f32, vel: [3]f32, dvel: [3]f32) {
 	if query.ncircles >= query.max_circles do return
 	cir := &query.circles[query.ncircles]
@@ -120,6 +134,7 @@ obstacle_avoidance_query_add_circle :: proc(query: ^Obstacle_Avoidance_Query, po
 	cir.dvel = dvel
 }
 
+@(private)
 obstacle_avoidance_query_add_segment :: proc(query: ^Obstacle_Avoidance_Query, p: [3]f32, q: [3]f32) {
 	if query.nsegments >= query.max_segments do return
 	seg := &query.segments[query.nsegments]
@@ -128,6 +143,7 @@ obstacle_avoidance_query_add_segment :: proc(query: ^Obstacle_Avoidance_Query, p
 	seg.q = q
 }
 
+@(private)
 sweep_circle_circle :: proc(c0: [3]f32, r0: f32, v: [3]f32, c1: [3]f32, r1: f32) -> (hit: bool, tmin: f32, tmax: f32) {
 	EPS :: 0.0001
 	s := c1 - c0
@@ -146,6 +162,7 @@ sweep_circle_circle :: proc(c0: [3]f32, r0: f32, v: [3]f32, c1: [3]f32, r1: f32)
 	return true, tmin, tmax
 }
 
+@(private = "file")
 obstacle_avoidance_query_prepare :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, dvel: [3]f32) {
 	for i in 0..<query.ncircles {
 		cir := &query.circles[i]
@@ -173,6 +190,7 @@ obstacle_avoidance_query_prepare :: proc(query: ^Obstacle_Avoidance_Query, pos: 
 	}
 }
 
+@(private = "file")
 obstacle_avoidance_query_process_sample :: proc(query: ^Obstacle_Avoidance_Query, vcand: [3]f32, cs: f32,
                                                  pos: [3]f32, rad: f32, vel: [3]f32, dvel: [3]f32,
                                                  min_penalty: f32, debug: ^Obstacle_Avoidance_Debug_Data) -> f32 {
@@ -262,6 +280,7 @@ obstacle_avoidance_query_process_sample :: proc(query: ^Obstacle_Avoidance_Query
 	return penalty
 }
 
+@(private = "file")
 obstacle_avoidance_sample_velocity_grid :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, rad: f32, vmax: f32,
                                                  vel: [3]f32, dvel: [3]f32, nvel: ^[3]f32,
                                                  params: ^Obstacle_Avoidance_Params,
@@ -309,6 +328,7 @@ obstacle_avoidance_sample_velocity_grid :: proc(query: ^Obstacle_Avoidance_Query
 	return ns
 }
 
+@(private = "file")
 normalize_2d :: proc(v: ^[3]f32) {
 	d := math.sqrt(v.x*v.x + v.z*v.z)
 	if d == 0 do return
@@ -317,6 +337,7 @@ normalize_2d :: proc(v: ^[3]f32) {
 	v.z *= d
 }
 
+@(private = "file")
 rotate_2d :: proc(dest: ^[3]f32, v: [3]f32, ang: f32) {
 	c := math.cos(ang)
 	s := math.sin(ang)
@@ -325,6 +346,7 @@ rotate_2d :: proc(dest: ^[3]f32, v: [3]f32, ang: f32) {
 	dest.y = v.y
 }
 
+@(private)
 obstacle_avoidance_sample_velocity_adaptive :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, rad: f32, vmax: f32,
                                                      vel: [3]f32, dvel: [3]f32, nvel: ^[3]f32,
                                                      params: ^Obstacle_Avoidance_Params,

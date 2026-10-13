@@ -3,11 +3,15 @@ package crowd
 
 import "../detour"
 
+@(private = "file")
 MAX_QUEUE :: 8
 
+@(private)
 Path_Queue_Ref :: distinct u32
+@(private)
 PATHQ_INVALID :: Path_Queue_Ref(0)
 
+@(private = "file")
 Path_Query :: struct {
 	ref:         Path_Queue_Ref,
 	start_pos:   [3]f32,
@@ -21,6 +25,7 @@ Path_Query :: struct {
 	filter:      ^detour.Query_Filter,
 }
 
+@(private)
 Path_Queue :: struct {
 	queue:          [MAX_QUEUE]Path_Query,
 	next_handle:    Path_Queue_Ref,
@@ -29,6 +34,7 @@ Path_Queue :: struct {
 	nav_query:      ^detour.Nav_Mesh_Query,
 }
 
+@(private)
 create_path_queue :: proc(max_path_size: int, max_search_node_count: int,
                           nav: ^detour.Nav_Mesh, allocator := context.allocator) -> (queue: ^Path_Queue, ok: bool) {
 	context.allocator = allocator
@@ -55,6 +61,7 @@ create_path_queue :: proc(max_path_size: int, max_search_node_count: int,
 	return queue, true
 }
 
+@(private)
 destroy_path_queue :: proc(queue: ^Path_Queue) {
 	if queue == nil do return
 	detour.nav_mesh_query_destroy(queue.nav_query)
@@ -65,6 +72,7 @@ destroy_path_queue :: proc(queue: ^Path_Queue) {
 	free(queue)
 }
 
+@(private)
 path_queue_update :: proc(queue: ^Path_Queue, max_iters: int) {
 	MAX_KEEP_ALIVE :: 2
 
@@ -112,6 +120,7 @@ path_queue_update :: proc(queue: ^Path_Queue, max_iters: int) {
 	}
 }
 
+@(private)
 path_queue_request :: proc(queue: ^Path_Queue, start_ref: detour.Poly_Ref, end_ref: detour.Poly_Ref,
                             start_pos: [3]f32, end_pos: [3]f32,
                             filter: ^detour.Query_Filter) -> Path_Queue_Ref {
@@ -145,6 +154,7 @@ path_queue_request :: proc(queue: ^Path_Queue, start_ref: detour.Poly_Ref, end_r
 	return ref
 }
 
+@(private)
 path_queue_get_request_status :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref) -> detour.Status {
 	for i in 0..<MAX_QUEUE {
 		if queue.queue[i].ref == ref {
@@ -154,6 +164,7 @@ path_queue_get_request_status :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref) -
 	return {.Invalid_Param}
 }
 
+@(private)
 path_queue_get_path_result :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref,
                                     path: []detour.Poly_Ref) -> (npath: int, status: detour.Status) {
 	for i in 0..<MAX_QUEUE {

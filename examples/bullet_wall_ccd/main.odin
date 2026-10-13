@@ -1,3 +1,4 @@
+// Fast projectiles don't tunnel through thin walls.
 package main
 
 import "../../mjolnir"

@@ -1,30 +1,27 @@
-// Text metrics and glyph quads over one TTF/OTF font, rasterized on demand
-// into an R8 atlas. Layer 1: no GPU, no other module. A UI measures with it;
-// a renderer draws its glyphs and uploads its atlas.
 package font
 
 import "core:log"
 import "core:slice"
 import fs "vendor:fontstash"
 
-// The fontstash context of one font. Use it by pointer only.
+// Font is the fontstash context of one font. Use it by pointer only.
 Font :: fs.FontContext
 
-// One glyph quad: corners in pixels, uvs in atlas texels so they stay valid
+// Glyph is one glyph quad: corners in pixels, uvs in atlas texels so they stay valid
 // when the atlas grows.
 Glyph :: struct {
   p0, p1:   [2]f32,
   uv0, uv1: [2]f32,
 }
 
-// Glyph sizes rasterized at init so the first atlas upload covers typical
+// DEFAULT_PREWARM_SIZES are the glyph sizes rasterized at init so the first atlas upload covers typical
 // text without growing the atlas; other sizes rasterize on first use.
 DEFAULT_PREWARM_SIZES :: []f32{14, 16, 20, 24}
 
 @(private = "file")
 PREWARM_TEXT :: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
 
-// `font_data` is a TTF/OTF file in memory; it is copied. Paired with destroy.
+// init loads a font; `font_data` is a TTF/OTF file in memory; it is copied. Paired with destroy.
 init :: proc(f: ^Font, font_data: []u8, prewarm_sizes := DEFAULT_PREWARM_SIZES) -> bool {
   fs.Init(f, 512, 512, .TOPLEFT)
   if fs.AddFontMem(f, "default", slice.clone(font_data), true) == fs.INVALID {
@@ -40,6 +37,7 @@ init :: proc(f: ^Font, font_data: []u8, prewarm_sizes := DEFAULT_PREWARM_SIZES) 
   return true
 }
 
+// destroy frees the font and its atlas.
 destroy :: proc(f: ^Font) {
   fs.Destroy(f)
 }
@@ -52,20 +50,20 @@ set_line :: proc(f: ^Font, size: f32) {
   fs.SetAlignVertical(f, .TOP)
 }
 
-// Width of `text` on one line at `size` pixels.
+// measure returns the width of `text` on one line at `size` pixels.
 measure :: proc(f: ^Font, text: string, size: f32) -> f32 {
   set_line(f, size)
   return fs.TextBounds(f, text)
 }
 
-// Distance between two lines at `size` pixels.
+// line_height returns the distance between two lines at `size` pixels.
 line_height :: proc(f: ^Font, size: f32) -> f32 {
   set_line(f, size)
   _, _, h := fs.VerticalMetrics(f)
   return h
 }
 
-// Append the glyphs of `text` on one line whose top-left is `origin`.
+// glyphs appends the glyphs of `text` on one line whose top-left is `origin`.
 glyphs :: proc(f: ^Font, text: string, origin: [2]f32, size: f32, out: ^[dynamic]Glyph) {
   set_line(f, size)
   iter := fs.TextIterInit(f, origin.x, origin.y, text)
@@ -78,7 +76,7 @@ glyphs :: proc(f: ^Font, text: string, origin: [2]f32, size: f32, out: ^[dynamic
   }
 }
 
-// The R8 atlas pixels (size.x by size.y); changed when glyphs were
+// atlas returns the R8 atlas pixels (size.x by size.y); changed when glyphs were
 // rasterized or the atlas grew since the previous call.
 atlas :: proc(f: ^Font) -> (pixels: []u8, size: [2]u32, changed: bool) {
   dirty: [4]f32

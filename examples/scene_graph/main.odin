@@ -1,3 +1,4 @@
+// Hierarchical transforms and traversal.
 package main
 
 import "../../mjolnir"

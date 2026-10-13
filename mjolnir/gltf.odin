@@ -9,21 +9,21 @@ import gltf_render "render/gltf"
 import "vendor:cgltf"
 import "world"
 
-// A skinned node and the rig (index into GltfScene.rigs) that deforms it.
+// GltfSkinnedNode is a skinned node and the rig (index into GltfScene.rigs) that deforms it.
 GltfSkinnedNode :: struct {
   node: world.NodeHandle,
   rig:  int,
 }
 
-// Result of load_gltf. World nodes and render resources belong to the world
-// and renderer; the scene owns `roots`, `skinned` and the rigs (free with
-// gltf_scene_destroy).
+// GltfScene is the result of load_gltf. World nodes and render resources belong
+// to the world and renderer; the scene owns `roots`, `skinned` and the rigs.
 GltfScene :: struct {
   roots:   [dynamic]world.NodeHandle,
   rigs:    [dynamic]anim.Rig, // one per skin a mesh node uses, with every animation as a clip
   skinned: [dynamic]GltfSkinnedNode,
 }
 
+// gltf_scene_destroy frees the rigs and lists a GltfScene owns.
 gltf_scene_destroy :: proc(self: ^GltfScene) {
   for &r in self.rigs do anim.rig_destroy(&r)
   delete(self.rigs)
@@ -32,8 +32,8 @@ gltf_scene_destroy :: proc(self: ^GltfScene) {
   self^ = {}
 }
 
-// Instantiate a glTF file: render looks (see gltf_render.load_meshes), one
-// animation rig per skin (see gltf_animation.load_rig) and one world node per glTF
+// load_gltf instantiates a glTF file: render looks (see gltf_render.load_meshes),
+// one rig per skin (see gltf_animation.load_rig) and one world node per glTF
 // node, spawned under `parent` (the world root by default).
 load_gltf :: proc(
   w: ^world.World,

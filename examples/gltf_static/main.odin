@@ -1,3 +1,4 @@
+// glTF asset import.
 package main
 
 import "../../mjolnir"

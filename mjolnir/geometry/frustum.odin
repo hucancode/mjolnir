@@ -2,33 +2,26 @@ package geometry
 
 import "core:math/linalg"
 
-// Plane is represented as a [4]f32 {A, B, C, D}
-// for the plane equation Ax + By + Cz + D = 0.
-// The normal {A, B, C} is assumed to point "inwards" for a convex volume.
+// Plane holds {A, B, C, D} of Ax + By + Cz + D = 0; the normal points inward.
 Plane :: [4]f32
 
+// Frustum is six inward-facing planes: left, right, bottom, top, near, far.
 Frustum :: struct {
   planes: [6]Plane,
 }
 
+// make_frustum extracts the normalized frustum planes from a view-projection matrix.
 make_frustum :: proc(m: matrix[4, 4]f32) -> Frustum {
-  // Each plane is a Vec4: a*x + b*y + c*z + d = 0
   x_axis := [4]f32{m[0, 0], m[0, 1], m[0, 2], m[0, 3]}
   y_axis := [4]f32{m[1, 0], m[1, 1], m[1, 2], m[1, 3]}
   z_axis := [4]f32{m[2, 0], m[2, 1], m[2, 2], m[2, 3]}
   origin := [4]f32{m[3, 0], m[3, 1], m[3, 2], m[3, 3]}
   planes := [6]Plane {
-    // Left
     origin + x_axis,
-    // Right
     origin - x_axis,
-    // Bottom
     origin + y_axis,
-    // Top
     origin - y_axis,
-    // Near
     origin + z_axis,
-    // Far
     origin - z_axis,
   }
   for &plane in planes {
@@ -40,6 +33,7 @@ make_frustum :: proc(m: matrix[4, 4]f32) -> Frustum {
   return Frustum{planes}
 }
 
+@(private = "file")
 signed_distance_to_plane :: proc "contextless" (
   plane: Plane,
   point: [3]f32,
@@ -47,6 +41,7 @@ signed_distance_to_plane :: proc "contextless" (
   return linalg.dot(plane.xyz, point) + plane.w
 }
 
+// frustum_test_point reports whether p lies inside frustum.
 frustum_test_point :: proc "contextless" (
   frustum: Frustum,
   p: [3]f32,
@@ -56,19 +51,15 @@ frustum_test_point :: proc "contextless" (
   }
   return true
 }
-// test_aabb_frustum tests if an Axis-Aligned Bounding Box (AABB) intersects or is contained within a Frustum.
-// Assumes Frustum planes have normals pointing inwards.
+// frustum_test_aabb reports whether aabb intersects or lies inside frustum.
 frustum_test_aabb :: proc "contextless" (
   frustum: Frustum,
   aabb: Aabb,
 ) -> bool {
-  // For each frustum plane, test if the AABB is completely on the negative side
   for plane in frustum.planes {
-    // Find the "positive" and "negative" vertices of the AABB relative to the plane normal
     // The positive vertex is the one furthest in the direction of the plane normal
     positive_vertex: [3]f32
     negative_vertex: [3]f32
-    // For each axis, choose min or max based on plane normal direction
     if plane.x >= 0 {
       positive_vertex.x = aabb.max.x
       negative_vertex.x = aabb.min.x
@@ -96,6 +87,7 @@ frustum_test_aabb :: proc "contextless" (
   return true
 }
 
+// frustum_test_sphere reports whether the sphere intersects or lies inside frustum.
 frustum_test_sphere :: proc "contextless" (
   frustum: Frustum,
   center: [3]f32,
@@ -108,6 +100,7 @@ frustum_test_sphere :: proc "contextless" (
   return true
 }
 
+// aabb_transform returns the box enclosing aabb after applying transform.
 aabb_transform :: proc "contextless" (
   aabb: Aabb,
   transform: matrix[4, 4]f32,

@@ -5,14 +5,14 @@ import ".."
 import "../detour"
 import "../recast"
 
-// Triangle soup to bake: one area type per triangle.
+// NavGeometryBuilder accumulates the triangle soup to bake: one area type per triangle.
 NavGeometryBuilder :: struct {
   vertices:   [dynamic][3]f32,
   indices:    [dynamic]i32,
   area_types: [dynamic]u8,
 }
 
-// Append a triangle mesh to a builder. Triangles are walkable unless
+// append_triangles adds a triangle mesh to b. Triangles are walkable unless
 // `is_obstacle`. Every position is offset by `offset`.
 append_triangles :: proc(
   b: ^NavGeometryBuilder,
@@ -28,6 +28,7 @@ append_triangles :: proc(
   for _ in 0 ..< len(indices) / 3 do append(&b.area_types, area)
 }
 
+// builder_destroy frees the builder arrays.
 builder_destroy :: proc(b: ^NavGeometryBuilder) {
   delete(b.vertices)
   delete(b.indices)
@@ -35,7 +36,7 @@ builder_destroy :: proc(b: ^NavGeometryBuilder) {
   b^ = {}
 }
 
-// Build the mesh and its query from the builder's triangles, replacing any
+// build bakes nav and its query from the builder's triangles, replacing any
 // previous build.
 build :: proc(
   nav: ^navigation.NavMesh,

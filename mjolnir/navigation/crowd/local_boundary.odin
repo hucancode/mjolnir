@@ -5,9 +5,12 @@ import "core:math"
 import "../detour"
 import "../../geometry"
 
+@(private)
 MAX_LOCAL_SEGS :: 8
+@(private = "file")
 MAX_LOCAL_POLYS :: 16
 
+@(private)
 Local_Boundary :: struct {
 	center: [3]f32,
 	segs:   [MAX_LOCAL_SEGS]Boundary_Segment,
@@ -16,27 +19,32 @@ Local_Boundary :: struct {
 	npolys: int,
 }
 
+@(private = "file")
 Boundary_Segment :: struct {
 	s: [6]f32,
 	d: f32,
 }
 
+@(private)
 create_local_boundary :: proc() -> ^Local_Boundary {
 	boundary := new(Local_Boundary)
 	local_boundary_reset(boundary)
 	return boundary
 }
 
+@(private)
 destroy_local_boundary :: proc(boundary: ^Local_Boundary) {
 	free(boundary)
 }
 
+@(private = "file")
 local_boundary_reset :: proc(boundary: ^Local_Boundary) {
 	boundary.center = {math.F32_MAX, math.F32_MAX, math.F32_MAX}
 	boundary.npolys = 0
 	boundary.nsegs = 0
 }
 
+@(private)
 local_boundary_add_segment :: proc(boundary: ^Local_Boundary, dist: f32, s: [6]f32) {
 	seg: ^Boundary_Segment
 
@@ -71,6 +79,7 @@ local_boundary_add_segment :: proc(boundary: ^Local_Boundary, dist: f32, s: [6]f
 	}
 }
 
+@(private)
 local_boundary_update :: proc(boundary: ^Local_Boundary, ref: detour.Poly_Ref, pos: [3]f32,
                                collision_query_range: f32, query: ^detour.Nav_Mesh_Query,
                                filter: ^detour.Query_Filter) {
@@ -111,6 +120,7 @@ local_boundary_update :: proc(boundary: ^Local_Boundary, ref: detour.Poly_Ref, p
 	}
 }
 
+@(private = "file")
 local_boundary_is_valid :: proc(boundary: ^Local_Boundary, query: ^detour.Nav_Mesh_Query,
                                  filter: ^detour.Query_Filter) -> bool {
 	if boundary.npolys == 0 do return false
@@ -124,6 +134,7 @@ local_boundary_is_valid :: proc(boundary: ^Local_Boundary, query: ^detour.Nav_Me
 	return true
 }
 
+@(private)
 local_boundary_get_segment :: proc(boundary: ^Local_Boundary, i: int) -> [6]f32 {
 	if i < 0 || i >= boundary.nsegs do return {}
 	return boundary.segs[i].s

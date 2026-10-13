@@ -9,6 +9,7 @@ import "core:sync"
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
 
+@(private)
 MAX_TEXTURES :: 1000
 @(private)
 MAX_STORAGE_IMAGES :: PRECOMPUTE_STORAGE_BASE + PRECOMPUTE_DISPATCHES
@@ -62,10 +63,8 @@ SAMPLERS := [SamplerType]struct {
   .MAX_REDUCE     = {.LINEAR, .CLAMP_TO_EDGE, .NEAREST, .MAX, false},
 }
 
-// Create the samplers and the bindless set with its layout, and write the
-// samplers and the pyramid counters into it. Call once at startup, after the
-// scene buffers and before pipeline layouts are built. Paired with
-// bindless_shutdown.
+// After the scene buffers, before pipeline layouts are built.
+@(private)
 bindless_init :: proc(r: ^Renderer) -> vk.Result {
   gctx := &r.gctx
   d := &r.scene
@@ -100,8 +99,7 @@ bindless_init :: proc(r: ^Renderer) -> vk.Result {
   return .SUCCESS
 }
 
-// Destroy the samplers and the set layout; the set goes with the descriptor
-// pool.
+@(private)
 bindless_shutdown :: proc(r: ^Renderer) {
   for &sampler in r.samplers {
     vk.DestroySampler(r.gctx.device, sampler, nil)
@@ -111,16 +109,13 @@ bindless_shutdown :: proc(r: ^Renderer) {
   r.scene.bindless_layout = 0
 }
 
-// The image of a live texture, nil for a stale or empty handle.
 @(private)
 texture_image :: proc(r: ^Renderer, handle: TextureHandle) -> ^gpu.Image {
   if !cont.slots_live(&r.texture_slots, u32(handle)) do return nil
   return &r.textures[handle]
 }
 
-// Allocate a texture in the bindless array: 2D, or a cube when `cube` (the
-// shaders' textureCube array aliases the same binding). `data` fills level 0
-// and generates the remaining mip levels.
+// A cube aliases the same binding as the shaders' textureCube array. `data` fills level 0; the other levels are blitted down.
 @(private)
 allocate_texture :: proc(
   r: ^Renderer,
@@ -140,7 +135,6 @@ allocate_texture :: proc(
   gctx := &r.gctx
   sync.recursive_mutex_lock(&r.mutex)
   defer sync.recursive_mutex_unlock(&r.mutex)
-  // level 0 is copied in, the other levels blitted down from it
   usage := usage | ({.TRANSFER_DST, .TRANSFER_SRC} if data != nil else {})
   img := gpu.image_create(gctx, extent, format, usage, mip_levels, cube = cube, shared = shared, components = swizzle) or_return
   if data != nil {
@@ -159,21 +153,19 @@ allocate_texture :: proc(
   return TextureHandle(h), .SUCCESS
 }
 
-// Free a texture. The handle is invalidated at once; its slot and image are
-// released once no frame in flight samples them. teardown frees every
-// texture.
+// destroy_texture invalidates handle at once; its slot and image are released once no
+// frame in flight samples them. teardown frees every texture.
 destroy_texture :: proc(r: ^Renderer, handle: TextureHandle) {
   sync.recursive_mutex_lock(&r.mutex)
   defer sync.recursive_mutex_unlock(&r.mutex)
   cont.slots_free(&r.texture_slots, u32(handle))
 }
 
-// A texture handle of none, as materials, emitters and draw2d commands hold
-// it.
+// NO_TEXTURE is the TextureHandle of none, as materials, emitters and draw2d commands hold it.
 NO_TEXTURE :: 0
 
-// Decode an encoded image (png, jpg, hdr, ...) held in memory into a bindless
-// 2D texture. A float format decodes it as linear HDR.
+// create_texture_from_data decodes an encoded image (png, jpg, hdr, ...) held in memory
+// into a bindless 2D texture. A float format decodes it as linear HDR.
 create_texture_from_data :: proc(
   r: ^Renderer,
   data: []u8,
@@ -208,7 +200,7 @@ create_texture_from_data :: proc(
   )
 }
 
-// Load an image file (png, jpg, hdr, ...) into a bindless 2D texture.
+// create_texture_from_path loads an image file (png, jpg, hdr, ...) into a bindless 2D texture.
 create_texture_from_path :: proc(
   r: ^Renderer,
   path: string,

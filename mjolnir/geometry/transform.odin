@@ -2,7 +2,7 @@ package geometry
 
 import "core:math/linalg"
 
-// Split an affine matrix into translation, rotation and per-axis scale.
+// decompose_matrix splits an affine matrix into translation, rotation and per-axis scale.
 decompose_matrix :: proc "contextless" (
   m: matrix[4, 4]f32,
 ) -> (

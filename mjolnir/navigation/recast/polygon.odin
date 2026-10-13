@@ -2,49 +2,36 @@ package recast
 
 import "core:math/linalg"
 
-// Integer polygon predicates on grid-space XZ coordinates.
-
-// Calculate signed area of triangle formed by three 2D points
-// Positive area = counter-clockwise, negative = clockwise
-// This is the 2D cross product of vectors (b-a) and (c-a)
 @(private)
 area2 :: proc "contextless" (a, b, c: [2]i32) -> i32 {
   return linalg.cross(b - a, c - a)
 }
 
-// Check if point c is to the left or on the directed line from a to b
 @(private)
 left_on :: proc "contextless" (a, b, c: [2]i32) -> bool {
   return area2(a, b, c) <= 0
 }
 
-// Check if point p is inside the cone formed by three consecutive vertices a0, a1, a2
-// a1 is the apex of the cone
 @(private)
 in_cone :: proc "contextless" (a0, a1, a2, p: [2]i32) -> bool {
-  // If a1 is a convex vertex (a2 is left or on the line from a0 to a1)
   if left_on(a0, a1, a2) {
     // p must be left of a1->p->a0 AND left of p->a1->a2
     return left(a1, p, a0) && left(p, a1, a2)
   }
-  // else a1 is reflex
   // p must NOT be (left-or-on a1->p->a2 AND left-or-on p->a1->a0)
   return !(left_on(a1, p, a2) && left_on(p, a1, a0))
 }
 
-// Check if point c is to the left of the directed line from a to b
 @(private)
 left :: proc "contextless" (a, b, c: [2]i32) -> bool {
   return area2(a, b, c) < 0
 }
 
-// Check if point p lies on the line segment from a to b
 @(private)
 between :: proc "contextless" (a, b, p: [2]i32) -> bool {
   if area2(a, b, p) != 0 {
-    return false // Not collinear
+    return false
   }
-  // If ab not vertical, check betweenness on x; else on y
   if a.x != b.x {
     return ((a.x <= p.x) && (p.x <= b.x)) || ((a.x >= p.x) && (p.x >= b.x))
   } else {
@@ -52,27 +39,22 @@ between :: proc "contextless" (a, b, p: [2]i32) -> bool {
   }
 }
 
-// Check if line segments ab and cd intersect properly (at a point interior to both segments)
 @(private)
 intersect_prop :: proc "contextless" (a, b, c, d: [2]i32) -> bool {
-  // Eliminate improper cases (endpoints touching)
   if area2(a, b, c) == 0 ||
      area2(a, b, d) == 0 ||
      area2(c, d, a) == 0 ||
      area2(c, d, b) == 0 {
     return false
   }
-  // Check if c and d are on opposite sides of ab, and a and b are on opposite sides of cd
   return (left(a, b, c) != left(a, b, d)) && (left(c, d, a) != left(c, d, b))
 }
 
-// Check if line segments ab and cd intersect (properly or improperly)
 @(private)
 intersect :: proc "contextless" (a, b, c, d: [2]i32) -> bool {
   if intersect_prop(a, b, c, d) {
     return true
   }
-  // Check if any endpoint lies on the other segment
   return(
     between(a, b, c) ||
     between(a, b, d) ||
@@ -81,10 +63,9 @@ intersect :: proc "contextless" (a, b, c, d: [2]i32) -> bool {
   )
 }
 
-// Calculate signed area of 2D contour (positive = counter-clockwise, negative = clockwise)
 @(private)
 calculate_contour_area :: proc(verts: [][4]i32) -> i32 {
-  if len(verts) < 3 do return 0 // Need at least 3 vertices
+  if len(verts) < 3 do return 0
   nverts := len(verts)
   area: i32 = 0
   j := nverts - 1
@@ -94,5 +75,5 @@ calculate_contour_area :: proc(verts: [][4]i32) -> i32 {
     area += vi.x * vj.z - vj.x * vi.z
     j = i
   }
-  return (area + 1) / 2 // Round and return signed area
+  return (area + 1) / 2
 }

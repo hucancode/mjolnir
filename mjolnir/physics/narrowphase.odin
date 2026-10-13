@@ -78,10 +78,6 @@ bounding_spheres_intersect :: proc "contextless" (
   return linalg.length2(pos_b - pos_a) <= radius_sum * radius_sum
 }
 
-// ---------------------------------------------------------------------------
-// Single-point primitive tests
-// ---------------------------------------------------------------------------
-
 test_sphere_sphere :: proc(
   pos_a: [3]f32,
   sphere_a: SphereCollider,
@@ -144,7 +140,6 @@ test_sphere_cylinder :: proc(
   penetration: f32,
   hit: bool,
 ) {
-  // Cylinder local space: axis is Y
   inv_rot := linalg.quaternion_inverse(rot_cylinder)
   local_sphere := geometry.qmv(inv_rot, pos_sphere - pos_cylinder)
   half_height := cylinder.height * 0.5
@@ -155,7 +150,6 @@ test_sphere_cylinder :: proc(
   above := local_sphere.y > half_height
   below := local_sphere.y < -half_height
   inside_radial := radial_dist < cylinder.radius
-  // Closest point on the cylinder surface
   local_closest: [3]f32
   if above || below {
     cap_y := above ? half_height : -half_height
@@ -301,10 +295,6 @@ test_cylinder_cylinder :: proc(
   return
 }
 
-// ---------------------------------------------------------------------------
-// Manifolds
-// ---------------------------------------------------------------------------
-
 ManifoldPoint :: struct {
   point:       [3]f32,
   penetration: f32,
@@ -339,10 +329,6 @@ point_manifold :: #force_inline proc(
   return m, true
 }
 
-// ---------------------------------------------------------------------------
-// Box-box
-// ---------------------------------------------------------------------------
-
 @(private = "file")
 BoxFrame :: struct {
   center: [3]f32,
@@ -363,7 +349,6 @@ box_frame :: proc(pos: [3]f32, rot: quaternion128, half: [3]f32) -> (f: BoxFrame
   return
 }
 
-// Support extent of a box along a world direction
 @(private = "file")
 box_extent :: #force_inline proc(f: ^BoxFrame, dir: [3]f32) -> f32 {
   return(
@@ -441,13 +426,11 @@ reduce_manifold :: proc(m: ^Manifold, candidates: []ManifoldPoint) {
     m.count = n
     return
   }
-  // 1: deepest
   best := 0
   for i in 1 ..< n {
     if candidates[i].penetration > candidates[best].penetration do best = i
   }
   m.points[0] = candidates[best]
-  // 2: farthest from 1
   best2, best_d := 0, f32(-1)
   for c, i in candidates {
     d := linalg.length2(c.point - m.points[0].point)
@@ -457,7 +440,6 @@ reduce_manifold :: proc(m: ^Manifold, candidates: []ManifoldPoint) {
     }
   }
   m.points[1] = candidates[best2]
-  // 3: max triangle area
   best3, best_a := 0, f32(-1)
   e01 := m.points[1].point - m.points[0].point
   for c, i in candidates {
@@ -468,7 +450,6 @@ reduce_manifold :: proc(m: ^Manifold, candidates: []ManifoldPoint) {
     }
   }
   m.points[2] = candidates[best3]
-  // 4: farthest from the triangle plane-projected centroid (max spread)
   centroid := (m.points[0].point + m.points[1].point + m.points[2].point) / 3
   best4, best_d4 := 0, f32(-1)
   for c, i in candidates {
@@ -506,7 +487,6 @@ collide_boxes_aligned :: proc(
   if overlap.y < overlap[axis] do axis = 1
   if overlap.z < overlap[axis] do axis = 2
   pen := overlap[axis]
-  // Clamp the contact rectangle to a valid region when separated
   for k in 0 ..< 3 {
     if overlap_min[k] > overlap_max[k] {
       mid := (overlap_min[k] + overlap_max[k]) * 0.5
@@ -517,7 +497,6 @@ collide_boxes_aligned :: proc(
   sign: f32 = pos_b[axis] > pos_a[axis] ? 1 : -1
   normal: [3]f32
   normal[axis] = sign
-  // Contact plane at the touching faces; corners of the overlap rectangle
   plane := sign > 0 ? max_a[axis] : min_a[axis]
   u := (axis + 1) % 3
   v := (axis + 2) % 3
@@ -569,7 +548,6 @@ collide_boxes :: proc(
   best_face_owner := -1 // 0 = A's face, 1 = B's face
   best_face_idx := -1
 
-  // Face axes of both boxes
   for owner in 0 ..< 2 {
     f := owner == 0 ? &fa : &fb
     for i in 0 ..< 3 {
@@ -613,9 +591,7 @@ collide_boxes :: proc(
   }
 
   if best_edge_a >= 0 && best_edge_pen * EDGE_BIAS < best_pen - EDGE_ABS_BIAS {
-    // Edge contact: closest points between the two supporting edges
     m.normal = best_edge_axis
-    // Support point on A along +axis, on B along -axis
     pa := fa.center
     for i in 0 ..< 3 {
       s: f32 = linalg.dot(best_edge_axis, fa.axes[i]) > 0 ? 1 : -1
@@ -628,7 +604,6 @@ collide_boxes :: proc(
       if i == best_edge_b do continue
       pb += fb.axes[i] * (s * fb.half[i])
     }
-    // Closest points on the two edge lines
     ea := fa.axes[best_edge_a]
     eb := fb.axes[best_edge_b]
     r := pb - pa
@@ -655,15 +630,12 @@ collide_boxes :: proc(
     return
   }
 
-  // Face contact: clip incident face against reference face side planes
   ref := best_face_owner == 0 ? &fa : &fb
   inc := best_face_owner == 0 ? &fb : &fa
-  // Reference normal always points from A to B
   ref_normal := best_axis
   ref_face_normal := best_face_owner == 0 ? ref_normal : -ref_normal
   ref_sign: f32 = linalg.dot(ref.axes[best_face_idx], ref_face_normal) > 0 ? 1 : -1
 
-  // Incident face: most anti-parallel to reference normal
   inc_idx := 0
   inc_dot := f32(math.F32_MAX)
   inc_sign: f32 = 1
@@ -688,7 +660,6 @@ collide_boxes :: proc(
     poly[i] = {p = v, id = u32(inc_idx) << 16 | u32(i)}
   }
 
-  // Clip against the 4 side planes of the reference face
   tmp: [8]ClipVertex
   for k in 0 ..< 3 {
     if k == best_face_idx do continue
@@ -703,7 +674,6 @@ collide_boxes :: proc(
     }
   }
 
-  // Keep points penetrating the reference face
   face_center := ref.center + ref.axes[best_face_idx] * (ref_sign * ref.half[best_face_idx])
   candidates: [8]ManifoldPoint
   cand_count := 0
@@ -725,10 +695,6 @@ collide_boxes :: proc(
   return
 }
 
-// ---------------------------------------------------------------------------
-// Cylinder manifolds
-// ---------------------------------------------------------------------------
-
 // Cap-contact rim points: 4 samples on the contact circle, clipped to
 // penetrating ones. Leaves `m` untouched when the contact is not a cap
 // resting case.
@@ -745,7 +711,6 @@ cylinder_cap_manifold :: proc(
 ) {
   axis := geometry.qy(cyl_rot)
   cap_dot := linalg.dot(axis, plane_normal)
-  // Cap must be near-parallel to the face
   if math.abs(cap_dot) < 0.966 do return // cos(15°)
   cap_sign: f32 = cap_dot > 0 ? -1 : 1
   cap_center := cyl_pos + axis * (cap_sign * height * 0.5)
@@ -811,10 +776,8 @@ collide_cylinders :: proc(
     axial_pen := half_sum - math.abs(axial_dist)
     if radial_pen < -margin || axial_pen < -margin do return
     if axial_pen < radial_pen {
-      // Cap contact: rim points on the smaller circle around the overlap center
       normal := axial_dist > 0 ? axis_a : -axis_a
       r := min(cyl_a.radius, cyl_b.radius)
-      // Circle center: midpoint of the two facing caps, shifted by radial offset
       cap_a := pos_a + normal * (cyl_a.height * 0.5)
       center := cap_a - normal * (axial_pen * 0.5)
       if radial_dist > math.F32_EPSILON {
@@ -836,7 +799,6 @@ collide_cylinders :: proc(
       hit = true
       return
     }
-    // Side contact: 2 points spanning the height overlap
     radial_dir := radial_dist > math.F32_EPSILON ? radial_vec / radial_dist : [3]f32{1, 0, 0}
     min_a := -cyl_a.height * 0.5
     max_a := cyl_a.height * 0.5
@@ -865,10 +827,6 @@ collide_cylinders :: proc(
   )
   return point_manifold(point, normal, penetration, single_hit)
 }
-
-// ---------------------------------------------------------------------------
-// Dispatch
-// ---------------------------------------------------------------------------
 
 // margin: speculative distance — contacts are generated while shapes are
 // still up to `margin` apart (penetration goes negative). The solver treats
@@ -934,12 +892,6 @@ collide_bodies :: #force_inline proc(body_a, body_b: ^Body, margin: f32 = 0) -> 
   )
 }
 
-// ---------------------------------------------------------------------------
-// Pairs
-// ---------------------------------------------------------------------------
-
-// Narrowphase one broadphase pair into a contact whose body A is dynamic.
-// Pairs without a dynamic body, or where nothing awake can move, are skipped.
 narrowphase_pair :: proc(world: ^World, handle_a, handle_b: BodyHandle, out: ^[dynamic]Contact) {
   handle_a, handle_b := handle_a, handle_b
   body_a := get_body(world, handle_a) or_else nil

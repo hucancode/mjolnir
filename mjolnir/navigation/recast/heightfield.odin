@@ -10,7 +10,7 @@ Span :: struct {
   next:       ^Span,
 }
 
-@(private)
+@(private = "file")
 Span_Pool :: struct {
   next:  ^Span_Pool,
   items: [RC_SPANS_PER_POOL]Span,
@@ -65,6 +65,7 @@ Compact_Heightfield :: struct {
   areas:           []u8,
 }
 
+// destroy_heightfield frees the heightfield and its spans.
 destroy_heightfield :: proc(hf: ^Heightfield) {
   if hf == nil do return
   pool := hf.pools
@@ -77,6 +78,7 @@ destroy_heightfield :: proc(hf: ^Heightfield) {
   free(hf)
 }
 
+// destroy_compact_heightfield frees the compact heightfield.
 destroy_compact_heightfield :: proc(chf: ^Compact_Heightfield) {
   if chf == nil do return
   delete(chf.cells)
@@ -115,6 +117,7 @@ free_span :: proc(hf: ^Heightfield, span: ^Span) {
   hf.freelist = span
 }
 
+// create_heightfield allocates an empty heightfield of width x height cells spanning bmin..bmax.
 create_heightfield :: proc(
   width, height: i32,
   bmin, bmax: [3]f32,
@@ -132,7 +135,7 @@ create_heightfield :: proc(
   return hf
 }
 
-@(private)
+@(private = "file")
 create_heightfield_from_config :: proc(cfg: ^Config) -> ^Heightfield {
   return create_heightfield(
     cfg.width,
@@ -144,6 +147,7 @@ create_heightfield_from_config :: proc(cfg: ^Config) -> ^Heightfield {
   )
 }
 
+// create_compact_heightfield builds a compact heightfield of walkable spans from hf, or nil on failure.
 create_compact_heightfield :: proc(
   walkable_height, walkable_climb: i32,
   hf: ^Heightfield,
