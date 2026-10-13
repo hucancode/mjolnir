@@ -96,8 +96,7 @@ update :: proc(app: ^App, dt: f32) {
   }
   for sprite, mode in sprites do render.set_sprite_frame(&app.renderer, sprite, frames[mode])
   world.update(&app.scene)
-  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
+  render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
 }
 

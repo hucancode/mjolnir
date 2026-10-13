@@ -140,8 +140,7 @@ update :: proc(app: ^App, dt: f32) {
     render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
   }
   world.update(&app.scene)
-  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
+  render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
 }
 

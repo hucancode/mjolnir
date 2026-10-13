@@ -471,12 +471,18 @@ slot_node :: proc(self: ^Renderer, slot: u32) -> ^NodeData {
 }
 
 // Set the world transform and effective visibility of every slot in
-// `changes`: any struct with `index` (the slot), `world_matrix` and `visible`
-// fields, such as world.NodeChange.
+// `changes`, and forget (see stage_slot_removal) the slots marked removed: any
+// struct with `index` (the slot), `world_matrix`, `visible` and `removed`
+// fields, such as world.NodeChange. Removals come first in the feed, so a slot
+// freed and reused in one tick ends up drawn by its new owner.
 stage_transforms :: proc(self: ^Renderer, changes: []$T) {
   sync.recursive_mutex_lock(&self.mutex)
   defer sync.recursive_mutex_unlock(&self.mutex)
   for &c in changes {
+    if c.removed {
+      stage_slot_removal(self, c.index)
+      continue
+    }
     node := slot_node(self, c.index)
     node.world_matrix = c.world_matrix
     if c.visible do node.flags += {.VISIBLE}

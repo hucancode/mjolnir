@@ -56,8 +56,7 @@ update :: proc(app: ^App, dt: f32) {
   rot := dt * math.PI * 0.5
   for h in app.gltf.roots do world.rotate_by(&app.scene, h, rot)
   world.update(&app.scene)
-  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
+  render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
 }
 

@@ -107,8 +107,7 @@ update :: proc(app: ^App, dt: f32) {
   // bypass_depth = renders over the real cube.
   render.debug_axes(&app.renderer, {-6, 0, 0}, scale = 1.5, bypass_depth = true)
   world.update(&app.scene)
-  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
+  render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
 }
 

@@ -202,14 +202,14 @@ test_despawn_reports_removed_node :: proc(t: ^testing.T) {
   testing.expectf(t, ok, "failed to spawn node")
   update(&w)
   changed := false
-  for n in changed_nodes(&w) do changed |= n.index == node_handle.index
+  for n in changes(&w) do changed |= n.index == node_handle.index && !n.removed
   testing.expectf(t, changed, "spawned node should be in the change feed")
   testing.expectf(t, despawn(&w, node_handle), "despawn should succeed")
   testing.expectf(t, node(&w, node_handle) == nil, "node should be freed immediately")
   update(&w)
   removed := false
-  for i in removed_nodes(&w) do removed |= i == node_handle.index
+  for n in changes(&w) do removed |= n.index == node_handle.index && n.removed
   testing.expectf(t, removed, "despawned node should be in the removal feed")
   update(&w)
-  testing.expectf(t, len(removed_nodes(&w)) == 0, "removal reported once")
+  testing.expectf(t, len(changes(&w)) == 0, "removal reported once")
 }

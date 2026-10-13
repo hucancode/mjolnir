@@ -126,8 +126,7 @@ update :: proc(app: ^App, dt: f32) {
   warrior_time += dt
   render.set_sprite_frame(&app.renderer, warrior_sprite, u32(warrior_time * 24) % 99)
   world.update(&app.scene)
-  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
+  render.stage_transforms(&app.renderer, world.changes(&app.scene))
   for &c in characters {
     for s, i in c.scene.skinned do render.stage_bones(&app.renderer, s.node.index, c.animators[i].palette)
   }

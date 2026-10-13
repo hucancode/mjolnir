@@ -24,17 +24,13 @@ TraverseEntry :: struct {
   parent_is_visible: bool,
 }
 
-// A node whose world transform or effective visibility changed.
+// A node whose world transform or effective visibility changed, or that was
+// despawned (`removed`; the other fields are then zero).
 NodeChange :: struct {
   index:        u32,
   world_matrix: matrix[4, 4]f32,
   visible:      bool, // own visibility and every ancestor's
-}
-
-// ChangeFeed is what the last `update` changed; the next update replaces it.
-ChangeFeed :: struct {
-  changed: [dynamic]NodeChange,
-  removed: [dynamic]u32,
+  removed:      bool,
 }
 
 // World is the scene graph. Set up with init, free with shutdown.
@@ -42,7 +38,8 @@ World :: struct {
   root:             NodeHandle,
   nodes:           cont.Pool(Node),
   traversal_stack: [dynamic]TraverseEntry,
-  feed:            ChangeFeed,
+  // what the last `update` changed, removals first; the next update replaces it
+  feed:            [dynamic]NodeChange,
   // removals made between updates; published by update
   pending_removed: [dynamic]u32,
 }
@@ -165,23 +162,18 @@ init :: proc(world: ^World) -> bool {
 
 // update advances one tick: recomputes world transforms and fills the change feed.
 update :: proc(world: ^World) {
-  clear(&world.feed.changed)
-  clear(&world.feed.removed)
-  append(&world.feed.removed, ..world.pending_removed[:])
+  clear(&world.feed)
+  for index in world.pending_removed do append(&world.feed, NodeChange{index = index, removed = true})
   clear(&world.pending_removed)
   cont.tick(&world.nodes, nil, node_retire)
   traverse(world)
 }
 
-// changed_nodes lists nodes whose world transform or visibility changed in the
-// last update. Node indices are stable for a node's lifetime: safe as external slot ids.
-changed_nodes :: proc(world: ^World) -> []NodeChange {
-  return world.feed.changed[:]
-}
-
-// removed_nodes lists indices of nodes despawned since the previous update.
-removed_nodes :: proc(world: ^World) -> []u32 {
-  return world.feed.removed[:]
+// changes lists what the last update changed: nodes despawned since the update
+// before (`removed`, first), then nodes whose world transform or visibility changed.
+// Node indices are stable for a node's lifetime: safe as external slot ids.
+changes :: proc(world: ^World) -> []NodeChange {
+  return world.feed[:]
 }
 
 // shutdown frees everything `world` owns.
@@ -189,13 +181,13 @@ shutdown :: proc(world: ^World) {
   cont.flush(&world.nodes, nil, node_retire)
   cont.destroy(&world.nodes, node_destroy)
   delete(world.traversal_stack)
-  delete(world.feed.changed)
-  delete(world.feed.removed)
+  delete(world.feed)
   delete(world.pending_removed)
 }
 
 // teardown despawns every node under root. Slots are reclaimed immediately and
-// removals are not reported: index-keyed consumers must reset their own slots.
+// removals are not reported: index-keyed consumers (render.teardown) must reset
+// their own slots, before the next level spawns into the freed ones.
 teardown :: proc(world: ^World) {
   root := cont.get(world.nodes, world.root)
   if root == nil do return
@@ -209,11 +201,10 @@ teardown :: proc(world: ^World) {
   }
   cont.flush(&world.nodes, nil, node_retire)
   clear(&world.pending_removed)
-  clear(&world.feed.changed)
-  clear(&world.feed.removed)
+  clear(&world.feed)
 }
 
-// despawn removes a node and its descendants; removed_nodes reports them after the next update.
+// despawn removes a node and its descendants; changes reports them after the next update.
 despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
   node := cont.get(world.nodes, handle) or_return
   detach(world.nodes, handle)
@@ -263,7 +254,7 @@ traverse :: proc(world: ^World) {
     }
     if visibility_changed || is_dirty || entry.parent_is_dirty {
       append(
-        &world.feed.changed,
+        &world.feed,
         NodeChange {
           index = entry.handle.index,
           world_matrix = current_node.transform.world_matrix,

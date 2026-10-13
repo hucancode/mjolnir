@@ -171,8 +171,7 @@ update :: proc(app: ^App, dt: f32) {
     render.debug_sphere(&app.renderer, target^, 0.2, red)
   }
   world.update(&app.scene)
-  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
+  render.stage_transforms(&app.renderer, world.changes(&app.scene))
   if rig != nil do render.stage_bones(&app.renderer, spider_mesh_node.index, animator.palette)
   render.update(&app.renderer, dt)
 }

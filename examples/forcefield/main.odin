@@ -150,8 +150,7 @@ update :: proc(app: ^App, dt: f32) {
   draw_ff_marker(app, &repel)
   draw_ff_marker(app, &attract)
   world.update(&app.scene)
-  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
-  render.stage_transforms(&app.renderer, world.changed_nodes(&app.scene))
+  render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
 }
 
