@@ -4,6 +4,7 @@ import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
+import "../../mjolnir/render/gpu"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -92,7 +93,10 @@ frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   ok := render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
   if mat, found := render.material(&app.renderer, rtt_material_handle); found {
-    mat.albedo_index = render.camera_attachment(&app.renderer, rtt_camera_handle, .FINAL_IMAGE)
+    // the image the frame just submitted rendered: the next frame samples it
+    // while it draws into the other one
+    just_rendered := u32((app.renderer.gctx.frame_serial + gpu.FRAMES_IN_FLIGHT - 1) % gpu.FRAMES_IN_FLIGHT)
+    mat.albedo_index = render.camera_attachment(&app.renderer, rtt_camera_handle, .FINAL_IMAGE, just_rendered)
   }
   return ok
 }

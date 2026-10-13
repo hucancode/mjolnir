@@ -61,6 +61,8 @@ record_camera_passes :: proc(self: ^Renderer, frame_index: u32) {
   if len(discards) == 0 do return
   // The draw lists written by culling become indirect arguments.
   indirect_barrier(cmd)
+  // Last frame's lit images, which a material may sample (render to texture).
+  gpu.memory_barrier(cmd, {.COLOR_ATTACHMENT_WRITE}, {.SHADER_READ}, {.COLOR_ATTACHMENT_OUTPUT}, {.FRAGMENT_SHADER})
   gpu.image_discard_barrier(cmd, ..discards[:])
   c = 0
   for i in cont.slots_next(&self.camera_slots, &c) do material_pass_record(self, frame_index, i, &self.cameras[i], .GBUFFER)
