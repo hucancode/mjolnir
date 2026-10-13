@@ -170,3 +170,42 @@ ul.cols { columns: 16rem; list-style: none; padding: 0; }
   .features article { grid-template-columns: 1fr; }
   .features article.flip .text { order: 0; }
 }
+
+/* home showcase: one sticky canvas, text steps scroll over it */
+body { overflow-x: clip; }
+.showcase { width: 100vw; margin-left: calc(50% - 50vw); }
+.stage {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  pointer-events: none;
+}
+/* pull the steps up over the stage; a negative margin on the stage itself would let it stick past the wrapper's end */
+.stage + .step { margin-top: -100vh; }
+.canvas-box { position: absolute; top: 0; bottom: 0; }
+.canvas-box canvas { display: block; width: 100%; height: 100%; }
+.step { position: relative; z-index: 1; padding-top: 30vh; }
+.step > * { max-width: 26rem; margin-left: max(1.5rem, calc(50vw - 36rem + 1.5rem)); }
+.pbr-flags {
+  position: absolute;
+  left: max(1.5rem, calc(50vw - 36rem + 1.5rem));
+  bottom: 12vh;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.pbr-flags.on { opacity: 1; }
+.pbr-flags li { color: var(--color-neutral); opacity: 0.5; transition: opacity 0.3s; }
+.pbr-flags li::before { content: '○ '; }
+.pbr-flags li.active { opacity: 1; color: var(--color-base-content); font-weight: 600; }
+.pbr-flags li.active::before { content: '● '; }
+.features .art video { width: 100%; height: 100%; object-fit: cover; }
+.features .art { padding: 0; }
+@media (max-width: 40rem) {
+  .step { padding-top: 12vh; }
+  .step > *, .pbr-flags { margin-left: 1.5rem; left: 1.5rem; }
+}
+/* leave room for the showcase canvas to scroll away before the first feature */
+.showcase + .features { margin-top: 20vh; }
