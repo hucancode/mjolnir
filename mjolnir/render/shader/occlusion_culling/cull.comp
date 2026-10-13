@@ -1,5 +1,6 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_samplerless_texture_functions : require
 
 // Culls every node against a range of views in one dispatch: x covers nodes,
 // y the views from params.first_view. A visible node is appended to list
@@ -8,7 +9,6 @@
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-const uint SAMPLER_MAX_REDUCE = 5u;
 
 const uint INVALID_ID = 0xFFFFFFFFu;
 
@@ -158,6 +158,17 @@ bool project_sphere(vec3 center, float radius, mat4 proj, float near, float far,
 }
 
 // return true if the sphere is visible, false if occluded
+// Farthest depth of the 2x2 texels of mip `level` around uv, like a bilinear
+// fetch reduced with MAX.
+float max_depth(uint pyramid, vec2 uv, int level) {
+    ivec2 size = textureSize(textures[pyramid], level);
+    ivec2 i0 = ivec2(floor(uv * vec2(size) - 0.5));
+    ivec2 lo = clamp(i0, ivec2(0), size - 1);
+    ivec2 hi = clamp(i0 + 1, ivec2(0), size - 1);
+    return max(max(texelFetch(textures[pyramid], lo, level).r, texelFetch(textures[pyramid], ivec2(hi.x, lo.y), level).r),
+               max(texelFetch(textures[pyramid], ivec2(lo.x, hi.y), level).r, texelFetch(textures[pyramid], hi, level).r));
+}
+
 bool occlusion_test(vec3 center, float radius, View view) {
     vec4 view_center4 = view.view * vec4(center, 1.0);
     vec3 view_center = view_center4.xyz;
@@ -167,14 +178,14 @@ bool occlusion_test(vec3 center, float radius, View view) {
         return true;
     }
 
-    vec2 pyramid_size = vec2(textureSize(sampler2D(textures[view.pyramid], samplers[SAMPLER_MAX_REDUCE]), 0));
+    vec2 pyramid_size = vec2(textureSize(textures[view.pyramid], 0));
     float width = (aabb.z - aabb.x) * pyramid_size.x;
     float height = (aabb.w - aabb.y) * pyramid_size.y;
     float level = ceil(log2(max(width, height)));
-    level = max(0.0, level);
+    level = clamp(level, 0.0, float(textureQueryLevels(textures[view.pyramid]) - 1));
 
     vec2 sample_uv = (aabb.xy + aabb.zw) * 0.5;
-    float occluder_depth = textureLod(sampler2D(textures[view.pyramid], samplers[SAMPLER_MAX_REDUCE]), sample_uv, level).r;
+    float occluder_depth = max_depth(view.pyramid, sample_uv, int(level));
 
     float object_near_z = view_center.z + radius;
     vec4 clip_pos = view.projection * vec4(0, 0, object_near_z, 1.0);

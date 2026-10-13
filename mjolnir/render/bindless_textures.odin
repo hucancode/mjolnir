@@ -43,8 +43,6 @@ SamplerType :: enum u32 {
   LINEAR_REPEAT  = 3,
   // bilinear depth comparison (2x2 PCF) for shadow maps
   SHADOW_COMPARE = 4,
-  // bilinear footprint reduced with MAX, for depth pyramids
-  MAX_REDUCE     = 5,
 }
 
 @(private = "file")
@@ -52,15 +50,13 @@ SAMPLERS := [SamplerType]struct {
   filter:    vk.Filter,
   address:   vk.SamplerAddressMode,
   mipmap:    vk.SamplerMipmapMode,
-  reduction: vk.SamplerReductionMode,
   compare:   bool,
 } {
-  .NEAREST_CLAMP  = {.NEAREST, .CLAMP_TO_EDGE, .LINEAR, .WEIGHTED_AVERAGE, false},
-  .LINEAR_CLAMP   = {.LINEAR, .CLAMP_TO_EDGE, .LINEAR, .WEIGHTED_AVERAGE, false},
-  .NEAREST_REPEAT = {.NEAREST, .REPEAT, .LINEAR, .WEIGHTED_AVERAGE, false},
-  .LINEAR_REPEAT  = {.LINEAR, .REPEAT, .LINEAR, .WEIGHTED_AVERAGE, false},
-  .SHADOW_COMPARE = {.LINEAR, .CLAMP_TO_EDGE, .LINEAR, .WEIGHTED_AVERAGE, true},
-  .MAX_REDUCE     = {.LINEAR, .CLAMP_TO_EDGE, .NEAREST, .MAX, false},
+  .NEAREST_CLAMP  = {.NEAREST, .CLAMP_TO_EDGE, .LINEAR, false},
+  .LINEAR_CLAMP   = {.LINEAR, .CLAMP_TO_EDGE, .LINEAR, false},
+  .NEAREST_REPEAT = {.NEAREST, .REPEAT, .LINEAR, false},
+  .LINEAR_REPEAT  = {.LINEAR, .REPEAT, .LINEAR, false},
+  .SHADOW_COMPARE = {.LINEAR, .CLAMP_TO_EDGE, .LINEAR, true},
 }
 
 // After the scene buffers, before pipeline layouts are built.
@@ -71,13 +67,8 @@ bindless_init :: proc(r: ^Renderer) -> vk.Result {
   d.bindless_layout = gpu.create_descriptor_layout(gctx, ..BINDLESS_BINDINGS[:]) or_return
   for &sampler, type in r.samplers {
     desc := SAMPLERS[type]
-    reduction := vk.SamplerReductionModeCreateInfo {
-      sType         = .SAMPLER_REDUCTION_MODE_CREATE_INFO,
-      reductionMode = desc.reduction,
-    }
     info := vk.SamplerCreateInfo {
       sType         = .SAMPLER_CREATE_INFO,
-      pNext         = &reduction,
       magFilter     = desc.filter,
       minFilter     = desc.filter,
       addressModeU  = desc.address,

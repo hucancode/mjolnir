@@ -1,5 +1,6 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_samplerless_texture_functions : require
 
 // Builds every mip of a max-depth pyramid in one dispatch. Mip 0 is half the
 // depth image's size; each texel holds the farthest depth of the 2x2 texels
@@ -9,8 +10,6 @@
 // [slot * MAX_MIPS, slot * MAX_MIPS + mip_count) and counter slot.
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
-
-const uint SAMPLER_MAX_REDUCE = 5u;
 
 const uint MAX_MIPS = 16u;
 const uint TILE = 32u; // mip 0 texels per tile side
@@ -37,11 +36,13 @@ layout(set = 1, binding = 4) coherent buffer Counters {
 shared float tile[TILE / 2][TILE / 2];
 shared bool is_last_group;
 
-// Farthest depth of mip 0 texel p: the 2x2 depth texels below it, one fetch
-// through the max-reduce sampler at the corner they share. Clamp-to-edge
+// Farthest depth of mip 0 texel p: the 2x2 depth texels below it. Clamping
 // repeats the last row and column of an odd-sized image.
-float mip0_value(ivec2 p, vec2 texel) {
-    return textureLod(sampler2D(textures[params.depth_index], samplers[SAMPLER_MAX_REDUCE]), vec2(p * 2 + 1) * texel, 0.0).r;
+float mip0_value(ivec2 p, ivec2 size) {
+    ivec2 lo = min(p * 2, size - 1);
+    ivec2 hi = min(p * 2 + 1, size - 1);
+    return max(max(texelFetch(textures[params.depth_index], lo, 0).r, texelFetch(textures[params.depth_index], ivec2(hi.x, lo.y), 0).r),
+               max(texelFetch(textures[params.depth_index], ivec2(lo.x, hi.y), 0).r, texelFetch(textures[params.depth_index], hi, 0).r));
 }
 
 void store(uint mip, ivec2 p, float value) {
@@ -52,16 +53,16 @@ void store(uint mip, ivec2 p, float value) {
 
 void main() {
     uint tid = gl_LocalInvocationIndex;
-    vec2 texel = 1.0 / vec2(textureSize(sampler2D(textures[params.depth_index], samplers[SAMPLER_MAX_REDUCE]), 0));
+    ivec2 size = textureSize(textures[params.depth_index], 0);
     ivec2 tile_origin = ivec2(gl_WorkGroupID.xy) * int(TILE);
 
     // Mips 0 and 1: each thread owns a 2x2 block of mip 0, one mip 1 texel.
     ivec2 local = ivec2(tid % (TILE / 2), tid / (TILE / 2));
     ivec2 p0 = tile_origin + local * 2;
-    float a = mip0_value(p0, texel);
-    float b = mip0_value(p0 + ivec2(1, 0), texel);
-    float c = mip0_value(p0 + ivec2(0, 1), texel);
-    float d = mip0_value(p0 + ivec2(1, 1), texel);
+    float a = mip0_value(p0, size);
+    float b = mip0_value(p0 + ivec2(1, 0), size);
+    float c = mip0_value(p0 + ivec2(0, 1), size);
+    float d = mip0_value(p0 + ivec2(1, 1), size);
     store(0u, p0, a);
     store(0u, p0 + ivec2(1, 0), b);
     store(0u, p0 + ivec2(0, 1), c);

@@ -286,13 +286,16 @@ material_pipelines_init :: proc(r: ^Renderer) -> vk.Result {
     types := MATERIAL_PASS_TYPES[pass]
     for type in types[0] ..< types[1] {
       shaders := MATERIAL_SHADERS[type]
+      // without fillModeNonSolid wireframe materials draw filled
+      polygon_mode := shaders.polygon_mode
+      if polygon_mode == .LINE && !r.gctx.fill_mode_non_solid do polygon_mode = .FILL
       pipeline := gpu.GraphicsPipelineDesc {
         vert = shaders.vert,
         frag = shaders.frag,
         vertex_bindings = VERTEX_BINDING_DESCRIPTION[:],
         vertex_attributes = VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
         topology = .TRIANGLE_LIST,
-        polygon_mode = shaders.polygon_mode,
+        polygon_mode = polygon_mode,
         cull_mode = shaders.cull_mode,
         layout = r.scene.layout,
       }

@@ -200,6 +200,9 @@ DrawLists :: struct {
   buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
   slot:     u32,
   capacity: u32, // draws per list
+  // without drawIndirectCount every slot is drawn, so a clear must also zero the commands
+  // (instanceCount 0 draws nothing)
+  zero_commands: bool,
 }
 
 @(private)
@@ -212,6 +215,7 @@ draw_lists_init :: proc(
 ) -> vk.Result {
   self.slot = slot
   self.capacity = capacity
+  self.zero_commands = !r.gctx.draw_indirect_count
   size := vk.DeviceSize(DRAW_LIST_HEADER * size_of(u32) + int(lists) * int(capacity) * DRAW_COMMAND_SIZE)
   for &buffer, frame in self.buffers {
     buffer = gpu.buffer_create(&r.gctx, size, {.STORAGE_BUFFER, .INDIRECT_BUFFER}, host_visible = false) or_return
@@ -236,17 +240,23 @@ draw_lists_destroy :: proc(self: ^DrawLists, gctx: ^gpu.GPUContext) {
 // Order earlier indirect reads before it and the cull after it.
 @(private)
 draw_lists_clear :: proc(self: ^DrawLists, cmd: vk.CommandBuffer, frame_index: u32) {
-  vk.CmdFillBuffer(cmd, self.buffers[frame_index].buffer, 0, DRAW_LIST_HEADER * size_of(u32), 0)
+  size := vk.DeviceSize(vk.WHOLE_SIZE) if self.zero_commands else DRAW_LIST_HEADER * size_of(u32)
+  vk.CmdFillBuffer(cmd, self.buffers[frame_index].buffer, 0, size, 0)
 }
 
 // Call inside a render scope.
 @(private)
 draw_lists_draw :: proc(self: ^DrawLists, cmd: vk.CommandBuffer, frame_index: u32, list: u32) {
   buffer := self.buffers[frame_index].buffer
+  offset := vk.DeviceSize(DRAW_LIST_HEADER * size_of(u32) + int(list) * int(self.capacity) * DRAW_COMMAND_SIZE)
+  if self.zero_commands {
+    vk.CmdDrawIndexedIndirect(cmd, buffer, offset, self.capacity, DRAW_COMMAND_SIZE)
+    return
+  }
   vk.CmdDrawIndexedIndirectCount(
     cmd,
     buffer,
-    vk.DeviceSize(DRAW_LIST_HEADER * size_of(u32) + int(list) * int(self.capacity) * DRAW_COMMAND_SIZE),
+    offset,
     buffer,
     vk.DeviceSize(list * size_of(u32)),
     self.capacity,
