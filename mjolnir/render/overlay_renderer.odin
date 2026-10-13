@@ -95,8 +95,6 @@ OverlayRenderer :: struct {
   atlas_dirty:     bool,
   debug_ctx:       mu.Context,
   debug_open:      bool, // mu.begin ran this frame; frame closes it
-  // Mouse buttons pressed over the debug UI, owned by it through release.
-  debug_buttons:   bit_set[0 ..< 32],
   debug_atlas:     TextureHandle, // microui's builtin atlas
   dpi_scale:       f32,
 }

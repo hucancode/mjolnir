@@ -42,6 +42,8 @@ App :: struct {
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
+  // orbit controller state, owned by the app
+  yaw, pitch, dist: f32,
 }
 
 main :: proc() {
@@ -67,6 +69,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 4, -4}, {0, 1, 0})
+  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   ground := world.spawn(&app.scene, {0, GROUND_Y, 0})
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
@@ -90,15 +93,15 @@ setup :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.debug_ui_input(&app.renderer, &app.input)
-  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-    yaw, pitch, dist := render.camera_orbit_state(cam)
+  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
-      yaw += app.input.mouse_delta.x * 0.02
-      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+      app.yaw += app.input.mouse_delta.x * 0.02
+      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
     }
-    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
+  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
   if animate_enabled {
     animation_time += dt
     y := f32(drive_amplitude) * math.sin(animation_time * f32(drive_frequency) * 2 * math.PI)

@@ -15,6 +15,8 @@ App :: struct {
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
+  // orbit controller state, owned by the app
+  yaw, pitch, dist: f32,
 }
 
 cube_handle: world.NodeHandle
@@ -57,6 +59,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 8, 12}, {0, 0.5, 0})
+  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   light_handle = world.spawn(&app.scene, {4, 8, 4})
   render.attach(&app.renderer, light_handle.index, render.directional_light_attachment({1, 0.97, 0.92, f32(light_intensity)}, 15.0, true))
@@ -106,15 +109,15 @@ read_input :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.debug_ui_input(&app.renderer, &app.input)
-  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-    yaw, pitch, dist := render.camera_orbit_state(cam)
+  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
-      yaw += app.input.mouse_delta.x * 0.02
-      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+      app.yaw += app.input.mouse_delta.x * 0.02
+      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
     }
-    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
+  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
   read_input(app)
   move := [3]f32{0, 0, 0}
   if !app.input.keyboard_captured {

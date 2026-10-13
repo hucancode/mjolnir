@@ -22,6 +22,8 @@ App :: struct {
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
+  // orbit controller state, owned by the app
+  yaw, pitch, dist: f32,
 }
 
 sprites: [Mode]render.MaterialHandle
@@ -47,6 +49,7 @@ main :: proc() {
 
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 1.5, 6}, {0, 1.5, 0})
+  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
@@ -81,10 +84,8 @@ should_close :: proc(app: ^App) -> bool {
 // Pick each sprite's sheet cell from elapsed time.
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-    yaw, pitch, dist := render.camera_orbit_state(cam)
-    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
-  }
+  if !app.input.mouse_captured do app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
   elapsed += dt
   step := u32(elapsed * FPS)
   cycle := u32(2 * (FRAME_COUNT - 1))

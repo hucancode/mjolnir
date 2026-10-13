@@ -15,6 +15,8 @@ App :: struct {
   renderer: render.Renderer,
   input:    input.State,
   time:     f32,
+  // orbit controller state, owned by the app
+  yaw, pitch, dist: f32,
 }
 
 main :: proc() {
@@ -41,6 +43,7 @@ handles: [9]world.NodeHandle
 
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 4, 9}, {0, 0, 0})
+  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   app.renderer.ambient.skybox_intensity = 0
 
   cube := app.renderer.builtin_meshes[.CUBE]
@@ -61,14 +64,14 @@ setup :: proc(app: ^App) {
 update :: proc(app: ^App, dt: f32) {
   app.time += dt
   platform.read_input(&app.window, &app.input)
-  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-    yaw, pitch, dist := render.camera_orbit_state(cam)
+  if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
-      yaw += app.input.mouse_delta.x * 0.02
-      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+      app.yaw += app.input.mouse_delta.x * 0.02
+      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
     }
-    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
+  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
   t := app.time
   axis := linalg.normalize([3]f32{1, 1, 0.4})
   for h, i in handles {

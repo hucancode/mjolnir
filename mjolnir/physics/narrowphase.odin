@@ -14,20 +14,24 @@ MAX_MANIFOLD_POINTS :: 4
 
 // Warmstart pair keys include handle generations so a recycled slot never
 // inherits the previous occupant's impulses.
+@(private)
 collision_pair_hash :: proc "contextless" (body_a, body_b: BodyHandle) -> u64 {
   ha := u64(body_a.index) | (u64(body_a.generation) << 32)
   hb := u64(body_b.index) | (u64(body_b.generation) << 32)
   return ha * 0x9E3779B97F4A7C15 ~ (hb + 0x517CC1B727220A95)
 }
 
+@(private)
 mix_friction :: #force_inline proc "contextless" (a, b: f32) -> f32 {
   return math.sqrt(a * b)
 }
 
+@(private)
 mix_restitution :: #force_inline proc "contextless" (a, b: f32) -> f32 {
   return max(a, b)
 }
 
+@(private)
 ContactWarmstart :: struct {
   count:           int,
   feature_ids:     [MAX_MANIFOLD_POINTS]u32,
@@ -36,6 +40,7 @@ ContactWarmstart :: struct {
   twist:           f32,
 }
 
+@(private)
 contact_has_impulse :: #force_inline proc(c: ^Contact) -> bool {
   if c.tangent_impulse != {0, 0} || c.twist_impulse != 0 do return true
   for i in 0 ..< c.count {
@@ -44,6 +49,7 @@ contact_has_impulse :: #force_inline proc(c: ^Contact) -> bool {
   return false
 }
 
+@(private)
 contact_store_warmstart :: proc(c: ^Contact) -> (w: ContactWarmstart) {
   w.count = c.count
   for i in 0 ..< c.count {
@@ -55,6 +61,7 @@ contact_store_warmstart :: proc(c: ^Contact) -> (w: ContactWarmstart) {
   return
 }
 
+@(private)
 contact_apply_warmstart :: proc(c: ^Contact, w: ^ContactWarmstart) {
   for i in 0 ..< c.count {
     for j in 0 ..< w.count {
@@ -68,6 +75,7 @@ contact_apply_warmstart :: proc(c: ^Contact, w: ^ContactWarmstart) {
   c.twist_impulse = w.twist
 }
 
+@(private)
 bounding_spheres_intersect :: proc "contextless" (
   pos_a: [3]f32,
   radius_a: f32,
@@ -78,6 +86,7 @@ bounding_spheres_intersect :: proc "contextless" (
   return linalg.length2(pos_b - pos_a) <= radius_sum * radius_sum
 }
 
+@(private)
 test_sphere_sphere :: proc(
   pos_a: [3]f32,
   sphere_a: SphereCollider,
@@ -103,6 +112,7 @@ test_sphere_sphere :: proc(
 
 // Point is the closest point on the box; normal points box → sphere. A
 // center inside the box gets the Y axis.
+@(private)
 test_box_sphere :: proc(
   pos_box: [3]f32,
   rot_box: quaternion128,
@@ -128,6 +138,7 @@ test_box_sphere :: proc(
 
 // Normal points sphere → cylinder, taken from the cylinder surface (stable
 // under deep penetration).
+@(private)
 test_sphere_cylinder :: proc(
   pos_sphere: [3]f32,
   sphere: SphereCollider,
@@ -191,6 +202,7 @@ test_sphere_cylinder :: proc(
 // Box vs cylinder axis segment: samples the segment for the point nearest the
 // box, refines once, then tests that distance against the radius. Point is on
 // the box; normal points box → cylinder.
+@(private)
 test_box_cylinder :: proc(
   pos_box: [3]f32,
   rot_box: quaternion128,
@@ -235,6 +247,7 @@ test_box_cylinder :: proc(
 
 // Non-parallel cylinders, approximated as capsules: closest points between
 // the two axis segments against the radius sum.
+@(private)
 test_cylinder_cylinder :: proc(
   pos_a: [3]f32,
   rot_a: quaternion128,
@@ -295,12 +308,14 @@ test_cylinder_cylinder :: proc(
   return
 }
 
+@(private)
 ManifoldPoint :: struct {
   point:       [3]f32,
   penetration: f32,
   feature_id:  u32,
 }
 
+@(private)
 Manifold :: struct {
   normal: [3]f32, // from A to B
   count:  int,
@@ -315,6 +330,7 @@ FEATURE_SINGLE :: u32(0xF0000000)
 // Wraps a single-point test result. Sphere tests run with the radius
 // inflated by `margin`; deflating the penetration back makes separated-but-
 // within-margin contacts come out negative (speculative).
+@(private)
 point_manifold :: #force_inline proc(
   point: [3]f32,
   normal: [3]f32,
@@ -527,6 +543,7 @@ collide_boxes_aligned :: proc(
   return
 }
 
+@(private)
 collide_boxes :: proc(
   pos_a: [3]f32,
   rot_a: quaternion128,
@@ -735,6 +752,7 @@ cylinder_cap_manifold :: proc(
   m.count = count
 }
 
+@(private)
 collide_box_cylinder :: proc(
   pos_box: [3]f32,
   rot_box: quaternion128,
@@ -751,6 +769,7 @@ collide_box_cylinder :: proc(
   return m, true
 }
 
+@(private)
 collide_cylinders :: proc(
   pos_a: [3]f32,
   rot_a: quaternion128,
@@ -832,6 +851,7 @@ collide_cylinders :: proc(
 // still up to `margin` apart (penetration goes negative). The solver treats
 // separated points as speculative (velocity clamp only, no push). Mirrored
 // pairs reuse the B-vs-A routine and flip the normal.
+@(private)
 collide :: proc(
   collider_a: ^Collider,
   pos_a: [3]f32,
@@ -880,6 +900,7 @@ collide :: proc(
   return
 }
 
+@(private)
 collide_bodies :: #force_inline proc(body_a, body_b: ^Body, margin: f32 = 0) -> (Manifold, bool) {
   return collide(
     &body_a.collider,
@@ -892,6 +913,7 @@ collide_bodies :: #force_inline proc(body_a, body_b: ^Body, margin: f32 = 0) -> 
   )
 }
 
+@(private)
 narrowphase_pair :: proc(world: ^World, handle_a, handle_b: BodyHandle, out: ^[dynamic]Contact) {
   handle_a, handle_b := handle_a, handle_b
   body_a := get_body(world, handle_a) or_else nil
@@ -948,6 +970,7 @@ CollisionContext :: struct {
 // BVH tree-vs-tree traversal finds candidate pairs in O(N + K); narrowphase
 // splits them across tasks, each appending to its own contact list, which
 // are concatenated in task order.
+@(private)
 collision_detection :: proc(world: ^World) {
   dynamic_pairs := make([dynamic]geometry.BVHOverlapPair(BroadPhaseEntry), context.temp_allocator)
   static_pairs := make([dynamic]geometry.BVHCrossPair(BroadPhaseEntry, BroadPhaseEntry), context.temp_allocator)

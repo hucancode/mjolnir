@@ -44,6 +44,8 @@ App :: struct {
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
+  // orbit controller state, owned by the app
+  yaw, pitch, dist: f32,
 }
 
 main :: proc() {
@@ -61,6 +63,8 @@ main :: proc() {
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
 
   render.main_camera_look_at(&app.renderer, {0, 0.2, 3.5}, {0, 0, 0})
+
+  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   dir_light = world.spawn(&app.scene, {4, 6, 4})
   render.attach(&app.renderer, dir_light.index, render.directional_light_attachment({1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false))
   swap_model(app, 0)
@@ -84,15 +88,15 @@ swap_model :: proc(app: ^App, index: int) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.debug_ui_input(&app.renderer, &app.input)
-  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-    yaw, pitch, dist := render.camera_orbit_state(cam)
+  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
-      yaw += app.input.mouse_delta.x * 0.02
-      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+      app.yaw += app.input.mouse_delta.x * 0.02
+      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
     }
-    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
+  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
   if l, ok := render.attachment(&app.renderer, dir_light.index, render.Light); ok {
     l.color[3] = f32(dir_intensity)
     render.attach(&app.renderer, dir_light.index, l)

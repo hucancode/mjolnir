@@ -38,6 +38,8 @@ App :: struct {
   input:    input.State,
   phys:     b2.WorldId,
   pieces:   [dynamic]Piece,
+  // orbit controller state, owned by the app
+  yaw, pitch, dist: f32,
 }
 
 main :: proc() {
@@ -135,6 +137,7 @@ setup :: proc(app: ^App) {
   }
   log.infof("Created %d Box2D bodies", PIECE_COUNT)
   render.main_camera_look_at(&app.renderer, {30, 25, 30}, {0, 5, 0})
+  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {0, 20, 0})
   render.attach(&app.renderer, light.index, render.spot_light_attachment({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
@@ -146,10 +149,8 @@ should_close :: proc(app: ^App) -> bool {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-    yaw, pitch, dist := render.camera_orbit_state(cam)
-    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
-  }
+  if !app.input.mouse_captured do app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
   b2.World_Step(app.phys, dt, 4)
   for i := len(app.pieces) - 1; i >= 0; i -= 1 {
     p := app.pieces[i]

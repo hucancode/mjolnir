@@ -75,7 +75,7 @@ setup :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.debug_ui_input(&app.renderer, &app.input)
+  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
   phase += dt
   world.rotate(&app.scene, spinner, phase)
   yaw := f32(cam_yaw)

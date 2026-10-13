@@ -122,6 +122,25 @@ camera_orbit_state :: proc(self: ^Camera, target: [3]f32 = {0, 0, 0}) -> (yaw, p
   return
 }
 
+// camera_pose returns the camera's world position and rotation.
+camera_pose :: proc(self: ^Camera) -> (position: [3]f32, rotation: quaternion128) {
+  return self.position, self.rotation
+}
+
+// camera_forward, camera_right and camera_up are the camera's world-space axes, for
+// controllers that move it (fly, pan) without matrix math.
+camera_forward :: proc(self: ^Camera) -> [3]f32 {
+  return linalg.quaternion_mul_vector3(self.rotation, [3]f32{0, 0, -1})
+}
+
+camera_right :: proc(self: ^Camera) -> [3]f32 {
+  return linalg.quaternion_mul_vector3(self.rotation, [3]f32{1, 0, 0})
+}
+
+camera_up :: proc(self: ^Camera) -> [3]f32 {
+  return linalg.quaternion_mul_vector3(self.rotation, [3]f32{0, 1, 0})
+}
+
 // camera_lerp blends the camera toward a pose: position lerps, rotation slerps the short arc.
 // t = 1 snaps; pass 1 - exp(-speed * dt) every tick for frame-rate independent smoothing.
 camera_lerp :: proc(self: ^Camera, position: [3]f32, rotation: quaternion128, t: f32) {
@@ -323,6 +342,14 @@ destroy_targets :: proc(self: ^Renderer, camera: ^Camera) {
   for frames in camera.attachments do for handle in frames do destroy_texture(self, handle)
   camera.attachments = {}
   for &pyramid in camera.depth_pyramid do occlusion_destroy_pyramid(self, &pyramid)
+}
+
+// main_camera_orbit is camera_orbit on the main camera. The controller owns yaw, pitch and
+// distance and sets them each tick; camera_orbit_state adopts an existing pose.
+main_camera_orbit :: proc(self: ^Renderer, yaw, pitch, distance: f32, target: [3]f32 = {0, 0, 0}) {
+  cam := main_camera(self)
+  if cam == nil do return
+  camera_orbit(cam, yaw, pitch, distance, target)
 }
 
 // main_camera_look_at aims the main camera at to from from.

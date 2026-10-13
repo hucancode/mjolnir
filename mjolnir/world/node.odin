@@ -34,6 +34,15 @@ rotate :: proc {
   rotate_angle,
 }
 
+// translate_by moves a node by `v` in its parent's space, on top of its local position
+// (translate sets it, as rotate sets and rotate_by composes).
+translate_by :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
+  node := cont.get(world.nodes, handle)
+  if node == nil do return
+  node.transform.position += v
+  node.transform.is_dirty = true
+}
+
 // rotate_by composes a rotation onto a node's local rotation, from a quaternion or angle (and axis, default Y).
 rotate_by :: proc {
   rotate_by_quaternion,

@@ -5,8 +5,10 @@ import "../geometry"
 import "base:intrinsics"
 import "core:thread"
 
+@(private)
 PARALLEL_MIN_ITEMS :: 100
 
+@(private)
 pool_wait :: proc(pool: ^thread.Pool) {
   for {
     task, ok := thread.pool_pop_waiting(pool)
@@ -19,6 +21,7 @@ pool_wait :: proc(pool: ^thread.Pool) {
 }
 
 // RangeProc handles items [start, end) of chunk `task`, which indexes per-task output slots.
+@(private)
 RangeProc :: #type proc(world: ^World, ctx: rawptr, task, start, end: int)
 
 @(private = "file")
@@ -35,6 +38,7 @@ RangeTask :: struct {
 // task 0 when the work is small or the world is single-threaded. Tasks run
 // with the caller's context.allocator, which must be thread-safe; worker
 // temp allocators are never freed, so tasks must not use them.
+@(private)
 parallel_for :: proc(world: ^World, n: int, ctx: rawptr, fn: RangeProc, min_items := PARALLEL_MIN_ITEMS) {
   if n <= 0 do return
   threads := world.thread_count
@@ -68,6 +72,7 @@ bvh_refit :: proc(world: ^World) {
   geometry.bvh_refit(&world.dynamic_bvh)
 }
 
+@(private)
 fat_aabb :: #force_inline proc(body: ^Body) -> geometry.Aabb {
   return {min = body.cached_aabb.min - SPECULATIVE_DISTANCE, max = body.cached_aabb.max + SPECULATIVE_DISTANCE}
 }

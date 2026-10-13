@@ -18,6 +18,8 @@ App :: struct {
   gltf:      mjolnir.GltfScene,
   // one animator per skinned node of the scene
   animators: [dynamic]anim.Animator,
+  // orbit controller state, owned by the app
+  yaw, pitch, dist: f32,
 }
 
 main :: proc() {
@@ -43,6 +45,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {1.5, 1.5, 1.5}, {0, 1, 0})
+  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   app.gltf = mjolnir.load_gltf(&app.scene, &app.renderer, "assets/CesiumMan.glb")
   for s in app.gltf.skinned {
     rig := &app.gltf.rigs[s.rig]
@@ -57,14 +60,14 @@ setup :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-    yaw, pitch, dist := render.camera_orbit_state(cam)
+  if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
-      yaw += app.input.mouse_delta.x * 0.02
-      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+      app.yaw += app.input.mouse_delta.x * 0.02
+      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
     }
-    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
+  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
   rot := dt * math.PI * 0.05
   for h in app.gltf.roots do world.rotate_by(&app.scene, h, rot)
   for s, i in app.gltf.skinned do anim.animator_update(&app.animators[i], &app.gltf.rigs[s.rig], dt)

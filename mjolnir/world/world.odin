@@ -300,6 +300,13 @@ set_world_pose :: proc(
   node.transform.is_dirty = true
 }
 
+// set_world_poses is set_world_pose for every pose of `poses`: any struct with
+// `user` (the node's Handle), `position` and `rotation` fields, such as
+// physics.BodyPose.
+set_world_poses :: proc(world: ^World, poses: []$T) {
+  for &p in poses do set_world_pose(world, NodeHandle(p.user), p.position, p.rotation)
+}
+
 // set_local_matrix sets a node's local transform from a matrix (decomposed into TRS).
 set_local_matrix :: proc(world: ^World, handle: NodeHandle, m: matrix[4, 4]f32) {
   position, rotation, scale := geometry.decompose_matrix(m)

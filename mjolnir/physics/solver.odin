@@ -14,21 +14,30 @@ import "core:thread"
 // solve with soft bias, integrate, relax. Body A of a contact is always dynamic;
 // body B may be static or kinematic (zero inverse mass, never written).
 
+@(private)
 RESTITUTION_THRESHOLD :: 1.0 // m/s
+@(private)
 CONTACT_HERTZ :: 30.0
+@(private)
 CONTACT_DAMPING_RATIO :: 10.0
 // Stiffer against infinite-mass bodies to resist push-through.
+@(private)
 STATIC_HERTZ_SCALE :: 2.0
+@(private)
 STATIC_DAMPING_SCALE :: 0.5
+@(private)
 CONTACT_MAX_PUSH_SPEED :: 3.0 // m/s cap on penetration recovery
+@(private)
 SOLVER_PARALLEL_THRESHOLD :: 200
 
+@(private)
 Softness :: struct {
   bias_rate:     f32,
   mass_scale:    f32,
   impulse_scale: f32,
 }
 
+@(private)
 make_soft :: proc "contextless" (hertz, zeta, h: f32) -> Softness {
   if hertz <= 0 do return {0, 1, 0}
   omega := 2.0 * math.PI * hertz
@@ -52,11 +61,13 @@ make_softness :: proc "contextless" (h: f32) -> [2]Softness {
   }
 }
 
+@(private)
 SpinBarrier :: struct {
   arrive: i32,
   sense:  bool,
 }
 
+@(private)
 spin_barrier_wait :: proc "contextless" (b: ^SpinBarrier, local_sense: ^bool, expected: i32) {
   local_sense^ = !local_sense^
   cur := sync.atomic_add(&b.arrive, 1) + 1
@@ -72,6 +83,7 @@ spin_barrier_wait :: proc "contextless" (b: ^SpinBarrier, local_sense: ^bool, ex
 
 // Static/kinematic bodies are never written by the solver, so only dynamic
 // bodies take color bits.
+@(private)
 build_solver_partition :: proc(world: ^World) {
   body_count := len(world.bodies.entries)
   resize(&world.solver_color_used, body_count)
@@ -124,6 +136,7 @@ point_velocity :: #force_inline proc "contextless" (body: ^Body, r: [3]f32) -> [
   return body.velocity + linalg.cross(body.angular_velocity, r)
 }
 
+@(private)
 prepare_contact :: proc(contact: ^Contact, body_a, body_b: ^Body) {
   inv_mass_sum := body_a.inv_mass + body_b.inv_mass
   centroid: [3]f32
@@ -164,6 +177,7 @@ prepare_contact :: proc(contact: ^Contact, body_a, body_b: ^Body) {
   contact.twist_mass = kt > math.F32_EPSILON ? 1.0 / kt : 0
 }
 
+@(private)
 prepare_contacts :: proc(world: ^World) {
   parallel_for(world, len(world.contacts), nil, proc(world: ^World, _: rawptr, _, start, end: int) {
     #no_bounds_check for i in start ..< end {
@@ -187,6 +201,7 @@ apply_pair_twist :: #force_inline proc(a, b: ^Body, twist: [3]f32) {
   apply_angular_impulse(b, twist)
 }
 
+@(private)
 warmstart_contact :: proc(contact: ^Contact, body_a, body_b: ^Body) {
   for i in 0 ..< contact.count {
     p := &contact.points[i]
@@ -210,6 +225,7 @@ current_separation :: #force_inline proc(
   return p.base_separation + linalg.dot(ds, normal)
 }
 
+@(private)
 resolve_velocity :: proc(
   contact: ^Contact,
   body_a, body_b: ^Body,
@@ -266,6 +282,7 @@ resolve_velocity :: proc(
 
 // Applied separately so the soft bias never doubles as bounce, and gated on
 // max_normal_impulse so speculative points that never touched don't bounce.
+@(private)
 apply_restitution :: proc(contact: ^Contact, body_a, body_b: ^Body) {
   if contact.restitution == 0 do return
   for i in 0 ..< contact.count {
@@ -390,6 +407,7 @@ solver_worker :: proc(data: ^SolverWorkerData) {
   worker_contact_phase(data, .Restitution, soft, inv_h, &local_sense)
 }
 
+@(private)
 run_substep_loop :: proc(world: ^World, h: f32, num_substeps: int, ccd_handled: []bool) {
   num_threads := world.thread_count
   if len(world.contacts) < SOLVER_PARALLEL_THRESHOLD do num_threads = 1

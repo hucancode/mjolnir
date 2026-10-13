@@ -17,6 +17,8 @@ App :: struct {
   renderer: render.Renderer,
   input:    input.State,
   time:     f32,
+  // orbit controller state, owned by the app
+  yaw, pitch, dist: f32,
 }
 
 FFState :: struct {
@@ -79,6 +81,7 @@ spawn_field :: proc(
 
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 12, 3}, {0, 2, 0})
+  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   app.renderer.ambient.skybox_intensity = 0
 
   // Particle source at center, large position spread
@@ -133,15 +136,15 @@ draw_ff_marker :: proc(app: ^App, s: ^FFState) {
 update :: proc(app: ^App, dt: f32) {
   app.time += dt
   platform.read_input(&app.window, &app.input)
-  render.debug_ui_input(&app.renderer, &app.input)
-  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-    yaw, pitch, dist := render.camera_orbit_state(cam)
+  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
-      yaw += app.input.mouse_delta.x * 0.02
-      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+      app.yaw += app.input.mouse_delta.x * 0.02
+      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
     }
-    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
+  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
   t := app.time
   world.rotate(&app.scene, repel.parent,   t * f32(repel.spin_speed)   * repel.spin_dir,   linalg.VECTOR3F32_Y_AXIS)
   world.rotate(&app.scene, attract.parent, t * f32(attract.spin_speed) * attract.spin_dir, linalg.VECTOR3F32_Y_AXIS)

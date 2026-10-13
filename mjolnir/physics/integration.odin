@@ -8,6 +8,7 @@ import "core:math/linalg"
 // Forces are held for the whole frame (cleared in step finalize) so each
 // substep integrates them with the substep dt — the TGS scheme. Kinematic
 // bodies keep their velocity.
+@(private)
 integrate_velocities_range :: proc(world: ^World, start, end: int, h: f32) {
   pool := &world.bodies
   list := world.awake_list[:]
@@ -27,6 +28,7 @@ integrate_velocities_range :: proc(world: ^World, start, end: int, h: f32) {
 
 // Per-substep position integration. AABBs are refreshed once per frame in
 // finalize, not here — collision runs once per frame.
+@(private)
 integrate_positions_range :: proc(world: ^World, start, end: int, h: f32, ccd_handled: []bool) {
   pool := &world.bodies
   list := world.awake_list[:]

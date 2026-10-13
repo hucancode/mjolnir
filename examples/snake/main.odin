@@ -47,6 +47,8 @@ App :: struct {
   renderer: render.Renderer,
   input:    input.State,
   font:     font.Font,
+  // orbit controller state, owned by the app
+  yaw, pitch, dist: f32,
 }
 
 main :: proc() {
@@ -105,6 +107,8 @@ setup :: proc(app: ^App) {
   spawn_wall(app, {-(half + wall_t), wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
 
   render.main_camera_look_at(&app.renderer, {0, 18, 13}, {0, 0, 0})
+
+  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   spot := world.spawn(&app.scene, {0, 10, 4})
   render.attach(&app.renderer, spot.index, render.spot_light_attachment({0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true))
@@ -182,10 +186,8 @@ on_key :: proc(key: input.Key) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-    yaw, pitch, dist := render.camera_orbit_state(cam)
-    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
-  }
+  if !app.input.mouse_captured do app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
   step_game(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

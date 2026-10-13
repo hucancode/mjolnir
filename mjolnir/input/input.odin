@@ -45,6 +45,8 @@ State :: struct {
   // then game UI). Later consumers skip a captured device.
   mouse_captured:    bool,
   keyboard_captured: bool,
+  // Buttons pressed over an overlay (feed_microui), owned by it through release.
+  overlay_buttons:   ButtonSet,
 }
 
 // new_frame drains the accumulator into this tick's snapshot. Call once per tick, before

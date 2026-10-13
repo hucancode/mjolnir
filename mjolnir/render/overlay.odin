@@ -1,6 +1,5 @@
 package render
 
-import "../input"
 import "core:fmt"
 import "core:math"
 import "core:sync"
@@ -37,6 +36,13 @@ flush_ui_atlas :: proc(self: ^Renderer) -> (ret: vk.Result) {
   return
 }
 
+// debug_ctx returns the microui debug context itself, without opening a frame: the
+// target of input.feed_microui. With USE_PARALLEL_UPDATE the update thread feeds the
+// context the render thread builds.
+debug_ctx :: proc(self: ^Renderer) -> ^mu.Context {
+  return &self.ui.debug_ctx
+}
+
 // debug_ui returns the microui debug context for this frame. Build widgets on the render
 // thread before frame, which draws and closes it; frames that never call it draw no debug UI.
 debug_ui :: proc(self: ^Renderer) -> ^mu.Context {
@@ -56,69 +62,6 @@ debug_ui_close :: proc(self: ^Renderer) -> bool {
   mu.end(&r.debug_ctx)
   r.debug_open = false
   return true
-}
-
-// debug_ui_input feeds one input tick to the debug UI and captures the mouse and keyboard it
-// owns (see input.State). Call first among input consumers on the update tick.
-// With USE_PARALLEL_UPDATE the update thread feeds the context the render thread builds.
-debug_ui_input :: proc(self: ^Renderer, s: ^input.State) {
-  r := &self.ui
-  ctx := &r.debug_ctx
-  hovered := ctx.hover_root != nil
-  x, y := i32(math.round(s.cursor.x)), i32(math.round(s.cursor.y))
-  mu.input_mouse_move(ctx, x, y)
-  for b in input.MouseButton {
-    // a press over the debug UI belongs to it until the tick after release
-    if input.mouse_pressed(s, b) && hovered do r.debug_buttons += {int(b)}
-    else if !input.mouse_down(s, b) && !input.mouse_released(s, b) do r.debug_buttons -= {int(b)}
-    mb: mu.Mouse
-    #partial switch b {
-    case .LEFT:   mb = .LEFT
-    case .RIGHT:  mb = .RIGHT
-    case .MIDDLE: mb = .MIDDLE
-    case:         continue
-    }
-    if input.mouse_pressed(s, b) do mu.input_mouse_down(ctx, x, y, mb)
-    if input.mouse_released(s, b) do mu.input_mouse_up(ctx, x, y, mb)
-  }
-  if s.scroll != {} {
-    mu.input_scroll(ctx, -i32(math.round(s.scroll.x)), -i32(math.round(s.scroll.y)))
-  }
-  it := 0
-  for key, pressed in input.next_key_edge(s, &it) {
-    mk := mu_key(key) or_continue
-    if pressed do mu.input_key_down(ctx, mk)
-    else do mu.input_key_up(ctx, mk)
-  }
-  for key in input.Key {
-    if !input.key_repeated(s, key) do continue
-    if mk, ok := mu_key(key); ok do mu.input_key_down(ctx, mk)
-  }
-  if t := input.text(s); len(t) > 0 do mu.input_text(ctx, t)
-  if ctx.hover_root != nil || r.debug_buttons != {} do s.mouse_captured = true
-  if ctx.focus_id != 0 do s.keyboard_captured = true
-}
-
-// microui models only editing and modifier keys; text arrives as chars.
-@(private = "file")
-mu_key :: proc(key: input.Key) -> (mu.Key, bool) {
-  #partial switch key {
-  case .LEFT_SHIFT, .RIGHT_SHIFT:     return .SHIFT, true
-  case .LEFT_CONTROL, .RIGHT_CONTROL: return .CTRL, true
-  case .LEFT_ALT, .RIGHT_ALT:         return .ALT, true
-  case .BACKSPACE:                    return .BACKSPACE, true
-  case .DELETE:                       return .DELETE, true
-  case .ENTER:                        return .RETURN, true
-  case .LEFT:                         return .LEFT, true
-  case .RIGHT:                        return .RIGHT, true
-  case .HOME:                         return .HOME, true
-  case .END:                          return .END, true
-  case .A:                            return .A, true
-  case .X:                            return .X, true
-  case .C:                            return .C, true
-  case .V:                            return .V, true
-  }
-  return .SHIFT, false
 }
 
 @(private)

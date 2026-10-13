@@ -89,7 +89,7 @@ spawn_landmark :: proc(app: ^App, pos: [3]f32, color: render.Color) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.debug_ui_input(&app.renderer, &app.input)
+  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
   runner_phase += dt * 0.6
   follow_target = {7.0 * math.sin(runner_phase), 0.6, 4.0 * math.sin(runner_phase * 2.0)}
   world.translate(&app.scene, runner_handle, follow_target)

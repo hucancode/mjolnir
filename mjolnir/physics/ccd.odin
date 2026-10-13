@@ -7,6 +7,7 @@ import "core:math/linalg"
 
 // Sweeps return the time of impact t in [0, 1] as a fraction of the motion.
 
+@(private)
 swept_sphere_sphere :: proc(
   pos_a, pos_b: [3]f32,
   radius_a, radius_b: f32,
@@ -33,6 +34,7 @@ swept_sphere_sphere :: proc(
 // Sphere moving by `velocity` against a box (possibly rotated). The sweep
 // runs in the box's local frame, where the sphere's center sweeps like a
 // point against the box grown by the radius.
+@(private)
 swept_sphere_box :: proc(
   center: [3]f32,
   radius: f32,
@@ -48,6 +50,7 @@ swept_sphere_box :: proc(
   return sweep_point_aabb(local_origin, local_velocity, {-r, r})
 }
 
+@(private)
 swept_box_box :: proc(
   pos_a, pos_b: [3]f32,
   half_extents_a, half_extents_b: [3]f32,
@@ -84,6 +87,7 @@ swept_radius :: proc(c: ^Collider) -> f32 {
 // TOI of A moving by velocity_a against a stationary B. Exact slab tests for
 // sphere/cylinder-vs-box and aligned box-box; everything else falls back to a
 // conservative swept-sphere approximation.
+@(private)
 swept_test :: proc(
   collider_a, collider_b: ^Collider,
   pos_a, pos_b: [3]f32,
@@ -118,6 +122,7 @@ swept_test :: proc(
 // Sweeps a fast dynamic body against static geometry and parks it just
 // short of the earliest impact; narrowphase runs after CCD this frame and
 // the speculative contact stops the remaining approach.
+@(private)
 ccd_step_body :: proc(
   world: ^World,
   body_a: ^Body,
@@ -160,6 +165,7 @@ CCDContext :: struct {
   total_candidates: []int, // per task
 }
 
+@(private)
 ccd :: proc(world: ^World, dt: f32, ccd_handled: []bool) -> (bodies_tested, total_candidates: int) {
   tasks := max(1, world.thread_count)
   ctx := CCDContext {

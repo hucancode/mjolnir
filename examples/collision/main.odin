@@ -62,6 +62,8 @@ App :: struct {
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
+  // orbit controller state, owned by the app
+  yaw, pitch, dist: f32,
 }
 
 bodies: [3]Body
@@ -110,6 +112,7 @@ frame :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {16, 14, 16}, {0, 1.5, 0})
+  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-6, 14, 6})
   render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.96, 0.9, 1}, 6.0, true))
   spawn_scene(app)
@@ -236,15 +239,15 @@ drive_circle :: proc(b: ^Body) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  render.debug_ui_input(&app.renderer, &app.input)
-  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-    yaw, pitch, dist := render.camera_orbit_state(cam)
+  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
-      yaw += app.input.mouse_delta.x * 0.02
-      pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
+      app.yaw += app.input.mouse_delta.x * 0.02
+      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
     }
-    render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
+  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
   if reset_requested {
     reset_requested = false
     physics.teardown(&phys)
@@ -300,7 +303,7 @@ update :: proc(app: ^App, dt: f32) {
   draw_contacts(app, dt)
   draw_selection(app)
   if !paused do physics.step(&phys, dt)
-  for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
+  world.set_world_poses(&app.scene, physics.body_poses(&phys))
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
