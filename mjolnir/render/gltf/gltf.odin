@@ -1,14 +1,12 @@
 package gltf_render
 
 import render ".."
-import "../mesh"
 import "core:log"
 import "core:mem"
 import "core:os"
 import path "core:path/filepath"
 import "core:slice"
 import "vendor:cgltf"
-import vk "vendor:vulkan"
 
 // load_meshes creates a render mesh, material and textures for every glTF mesh a node references.
 // looks[i] draws data.meshes[i]; it is nil for meshes no node uses or that failed to upload.
@@ -54,7 +52,7 @@ load_texture :: proc(
   texture: ^cgltf.texture,
   gltf_path: string,
   cache: ^map[^cgltf.texture]render.TextureHandle,
-  format: vk.Format = .R8G8B8A8_SRGB,
+  format: render.TextureFormat = .RGBA8_SRGB,
 ) -> (
   handle: render.TextureHandle,
   ok: bool,
@@ -75,9 +73,7 @@ load_texture :: proc(
     return {}, false
   }
   defer delete(pixel_data)
-  res: vk.Result
-  handle, res = render.create_texture_from_data(r, pixel_data, format)
-  if res != .SUCCESS do return {}, false
+  handle = render.create_texture_from_data(r, pixel_data, format) or_return
   cache[texture] = handle
   log.infof("Created texture %v", handle)
   return handle, true
@@ -105,12 +101,12 @@ load_material :: proc(
   // albedo, metallic-roughness, normal, emissive; color data is sRGB
   sources := [4]struct {
     texture: ^cgltf.texture,
-    format:  vk.Format,
+    format:  render.TextureFormat,
   } {
-    {mat.pbr_metallic_roughness.base_color_texture.texture, .R8G8B8A8_SRGB},
-    {mat.pbr_metallic_roughness.metallic_roughness_texture.texture, .R8G8B8A8_UNORM},
-    {mat.normal_texture.texture, .R8G8B8A8_UNORM},
-    {mat.emissive_texture.texture, .R8G8B8A8_SRGB},
+    {mat.pbr_metallic_roughness.base_color_texture.texture, .RGBA8_SRGB},
+    {mat.pbr_metallic_roughness.metallic_roughness_texture.texture, .RGBA8_UNORM},
+    {mat.normal_texture.texture, .RGBA8_UNORM},
+    {mat.emissive_texture.texture, .RGBA8_SRGB},
   }
   tex: [4]render.TextureHandle
   for src, i in sources do if src.texture != nil {
@@ -137,16 +133,16 @@ load_material :: proc(
 }
 
 @(private = "file")
-load_geometry :: proc(gltf_mesh: ^cgltf.mesh, include_skinning: bool) -> mesh.Geometry {
-  vertices := make([dynamic]mesh.Vertex, 0, context.allocator)
+load_geometry :: proc(gltf_mesh: ^cgltf.mesh, include_skinning: bool) -> render.Geometry {
+  vertices := make([dynamic]render.Vertex, 0, context.allocator)
   indices := make([dynamic]u32, 0, context.allocator)
-  skinnings: [dynamic]mesh.SkinningData
-  if include_skinning do skinnings = make([dynamic]mesh.SkinningData, 0, context.allocator)
+  skinnings: [dynamic]render.SkinningData
+  if include_skinning do skinnings = make([dynamic]render.SkinningData, 0, context.allocator)
   for &prim in gltf_mesh.primitives {
     vertex_offset := u32(len(vertices))
     count := int(prim.attributes[0].data.count)
     resize(&vertices, len(vertices) + count)
-    prim_skinnings: []mesh.SkinningData
+    prim_skinnings: []render.SkinningData
     if include_skinning {
       resize(&skinnings, len(skinnings) + count)
       prim_skinnings = skinnings[len(skinnings) - count:]
@@ -162,14 +158,14 @@ load_geometry :: proc(gltf_mesh: ^cgltf.mesh, include_skinning: bool) -> mesh.Ge
     }
   }
   // nil skinnings without include_skinning
-  return mesh.make_geometry(vertices[:], indices[:], skinnings[:])
+  return render.make_geometry(vertices[:], indices[:], skinnings[:])
 }
 
 @(private = "file")
 load_vertex_attributes :: proc(
   primitive: ^cgltf.primitive,
-  vertices: []mesh.Vertex,
-  skinnings: []mesh.SkinningData = nil,
+  vertices: []render.Vertex,
+  skinnings: []render.SkinningData = nil,
 ) {
   // glTF vertex color is optional and multiplies base_color_factor
   for &v in vertices do v.color = {1, 1, 1, 1}
@@ -177,15 +173,15 @@ load_vertex_attributes :: proc(
     accessor := attribute.data
     #partial switch attribute.type {
     case .position:
-      read_floats(accessor, vertices, offset_of(mesh.Vertex, position), 3)
+      read_floats(accessor, vertices, offset_of(render.Vertex, position), 3)
     case .normal:
-      read_floats(accessor, vertices, offset_of(mesh.Vertex, normal), 3)
+      read_floats(accessor, vertices, offset_of(render.Vertex, normal), 3)
     case .texcoord:
-      if attribute.index == 0 do read_floats(accessor, vertices, offset_of(mesh.Vertex, uv), 2)
+      if attribute.index == 0 do read_floats(accessor, vertices, offset_of(render.Vertex, uv), 2)
     case .color:
-      if attribute.index == 0 do read_floats(accessor, vertices, offset_of(mesh.Vertex, color), 4)
+      if attribute.index == 0 do read_floats(accessor, vertices, offset_of(render.Vertex, color), 4)
     case .tangent:
-      read_floats(accessor, vertices, offset_of(mesh.Vertex, tangent), 4)
+      read_floats(accessor, vertices, offset_of(render.Vertex, tangent), 4)
     case .joints:
       if attribute.index == 0 && skinnings != nil {
         for i in 0 ..< min(int(accessor.count), len(skinnings)) {
@@ -193,7 +189,7 @@ load_vertex_attributes :: proc(
         }
       }
     case .weights:
-      if attribute.index == 0 do read_floats(accessor, skinnings, offset_of(mesh.SkinningData, weights), 4)
+      if attribute.index == 0 do read_floats(accessor, skinnings, offset_of(render.SkinningData, weights), 4)
     }
   }
 }

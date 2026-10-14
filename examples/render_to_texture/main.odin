@@ -5,7 +5,6 @@ import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
-import "../../mjolnir/render/gpu"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -32,7 +31,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 800, 600, "Render To Texture") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "Render To Texture", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "Render To Texture", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -98,7 +97,7 @@ frame :: proc(app: ^App) -> bool {
   if mat, found := render.material(&app.renderer, rtt_material_handle); found {
     // the image the frame just submitted rendered: the next frame samples it
     // while it draws into the other one
-    just_rendered := u32((app.renderer.gctx.frame_serial + gpu.FRAMES_IN_FLIGHT - 1) % gpu.FRAMES_IN_FLIGHT)
+    just_rendered := u32((render.frame_serial(&app.renderer) + render.FRAMES_IN_FLIGHT - 1) % render.FRAMES_IN_FLIGHT)
     mat.albedo_index = render.camera_attachment(&app.renderer, rtt_camera_handle, .FINAL_IMAGE, just_rendered)
   }
   return ok

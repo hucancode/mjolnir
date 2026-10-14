@@ -5,7 +5,6 @@ import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
-import "../../mjolnir/render/mesh"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
@@ -38,7 +37,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 1000, 700, "OBJ Loader") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "OBJ Loader", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "OBJ Loader", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -58,9 +57,9 @@ main :: proc() {
       log.errorf("failed to load %s", files[i])
       continue
     }
-    geom := mesh.from_triangles(obj.positions, obj.indices)
+    geom := render.from_triangles(obj.positions, obj.indices)
     obj_mesh_destroy(&obj)
-    aabb := mesh.aabb_from_vertices(geom.vertices)
+    aabb := render.aabb_from_vertices(geom.vertices)
     log.infof("%s: %d verts, %d tris, aabb %v..%v", files[i], len(geom.vertices), len(geom.indices) / 3, aabb.min, aabb.max)
     loaded_aabb[i] = {aabb.min, aabb.max}
     loaded_meshes[i] = render.create_mesh(&app.renderer, geom)

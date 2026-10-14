@@ -36,7 +36,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 800, 600, "Sprite") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "Sprite", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "Sprite", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -55,8 +55,8 @@ setup :: proc(app: ^App) {
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 6.0)
 
-  tex, tex_ret := render.create_texture_from_path(&app.renderer, "assets/Warrior_Sheet-Effect.png")
-  if tex_ret != .SUCCESS {
+  tex, tex_ok := render.create_texture_from_path(&app.renderer, "assets/Warrior_Sheet-Effect.png")
+  if !tex_ok {
     log.error("failed to load warrior sheet")
     return
   }

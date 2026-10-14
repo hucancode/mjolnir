@@ -4,7 +4,6 @@ package main
 import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
-import "../../mjolnir/render/mesh"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:log"
@@ -39,7 +38,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 1000, 700, "Procedural Mesh") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "Procedural Mesh", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "Procedural Mesh", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -81,8 +80,8 @@ setup :: proc(app: ^App) {
   spiral_node = spawn_mesh(app, render.create_mesh(&app.renderer, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0})
 }
 
-build_wave :: proc(n: int, size: f32, amp: f32) -> mesh.Geometry {
-  vertices := make([]mesh.Vertex, n * n)
+build_wave :: proc(n: int, size: f32, amp: f32) -> render.Geometry {
+  vertices := make([]render.Vertex, n * n)
   indices := make([]u32, (n - 1) * (n - 1) * 6)
   step := size / f32(n - 1)
   for j in 0 ..< n do for i in 0 ..< n {
@@ -91,7 +90,7 @@ build_wave :: proc(n: int, size: f32, amp: f32) -> mesh.Geometry {
     y := math.sin(x * 0.9) * math.cos(z * 0.9) * amp
     dy_dx := 0.9 * math.cos(x * 0.9) * math.cos(z * 0.9) * amp
     dy_dz := -0.9 * math.sin(x * 0.9) * math.sin(z * 0.9) * amp
-    vertices[j * n + i] = mesh.Vertex{
+    vertices[j * n + i] = render.Vertex{
       position = {x, y, z},
       normal   = linalg.normalize([3]f32{-dy_dx, 1.0, -dy_dz}),
       color    = {1, 1, 1, 1},
@@ -106,11 +105,11 @@ build_wave :: proc(n: int, size: f32, amp: f32) -> mesh.Geometry {
     indices[idx + 3] = b; indices[idx + 4] = c; indices[idx + 5] = d
     idx += 6
   }
-  return mesh.make_geometry(vertices, indices)
+  return render.make_geometry(vertices, indices)
 }
 
-build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -> mesh.Geometry {
-  vertices := make([]mesh.Vertex, segments_u * segments_v)
+build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -> render.Geometry {
+  vertices := make([]render.Vertex, segments_u * segments_v)
   indices := make([]u32, segments_u * segments_v * 6)
   for i in 0 ..< segments_u {
     u := f32(i) / f32(segments_u) * 2.0 * math.PI
@@ -125,7 +124,7 @@ build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -
       v := f32(j) / f32(segments_v) * 2.0 * math.PI
       offset := nrm * (math.cos(v) * tube) + bi * (math.sin(v) * tube)
       pos := center * radius + offset
-      vertices[i * segments_v + j] = mesh.Vertex{
+      vertices[i * segments_v + j] = render.Vertex{
         position = pos, normal = linalg.normalize(offset),
         color = {1, 1, 1, 1}, uv = {f32(i) / f32(segments_u), f32(j) / f32(segments_v)},
       }
@@ -140,11 +139,11 @@ build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -
     indices[idx + 3] = b; indices[idx + 4] = d; indices[idx + 5] = c
     idx += 6
   }
-  return mesh.make_geometry(vertices, indices)
+  return render.make_geometry(vertices, indices)
 }
 
-build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height, turns: f32) -> mesh.Geometry {
-  vertices := make([]mesh.Vertex, segments_u * segments_v)
+build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height, turns: f32) -> render.Geometry {
+  vertices := make([]render.Vertex, segments_u * segments_v)
   indices := make([]u32, (segments_u - 1) * segments_v * 6)
   for i in 0 ..< segments_u {
     t := f32(i) / f32(segments_u - 1)
@@ -157,7 +156,7 @@ build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height
       v := f32(j) / f32(segments_v) * 2.0 * math.PI
       offset := nrm * (math.cos(v) * tube) + side * (math.sin(v) * tube)
       pos := center + offset
-      vertices[i * segments_v + j] = mesh.Vertex{
+      vertices[i * segments_v + j] = render.Vertex{
         position = pos, normal = linalg.normalize(offset),
         color = {1, 1, 1, 1}, uv = {t, f32(j) / f32(segments_v)},
       }
@@ -172,7 +171,7 @@ build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height
     indices[idx + 3] = b; indices[idx + 4] = d; indices[idx + 5] = c
     idx += 6
   }
-  return mesh.make_geometry(vertices, indices)
+  return render.make_geometry(vertices, indices)
 }
 
 update :: proc(app: ^App, dt: f32) {

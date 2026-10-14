@@ -3,11 +3,6 @@ package render
 import "core:math"
 import "core:math/linalg"
 import "core:sync"
-import "gpu"
-import vk "vendor:vulkan"
-
-@(private)
-MAX_SEGMENTS :: 65536
 
 // Also the GPU record the debug line shader pulls its two vertices from.
 @(private)
@@ -20,35 +15,6 @@ DebugLineSegment :: struct {
   color:        [4]f32,
 }
 #assert(size_of(DebugLineSegment) == 48)
-
-@(private)
-debug_line_init :: proc(r: ^Renderer) -> vk.Result {
-  // Depth test toggled dynamically per draw to fold overlay variant into the same pipeline.
-  dyn_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_TEST_ENABLE}
-  color_formats := [?]vk.Format{r.swapchain.format.format}
-  blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ALPHA}
-  r.pipelines[.DEBUG_LINE] = gpu.create_graphics_pipeline(
-    &r.gctx,
-    {
-      vert = #load("shader/debug_line/vert.spv"),
-      frag = #load("shader/debug_line/frag.spv"),
-      topology = .LINE_LIST,
-      depth = gpu.READ_ONLY_DEPTH_STATE,
-      blend = blend[:],
-      color_formats = color_formats[:],
-      depth_format = ATTACHMENTS[.DEPTH].format,
-      dynamic_states = dyn_states[:],
-      layout = r.scene.layout,
-    },
-  ) or_return
-  for &inbox in r.debug_lines do inbox = make([dynamic]DebugLineSegment, 0, 1024)
-  return .SUCCESS
-}
-
-// Segments live in two rings of DEBUG_RING in the frame table, drawn up to their fill:
-// [0] depth-tested, [1] drawn over the scene. The shader skips a segment past its expiry.
-@(private)
-DEBUG_RING :: MAX_SEGMENTS / 2
 
 // Segments beyond DEBUG_RING per ring between two frames are dropped. life <= 0 shows the
 // segment until the next update.
@@ -82,43 +48,6 @@ flush_debug_lines :: proc(self: ^Renderer) {
     }
     clear(&inbox)
   }
-}
-
-@(private)
-debug_line_record :: proc(
-  r: ^Renderer,
-  frame_index: u32,
-  camera_index: u32,
-  color_view: vk.ImageView,
-  extent: vk.Extent2D,
-  depth_image: ^gpu.Image,
-) {
-  cmd := r.command_buffers[frame_index]
-  counts := [2]u32{u32(min(r.debug_filled[0], DEBUG_RING)), u32(min(r.debug_filled[1], DEBUG_RING))}
-  if counts == {} do return
-  sync.mutex_lock(&r.debug_mutex)
-  push := struct {
-    camera_index: u32,
-    time:         f32,
-  }{camera_index, r.debug_time}
-  sync.mutex_unlock(&r.debug_mutex)
-  gpu.begin_rendering(
-    cmd,
-    extent,
-    gpu.create_depth_attachment(depth_image.view, .LOAD, .STORE),
-    gpu.create_color_attachment(color_view, .LOAD, .STORE),
-  )
-  push_constants(r, cmd, &push)
-  vk.CmdBindPipeline(cmd, .GRAPHICS, r.pipelines[.DEBUG_LINE])
-  if counts[0] > 0 {
-    vk.CmdSetDepthTestEnable(cmd, true)
-    vk.CmdDraw(cmd, 2 * counts[0], 1, 0, 0)
-  }
-  if counts[1] > 0 {
-    vk.CmdSetDepthTestEnable(cmd, false)
-    vk.CmdDraw(cmd, 2 * counts[1], 1, 2 * DEBUG_RING, 0)
-  }
-  vk.CmdEndRendering(cmd)
 }
 
 // DEBUG_* are the stock debug line colors.

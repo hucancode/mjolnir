@@ -2,9 +2,7 @@ package render
 
 import "core:fmt"
 import "core:log"
-import "gpu"
 import mu "vendor:microui"
-import vk "vendor:vulkan"
 
 // stage_overlay submits the 2D overlay for the next frame only; call it every frame the UI should show.
 // The commands must stay valid until that frame is recorded; a non-empty atlas replaces the font atlas.
@@ -14,9 +12,10 @@ stage_overlay :: proc(self: ^Renderer, list: DrawList) {
   if len(list.atlas) == 0 do return
   guard(self)
   destroy_texture(self, ui.font_atlas)
-  res: vk.Result
-  ui.font_atlas, res = allocate_alpha_texture(self, list.atlas, list.atlas_size[0], list.atlas_size[1])
-  if res != .SUCCESS do log.errorf("Font atlas upload failed: %v", res)
+  ok: bool
+  ui.font_atlas, ok = allocate_alpha_texture(self, list.atlas, list.atlas_size[0], list.atlas_size[1])
+  ui.font_atlas_size = {f32(list.atlas_size[0]), f32(list.atlas_size[1])}
+  if !ok do log.errorf("Font atlas upload failed")
 }
 
 // debug_ctx returns the microui debug context itself, without opening a frame: the
@@ -52,7 +51,7 @@ stats_panel :: proc(self: ^Renderer) {
   ctx := debug_ui(self)
   draws: u32
   if _, ok := main_camera(self); ok {
-    draws = gpu.mapped(&self.draw_count_readback[write_frame(self)], u32)[MaterialType.PBR]
+    draws = backend_draw_count(&self.gpu, write_frame(self))
   }
   if mu.window(ctx, "Engine", {40, 40, 200, 200}, {}) {
     mu.label(ctx, fmt.tprintf("Textures %d", self.texture_slots.count))

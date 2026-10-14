@@ -1,4 +1,4 @@
-package gpu
+package vulkan_backend
 
 import vk "vendor:vulkan"
 
@@ -43,9 +43,6 @@ BLEND_ADDITIVE := vk.PipelineColorBlendAttachmentState {
   alphaBlendOp        = .ADD,
   colorWriteMask      = {.R, .G, .B, .A},
 }
-
-// HDR_COLOR_FORMAT is the format of the scene color target.
-HDR_COLOR_FORMAT :: vk.Format.R16G16B16A16_SFLOAT
 
 // GraphicsPipelineDesc is everything that varies between the engine's graphics pipelines.
 // Shaders are SPIR-V with entry point "main"; `frag` may be empty. Front faces wind

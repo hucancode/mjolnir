@@ -6,15 +6,9 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
-import "core:strings"
 import "core:sync"
-import "gpu"
-import vk "vendor:vulkan"
+import "vendor:glfw"
 
-@(private)
-MAX_NODES_IN_SCENE :: 65536
-@(private)
-MAX_ACTIVE_CAMERAS :: 128
 // direct_light packs camera indices into 16 bits
 #assert(MAX_ACTIVE_CAMERAS < 0xFFFF)
 // MAX_LIGHTS is the capacity of the light buffer.
@@ -23,10 +17,6 @@ MAX_LIGHTS :: 256
 MAX_MESHES :: 65536
 @(private)
 MAX_MATERIALS :: 4096
-@(private)
-MAX_SHADOW_MAPS :: 16
-@(private)
-SHADOW_MAP_SIZE :: 512
 // Shadow casters ranked by screen coverage get a map; the rest of the maps go
 // to casters that ranked within the last SHADOW_GRACE_FRAMES frames.
 @(private)
@@ -34,212 +24,112 @@ SHADOW_RANKED_CASTERS :: 12
 @(private)
 SHADOW_GRACE_FRAMES :: 30
 #assert(SHADOW_RANKED_CASTERS <= MAX_SHADOW_MAPS)
-// a cube map renders six views
-@(private)
-MAX_SHADOW_VIEWS :: MAX_SHADOW_MAPS * 6
-@(private)
-SHADOW_MAX_DRAWS :: 4096 * MAX_SHADOW_VIEWS
 
 // A handle is the index of its resource in the resource's array, GPU table
 // and (textures) bindless array. 0 is none: index 0 is never handed out.
 MeshHandle :: distinct u32
 // MaterialHandle identifies a material.
 MaterialHandle :: distinct u32
-// TextureHandle identifies a bindless texture; NO_TEXTURE is none.
-TextureHandle :: distinct u32
 // CameraHandle identifies a camera.
 CameraHandle :: distinct u32
 
-// Single-variant pipelines; the others are indexed by MaterialType, LightType and effect.
-@(private)
-PipelineId :: enum {
-  CULL,
-  DEPTH_REDUCE,
-  SHADOW_DEPTH,
-  PARTICLE_EMIT,
-  PARTICLE_SIMULATE,
-  PARTICLE_DRAW,
-  DEBUG_LINE,
-  OVERLAY,
-}
-
 // Renderer is the whole renderer. Public fields: builtin_meshes, builtin_materials,
 // main_camera, ibl_intensity, skybox_intensity, skybox_blur and effect_stack; the rest is
-// internal state. init/shutdown own the device, pipelines, buffers and what init makes
-// (builtin meshes and materials, the main camera): application lifetime. Everything made
-// after init lives for the map: teardown frees it in one go, back to the marks init leaves.
+// internal state. init/shutdown own the GPU backend and what init makes (builtin meshes and
+// materials, the main camera): application lifetime. Everything made after init lives for
+// the map: teardown frees it in one go, back to the marks init leaves.
 Renderer :: struct {
-  gctx:                    gpu.GPUContext,
-  swapchain:               gpu.Swapchain,
-  mesh_slots:              cont.Slots,
-  material_slots:          cont.Slots,
-  emitter_slots:           cont.Slots,
-  forcefield_slots:        cont.Slots,
-  // slots up to this one are covered by every cull dispatch
-  node_count:              u32,
+  gpu:                 Backend,
+  // what the backend reads each frame besides the tables: the environment light, light and
+  // shadow view counts, particle parameters; flush fills the per-frame rest
+  using frame:         FrameDesc,
+  mesh_slots:          cont.Slots,
+  material_slots:      cont.Slots,
+  emitter_slots:       cont.Slots,
+  forcefield_slots:    cont.Slots,
   // each light and the slot it shines from (bound_at)
-  lights:                  []struct {
+  lights:              []struct {
     node_index: u32,
     light:      Light,
   },
-  light_slots:             cont.Slots,
-  builtin_materials:       [Color]MaterialHandle,
-  builtin_meshes:          [Primitive]MeshHandle,
-  cameras:                 []Camera,
-  camera_slots:            cont.Slots,
-  main_camera:             CameraHandle,
-  // the environment light, drawn as the AMBIENT light (pass_ambient.odin)
-  environment_map:         TextureHandle,
-  brdf_lut:                TextureHandle,
-  // precomputed from environment_map
-  irradiance_cube:         TextureHandle,
-  prefilter_cube:          TextureHandle,
+  light_slots:         cont.Slots,
+  builtin_materials:   [Color]MaterialHandle,
+  builtin_meshes:      [Primitive]MeshHandle,
+  cameras:             []Camera,
+  camera_slots:        cont.Slots,
+  main_camera:         CameraHandle,
   // scales image-based lighting
-  ibl_intensity:           f32,
-  // 0 hides the skybox
-  skybox_intensity:        f32,
-  skybox_blur:             f32,
-  // every camera runs the stack in order (pass_post_process.odin)
-  effect_stack:            [dynamic]PostprocessEffect,
-  // [is_last][tag]: every pass writes an HDR ring image but the last, which writes the
-  // swapchain format
-  post_process_pipelines:  [2][len(EFFECTS)]vk.Pipeline,
+  ibl_intensity:       f32,
+  // every camera runs the stack in order
+  effect_stack:        [dynamic]PostprocessEffect,
   // pass i writes slot i % POST_PROCESS_RING; its input and original are the two slots before
-  post_process_images:     [gpu.FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
-  command_buffers:         [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  compute_command_buffers: [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  scene:                   SceneDescriptors,
-  pipelines:               [PipelineId]vk.Pipeline,
-  material_pipelines:      [MaterialType]vk.Pipeline,
-  light_pipelines:         [LightType]vk.Pipeline,
-  textures:                []gpu.Image,
+  post_process_ring:   [FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
   // render targets below MAX_RENDER_TARGETS, every other texture above (bindless_textures.odin)
-  target_slots:            cont.Slots,
-  texture_slots:           cont.Slots,
-  samplers:                [SamplerType]vk.Sampler,
-  mesh_buffers:            [MeshStream]gpu.Buffer,
-  mesh_slabs:              [MeshStream]cont.SlabAllocator,
-  frame_arena:             [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
-  arena_offset:            [SceneBinding]vk.DeviceSize,
-  region_debt:             RegionDebt,
-  draw_count_readback:     [gpu.FRAMES_IN_FLIGHT]gpu.Buffer,
-  bone_matrix_slab:        cont.SlabAllocator,
-  // per pyramid slot: groups done this dispatch; the last one resets it
-  pyramid_counters:        gpu.Buffer,
-  // alive list: an indirect draw header followed by one particle index per vertex
-  particle_buffer:         gpu.Buffer,
-  particle_alive_buffer:   gpu.Buffer,
-  particle_params:         ParticleSystemParams,
+  target_slots:        cont.Slots,
+  texture_slots:       cont.Slots,
+  mesh_slabs:          [MeshStream]cont.SlabAllocator,
+  region_debt:         RegionDebt,
+  bone_matrix_slab:    cont.SlabAllocator,
   // simulated seconds; an emitter emits floor(rate * time) particles in total
-  particle_time:           f64,
+  particle_time:       f64,
   // segments added since the last frame, per ring: [0] depth-tested, [1] drawn over the scene
-  debug_lines:             [2][dynamic]DebugLineSegment,
-  // segments each ring has taken in total (pass_debug_line.odin)
-  debug_filled:            [2]u64,
-  debug_time:              f32,
-  debug_mutex:             sync.Mutex,
-  ui:                      OverlayRenderer,
-  light_count:             [LightType]u32,
-  shadow_casters:          [MAX_SHADOW_MAPS]Caster,
-  // one per atlas layer in use (pack_lights)
-  shadow_view_count:       u32,
-  shadow_atlas:            [gpu.FRAMES_IN_FLIGHT]gpu.Image,
-  // indirect draw lists per bindless draw-list slot (pass_occlusion_culling.odin)
-  draw_lists:              [MAX_DRAW_LIST_SLOTS]gpu.Buffer,
-  // per pyramid slot: the depth pyramid, its storage view per mip and whether they are in the
-  // storage image array yet
-  pyramids:                [MAX_PYRAMID_SLOTS]TextureHandle,
-  pyramid_views:           [MAX_PYRAMID_SLOTS][MAX_DEPTH_MIPS_LEVEL]vk.ImageView,
-  pyramid_bound:           [MAX_PYRAMID_SLOTS]bool,
-  mutex:                   sync.Recursive_Mutex,
+  debug_lines:         [2][dynamic]DebugLineSegment,
+  // segments each ring has taken in total (debug_line.odin)
+  debug_filled:        [2]u64,
+  debug_time:          f32,
+  debug_mutex:         sync.Mutex,
+  ui:                  OverlayRenderer,
+  shadow_casters:      [MAX_SHADOW_MAPS]Caster,
+  // per pyramid slot: the depth pyramid camera_slot(c) + frame of camera c
+  pyramids:            [MAX_PYRAMID_SLOTS]TextureHandle,
+  mutex:               sync.Recursive_Mutex,
 }
 
-// Creates a window surface for `instance`; `user` is passed through from init.
-SurfaceProc :: #type proc(user: rawptr, instance: vk.Instance) -> (vk.SurfaceKHR, vk.Result)
-
-// Bring the renderer up on a window: instance, surface (through
-// `create_surface(surface_user, instance)`), device, swapchain, every
-// resource and an empty scene with a main camera. Paired with shutdown.
+// Bring the renderer up on a GLFW window: the GPU backend, every resource and an empty
+// scene with a main camera. Paired with shutdown.
 init :: proc(
   self: ^Renderer,
   app_name: string,
-  instance_extensions: []cstring,
-  get_instance_proc_addr: rawptr,
-  create_surface: SurfaceProc,
-  surface_user: rawptr,
+  window: glfw.WindowHandle,
   framebuffer_size: [2]u32,
   dpi_scale: f32,
 ) -> bool {
-  res := init_vulkan(
-    self,
-    app_name,
-    instance_extensions,
-    get_instance_proc_addr,
-    create_surface,
-    surface_user,
-    framebuffer_size,
-    dpi_scale,
-  )
-  if res != .SUCCESS {
-    log.errorf("Renderer init failed: %v", res)
-    return false
+  table_size: [Table]int
+  for t, binding in TABLES do table_size[binding] = t.stride * t.capacity
+  mesh_size: [MeshStream]int
+  for stream, s in MESH_STREAMS {
+    cont.slab_init(&self.mesh_slabs[s], stream.slab)
+    mesh_size[s] = int(self.mesh_slabs[s].capacity) * stream.elem_size
   }
-  return true
-}
-
-@(private = "file")
-init_vulkan :: proc(
-  self: ^Renderer,
-  app_name: string,
-  instance_extensions: []cstring,
-  get_instance_proc_addr: rawptr,
-  create_surface: SurfaceProc,
-  surface_user: rawptr,
-  framebuffer_size: [2]u32,
-  dpi_scale: f32,
-) -> vk.Result {
-  gctx := &self.gctx
-  name := strings.clone_to_cstring(app_name, context.temp_allocator)
-  gpu.instance_init(gctx, name, instance_extensions, get_instance_proc_addr) or_return
-  gctx.surface = create_surface(surface_user, gctx.instance) or_return
-  gpu.device_init(gctx) or_return
-  gpu.swapchain_init(&self.swapchain, gctx, framebuffer_size) or_return
-  init_descriptor_pool(gctx) or_return
-  cont.slots_init(&self.camera_slots, MAX_ACTIVE_CAMERAS, gpu.RETIRE_GRACE)
-  cont.slots_init(&self.mesh_slots, MAX_MESHES, gpu.RETIRE_GRACE)
-  cont.slots_init(&self.material_slots, MAX_MATERIALS, gpu.RETIRE_GRACE)
+  backend_init(&self.gpu, app_name, window, framebuffer_size, table_size, mesh_size) or_return
+  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
+    backend_draw_list_create(&self.gpu, SHADOW_DRAW_SLOT_BASE + frame, 1, SHADOW_LIST_CAPACITY) or_return
+  }
+  cont.slots_init(&self.camera_slots, MAX_ACTIVE_CAMERAS, RETIRE_GRACE)
+  cont.slots_init(&self.mesh_slots, MAX_MESHES, RETIRE_GRACE)
+  cont.slots_init(&self.material_slots, MAX_MATERIALS, RETIRE_GRACE)
   // retired, not reclaimed: submitted frames may still sample the slot
-  cont.slots_init(&self.target_slots, MAX_RENDER_TARGETS, gpu.RETIRE_GRACE)
-  cont.slots_init(&self.texture_slots, MAX_TEXTURES, gpu.RETIRE_GRACE, first = MAX_RENDER_TARGETS)
+  cont.slots_init(&self.target_slots, MAX_RENDER_TARGETS, RETIRE_GRACE)
+  cont.slots_init(&self.texture_slots, MAX_TEXTURES, RETIRE_GRACE, first = MAX_RENDER_TARGETS)
   // Attachments have no handle to go stale and each frame reads its own copy of the
   // table, so no grace. Index 0 is never handed out and the ambient light takes it, so
   // every light fits the frame's table.
   cont.slots_init(&self.emitter_slots, MAX_EMITTERS)
   cont.slots_init(&self.forcefield_slots, MAX_FORCE_FIELDS)
   cont.slots_init(&self.light_slots, MAX_LIGHTS)
+  cont.slab_init(&self.bone_matrix_slab, BONE_SLAB_CONFIG)
   self.lights = make(type_of(self.lights), MAX_LIGHTS)
   self.cameras = make([]Camera, MAX_ACTIVE_CAMERAS)
-  self.textures = make([]gpu.Image, MAX_TEXTURES)
-  gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
-  gpu.allocate_command_buffer(gctx, self.compute_command_buffers[:], gctx.compute_command_pool) or_return
-  mesh_arena_init(self) or_return
-  init_scene_buffers(self, gctx) or_return
   init_builtin_materials(self)
   init_builtin_meshes(self)
-  bindless_init(self) or_return
-  scene_descriptors_init(self) or_return
   ambient_init(self) or_return
-  occlusion_init(self) or_return
-  shadow_init(self) or_return
-  direct_light_init(self) or_return
-  material_pipelines_init(self) or_return
-  particles_init(self) or_return
-  post_process_init(self) or_return
-  debug_line_init(self) or_return
+  self.effect_stack = make([dynamic]PostprocessEffect)
+  post_process_create_images(self) or_return
+  for &inbox in self.debug_lines do inbox = make([dynamic]DebugLineSegment, 0, 1024)
   overlay_init(self, dpi_scale) or_return
-  extent := self.swapchain.extent
-  cam, created := create_camera(self, extent.width, extent.height, position = {3, 4, 3}, far_plane = 1000.0)
-  if !created do return .ERROR_INITIALIZATION_FAILED
+  extent := backend_extent(&self.gpu)
+  cam, created := create_camera(self, extent.x, extent.y, position = {3, 4, 3}, far_plane = 1000.0)
+  if !created do return false
   self.main_camera = cam
   // what init made outlives teardown
   cont.slots_mark(&self.mesh_slots)
@@ -247,15 +137,13 @@ init_vulkan :: proc(
   cont.slots_mark(&self.material_slots)
   cont.slots_mark(&self.texture_slots)
   cont.slots_mark(&self.camera_slots)
-  return .SUCCESS
+  return true
 }
 
 // setup starts a map: no particle is alive.
 setup :: proc(self: ^Renderer) -> bool {
   guard(self)
-  res := particles_reset(self)
-  if res != .SUCCESS do log.errorf("Renderer map setup failed: %v", res)
-  return res == .SUCCESS
+  return particles_reset(self)
 }
 
 // teardown ends a map in one go, waiting for the GPU: every slot forgets its attachment
@@ -264,16 +152,13 @@ setup :: proc(self: ^Renderer) -> bool {
 // camera, render targets, pipelines. Handles to freed resources are stale.
 teardown :: proc(self: ^Renderer) {
   guard(self)
-  gctx := &self.gctx
   // their render targets and draw lists retire, and go with the flushes below
   c := self.camera_slots.mark
   for i in cont.slots_next(&self.camera_slots, &c) do destroy_camera(self, CameraHandle(i))
   // queued uploads may be init's: they land before anything is freed
-  if res := gpu.submit_uploads(gctx); res != .SUCCESS do log.errorf("Renderer teardown upload failed: %v", res)
-  vk.DeviceWaitIdle(gctx.device)
-  gpu.deferred_flush(gctx)
-  for r in cont.slots_flush(&self.target_slots) do gpu.image_destroy(gctx.device, &self.textures[r.index])
-  for &img in self.textures[self.texture_slots.mark:self.texture_slots.high_water] do gpu.image_destroy(gctx.device, &img)
+  backend_wait_idle(&self.gpu)
+  for r in cont.slots_flush(&self.target_slots) do backend_texture_destroy(&self.gpu, TextureHandle(r.index))
+  for i in self.texture_slots.mark ..< self.texture_slots.high_water do backend_texture_destroy(&self.gpu, TextureHandle(i))
   cont.slots_rewind(&self.texture_slots)
   self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
   cont.slots_rewind(&self.camera_slots)
@@ -298,30 +183,19 @@ teardown :: proc(self: ^Renderer) {
 // and precompute image-based lighting from it. Without one, IBL and the
 // skybox are black.
 load_environment_map :: proc(self: ^Renderer, path: string) -> bool {
-  res := ambient_load_environment(self, path)
-  if res != .SUCCESS do log.warnf("Failed to load environment map %s: %v", path, res)
-  return res == .SUCCESS
+  ok := ambient_load_environment(self, path)
+  if !ok do log.warnf("Failed to load environment map %s", path)
+  return ok
 }
 
 // Destroy everything, whatever map is up.
 shutdown :: proc(self: ^Renderer) {
-  gctx := &self.gctx
-  vk.DeviceWaitIdle(gctx.device)
-  gpu.deferred_flush(gctx)
-  for &img in self.textures do gpu.image_destroy(gctx.device, &img)
-  for &b in self.draw_lists do gpu.buffer_destroy(gctx.device, &b)
-  for views in self.pyramid_views do for v in views do vk.DestroyImageView(gctx.device, v, nil)
-  overlay_shutdown(self)
-  for p in self.pipelines do vk.DestroyPipeline(gctx.device, p, nil)
-  for p in self.material_pipelines do vk.DestroyPipeline(gctx.device, p, nil)
-  for p in self.light_pipelines do vk.DestroyPipeline(gctx.device, p, nil)
-  for pipelines in self.post_process_pipelines do for p in pipelines do vk.DestroyPipeline(gctx.device, p, nil)
+  backend_shutdown(&self.gpu)
+  delete(self.ui.batches)
   delete(self.effect_stack)
   for inbox in self.debug_lines do delete(inbox)
-  scene_descriptors_shutdown(&self.scene, gctx)
-  bindless_shutdown(self)
-  destroy_scene_buffers(self, gctx)
-  mesh_arena_destroy(self)
+  for &slab in self.mesh_slabs do cont.slab_destroy(&slab)
+  cont.slab_destroy(&self.bone_matrix_slab)
   cont.slots_destroy(&self.camera_slots)
   cont.slots_destroy(&self.mesh_slots)
   cont.slots_destroy(&self.material_slots)
@@ -332,41 +206,57 @@ shutdown :: proc(self: ^Renderer) {
   cont.slots_destroy(&self.target_slots)
   delete(self.cameras)
   delete(self.lights)
-  delete(self.textures)
-  gpu.swapchain_destroy(&self.swapchain, gctx.device)
-  gpu.shutdown(gctx)
 }
 
 // Cameras that matched the old extent follow the new one.
 @(private)
-recreate_swapchain :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> vk.Result {
-  gctx := &self.gctx
-  old := self.swapchain.extent
-  vk.DeviceWaitIdle(gctx.device)
-  gpu.swapchain_destroy(&self.swapchain, gctx.device)
-  gpu.swapchain_init(&self.swapchain, gctx, framebuffer_size) or_return
-  extent := self.swapchain.extent
+recreate_swapchain :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool {
+  old := backend_extent(&self.gpu)
+  backend_resize(&self.gpu, framebuffer_size) or_return
+  extent := backend_extent(&self.gpu)
   c: u32
   for i in cont.slots_next(&self.camera_slots, &c) {
-    if self.cameras[i].extent != {old.width, old.height} do continue
-    resize_camera(self, CameraHandle(i), extent.width, extent.height) or_return
+    if self.cameras[i].extent != old do continue
+    resize_camera(self, CameraHandle(i), extent.x, extent.y) or_return
   }
   post_process_release_images(self)
   post_process_create_images(self) or_return
   self.ui.dpi_scale = dpi_scale
-  return .SUCCESS
+  return true
+}
+
+// POST_PROCESS_RING is the intermediate images per frame in flight the effect stack ping-pongs.
+@(private)
+POST_PROCESS_RING :: 3
+
+// The post-process ring of every frame in flight, at the swapchain extent;
+// recreate_swapchain rebuilds it.
+@(private = "file")
+post_process_create_images :: proc(r: ^Renderer) -> bool {
+  desc := TextureDesc {
+    extent = backend_extent(&r.gpu),
+    format = HDR_COLOR_FORMAT,
+    usage  = {.COLOR_TARGET, .SAMPLED},
+  }
+  for &frame in r.post_process_ring {
+    for &handle in frame do handle = allocate_texture(r, desc, target = true) or_return
+  }
+  return true
 }
 
 @(private = "file")
-init_descriptor_pool :: proc(gctx: ^gpu.GPUContext) -> vk.Result {
-  sizes := make([dynamic]vk.DescriptorPoolSize, context.temp_allocator)
-  add :: proc(sizes: ^[dynamic]vk.DescriptorPoolSize, type: vk.DescriptorType, count: u32) {
-    for &s in sizes do if s.type == type {s.descriptorCount += count; return}
-    append(sizes, vk.DescriptorPoolSize{type, count})
+post_process_release_images :: proc(r: ^Renderer) {
+  for &frame in r.post_process_ring {
+    for &handle in frame {
+      destroy_texture(r, handle)
+      handle = 0
+    }
   }
-  for b in BINDINGS do add(&sizes, b.type, gpu.FRAMES_IN_FLIGHT)
-  for b in BINDLESS_BINDINGS do add(&sizes, b.type, b.count)
-  return gpu.descriptor_pool_init(gctx, sizes[:], gpu.FRAMES_IN_FLIGHT + 1)
+}
+
+// frame_serial is the number of frames submitted so far; frame records frame_serial % FRAMES_IN_FLIGHT next.
+frame_serial :: proc(self: ^Renderer) -> u64 {
+  return backend_frame_serial(&self.gpu)
 }
 
 // lock holds off frame while another thread edits through the pointers material,
@@ -389,9 +279,9 @@ guard :: proc(self: ^Renderer) {
 // The only place retirement advances; once per frame, so ticks follow frame_serial.
 @(private)
 tick_resource_pools :: proc(self: ^Renderer) {
-  gpu.deferred_tick(&self.gctx)
-  for r in cont.slots_tick(&self.target_slots) do gpu.image_destroy(self.gctx.device, &self.textures[r.index])
-  for r in cont.slots_tick(&self.texture_slots) do gpu.image_destroy(self.gctx.device, &self.textures[r.index])
+  backend_tick(&self.gpu)
+  for r in cont.slots_tick(&self.target_slots) do backend_texture_destroy(&self.gpu, TextureHandle(r.index))
+  for r in cont.slots_tick(&self.texture_slots) do backend_texture_destroy(&self.gpu, TextureHandle(r.index))
   for r in cont.slots_tick(&self.mesh_slots) {
     free_mesh(self, write_table(self, .MESHES, MeshData)[r.index])
     clear_entry(self, .MESHES, r.index)
@@ -425,6 +315,10 @@ NodeFlag :: enum u32 {
 @(private)
 NodeFlagSet :: bit_set[NodeFlag;u32]
 
+// the shadow pass draws these; the material type must also be in GBUFFER_TYPES
+@(private)
+SHADOW_CASTER_FLAGS :: NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
+
 // The zero record is an empty slot: mesh and material 0 are none. attachment_data_index is
 // the first entry of the slot's bone table range when .SKINNED is set.
 @(private)
@@ -435,6 +329,7 @@ NodeData :: struct #packed {
   attachment_data_index: u32,
   flags:                 NodeFlagSet,
 }
+#assert(size_of(NodeData) == 80)
 
 // MeshAttachment draws mesh handle with material from a slot's transform.
 MeshAttachment :: struct {
@@ -623,15 +518,6 @@ attachment :: proc(
 
 // SPOT_LIGHT_INNER_RATIO is the default ratio of a spot light's full-intensity cone to its falloff cone.
 SPOT_LIGHT_INNER_RATIO :: f32(0.75)
-
-// LightType selects the light branch of the lighting shaders (specialization constant 0).
-// AMBIENT is the environment light (image-based lighting, emissive, skybox), one per frame.
-LightType :: enum u16 {
-  POINT,
-  SPOT,
-  DIRECTIONAL,
-  AMBIENT,
-}
 
 // Light is stored as the lighting shaders read it. Attached to a slot it shines from the
 // slot's transform along its forward axis; render fills position, direction, shadow_map
@@ -910,11 +796,12 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   }
   slice.sort_by(casters[:caster_count], proc(a, b: Caster) -> bool {return a.score > b.score})
   maps := &self.shadow_casters
-  selected := select_shadow_casters(casters[:caster_count], maps, self.gctx.frame_serial)
+  selected := select_shadow_casters(casters[:caster_count], maps, backend_frame_serial(&self.gpu))
   // any nonzero view marks the pick; pack_lights assigns the real one
   for c in maps[:selected] do lights[c.light].shadow_map = 1
   dst := frame_table(self, .LIGHTS, Light, frame_index)
   self.light_count, self.shadow_view_count = pack_lights(lights[:n], dst)
+  self.shadow_draw_list = SHADOW_DRAW_SLOT_BASE + frame_index
   for &l in dst[:n] {
     if l.shadow_map == 0 do continue
     for f in 0 ..< SHADOW_FACE_COUNT[l.type] {
@@ -934,7 +821,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
         require_flags   = SHADOW_CASTER_FLAGS,
         instance_tag    = v << 16,
         layer           = v - SHADOW_VIEW_BASE,
-        draw_list       = SHADOW_DRAW_SLOT_BASE + frame_index,
+        draw_list       = self.shadow_draw_list,
         list_capacity   = SHADOW_LIST_CAPACITY,
       }
     }
@@ -970,21 +857,30 @@ flush_particles :: proc(self: ^Renderer) {
   p.frame_counter += 1
 }
 
+// Writes the camera views and lists the live cameras for the backend, in slot order.
 @(private = "file")
-flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
+flush_cameras :: proc(self: ^Renderer, frame_index: u32) -> (cameras: []FrameCamera, main: int) {
   views := frame_table(self, .VIEWS, ViewGPU, frame_index)
   // a slot without a camera keeps an empty view that draws no type
-  next_frame_index := (frame_index + 1) % gpu.FRAMES_IN_FLIGHT
+  next_frame_index := (frame_index + 1) % FRAMES_IN_FLIGHT
+  prev_frame_index := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
+  serial := backend_frame_serial(&self.gpu)
   slot_count := self.camera_slots.high_water
   slice.zero(views[CAMERA_VIEW_BASE:][:slot_count])
   all_types := u32(1 << len(MaterialType) - 1)
+  list := make([dynamic]FrameCamera, 0, self.camera_slots.count, context.temp_allocator)
+  main = -1
   c: u32
   for i in cont.slots_next(&self.camera_slots, &c) {
     cam := &self.cameras[i]
-    occlusion_bind_pyramid(self, camera_slot(i) + frame_index)
     view := camera_view_matrix(cam)
     projection := camera_projection_matrix(cam)
     view_projection := projection * view
+    slot := camera_slot(i) + frame_index
+    // frame N builds pyramid N from N-1's depth and culls into N+1's lists
+    next_slot := camera_slot(i) + next_frame_index
+    pyramid := self.pyramids[slot]
+    ready := serial >= cam.ready_serial
     v := &views[CAMERA_VIEW_BASE + i]
     v^ = {
       view                = view,
@@ -996,29 +892,115 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       extent              = {f32(cam.extent[0]), f32(cam.extent[1])},
       near                = cam.near,
       far                 = cam.far,
-      pyramid             = u32(self.pyramids[camera_slot(i) + frame_index]),
-      occlusion_mask      = GBUFFER_TYPES if self.gctx.frame_serial >= cam.ready_serial else 0,
+      pyramid             = u32(pyramid),
+      occlusion_mask      = GBUFFER_TYPES if ready else 0,
       list_stride         = 1,
       type_mask           = all_types,
       require_flags       = {.VISIBLE},
-      draw_list           = CAMERA_DRAW_SLOT_BASE + camera_slot(i) + next_frame_index,
+      draw_list           = next_slot,
       list_capacity       = CAMERA_LIST_CAPACITY,
     }
     for a in AttachmentType do v.attachments[a] = u32(cam.attachments[a][frame_index])
+    if CameraHandle(i) == self.main_camera do main = len(list)
+    fc := FrameCamera {
+      index        = i,
+      prev_depth   = cam.attachments[.DEPTH][prev_frame_index],
+      pyramid      = pyramid,
+      slot         = slot,
+      next_slot    = next_slot,
+      near         = cam.near,
+      far          = cam.far,
+      ready        = ready,
+    }
+    for a in AttachmentType do fc.attachments[a] = cam.attachments[a][frame_index]
+    append(&list, fc)
   }
+  return list[:], main
 }
 
-// Writes the render-generated tables. Once per frame under the render mutex, before record_frame.
+// The effect stack as passes over the main camera's image: pass i writes ring slot
+// i % POST_PROCESS_RING, the last one the presented image. Blur and bloom take two passes
+// (horizontal, then vertical); an empty stack copies the image unchanged (nil effect).
+@(private = "file")
+flush_post_passes :: proc(self: ^Renderer, frame_index: u32) -> []PostPass {
+  if self.main_live < 0 do return nil
+  effects := self.effect_stack[:]
+  copy_only := [1]PostprocessEffect{nil}
+  if len(effects) == 0 do effects = copy_only[:]
+  passes := make([dynamic]PostPass, 0, 2 * len(effects), context.temp_allocator)
+  input := self.live_cameras[self.main_live].attachments[.FINAL_IMAGE]
+  original := input
+  for effect in effects {
+    pass_count: u32 = 1
+    #partial switch _ in effect {
+    case BlurEffect, BloomEffect:
+      pass_count = 2
+    }
+    for pass in 0 ..< pass_count {
+      output := self.post_process_ring[frame_index][len(passes) % POST_PROCESS_RING]
+      append(&passes, PostPass{effect, pass, input, original, output})
+      original, input = input, output
+    }
+  }
+  passes[len(passes) - 1].output = NO_TEXTURE
+  return passes[:]
+}
+
+// Writes the render-generated tables and describes the frame for the backend. Once per
+// frame under the render mutex.
 @(private)
-flush :: proc(self: ^Renderer, frame_index: u32) -> vk.Result {
+flush :: proc(self: ^Renderer, frame_index: u32, debug_ui: bool) {
+  desc := &self.frame
   // before the lights: shadow casters are ranked by the camera views
-  flush_cameras(self, frame_index)
+  desc.live_cameras, desc.main_live = flush_cameras(self, frame_index)
   flush_particles(self)
   collect_lights(self, frame_index)
   flush_debug_lines(self)
-  shadow_atlas_reserve(self, frame_index, self.shadow_view_count) or_return
   // cull dispatches cover the slots up to the last one holding anything
   nodes := write_table(self, .NODES, NodeData)
   for self.node_count > 0 && nodes[self.node_count - 1] == {} do self.node_count -= 1
-  return .SUCCESS
+  meshes := write_table(self, .MESHES, MeshData)
+  desc.camera_view_count = self.camera_slots.high_water - 1
+  desc.light_volumes[.POINT] = meshes[self.builtin_meshes[.SPHERE]]
+  desc.light_volumes[.SPOT] = meshes[self.builtin_meshes[.CONE]]
+  desc.post_passes = flush_post_passes(self, frame_index)
+  desc.debug_line_counts = {u32(min(self.debug_filled[0], DEBUG_RING)), u32(min(self.debug_filled[1], DEBUG_RING))}
+  sync.mutex_lock(&self.debug_mutex)
+  desc.debug_line_time = self.debug_time
+  sync.mutex_unlock(&self.debug_mutex)
+  desc.ui_batches = overlay_batch(self, frame_index, desc.main_live >= 0, debug_ui)
+}
+
+// frame renders and presents one frame, closing the debug UI opened by debug_ui
+// (plus a stats panel when show_stats). An out-of-date swapchain is rebuilt at
+// framebuffer_size. It returns false on a GPU error.
+frame :: proc(
+  self: ^Renderer,
+  framebuffer_size: [2]u32,
+  dpi_scale: f32,
+  show_stats := false,
+) -> bool {
+  frame_index := write_frame(self)
+  if show_stats do stats_panel(self)
+  debug_ui_drawn := debug_ui_close(self)
+  // until hand_off the GPU may read this frame's tables
+  guard(self)
+  tick_resource_pools(self)
+  flush(self, frame_index, debug_ui_drawn)
+  submitted, status := backend_frame(&self.gpu, &self.frame)
+  // staged commands point into caller memory valid for this frame only
+  self.ui.commands = nil
+  if submitted {
+    // simulated: the next frame's time accumulates from zero
+    self.particle_params.delta_time = 0
+    hand_off(self, frame_index)
+  }
+  switch status {
+  case .OK:
+    return true
+  case .RESIZE:
+    return recreate_swapchain(self, framebuffer_size, dpi_scale)
+  case .ERROR:
+  }
+  return false
 }

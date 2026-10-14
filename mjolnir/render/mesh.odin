@@ -1,23 +1,15 @@
-package mesh
+package render
 
-import "../../geometry"
+import "../geometry"
 import "core:math/linalg"
 import "core:slice"
-
-// Vertex is the renderer's vertex format.
-Vertex :: struct {
-  position: [3]f32,
-  normal:   [3]f32,
-  color:    [4]f32,
-  uv:       [2]f32,
-  tangent:  [4]f32, // xyz = tangent, w = handedness (for bitangent reconstruction)
-}
 
 // SkinningData holds the four joint indices and weights that deform one vertex.
 SkinningData :: struct {
   joints:  [4]u32,
   weights: [4]f32,
 }
+#assert(size_of(SkinningData) == 32)
 
 // Geometry is a CPU triangle mesh; skinnings is empty or parallel to vertices.
 Geometry :: struct {

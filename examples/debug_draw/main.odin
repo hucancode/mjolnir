@@ -28,7 +28,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 1024, 768, "Debug Draw") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "Debug Draw", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "Debug Draw", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)

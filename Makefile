@@ -1,4 +1,4 @@
-SHADER_DIR := mjolnir/render/shader
+SHADER_DIR := mjolnir/render/vulkan/shader
 
 # Find all shader files
 VERT_SHADERS := $(shell find $(SHADER_DIR) -name "shader.vert")

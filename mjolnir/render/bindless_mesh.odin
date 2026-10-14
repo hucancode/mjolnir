@@ -2,10 +2,6 @@ package render
 
 import cont "../containers"
 import "core:log"
-import "core:sync"
-import "gpu"
-import "mesh"
-import vk "vendor:vulkan"
 
 // Primitive names a builtin mesh in Renderer.builtin_meshes.
 Primitive :: enum {
@@ -15,35 +11,6 @@ Primitive :: enum {
   QUAD_XY,
   CONE,
   CYLINDER,
-}
-
-@(private)
-MeshFlag :: enum u32 {
-  SKINNED,
-}
-
-@(private)
-MeshFlagSet :: bit_set[MeshFlag;u32]
-
-// as the cull shader reads it from the mesh table
-@(private)
-MeshData :: struct {
-  aabb_min:        [3]f32,
-  index_count:     u32,
-  aabb_max:        [3]f32,
-  first_index:     u32,
-  vertex_offset:   i32,
-  skinning_offset: u32,
-  flags:           MeshFlagSet,
-  vertex_count:    u32,
-}
-
-// One buffer per stream, sub-allocated by its slab; skinning is read through the scene set.
-@(private)
-MeshStream :: enum {
-  VERTEX,
-  INDEX,
-  SKINNING,
 }
 
 @(private = "file")
@@ -58,13 +25,13 @@ VERTEX_SLAB_CONFIG :: cont.SlabConfig {
   {block_size = 0, block_count = 0},
 }
 
-@(private = "file")
+// Each stream's buffer holds its slab's capacity, so no offset can pass the end of a buffer.
+@(private)
 MESH_STREAMS := [MeshStream]struct {
   slab:      cont.SlabConfig,
   elem_size: int,
-  usage:     vk.BufferUsageFlags,
 } {
-  .VERTEX = {VERTEX_SLAB_CONFIG, size_of(mesh.Vertex), {.VERTEX_BUFFER}},
+  .VERTEX = {VERTEX_SLAB_CONFIG, size_of(Vertex)},
   .INDEX = {
     {
       {block_size = 128, block_count = 2048},
@@ -77,38 +44,18 @@ MESH_STREAMS := [MeshStream]struct {
       {block_size = 2097152, block_count = 4},
     },
     size_of(u32),
-    {.INDEX_BUFFER},
   },
-  .SKINNING = {VERTEX_SLAB_CONFIG, size_of(mesh.SkinningData), {.STORAGE_BUFFER}},
-}
-
-// capacities come from the slab configs, so no offset can pass the end of a buffer
-@(private)
-mesh_arena_init :: proc(r: ^Renderer) -> vk.Result {
-  for stream, s in MESH_STREAMS {
-    cont.slab_init(&r.mesh_slabs[s], stream.slab)
-    size := vk.DeviceSize(r.mesh_slabs[s].capacity) * vk.DeviceSize(stream.elem_size)
-    r.mesh_buffers[s] = gpu.buffer_create(&r.gctx, size, stream.usage, host_visible = false) or_return
-  }
-  return .SUCCESS
-}
-
-@(private)
-mesh_arena_destroy :: proc(r: ^Renderer) {
-  for &b in r.mesh_buffers do gpu.buffer_destroy(r.gctx.device, &b)
-  for &slab in r.mesh_slabs do cont.slab_destroy(&slab)
+  .SKINNING = {VERTEX_SLAB_CONFIG, size_of(SkinningData)},
 }
 
 // Returns the first element index; empty data takes no range.
 @(private = "file")
-mesh_arena_upload :: proc(r: ^Renderer, stream: MeshStream, data: []$T) -> (offset: u32, ret: vk.Result) {
-  if len(data) == 0 do return 0, .SUCCESS
+mesh_arena_upload :: proc(r: ^Renderer, stream: MeshStream, data: []$T) -> (offset: u32, ok: bool) {
+  if len(data) == 0 do return 0, true
   slab := &r.mesh_slabs[stream]
-  ok: bool
-  offset, ok = cont.slab_alloc(slab, u32(len(data)))
-  if !ok do return 0, .ERROR_OUT_OF_DEVICE_MEMORY
-  ret = gpu.queue_buffer_write(&r.gctx, &r.mesh_buffers[stream], data, int(offset))
-  if ret != .SUCCESS do cont.slab_free(slab, offset)
+  offset = cont.slab_alloc(slab, u32(len(data))) or_return
+  ok = backend_mesh_write(&r.gpu, stream, data, offset)
+  if !ok do cont.slab_free(slab, offset)
   return
 }
 
@@ -119,27 +66,13 @@ free_mesh :: proc(r: ^Renderer, m: MeshData) {
   if .SKINNED in m.flags do cont.slab_free(&r.mesh_slabs[.SKINNING], m.skinning_offset)
 }
 
-@(private)
-VERTEX_BINDING_DESCRIPTION := [?]vk.VertexInputBindingDescription {
-  {binding = 0, stride = size_of(mesh.Vertex), inputRate = .VERTEX},
-}
-
-@(private)
-VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
-  {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(mesh.Vertex, position))},
-  {location = 1, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(mesh.Vertex, normal))},
-  {location = 2, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(mesh.Vertex, color))},
-  {location = 3, binding = 0, format = .R32G32_SFLOAT, offset = u32(offset_of(mesh.Vertex, uv))},
-  {location = 4, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(mesh.Vertex, tangent))},
-}
-
 // Fills entry `index` of the mesh table. On failure the ranges taken so far are freed.
 @(private)
-upload_mesh :: proc(render: ^Renderer, index: u32, g: mesh.Geometry) -> (ret: vk.Result) {
+upload_mesh :: proc(render: ^Renderer, index: u32, g: Geometry) -> (ok: bool) {
   m := &write_table(render, .MESHES, MeshData)[index]
-  aabb := mesh.aabb_from_vertices(g.vertices)
+  aabb := aabb_from_vertices(g.vertices)
   m^ = {aabb_min = aabb.min, aabb_max = aabb.max}
-  defer if ret != .SUCCESS {
+  defer if !ok {
     free_mesh(render, m^)
     m^ = {}
   }
@@ -150,23 +83,23 @@ upload_mesh :: proc(render: ^Renderer, index: u32, g: mesh.Geometry) -> (ret: vk
   m.index_count = u32(len(g.indices))
   m.skinning_offset = mesh_arena_upload(render, .SKINNING, g.skinnings) or_return
   if len(g.skinnings) > 0 do m.flags |= {.SKINNED}
-  return .SUCCESS
+  return true
 }
 
 // create_mesh uploads geometry_data into the mesh arena; it lives until destroy_mesh or teardown.
 // Ownership of the geometry transfers: it is deleted.
 create_mesh :: proc(
   self: ^Renderer,
-  geometry_data: mesh.Geometry,
+  geometry_data: Geometry,
 ) -> (
   handle: MeshHandle,
   ok: bool,
 ) #optional_ok {
-  defer mesh.delete_geometry(geometry_data)
+  defer delete_geometry(geometry_data)
   guard(self)
   handle = MeshHandle(cont.slots_alloc(&self.mesh_slots) or_return)
-  if res := upload_mesh(self, u32(handle), geometry_data); res != .SUCCESS {
-    log.errorf("Mesh %d upload failed: %v", handle, res)
+  if !upload_mesh(self, u32(handle), geometry_data) {
+    log.errorf("Mesh %d upload failed", handle)
     cont.slots_free(&self.mesh_slots, u32(handle))
     return 0, false
   }
@@ -181,10 +114,10 @@ destroy_mesh :: proc(self: ^Renderer, handle: MeshHandle) {
 
 @(private)
 init_builtin_meshes :: proc(self: ^Renderer) {
-  self.builtin_meshes[.CUBE] = create_mesh(self, mesh.make_cube())
-  self.builtin_meshes[.SPHERE] = create_mesh(self, mesh.make_sphere())
-  self.builtin_meshes[.QUAD_XZ] = create_mesh(self, mesh.make_quad())
-  self.builtin_meshes[.QUAD_XY] = create_mesh(self, mesh.make_billboard_quad())
-  self.builtin_meshes[.CONE] = create_mesh(self, mesh.make_cone())
-  self.builtin_meshes[.CYLINDER] = create_mesh(self, mesh.make_cylinder())
+  self.builtin_meshes[.CUBE] = create_mesh(self, make_cube())
+  self.builtin_meshes[.SPHERE] = create_mesh(self, make_sphere())
+  self.builtin_meshes[.QUAD_XZ] = create_mesh(self, make_quad())
+  self.builtin_meshes[.QUAD_XY] = create_mesh(self, make_billboard_quad())
+  self.builtin_meshes[.CONE] = create_mesh(self, make_cone())
+  self.builtin_meshes[.CYLINDER] = create_mesh(self, make_cylinder())
 }

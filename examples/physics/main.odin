@@ -6,7 +6,6 @@ import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
-import "../../mjolnir/render/mesh"
 import "../../mjolnir/physics"
 import "core:log"
 import "core:math"
@@ -41,7 +40,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 800, 600, "Physics") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "Physics", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "Physics", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -65,8 +64,8 @@ setup :: proc(app: ^App) {
   sphere_mat := app.renderer.builtin_materials[.MAGENTA]
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
   cube_mat := app.renderer.builtin_materials[.RED]
-  rand_sphere := mesh.make_sphere()
-  rand_cylinder := mesh.make_cylinder()
+  rand_sphere := render.make_sphere()
+  rand_cylinder := render.make_cylinder()
   for &v in rand_sphere.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   for &v in rand_cylinder.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   rand_sphere_mesh := render.create_mesh(&app.renderer, rand_sphere)

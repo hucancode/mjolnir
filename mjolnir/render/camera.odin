@@ -2,21 +2,9 @@ package render
 
 import geom "../geometry"
 import cont "../containers"
-import "gpu"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import vk "vendor:vulkan"
-
-// AttachmentType names the images a camera renders into.
-AttachmentType :: enum {
-  FINAL_IMAGE        = 0,
-  NORMAL             = 1,
-  ALBEDO             = 2,
-  METALLIC_ROUGHNESS = 3,
-  EMISSIVE           = 4,
-  DEPTH              = 5,
-}
 
 // The aspect ratio follows the camera's extent.
 PerspectiveProjection :: struct {
@@ -35,8 +23,23 @@ CameraProjection :: union {
   OrthographicProjection,
 }
 
+// Camera c's frame f takes pyramid and draw-list slot camera_slot(c) + f; the shadow views
+// take one draw-list slot per frame after every camera's. A camera keeps one list per
+// material type, the shadow views share one.
+@(private)
+camera_slot :: #force_inline proc "contextless" (camera: u32) -> u32 {
+  return camera * FRAMES_IN_FLIGHT
+}
+@(private)
+SHADOW_DRAW_SLOT_BASE :: MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
+#assert(SHADOW_DRAW_SLOT_BASE + FRAMES_IN_FLIGHT <= MAX_DRAW_LIST_SLOTS)
+@(private)
+CAMERA_LIST_CAPACITY :: MAX_NODES_IN_SCENE
+@(private)
+SHADOW_LIST_CAPACITY :: 4096 * MAX_SHADOW_VIEWS
+
 // Camera is a view into the scene: pose and projection, plus the images it renders into.
-// Its draw lists and depth pyramids live in Renderer arrays at its slot (camera_slot).
+// Its depth pyramids live in Renderer.pyramids at its slot (camera_slot).
 Camera :: struct {
   position:                     [3]f32,
   rotation:                     quaternion128,
@@ -44,7 +47,7 @@ Camera :: struct {
   // clip planes, shared by both projections
   near, far:                    f32,
   extent:                       [2]u32, // width, height
-  attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]TextureHandle,
+  attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]TextureHandle,
   // first serial whose compute work may read depth and pyramids; until then no occlusion, no lists
   ready_serial:                 u64,
 }
@@ -237,10 +240,14 @@ create_camera :: proc(
   }
   camera_set_perspective(cam, fov, near_plane, far_plane)
   camera_look_at(cam, position, target)
-  // frame N's culling writes the lists frame N+1 draws
-  res := draw_lists_create(self, CAMERA_DRAW_SLOT_BASE + camera_slot(u32(handle)), len(MaterialType), CAMERA_LIST_CAPACITY)
-  if res == .SUCCESS do res = create_targets(self, u32(handle))
-  if res != .SUCCESS {
+  // the lists' size does not depend on the camera's extent
+  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
+    if !backend_draw_list_create(&self.gpu, camera_slot(u32(handle)) + frame, len(MaterialType), CAMERA_LIST_CAPACITY) {
+      destroy_camera(self, handle)
+      return 0, false
+    }
+  }
+  if !create_targets(self, u32(handle)) {
     destroy_camera(self, handle)
     return 0, false
   }
@@ -252,7 +259,7 @@ destroy_camera :: proc(self: ^Renderer, handle: CameraHandle) {
   cam := camera(self, handle)
   if cam == nil do return
   destroy_targets(self, u32(handle))
-  draw_lists_destroy(self, CAMERA_DRAW_SLOT_BASE + camera_slot(u32(handle)))
+  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) do backend_draw_list_destroy(&self.gpu, camera_slot(u32(handle)) + frame)
   cont.slots_free(&self.camera_slots, u32(handle))
   if handle == self.main_camera do self.main_camera = 0
 }
@@ -276,60 +283,80 @@ resize_camera :: proc(
   self: ^Renderer,
   handle: CameraHandle,
   width, height: u32,
-) -> vk.Result {
-  cam, ok := camera(self, handle)
-  if !ok do return .SUCCESS
-  if cam.extent == {width, height} do return .SUCCESS
+) -> bool {
+  cam := camera(self, handle) or_return
+  if cam.extent == {width, height} do return true
   cam.extent = {width, height}
   destroy_targets(self, u32(handle))
   create_targets(self, u32(handle)) or_return
   log.infof("Camera resized to %dx%d", width, height)
-  return .SUCCESS
+  return true
 }
 
-// Pipelines drawing into an attachment take its format from here.
+// A camera or a shadow map face, as the views table holds it. A drawn node goes to list
+// type * list_stride of `draw_list`: cameras keep one list per material type (stride 1);
+// shadow views share one list (stride 0) and tell draws apart by instance_tag.
 @(private)
-ATTACHMENTS := [AttachmentType]struct {
-  format: vk.Format,
-  usage:  vk.ImageUsageFlags,
-  // also accessed by the async compute queue
-  shared: bool,
-} {
-  .FINAL_IMAGE        = {gpu.HDR_COLOR_FORMAT, {.COLOR_ATTACHMENT, .SAMPLED}, false},
-  .NORMAL             = {.R8G8B8A8_UNORM, {.COLOR_ATTACHMENT, .SAMPLED}, false},
-  .ALBEDO             = {.R8G8B8A8_UNORM, {.COLOR_ATTACHMENT, .SAMPLED}, false},
-  .METALLIC_ROUGHNESS = {.R8G8B8A8_UNORM, {.COLOR_ATTACHMENT, .SAMPLED}, false},
-  // HDR, feeds bloom
-  .EMISSIVE           = {.R16G16B16A16_SFLOAT, {.COLOR_ATTACHMENT, .SAMPLED}, false},
-  // the depth pyramid build reads it
-  .DEPTH              = {.D32_SFLOAT, {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED}, true},
+ViewGPU :: struct {
+  view:                matrix[4, 4]f32,
+  projection:          matrix[4, 4]f32,
+  view_projection:     matrix[4, 4]f32,
+  // rebuilds world positions from depth
+  inv_view_projection: matrix[4, 4]f32,
+  planes:              [6][4]f32, // normalized, pointing inward
+  position:            [4]f32,
+  extent:              [2]f32,
+  near, far:           f32,
+  attachments:         [AttachmentType]u32,
+  // bindless depth pyramid
+  pyramid:         u32,
+  // bit t: material type t is tested against the pyramid
+  occlusion_mask:  u32,
+  list_stride:     u32,
+  // bit t: material type t is drawn
+  type_mask:       u32,
+  require_flags:   NodeFlagSet,
+  // OR-ed into each draw's first_instance above the node index
+  instance_tag:    u32,
+  // render target layer
+  layer:           u32,
+  // bindless draw lists slot the view appends to
+  draw_list:       u32,
+  // draws per list
+  list_capacity:   u32,
+  _:               u32,
 }
+#assert(size_of(ViewGPU) == 448)
 
+// A camera's attachments, depth pyramids and draw lists, one set per frame in flight: frame
+// N's culling writes the lists frame N+1 draws. A depth pyramid is a max-depth texture at
+// half the camera's resolution.
 @(private)
-create_targets :: proc(self: ^Renderer, index: u32) -> vk.Result {
-  gctx := &self.gctx
+create_targets :: proc(self: ^Renderer, index: u32) -> bool {
   camera := &self.cameras[index]
-  extent := vk.Extent2D{camera.extent[0], camera.extent[1]}
+  attachments := ATTACHMENTS
   for a in AttachmentType {
-    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-      camera.attachments[a][frame] = allocate_texture(
-        self,
-        extent,
-        ATTACHMENTS[a].format,
-        ATTACHMENTS[a].usage,
-        shared = ATTACHMENTS[a].shared,
-        target = true,
-      ) or_return
+    desc := attachments[a]
+    desc.extent = camera.extent
+    for frame in 0 ..< FRAMES_IN_FLIGHT {
+      camera.attachments[a][frame] = allocate_texture(self, desc, target = true) or_return
     }
   }
-  // depth leaves UNDEFINED next frame; compute of the frame after is the first reader
-  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    depth := texture_image(self, camera.attachments[.DEPTH][frame])
-    gpu.queue_image_init(gctx, {depth.image, {.DEPTH}, {.DEPTH_STENCIL_ATTACHMENT_READ}, {.EARLY_FRAGMENT_TESTS}})
+  half := [2]u32{max(1, camera.extent.x / 2), max(1, camera.extent.y / 2)}
+  pyramid := TextureDesc {
+    extent     = half,
+    format     = .R32F,
+    usage      = {.SAMPLED, .STORAGE},
+    mip_levels = calculate_mip_levels(half.x, half.y),
+    shared     = true,
   }
-  camera.ready_serial = gctx.frame_serial + 1
-  for frame in 0 ..< u32(gpu.FRAMES_IN_FLIGHT) do occlusion_setup_pyramid(self, camera_slot(index) + frame, extent) or_return
-  return .SUCCESS
+  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
+    slot := camera_slot(index) + frame
+    self.pyramids[slot] = allocate_texture(self, pyramid, target = true) or_return
+    backend_pyramid_create(&self.gpu, slot, self.pyramids[slot]) or_return
+  }
+  camera.ready_serial = backend_frame_serial(&self.gpu) + 1
+  return true
 }
 
 @(private)
@@ -337,7 +364,12 @@ destroy_targets :: proc(self: ^Renderer, index: u32) {
   camera := &self.cameras[index]
   for frames in camera.attachments do for handle in frames do destroy_texture(self, handle)
   camera.attachments = {}
-  for frame in 0 ..< u32(gpu.FRAMES_IN_FLIGHT) do occlusion_destroy_pyramid(self, camera_slot(index) + frame)
+  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
+    slot := camera_slot(index) + frame
+    backend_pyramid_destroy(&self.gpu, slot)
+    destroy_texture(self, self.pyramids[slot])
+    self.pyramids[slot] = 0
+  }
 }
 
 // main_camera_orbit is camera_orbit on the main camera. The controller owns yaw, pitch and

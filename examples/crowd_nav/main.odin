@@ -4,7 +4,6 @@ package main
 import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
-import "../../mjolnir/render/mesh"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import nav "../../mjolnir/navigation"
@@ -60,7 +59,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 1000, 700, "Crowd Navigation") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "Crowd Navigation", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "Crowd Navigation", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -85,9 +84,9 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 build_scene :: proc(app: ^App) {
-  ground_geom := mesh.make_quad({0.25, 0.55, 0.25, 1})
+  ground_geom := render.make_quad({0.25, 0.55, 0.25, 1})
   for &v in ground_geom.vertices { v.position.x *= WORLD_HALF * 2; v.position.z *= WORLD_HALF * 2 }
-  bake.append_triangles(&nav_builder, mesh.positions(ground_geom, context.temp_allocator), ground_geom.indices)
+  bake.append_triangles(&nav_builder, render.positions(ground_geom, context.temp_allocator), ground_geom.indices)
   gm := render.create_mesh(&app.renderer, ground_geom)
   gmat := render.create_material(&app.renderer, type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8)
   ground := world.spawn(&app.scene)
@@ -100,9 +99,9 @@ build_scene :: proc(app: ^App) {
     {{38, 1.5, -22}, {2, 3, 4}}, {{-38, 1.5, 22}, {2, 3, 4}},
   }
   for o in obstacles {
-    g := mesh.make_cube({0.7, 0.2, 0.2, 1})
+    g := render.make_cube({0.7, 0.2, 0.2, 1})
     for &v in g.vertices { v.position.x *= o.size.x; v.position.y *= o.size.y; v.position.z *= o.size.z }
-    bake.append_triangles(&nav_builder, mesh.positions(g, context.temp_allocator), g.indices, o.pos, true)
+    bake.append_triangles(&nav_builder, render.positions(g, context.temp_allocator), g.indices, o.pos, true)
     mh := render.create_mesh(&app.renderer, g)
     mat := render.create_material(&app.renderer, type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6)
     n := world.spawn(&app.scene, o.pos)
@@ -118,7 +117,7 @@ visualize_navmesh :: proc(app: ^App) {
   world.despawn(&app.scene, navmesh_node_handle)
   positions, indices := nav.debug_triangles(&navmesh, context.temp_allocator)
   for &p in positions do p.y += 0.2 // lift above the ground to avoid z-fighting
-  nm_geom := mesh.from_triangles(positions, indices)
+  nm_geom := render.from_triangles(positions, indices)
   nm_mesh, mesh_ok := render.create_mesh(&app.renderer, nm_geom)
   if !mesh_ok do return
   nm_mat, mat_ok := render.create_material(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7})
@@ -157,7 +156,7 @@ spawn_agents :: proc(app: ^App) {
     pos := [3]f32{math.cos(angle) * r, 0, math.sin(angle) * r}
     agents[i].id = crowd.add_agent(agent_crowd, pos, params)
     agents[i].color = palette[i % len(palette)]
-    cap_geom := mesh.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS)
+    cap_geom := render.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS)
     mh := render.create_mesh(&app.renderer, cap_geom)
     mat := render.create_material(&app.renderer, type = .PBR, base_color_factor = agents[i].color, emissive_value = 0.4)
     agents[i].node = world.spawn(&app.scene, pos + {0, AGENT_HEIGHT * 0.5, 0})

@@ -1,4 +1,4 @@
-package gpu
+package vulkan_backend
 
 import "core:mem"
 import "core:slice"

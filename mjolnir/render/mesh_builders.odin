@@ -1,6 +1,6 @@
-package mesh
+package render
 
-import "../../geometry"
+import "../geometry"
 import "core:math"
 import "core:math/linalg"
 

@@ -4,7 +4,6 @@ package main
 import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
-import "../../mjolnir/render/mesh"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import nav "../../mjolnir/navigation"
@@ -53,7 +52,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 800, 600, "Navigation Mesh") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "Navigation Mesh", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "Navigation Mesh", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -94,9 +93,9 @@ demo_setup :: proc(app: ^App) {
 }
 
 create_demo_scene :: proc(app: ^App) {
-  ground_geom := mesh.make_quad({0.2, 0.6, 0.2, 1.0})
+  ground_geom := render.make_quad({0.2, 0.6, 0.2, 1.0})
   for &v in ground_geom.vertices { v.position.x *= 50; v.position.z *= 50 }
-  bake.append_triangles(&nav_builder, mesh.positions(ground_geom, context.temp_allocator), ground_geom.indices)
+  bake.append_triangles(&nav_builder, render.positions(ground_geom, context.temp_allocator), ground_geom.indices)
   ground_mesh := render.create_mesh(&app.renderer, ground_geom)
   ground_mat := render.material_pbr(&app.renderer, metallic = 0.1, roughness = 0.8, emissive = 0.02)
   ground_handle = spawn_mesh(app, ground_mesh, ground_mat)
@@ -106,9 +105,9 @@ create_demo_scene :: proc(app: ^App) {
   obstacle_sizes := [][3]f32{{2, 3, 2}, {2, 3, 2}, {2, 3, 2}, {2, 3, 2}, {4, 4, 4}}
   for pos, i in obstacle_positions {
     size := obstacle_sizes[i]
-    g := mesh.make_cube({0.8, 0.2, 0.2, 1.0})
+    g := render.make_cube({0.8, 0.2, 0.2, 1.0})
     for &v in g.vertices { v.position.x *= size.x; v.position.y *= size.y; v.position.z *= size.z }
-    bake.append_triangles(&nav_builder, mesh.positions(g, context.temp_allocator), g.indices, pos, true)
+    bake.append_triangles(&nav_builder, render.positions(g, context.temp_allocator), g.indices, pos, true)
     mh := render.create_mesh(&app.renderer, g)
     mat := render.material_pbr(&app.renderer, metallic = 0.3, roughness = 0.7, emissive = 0.1)
     h := spawn_mesh(app, mh, mat, pos)
@@ -119,7 +118,7 @@ create_demo_scene :: proc(app: ^App) {
 }
 
 create_agent :: proc(app: ^App) {
-  agent_geom := mesh.make_cylinder(16, 2, 0.5, {0.2, 0.5, 1.0, 1.0})
+  agent_geom := render.make_cylinder(16, 2, 0.5, {0.2, 0.5, 1.0, 1.0})
   mh := render.create_mesh(&app.renderer, agent_geom)
   mat := render.material_pbr(&app.renderer, metallic = 0.3, roughness = 0.6, emissive = 0.3)
   agent_handle = spawn_mesh(app, mh, mat, agent_pos + {0, 1, 0})
@@ -139,7 +138,7 @@ setup_navigation_mesh :: proc(app: ^App) {
 visualize_navmesh :: proc(app: ^App) {
   world.despawn(&app.scene, navmesh_node_handle)
   positions, indices := nav.debug_triangles(&navmesh, context.temp_allocator)
-  navmesh_geom := mesh.from_triangles(positions, indices)
+  navmesh_geom := render.from_triangles(positions, indices)
   log.infof("Built navmesh visualization geometry: %d vertices, %d indices", len(navmesh_geom.vertices), len(navmesh_geom.indices))
   m, m_ok := render.create_mesh(&app.renderer, navmesh_geom)
   if !m_ok { log.error("Failed to create navmesh visualization mesh"); return }
@@ -164,7 +163,7 @@ start_find_path :: proc(app: ^App) {
 
 update_position_marker :: proc(app: ^App, handle: ^world.NodeHandle, pos: [3]f32, color: [4]f32) {
   world.despawn(&app.scene, handle^)
-  g := mesh.make_sphere(12, 6, 0.3, color)
+  g := render.make_sphere(12, 6, 0.3, color)
   m := render.create_mesh(&app.renderer, g)
   mat := render.material_pbr(&app.renderer, metallic = 0.2, roughness = 0.8, emissive = 0.5)
   handle^ = spawn_mesh(app, m, mat, pos + {0, 0.2, 0})

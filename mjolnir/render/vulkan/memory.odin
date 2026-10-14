@@ -1,4 +1,4 @@
-package gpu
+package vulkan_backend
 
 import vk "vendor:vulkan"
 
@@ -67,10 +67,6 @@ mapped :: proc(buffer: ^Buffer, $T: typeid, offset: vk.DeviceSize = 0, count := 
   if count < 0 do count = int((buffer.size - offset) / size_of(T))
   return ([^]T)(&buffer.mapped[offset])[:count]
 }
-
-// RETIRE_GRACE is the frames a freed resource or pool slot waits before it is
-// destroyed or reused: frames in flight plus one for async compute.
-RETIRE_GRACE :: FRAMES_IN_FLIGHT + 1
 
 // Trash is a resource that defer_destroy can queue; pool-managed resources retire through their pool instead.
 Trash :: union {

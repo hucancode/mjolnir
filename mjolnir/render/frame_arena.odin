@@ -1,10 +1,7 @@
 package render
 
 import cont "../containers"
-import "core:mem"
 import "core:slice"
-import "gpu"
-import vk "vendor:vulkan"
 
 // About 16 MB per frame in flight.
 @(private)
@@ -30,79 +27,74 @@ BONE_CAPACITY ::
 #assert(BONE_SLAB_CONFIG[6].block_count == 0 && BONE_SLAB_CONFIG[7].block_count == 0)
 
 // A write sets its regions' debt to the frames that miss it; each hand_off pays one off.
-// The frame arena holds one copy of every CPU-written table (BINDINGS) per frame in flight;
+// The frame arena holds one copy of every CPU-written table (TABLES) per frame in flight;
 // only the write frame is written, and mark_dirty + hand_off carry writes into the next copy.
 @(private)
 REGION_COUNT :: 64
 @(private)
-RegionDebt :: [SceneBinding][REGION_COUNT]u8
+RegionDebt :: [Table][REGION_COUNT]u8
 
+// The tables render writes: `capacity` entries of `stride` bytes, one copy per frame in flight
+// in the backend's frame arena. The entry layouts are the GPU data contract: every backend's
+// shaders mirror them.
 @(private)
-table_range :: proc(b: SceneBinding) -> vk.DeviceSize {
-  return vk.DeviceSize(BINDINGS[b].stride * BINDINGS[b].capacity)
-}
-
-// Offset of each binding's table in the arena; every table is aligned.
-@(private)
-arena_layout :: proc(alignment: vk.DeviceSize) -> (offset: [SceneBinding]vk.DeviceSize, size: vk.DeviceSize) {
-  for b in SceneBinding {
-    size = vk.DeviceSize(mem.align_forward_uint(uint(size), uint(alignment)))
-    offset[b] = size
-    size += table_range(b)
-  }
-  return
+TABLES := [Table]struct {
+  stride:   int,
+  capacity: int,
+} {
+  .VIEWS = {size_of(ViewGPU), MAX_VIEWS},
+  .NODES = {size_of(NodeData), MAX_NODES_IN_SCENE},
+  .MESHES = {size_of(MeshData), MAX_MESHES},
+  .MATERIALS = {size_of(Material), MAX_MATERIALS},
+  .BONES = {size_of(matrix[4, 4]f32), BONE_CAPACITY},
+  .EMITTERS = {size_of(Emitter), MAX_EMITTERS},
+  .FORCEFIELDS = {size_of(ForceField), MAX_FORCE_FIELDS},
+  .LIGHTS = {size_of(Light), MAX_LIGHTS},
+  .DEBUG_LINES = {size_of(DebugLineSegment), MAX_SEGMENTS},
 }
 
 @(private)
 write_frame :: #force_inline proc(self: ^Renderer) -> u32 {
-  return u32(self.gctx.frame_serial % gpu.FRAMES_IN_FLIGHT)
-}
-
-// Empty for a binding outside the arena.
-@(private)
-table_bytes :: proc(self: ^Renderer, b: SceneBinding, frame_index: u32) -> []u8 {
-  return self.frame_arena[frame_index].mapped[self.arena_offset[b]:][:table_range(b)]
+  return u32(backend_frame_serial(&self.gpu) % FRAMES_IN_FLIGHT)
 }
 
 @(private)
-frame_table :: proc(self: ^Renderer, b: SceneBinding, $T: typeid, frame_index: u32) -> []T {
-  bytes := table_bytes(self, b, frame_index)
-  return ([^]T)(raw_data(bytes))[:len(bytes) / size_of(T)]
+frame_table :: proc(self: ^Renderer, t: Table, $T: typeid, frame_index: u32) -> []T {
+  return slice.reinterpret([]T, backend_table(&self.gpu, t, frame_index))
 }
 
 // Callers mark what they change with mark_dirty.
 @(private)
-write_table :: #force_inline proc(self: ^Renderer, b: SceneBinding, $T: typeid) -> []T {
-  return frame_table(self, b, T, write_frame(self))
+write_table :: #force_inline proc(self: ^Renderer, t: Table, $T: typeid) -> []T {
+  return frame_table(self, t, T, write_frame(self))
 }
 
 // Zeroes `count` entries of the write table from `index` and marks them.
 @(private)
-clear_entry :: proc(self: ^Renderer, b: SceneBinding, index: u32, count: u32 = 1) {
+clear_entry :: proc(self: ^Renderer, t: Table, index: u32, count: u32 = 1) {
   if count == 0 do return
-  stride := BINDINGS[b].stride
-  slice.zero(table_bytes(self, b, write_frame(self))[int(index) * stride:][:int(count) * stride])
-  mark_dirty(self, b, int(index), int(count))
+  stride := TABLES[t].stride
+  slice.zero(backend_table(&self.gpu, t, write_frame(self))[int(index) * stride:][:int(count) * stride])
+  mark_dirty(self, t, int(index), int(count))
 }
 
 @(private)
-mark_dirty :: proc(self: ^Renderer, b: SceneBinding, index: int, count := 1) {
-  stride := BINDINGS[b].stride
-  region := (int(table_range(b)) + REGION_COUNT - 1) / REGION_COUNT
+mark_dirty :: proc(self: ^Renderer, t: Table, index: int, count := 1) {
+  stride := TABLES[t].stride
+  region := (len(backend_table(&self.gpu, t, write_frame(self))) + REGION_COUNT - 1) / REGION_COUNT
   first := index * stride / region
   last := min(((index + count) * stride - 1) / region, REGION_COUNT - 1)
-  for r in first ..= last do self.region_debt[b][r] = gpu.FRAMES_IN_FLIGHT - 1
+  for r in first ..= last do self.region_debt[t][r] = FRAMES_IN_FLIGHT - 1
 }
 
-// Call right after submitting `from`, which holds every write so far.
+// Call once the backend submitted `from`, which holds every write so far, and freed the next copy.
 @(private)
-hand_off :: proc(self: ^Renderer, from: u32) -> vk.Result {
-  gpu.wait_frame(&self.gctx) or_return
+hand_off :: proc(self: ^Renderer, from: u32) {
   to := write_frame(self)
-  for b in SceneBinding {
-    src, dst := table_bytes(self, b, from), table_bytes(self, b, to)
+  for t in Table {
+    src, dst := backend_table(&self.gpu, t, from), backend_table(&self.gpu, t, to)
     region := (len(src) + REGION_COUNT - 1) / REGION_COUNT
-    for &debt, r in self.region_debt[b] {
+    for &debt, r in self.region_debt[t] {
       if debt == 0 do continue
       debt -= 1
       lo := min(r * region, len(src))
@@ -110,41 +102,4 @@ hand_off :: proc(self: ^Renderer, from: u32) -> vk.Result {
       copy(dst[lo:hi], src[lo:hi])
     }
   }
-  return .SUCCESS
-}
-
-@(private)
-init_scene_buffers :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-) -> (
-  ret: vk.Result,
-) {
-  defer if ret != .SUCCESS do destroy_scene_buffers(self, gctx)
-  cont.slab_init(&self.bone_matrix_slab, BONE_SLAB_CONFIG)
-  arena_size: vk.DeviceSize
-  self.arena_offset, arena_size = arena_layout(gctx.device_properties.limits.minStorageBufferOffsetAlignment)
-  for &arena in self.frame_arena {
-    arena = gpu.buffer_create(gctx, arena_size, {.STORAGE_BUFFER}, host_cached = true) or_return
-    mem.zero(arena.mapped, int(arena.size))
-  }
-  for &readback in self.draw_count_readback {
-    readback = gpu.buffer_create(gctx, DRAW_LIST_HEADER * size_of(u32), {.TRANSFER_DST}) or_return
-  }
-  self.pyramid_counters = gpu.buffer_create(gctx, MAX_PYRAMID_SLOTS * size_of(u32), {.STORAGE_BUFFER}, host_visible = false) or_return
-  gpu.queue_buffer_fill(gctx, &self.pyramid_counters)
-  particles_init_buffers(self) or_return
-  for &atlas in self.shadow_atlas do atlas = shadow_atlas_create(gctx, 1) or_return
-  return .SUCCESS
-}
-
-@(private)
-destroy_scene_buffers :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  for &arena in self.frame_arena do gpu.buffer_destroy(gctx.device, &arena)
-  for &readback in self.draw_count_readback do gpu.buffer_destroy(gctx.device, &readback)
-  for &atlas in self.shadow_atlas do gpu.image_destroy(gctx.device, &atlas)
-  gpu.buffer_destroy(gctx.device, &self.pyramid_counters)
-  gpu.buffer_destroy(gctx.device, &self.particle_buffer)
-  gpu.buffer_destroy(gctx.device, &self.particle_alive_buffer)
-  cont.slab_destroy(&self.bone_matrix_slab)
 }

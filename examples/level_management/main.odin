@@ -5,7 +5,6 @@ import "../../mjolnir"
 import anim "../../mjolnir/animation"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
-import "../../mjolnir/render/mesh"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
@@ -45,7 +44,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 1100, 760, "Level Management") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "Level Management", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "Level Management", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -87,12 +86,12 @@ setup :: proc(app: ^App) {
 
   // One example mesh per column (distinct primitive), so "Destroy All Meshes" is
   // visible: every column collapses to the builtin cube.
-  primitives := [GRID]mesh.Geometry {
-    mesh.make_sphere(),
-    mesh.make_cone(),
-    mesh.make_capsule(),
-    mesh.make_cylinder(),
-    mesh.make_torus(),
+  primitives := [GRID]render.Geometry {
+    render.make_sphere(),
+    render.make_cone(),
+    render.make_capsule(),
+    render.make_cylinder(),
+    render.make_torus(),
   }
   col_meshes: [GRID]render.MeshHandle
   for geom, col in primitives {

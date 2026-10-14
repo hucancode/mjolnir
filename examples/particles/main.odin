@@ -61,7 +61,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 1280, 800, "Particles") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "Particles", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "Particles", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -74,8 +74,8 @@ main :: proc() {
 
   for name in TEXTURE_FILES {
     path := fmt.tprintf("assets/particles/%s.png", name)
-    handle, ret := render.create_texture_from_path(&app.renderer, path)
-    if ret != .SUCCESS do continue
+    handle, ok := render.create_texture_from_path(&app.renderer, path)
+    if !ok do continue
     append(&textures, TextureEntry{name = strings.clone(name), handle = handle})
   }
   if len(textures) > 0 && int(selected_tex_index) >= len(textures) do selected_tex_index = 0

@@ -1,4 +1,4 @@
-package gpu
+package vulkan_backend
 
 import "base:runtime"
 import "core:log"
@@ -13,9 +13,6 @@ when ODIN_OS == .Darwin {
   @(require, extra_linker_flags = "-Wl,-rpath,/usr/local/lib,")
   foreign import __ "system:System.framework"
 }
-// FRAMES_IN_FLIGHT is the number of frames the CPU may record ahead of the GPU.
-FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
-
 // not yet in vendor bindings (needs vulkan header >= 315)
 @(private)
 PhysicalDeviceUnifiedImageLayoutsFeaturesKHR :: struct {
@@ -132,8 +129,8 @@ timelines_init :: proc(self: ^GPUContext) -> vk.Result {
   return .SUCCESS
 }
 
-// shutdown destroys every object the context owns, including the device, surface and instance.
-shutdown :: proc(self: ^GPUContext) {
+// shutdown_context destroys every object the context owns, including the device, surface and instance.
+shutdown_context :: proc(self: ^GPUContext) {
   vk.DeviceWaitIdle(self.device)
   deferred_flush(self)
   delete(self.trash)

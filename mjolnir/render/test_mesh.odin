@@ -1,4 +1,4 @@
-package mesh
+package render
 
 import "core:math"
 import "core:math/linalg"

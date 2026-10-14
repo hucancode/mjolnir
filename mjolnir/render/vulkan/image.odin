@@ -1,7 +1,6 @@
-package gpu
+package vulkan_backend
 
 import "core:log"
-import "core:math"
 import vk "vendor:vulkan"
 
 // Image is a device-local, optimal-tiling 2D or cube image with a view over every mip and layer.
@@ -28,11 +27,6 @@ infer_aspect_mask :: proc(format: vk.Format) -> vk.ImageAspectFlags {
   case:
     return {.COLOR}
   }
-}
-
-// calculate_mip_levels returns the full mip chain length for the given dimensions.
-calculate_mip_levels :: proc(width, height: u32) -> u32 {
-  return u32(math.floor(math.log2(f32(max(width, height))))) + 1
 }
 
 // image_create allocates a device-local Image with a view, optionally mipmapped or a cube.

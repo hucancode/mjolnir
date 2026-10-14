@@ -48,7 +48,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 900, 700, "UI") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "UI", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "UI", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -106,7 +106,7 @@ build_ui :: proc(app: ^App) {
   app.looks[hint] = {{0, 0, 0, 160}, render.NO_TEXTURE}
   text(app, hint, "drag: orbit   wheel over list: scroll", 14)
   // an image anchored bottom-right, and a star mesh bottom-left
-  if star_texture, ret := render.create_texture_from_path(&app.renderer, "assets/gold-star.png"); ret == .SUCCESS {
+  if star_texture, ok := render.create_texture_from_path(&app.renderer, "assets/gold-star.png"); ok {
     image := ui.create(&app.gui, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, size = {{.FIXED, 128}, {.FIXED, 128}}})
     app.looks[image] = {{255, 255, 255, 255}, u32(star_texture)}
   }

@@ -6,7 +6,6 @@ import "core:log"
 import "core:strings"
 import "../input"
 import "vendor:glfw"
-import vk "vendor:vulkan"
 
 // Platform is a GLFW window that writes device events into `input`. Must not move after
 // init (the window callbacks keep a pointer to it).
@@ -20,10 +19,6 @@ Platform :: struct {
 init :: proc(self: ^Platform, width, height: u32, title: string) -> bool {
   if !glfw.Init() {
     log.errorf("Failed to initialize GLFW")
-    return false
-  }
-  if !glfw.VulkanSupported() {
-    log.errorf("GLFW: Vulkan Not Supported")
     return false
   }
   glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
@@ -64,25 +59,6 @@ poll_events :: proc(self: ^Platform) {
 // read_input takes this tick's input snapshot from the events polled so far.
 read_input :: proc(self: ^Platform, s: ^input.State) {
   input.new_frame(s, &self.input)
-}
-
-// vulkan_instance_extensions returns the instance extensions the window surface needs.
-vulkan_instance_extensions :: proc() -> []cstring {
-  return glfw.GetRequiredInstanceExtensions()
-}
-
-// vulkan_get_instance_proc_addr returns GLFW's vkGetInstanceProcAddr.
-vulkan_get_instance_proc_addr :: proc() -> rawptr {
-  return rawptr(glfw.GetInstanceProcAddress)
-}
-
-// create_surface creates a Vulkan surface for the window. `platform` is the ^Platform; the
-// erased pointer lets a renderer take this proc as a callback without
-// importing platform.
-create_surface :: proc(platform: rawptr, instance: vk.Instance) -> (surface: vk.SurfaceKHR, ret: vk.Result) {
-  self := cast(^Platform)platform
-  ret = glfw.CreateWindowSurface(instance, self.window, nil, &surface)
-  return
 }
 
 // framebuffer_size returns the framebuffer size in pixels.

@@ -1,27 +1,9 @@
 package render
 
 import cont "../containers"
-import "core:sync"
-import "gpu"
-import vk "vendor:vulkan"
 
-// How a material is drawn: one pipeline (MATERIAL_SHADERS) and, per camera,
-// one indirect draw list per type, drawn in this order. The types before
-// FIRST_FORWARD_TYPE are opaque: drawn into the G-buffer, lit by the lighting
-// pass, tested against the depth pyramid and drawn into shadow maps. The rest
-// are drawn forward, alpha-blended over the lit image.
-MaterialType :: enum u32 {
-  PBR,
-  TRANSPARENT,
-  WIREFRAME,
-  RANDOM_COLOR,
-  // camera-facing billboard showing one cell of the albedo sprite sheet
-  SPRITE,
-}
-
-@(private)
-FIRST_FORWARD_TYPE :: MaterialType.TRANSPARENT
-// bit t set for every G-buffer type t
+// bit t set for every G-buffer type t; views mask material types in a u32
+#assert(len(MaterialType) <= 32)
 @(private)
 GBUFFER_TYPES :: u32(1) << u32(FIRST_FORWARD_TYPE) - 1
 
@@ -56,6 +38,7 @@ Material :: struct {
   frame_index:              u32,
   type:                     MaterialType,
 }
+#assert(size_of(Material) == 64)
 
 // A pointer to a material in the table the next frame draws from: edit it in
 // place. The pointer is valid until the next frame; edits from another
@@ -202,131 +185,4 @@ init_builtin_materials :: proc(self: ^Renderer) {
   for color, i in colors {
     self.builtin_materials[i] = material_pbr(self, base_color = color) or_continue
   }
-}
-
-// Each MaterialType's pipeline is built against the targets of its pass (MATERIAL_PASS_TARGETS).
-@(private)
-MaterialPass :: enum {
-  // writes the G-buffer and depth, lit by the lighting pass
-  GBUFFER,
-  // alpha-blends into the lit image, depth-tested without writing
-  FORWARD,
-}
-
-// its outputs feed every mesh fragment shader
-@(private = "file")
-MESH_VERT :: #load("shader/gbuffer/vert.spv")
-
-@(private)
-MATERIAL_SHADERS := [MaterialType]struct {
-  vert, frag:   []u8,
-  polygon_mode: vk.PolygonMode,
-  cull_mode:    vk.CullModeFlags,
-} {
-  .PBR          = {vert = MESH_VERT, frag = #load("shader/gbuffer/frag.spv"), cull_mode = {.BACK}},
-  .TRANSPARENT  = {vert = MESH_VERT, frag = #load("shader/transparent/frag.spv"), cull_mode = {.BACK}},
-  .WIREFRAME    = {vert = MESH_VERT, frag = #load("shader/wireframe/frag.spv"), polygon_mode = .LINE},
-  .RANDOM_COLOR = {vert = MESH_VERT, frag = #load("shader/random_color/frag.spv"), cull_mode = {.BACK}},
-  .SPRITE       = {vert = #load("shader/sprite/vert.spv"), frag = #load("shader/sprite/frag.spv")},
-}
-
-// `colors` and the camera depth, all loaded with `load`.
-@(private)
-MaterialPassTargets :: struct {
-  colors: []AttachmentType,
-  blend:  vk.PipelineColorBlendAttachmentState,
-  depth:  vk.PipelineDepthStencilStateCreateInfo,
-  load:   vk.AttachmentLoadOp,
-}
-
-@(private)
-MATERIAL_PASS_TARGETS := [MaterialPass]MaterialPassTargets {
-  .GBUFFER = {
-    colors = {.NORMAL, .ALBEDO, .METALLIC_ROUGHNESS, .EMISSIVE},
-    blend = gpu.BLEND_OVERRIDE,
-    depth = gpu.READ_WRITE_DEPTH_STATE,
-    load = .CLEAR,
-  },
-  .FORWARD = {
-    colors = {.FINAL_IMAGE},
-    blend = gpu.BLEND_ALPHA,
-    depth = gpu.READ_ONLY_DEPTH_STATE,
-    load = .LOAD,
-  },
-}
-
-@(private)
-MATERIAL_PASS_TYPES := [MaterialPass][2]MaterialType {
-  .GBUFFER = {MaterialType(0), FIRST_FORWARD_TYPE},
-  .FORWARD = {FIRST_FORWARD_TYPE, MaterialType(len(MaterialType))},
-}
-
-@(private)
-material_pass_desc :: proc(pass: MaterialPass, desc: ^gpu.GraphicsPipelineDesc) {
-  t := &MATERIAL_PASS_TARGETS[pass]
-  formats := make([]vk.Format, len(t.colors), context.temp_allocator)
-  blend := make([]vk.PipelineColorBlendAttachmentState, len(t.colors), context.temp_allocator)
-  for a, i in t.colors {
-    formats[i] = ATTACHMENTS[a].format
-    blend[i] = t.blend
-  }
-  desc.color_formats = formats
-  desc.blend = blend
-  desc.depth = t.depth
-  desc.depth_format = ATTACHMENTS[.DEPTH].format
-}
-
-@(private)
-material_pipelines_init :: proc(r: ^Renderer) -> vk.Result {
-  for pass in MaterialPass {
-    types := MATERIAL_PASS_TYPES[pass]
-    for type in types[0] ..< types[1] {
-      shaders := MATERIAL_SHADERS[type]
-      // without fillModeNonSolid wireframe materials draw filled
-      polygon_mode := shaders.polygon_mode
-      if polygon_mode == .LINE && !r.gctx.fill_mode_non_solid do polygon_mode = .FILL
-      pipeline := gpu.GraphicsPipelineDesc {
-        vert = shaders.vert,
-        frag = shaders.frag,
-        vertex_bindings = VERTEX_BINDING_DESCRIPTION[:],
-        vertex_attributes = VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
-        topology = .TRIANGLE_LIST,
-        polygon_mode = polygon_mode,
-        cull_mode = shaders.cull_mode,
-        layout = r.scene.layout,
-      }
-      material_pass_desc(pass, &pipeline)
-      r.material_pipelines[type] = gpu.create_graphics_pipeline(&r.gctx, pipeline) or_return
-    }
-  }
-  return .SUCCESS
-}
-
-// The forward pass draws particles first. A camera draws nothing until a cull has written its lists.
-@(private)
-material_pass_record :: proc(
-  r: ^Renderer,
-  frame_index: u32,
-  cam_index: u32,
-  pass: MaterialPass,
-) {
-  cmd := r.command_buffers[frame_index]
-  cam := &r.cameras[cam_index]
-  t := &MATERIAL_PASS_TARGETS[pass]
-  colors := make([]vk.RenderingAttachmentInfo, len(t.colors), context.temp_allocator)
-  for a, i in t.colors do colors[i] = gpu.create_color_attachment(texture_image(r, cam.attachments[a][frame_index]).view, t.load)
-  depth := texture_image(r, cam.attachments[.DEPTH][frame_index])
-  gpu.begin_rendering(cmd, depth.extent, gpu.create_depth_attachment(depth.view, t.load), ..colors)
-  push := cam_index
-  push_constants(r, cmd, &push)
-  if pass == .FORWARD do particles_draw(r, cmd)
-  if r.gctx.frame_serial >= cam.ready_serial {
-    bind_mesh_buffers(r, cmd)
-    types := MATERIAL_PASS_TYPES[pass]
-    for type in types[0] ..< types[1] {
-      vk.CmdBindPipeline(cmd, .GRAPHICS, r.material_pipelines[type])
-      draw_lists_draw(r, cmd, CAMERA_DRAW_SLOT_BASE + camera_slot(cam_index) + frame_index, u32(type), CAMERA_LIST_CAPACITY)
-    }
-  }
-  vk.CmdEndRendering(cmd)
 }

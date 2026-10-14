@@ -140,7 +140,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 1280, 720, "Mjolnir") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "Mjolnir", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "Mjolnir", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -240,9 +240,9 @@ setup :: proc(app: ^App) {
   when true {
     brick_wall_mat_handle: render.MaterialHandle
     brick_wall_mat_ok := false
-    brick_albedo_handle, brick_albedo_ret := render.create_texture_from_path(&app.renderer, "assets/t_brick_floor_002_diffuse_1k.jpg",
+    brick_albedo_handle, brick_albedo_ok := render.create_texture_from_path(&app.renderer, "assets/t_brick_floor_002_diffuse_1k.jpg",
     )
-    if brick_albedo_ret == .SUCCESS {
+    if brick_albedo_ok {
       brick_wall_mat_handle, brick_wall_mat_ok = render.create_material(
         &app.renderer,
         albedo_handle = brick_albedo_handle,
@@ -515,12 +515,10 @@ setup :: proc(app: ^App) {
   }
   when true {
     log.info("Setting up particles...")
-    black_circle_texture_handle, black_circle_ret := render.create_texture_from_path(&app.renderer, "assets/particles/circle_05.png",
+    black_circle_texture_handle, black_circle_ok := render.create_texture_from_path(&app.renderer, "assets/particles/circle_05.png",
     )
-    black_circle_ok := black_circle_ret == .SUCCESS
-    goldstar_texture_handle, goldstar_texture_ret := render.create_texture_from_path(&app.renderer, "assets/particles/star_07.png",
+    goldstar_texture_handle, goldstar_texture_ok := render.create_texture_from_path(&app.renderer, "assets/particles/star_07.png",
     )
-    goldstar_texture_ok := goldstar_texture_ret == .SUCCESS
     goldstar_material_handle: render.MaterialHandle
     goldstar_material_ok := false
     if goldstar_texture_ok {
@@ -644,9 +642,9 @@ setup :: proc(app: ^App) {
     log.info(
       "spawning Warrior effect sprite with animation (99 frames @ 24fps)...",
     )
-    warrior_sprite_texture, warrior_sprite_ret := render.create_texture_from_path(&app.renderer, "assets/Warrior_Sheet-Effect.png",
+    warrior_sprite_texture, warrior_sprite_ok := render.create_texture_from_path(&app.renderer, "assets/Warrior_Sheet-Effect.png",
     )
-    if warrior_sprite_ret == .SUCCESS {
+    if warrior_sprite_ok {
       // 6x17 sprite sheet using frames 0-98, animated in update
       sprite_material, sprite_ok := render.material_sprite(
         &app.renderer,

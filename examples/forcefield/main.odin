@@ -43,7 +43,7 @@ main :: proc() {
   w := &app.window
   if !platform.init(w, 1100, 720, "Forcefield") do return
   defer platform.shutdown(w)
-  if !render.init(&app.renderer, "Forcefield", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !render.init(&app.renderer, "Forcefield", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
@@ -83,7 +83,7 @@ setup :: proc(app: ^App) {
   app.renderer.skybox_intensity = 0
 
   // Particle source at center, large position spread
-  if tex, ret := render.create_texture_from_path(&app.renderer, "assets/particles/star_09.png"); ret == .SUCCESS {
+  if tex, ok := render.create_texture_from_path(&app.renderer, "assets/particles/star_09.png"); ok {
     em := render.emitter_attachment(
       texture_handle    = tex,
       emission_rate     = 100,
