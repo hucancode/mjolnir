@@ -35,8 +35,12 @@ FrameCamera :: struct {
   ready:       bool,
 }
 
-// FrameDesc is everything frame records besides the scene tables.
+// FrameDesc is everything frame records.
 FrameDesc :: struct {
+  // render's tables, the one copy; bit r of dirty[t] is region r of tables[t] (TABLE_REGIONS),
+  // written since the last submitted frame
+  tables:               [Table][]u8,
+  dirty:                [Table]u64,
   live_cameras:         []FrameCamera,
   // index into live_cameras of the camera presented to the swapchain, -1 for none
   main_live:            int,
@@ -63,6 +67,8 @@ FrameDesc :: struct {
   // render clock time; the shader skips segments past their expiry
   debug_line_time:      f32,
   ui_batches:           []UIBatch,
+  ui_vertices:          []Vertex2D,
+  ui_indices:           []u32,
 }
 
 // FrameStatus is how frame went: RESIZE asks for resize at the new framebuffer size.
@@ -107,6 +113,8 @@ Backend :: struct {
   frame_arena:             [FRAMES_IN_FLIGHT]Buffer,
   table_offset:            [SceneBinding]int,
   table_size:              [SceneBinding]int,
+  // per table, per copy: regions render wrote since the copy was last brought up to date
+  table_stale:             [Table][FRAMES_IN_FLIGHT]u64,
   draw_count_readback:     [FRAMES_IN_FLIGHT]Buffer,
   // per pyramid slot: groups done this dispatch; the last one resets it
   pyramid_counters:        Buffer,
@@ -125,13 +133,16 @@ Backend :: struct {
   ui_index_buffers:        [FRAMES_IN_FLIGHT]Buffer,
 }
 
+// WindowHandle is the window render draws into.
+WindowHandle :: glfw.WindowHandle
+
 // init brings Vulkan up on window: instance, surface, device, swapchain, the frame arena
 // holding `table_size` bytes per table, the mesh buffers of `mesh_size` bytes per
 // stream, and every pipeline. Paired with shutdown.
 init :: proc(
   b: ^Backend,
   app_name: string,
-  window: glfw.WindowHandle,
+  window: WindowHandle,
   framebuffer_size: [2]u32,
   table_size: [Table]int,
   mesh_size: [MeshStream]int,
@@ -231,6 +242,11 @@ init_scene_buffers :: proc(b: ^Backend, table_size: [Table]int) -> vk.Result {
   return .SUCCESS
 }
 
+// ready reports whether init has finished: Vulkan is up when init returns.
+ready :: proc(b: ^Backend) -> bool {
+  return true
+}
+
 // shutdown destroys every Vulkan object, textures included.
 shutdown :: proc(b: ^Backend) {
   gctx := &b.gctx
@@ -291,12 +307,6 @@ resize :: proc(b: ^Backend, framebuffer_size: [2]u32) -> bool {
   return check(swapchain_init(&b.swapchain, &b.gctx, framebuffer_size), "Swapchain rebuild")
 }
 
-// table is t in the copy of frame_index.
-table :: #force_inline proc(b: ^Backend, t: Table, frame_index: u32) -> []u8 {
-  binding := TABLE_BINDING[t]
-  return mapped(&b.frame_arena[frame_index], u8, vk.DeviceSize(b.table_offset[binding]), b.table_size[binding])
-}
-
 // mesh_write uploads data at element `first` of stream's buffer before the next frame.
 mesh_write :: proc(b: ^Backend, stream: MeshStream, data: []$T, first: u32) -> bool {
   return check(queue_buffer_write(&b.gctx, &b.mesh_buffers[stream], data, int(first)), "Mesh upload")
@@ -307,17 +317,14 @@ draw_count :: proc(b: ^Backend, frame_index: u32) -> u32 {
   return mapped(&b.draw_count_readback[frame_index], u32)[MaterialType.PBR]
 }
 
-// ui_memory is frame_index's overlay vertex and index buffers, written by render before frame.
-ui_memory :: proc(b: ^Backend, frame_index: u32) -> (vertices: []Vertex2D, indices: []u32) {
-  return mapped(&b.ui_vertex_buffers[frame_index], Vertex2D), mapped(&b.ui_index_buffers[frame_index], u32)
-}
-
-// frame records, submits and presents the frame whose tables render has written. Once
-// submitted it waits until the next frame's copy of the tables is free. RESIZE: the
-// swapchain is out of date.
+// frame records, submits and presents the frame render described. Once submitted it waits
+// until the next frame's copy of the tables is free. RESIZE: the swapchain is out of date.
 frame :: proc(b: ^Backend, desc: ^FrameDesc) -> (submitted: bool, status: FrameStatus) {
   gctx := &b.gctx
   frame_index := u32(gctx.frame_serial % FRAMES_IN_FLIGHT)
+  tables_sync(b, desc, frame_index)
+  copy(mapped(&b.ui_vertex_buffers[frame_index], Vertex2D), desc.ui_vertices)
+  copy(mapped(&b.ui_index_buffers[frame_index], u32), desc.ui_indices)
   for &cam in desc.live_cameras do occlusion_bind_pyramid(b, cam.slot)
   sc := &b.swapchain
   res := shadow_atlas_reserve(b, frame_index, desc.shadow_view_count)

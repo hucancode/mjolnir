@@ -8,20 +8,18 @@ Vertex2D :: struct {
   pos:        [2]f32,
   uv:         [2]f32,
   color:      [4]u8,
-  texture_id: u32,
 }
 
-// UIBatch is a run of overlay indices drawn inside one scissor (x, y, w, h).
+// UIBatch is a run of overlay indices drawn with one texture inside one scissor (x, y, w, h).
 UIBatch :: struct {
   first_index: u32,
   index_count: u32,
   scissor:     [4]i32,
+  texture:     TextureHandle,
 }
 
-// capacity of each frame's overlay buffers
-@(private)
+// UI_MAX_VERTICES and UI_MAX_INDICES are the overlay's capacity per frame.
 UI_MAX_VERTICES :: 65536
-@(private)
 UI_MAX_INDICES :: 98304
 
 @(private = "file")
@@ -29,10 +27,15 @@ VERTEX2D_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
   {binding = 0, location = 0, format = .R32G32_SFLOAT,  offset = u32(offset_of(Vertex2D, pos))},
   {binding = 0, location = 1, format = .R32G32_SFLOAT,  offset = u32(offset_of(Vertex2D, uv))},
   {binding = 0, location = 2, format = .R8G8B8A8_UNORM, offset = u32(offset_of(Vertex2D, color))},
-  {binding = 0, location = 3, format = .R32_UINT,       offset = u32(offset_of(Vertex2D, texture_id))},
 }
 
-// The overlay draws render's 2D batches (ui_memory) into the swapchain image after
+@(private = "file")
+OverlayPushConstants :: struct {
+  projection: matrix[4, 4]f32,
+  texture:    TextureHandle,
+}
+
+// The overlay draws render's 2D batches (FrameDesc.ui_*) into the swapchain image after
 // post-processing, with one pipeline and one vertex stream.
 @(private)
 overlay_init :: proc(b: ^Backend) -> vk.Result {
@@ -77,8 +80,9 @@ overlay_record :: proc(
   )
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, b.pipelines[.OVERLAY])
   // pixel y grows down, as clip-space y does
-  projection := linalg.matrix_ortho3d_f32(0, f32(extent.width), 0, f32(extent.height), -1, 1)
-  push_constants(b, command_buffer, &projection)
+  push := OverlayPushConstants {
+    projection = linalg.matrix_ortho3d_f32(0, f32(extent.width), 0, f32(extent.height), -1, 1),
+  }
   bind_vertex_index_buffers(
     command_buffer,
     b.ui_vertex_buffers[frame_index].buffer,
@@ -89,6 +93,8 @@ overlay_record :: proc(
     s := batch.scissor
     scissor := vk.Rect2D{offset = {s.x, s.y}, extent = {u32(s.z), u32(s.w)}}
     vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+    push.texture = batch.texture
+    push_constants(b, command_buffer, &push)
     vk.CmdDrawIndexed(command_buffer, batch.index_count, 1, batch.first_index, 0, 0)
   }
   vk.CmdEndRendering(command_buffer)

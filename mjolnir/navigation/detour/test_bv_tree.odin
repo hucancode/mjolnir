@@ -1,3 +1,4 @@
+#+build !js
 package detour
 
 import "core:math"

@@ -7,3 +7,6 @@ perf.data
 perf.data.old
 screenshots/*.ppm
 screenshots/*.png
+web/*.wasm
+web/odin.js
+web/wgpu.js

@@ -1,3 +1,4 @@
+#+build !js
 package physics
 
 import "core:log"

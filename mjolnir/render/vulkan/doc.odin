@@ -1,5 +1,5 @@
 // Package vulkan_backend is the Vulkan backend of render. Its half of the boundary is every
-// name render aliases in backend.odin and backend_private.odin, each declared next to the code
+// name render aliases in backend.odin and backend_glue.odin, each declared next to the code
 // it belongs to; another backend exports the same names. It never imports render and decides
 // nothing: it reads render's scene tables as bytes and the rest of each frame, slots and passes
 // resolved, from FrameDesc.

@@ -7,7 +7,6 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "core:sync"
-import "vendor:glfw"
 
 // direct_light packs camera indices into 16 bits
 #assert(MAX_ACTIVE_CAMERAS < 0xFFFF)
@@ -68,7 +67,6 @@ Renderer :: struct {
   target_slots:        cont.Slots,
   texture_slots:       cont.Slots,
   mesh_slabs:          [MeshStream]cont.SlabAllocator,
-  region_debt:         RegionDebt,
   bone_matrix_slab:    cont.SlabAllocator,
   // simulated seconds; an emitter emits floor(rate * time) particles in total
   particle_time:       f64,
@@ -83,14 +81,17 @@ Renderer :: struct {
   // per pyramid slot: the depth pyramid camera_slot(c) + frame of camera c
   pyramids:            [MAX_PYRAMID_SLOTS]TextureHandle,
   mutex:               sync.Recursive_Mutex,
+  // ready ran init_resources
+  initialized:         bool,
 }
 
-// Bring the renderer up on a GLFW window: the GPU backend, every resource and an empty
-// scene with a main camera. Paired with shutdown.
+// Bring the renderer up on a window: the GPU backend, every resource and an empty scene
+// with a main camera. Paired with shutdown. A backend whose device arrives asynchronously
+// (wgpu on the web) finishes in ready: until it returns true, nothing but ready may be called.
 init :: proc(
   self: ^Renderer,
   app_name: string,
-  window: glfw.WindowHandle,
+  window: WindowHandle,
   framebuffer_size: [2]u32,
   dpi_scale: f32,
 ) -> bool {
@@ -102,6 +103,22 @@ init :: proc(
     mesh_size[s] = int(self.mesh_slabs[s].capacity) * stream.elem_size
   }
   backend_init(&self.gpu, app_name, window, framebuffer_size, table_size, mesh_size) or_return
+  tables_init(self)
+  self.ui.dpi_scale = dpi_scale
+  if backend_ready(&self.gpu) do return ready(self)
+  return true
+}
+
+// ready reports whether the renderer is up, finishing init once the backend is.
+ready :: proc(self: ^Renderer) -> bool {
+  if self.initialized do return true
+  if !backend_ready(&self.gpu) do return false
+  self.initialized = init_resources(self)
+  return self.initialized
+}
+
+@(private = "file")
+init_resources :: proc(self: ^Renderer) -> bool {
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     backend_draw_list_create(&self.gpu, SHADOW_DRAW_SLOT_BASE + frame, 1, SHADOW_LIST_CAPACITY) or_return
   }
@@ -126,7 +143,7 @@ init :: proc(
   self.effect_stack = make([dynamic]PostprocessEffect)
   post_process_create_images(self) or_return
   for &inbox in self.debug_lines do inbox = make([dynamic]DebugLineSegment, 0, 1024)
-  overlay_init(self, dpi_scale) or_return
+  overlay_init(self) or_return
   extent := backend_extent(&self.gpu)
   cam, created := create_camera(self, extent.x, extent.y, position = {3, 4, 3}, far_plane = 1000.0)
   if !created do return false
@@ -188,10 +205,21 @@ load_environment_map :: proc(self: ^Renderer, path: string) -> bool {
   return ok
 }
 
+// load_environment_map_from_data is load_environment_map for an image held in memory (the web
+// has no file system: #load it).
+load_environment_map_from_data :: proc(self: ^Renderer, data: []u8) -> bool {
+  ok := ambient_load_environment(self, "", data)
+  if !ok do log.warnf("Failed to load environment map from memory")
+  return ok
+}
+
 // Destroy everything, whatever map is up.
 shutdown :: proc(self: ^Renderer) {
   backend_shutdown(&self.gpu)
+  tables_destroy(self)
   delete(self.ui.batches)
+  delete(self.ui.vertices)
+  delete(self.ui.indices)
   delete(self.effect_stack)
   for inbox in self.debug_lines do delete(inbox)
   for &slab in self.mesh_slabs do cont.slab_destroy(&slab)
@@ -764,13 +792,13 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   lights: [MAX_LIGHTS]Light
   lights[0] = {type = .AMBIENT, color = {1, 1, 1, self.ibl_intensity}}
   n := 1
-  views := frame_table(self, .VIEWS, ViewGPU, frame_index)
+  views := write_table(self, .VIEWS, ViewGPU)
   cameras := views[CAMERA_VIEW_BASE:][:self.camera_slots.high_water]
   casters: [MAX_LIGHTS]Caster
   caster_count := 0
   _, has_eye := main_camera(self)
   eye := &views[CAMERA_VIEW_BASE + u32(self.main_camera)]
-  nodes := frame_table(self, .NODES, NodeData, frame_index)
+  nodes := write_table(self, .NODES, NodeData)
   cursor: u32
   for i in cont.slots_next(&self.light_slots, &cursor) {
     slot, light := self.lights[i].node_index, self.lights[i].light
@@ -799,8 +827,10 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   selected := select_shadow_casters(casters[:caster_count], maps, backend_frame_serial(&self.gpu))
   // any nonzero view marks the pick; pack_lights assigns the real one
   for c in maps[:selected] do lights[c.light].shadow_map = 1
-  dst := frame_table(self, .LIGHTS, Light, frame_index)
+  dst := write_table(self, .LIGHTS, Light)
   self.light_count, self.shadow_view_count = pack_lights(lights[:n], dst)
+  mark_dirty(self, .LIGHTS, 0, n)
+  mark_dirty(self, .VIEWS, SHADOW_VIEW_BASE, int(self.shadow_view_count))
   self.shadow_draw_list = SHADOW_DRAW_SLOT_BASE + frame_index
   for &l in dst[:n] {
     if l.shadow_map == 0 do continue
@@ -860,13 +890,14 @@ flush_particles :: proc(self: ^Renderer) {
 // Writes the camera views and lists the live cameras for the backend, in slot order.
 @(private = "file")
 flush_cameras :: proc(self: ^Renderer, frame_index: u32) -> (cameras: []FrameCamera, main: int) {
-  views := frame_table(self, .VIEWS, ViewGPU, frame_index)
+  views := write_table(self, .VIEWS, ViewGPU)
   // a slot without a camera keeps an empty view that draws no type
   next_frame_index := (frame_index + 1) % FRAMES_IN_FLIGHT
   prev_frame_index := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
   serial := backend_frame_serial(&self.gpu)
   slot_count := self.camera_slots.high_water
   slice.zero(views[CAMERA_VIEW_BASE:][:slot_count])
+  mark_dirty(self, .VIEWS, CAMERA_VIEW_BASE, int(slot_count))
   all_types := u32(1 << len(MaterialType) - 1)
   list := make([dynamic]FrameCamera, 0, self.camera_slots.count, context.temp_allocator)
   main = -1
@@ -968,7 +999,7 @@ flush :: proc(self: ^Renderer, frame_index: u32, debug_ui: bool) {
   sync.mutex_lock(&self.debug_mutex)
   desc.debug_line_time = self.debug_time
   sync.mutex_unlock(&self.debug_mutex)
-  desc.ui_batches = overlay_batch(self, frame_index, desc.main_live >= 0, debug_ui)
+  overlay_batch(self, desc.main_live >= 0, debug_ui)
 }
 
 // frame renders and presents one frame, closing the debug UI opened by debug_ui
@@ -980,10 +1011,9 @@ frame :: proc(
   dpi_scale: f32,
   show_stats := false,
 ) -> bool {
-  frame_index := write_frame(self)
+  frame_index := current_frame(self)
   if show_stats do stats_panel(self)
   debug_ui_drawn := debug_ui_close(self)
-  // until hand_off the GPU may read this frame's tables
   guard(self)
   tick_resource_pools(self)
   flush(self, frame_index, debug_ui_drawn)
@@ -993,7 +1023,8 @@ frame :: proc(
   if submitted {
     // simulated: the next frame's time accumulates from zero
     self.particle_params.delta_time = 0
-    hand_off(self, frame_index)
+    // the backend has every write so far
+    self.dirty = {}
   }
   switch status {
   case .OK:

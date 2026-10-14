@@ -1,3 +1,4 @@
+#+build !js
 package recast
 
 import "core:slice"

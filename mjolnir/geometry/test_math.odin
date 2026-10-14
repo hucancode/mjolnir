@@ -1,3 +1,4 @@
+#+build !js
 package geometry
 
 import "core:fmt"

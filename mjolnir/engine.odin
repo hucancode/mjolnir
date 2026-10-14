@@ -29,92 +29,117 @@ Loop :: struct($T: typeid) {
   should_close: proc(app: ^T) -> bool, // polled once per iteration, main thread
   update:       proc(app: ^T, dt: f32), // UPDATE_FPS ticks; own thread with USE_PARALLEL_UPDATE
   frame:        proc(app: ^T) -> bool, // RENDER_FPS, main thread: poll events, render; false on error
+  // optional, main thread: retried each iteration until true, before the first update (wait
+  // for render.ready, build the scene); shutdown runs once after the last iteration
+  setup:        proc(app: ^T) -> bool,
+  shutdown:     proc(app: ^T),
 }
 
-// run drives loop on the calling thread (the one that created the window)
-// until should_close, FRAME_LIMIT frames, or too many consecutive frame failures.
+// run drives loop until should_close, FRAME_LIMIT frames, or too many consecutive frame
+// failures, then calls shutdown. Natively it returns then, on the calling thread (the one
+// that created the window); on the web it returns at once and the browser calls step each
+// animation frame.
 run :: proc(loop: Loop($T)) {
   run_loop(transmute(Loop(byte))loop)
 }
 
-@(private = "file")
-Ticker :: struct {
+@(private)
+Runner :: struct {
   loop:        Loop(byte),
   last_update: time.Time,
+  last_frame:  time.Time,
+  frame:       int,
+  error_count: int,
+  // setup returned true
+  started:     bool,
+  // the update thread runs ticks while true
   active:      bool,
+  thread:      ^thread.Thread,
 }
 
-@(private = "file")
-run_loop :: proc(loop: Loop(byte)) {
-  ticker := Ticker{loop = loop, last_update = time.now(), active = true}
-  when USE_PARALLEL_UPDATE {
-    update_thread := thread.create(update_thread_proc)
-    update_thread.data = &ticker
-    update_thread.init_context = context
-    thread.start(update_thread)
-    defer {
-      ticker.active = false
-      thread.join(update_thread)
-      thread.destroy(update_thread)
+// One iteration of the loop; false when it is over. Sleeps until the next frame natively.
+@(private)
+step :: proc(r: ^Runner) -> bool {
+  loop := &r.loop
+  if loop.should_close(loop.app) do return false
+  if !r.started {
+    if loop.setup != nil && !loop.setup(loop.app) do return true
+    r.started = true
+    r.last_update = time.now()
+    when USE_PARALLEL_UPDATE {
+      r.active = true
+      r.thread = thread.create(update_thread_proc)
+      r.thread.data = r
+      r.thread.init_context = context
+      thread.start(r.thread)
     }
   }
-  last_frame: time.Time
-  frame := 0
-  error_count := 0
-  for !loop.should_close(loop.app) {
+  when !USE_PARALLEL_UPDATE {
+    tick(r)
+  }
+  remaining := FRAME_TIME_MILIS - time.duration_milliseconds(time.since(r.last_frame))
+  if remaining > 0 {
+    // Don't oversleep past the next update tick (UPDATE_FPS may exceed
+    // RENDER_FPS); keep input latency bounded to one tick.
     when !USE_PARALLEL_UPDATE {
-      tick(&ticker)
+      until_tick := UPDATE_FRAME_TIME_MILIS - time.duration_milliseconds(time.since(r.last_update))
+      if until_tick < remaining do remaining = until_tick
     }
-    remaining := FRAME_TIME_MILIS - time.duration_milliseconds(time.since(last_frame))
-    if remaining > 0 {
-      // Don't oversleep past the next update tick (UPDATE_FPS may exceed
-      // RENDER_FPS); keep input latency bounded to one tick.
-      when !USE_PARALLEL_UPDATE {
-        until_tick := UPDATE_FRAME_TIME_MILIS - time.duration_milliseconds(time.since(ticker.last_update))
-        if until_tick < remaining do remaining = until_tick
-      }
-      if remaining > 0.2 {
-        time.sleep(time.Duration(remaining * f64(time.Millisecond)))
-      }
-      continue
+    when ODIN_OS != .JS {
+      if remaining > 0.2 do time.sleep(time.Duration(remaining * f64(time.Millisecond)))
     }
-    last_frame = time.now()
-    ok := loop.frame(loop.app)
-    free_all(context.temp_allocator)
-    if ok {
-      error_count = 0
-    } else {
-      error_count += 1
-      if error_count >= MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
-        log.errorf("Too many render errors, exiting...")
-        break
-      }
-    }
-    frame += 1
-    when FRAME_LIMIT > 0 {
-      if frame >= FRAME_LIMIT {
-        log.infof("Reached frame limit %d, exiting gracefully", FRAME_LIMIT)
-        break
-      }
+    return true
+  }
+  r.last_frame = time.now()
+  ok := loop.frame(loop.app)
+  free_all(context.temp_allocator)
+  if ok {
+    r.error_count = 0
+  } else {
+    r.error_count += 1
+    if r.error_count >= MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
+      log.errorf("Too many render errors, exiting...")
+      return false
     }
   }
+  r.frame += 1
+  when FRAME_LIMIT > 0 {
+    if r.frame >= FRAME_LIMIT {
+      log.infof("Reached frame limit %d, exiting gracefully", FRAME_LIMIT)
+      return false
+    }
+  }
+  return true
+}
+
+// Stops the update thread and shuts the app down.
+@(private)
+stop :: proc(r: ^Runner) {
+  when USE_PARALLEL_UPDATE {
+    if r.thread != nil {
+      r.active = false
+      thread.join(r.thread)
+      thread.destroy(r.thread)
+    }
+  }
+  if r.loop.shutdown != nil do r.loop.shutdown(r.loop.app)
 }
 
 // tick runs one update when due; false when it was not.
 @(private = "file")
-tick :: proc(self: ^Ticker) -> bool {
-  dt := f32(time.duration_seconds(time.since(self.last_update)))
+tick :: proc(r: ^Runner) -> bool {
+  dt := f32(time.duration_seconds(time.since(r.last_update)))
   if dt < UPDATE_FRAME_TIME do return false
-  self.last_update = time.now()
-  self.loop.update(self.loop.app, dt)
+  r.last_update = time.now()
+  r.loop.update(r.loop.app, dt)
   return true
 }
 
 @(private = "file")
 update_thread_proc :: proc(t: ^thread.Thread) {
-  ticker := cast(^Ticker)t.data
-  for ticker.active {
-    if !tick(ticker) do time.sleep(time.Millisecond * 2)
+  r := cast(^Runner)t.data
+  for r.active {
+    if !tick(r) do time.sleep(time.Millisecond * 2)
     free_all(context.temp_allocator)
   }
   log.info("Update thread terminating")

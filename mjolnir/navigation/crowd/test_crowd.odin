@@ -1,3 +1,4 @@
+#+build !js
 package crowd
 
 import "../detour"

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>mjolnir</title>
+  <link rel="icon" href="data:,">
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+    #canvas { display: block; width: 100%; height: 100%; }
+    #console { position: fixed; left: 0; bottom: 0; max-height: 30%; margin: 0; overflow: auto; color: #ccc; font: 12px monospace; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" tabindex="0" oncontextmenu="return false"></canvas>
+  <pre id="console"></pre>
+  <script src="odin.js"></script>
+  <script src="wgpu.js"></script>
+  <script>
+    const example = new URLSearchParams(location.search).get("example") || "cube";
+    const consoleElement = document.getElementById("console");
+    if (!navigator.gpu) {
+      consoleElement.textContent = "This browser has no WebGPU.";
+    } else {
+      const mem = new odin.WasmMemoryInterface();
+      const wgpu = new odin.WebGPUInterface(mem);
+      odin.runWasm(`${example}.wasm`, consoleElement, { wgpu: wgpu.getInterface() }, mem);
+    }
+  </script>
+</body>
+</html>

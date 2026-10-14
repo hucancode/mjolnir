@@ -4,7 +4,6 @@ import cont "../containers"
 import "core:c"
 import "core:log"
 import "core:math"
-import "core:os"
 import stbi "vendor:stb/image"
 
 // Textures below MAX_RENDER_TARGETS are render targets (target_slots): camera attachments,
@@ -84,21 +83,3 @@ create_texture_from_data :: proc(
   return allocate_texture(r, desc, ([^]u8)(pixels)[:width * height * texel_size])
 }
 
-// create_texture_from_path loads an image file (png, jpg, hdr, ...) into a bindless 2D texture.
-create_texture_from_path :: proc(
-  r: ^Renderer,
-  path: string,
-  format: TextureFormat = .RGBA8_SRGB,
-  generate_mips: bool = false,
-) -> (
-  handle: TextureHandle,
-  ok: bool,
-) #optional_ok {
-  data, err := os.read_entire_file(path, context.allocator)
-  if err != nil {
-    log.errorf("Failed to read texture '%s': %v", path, err)
-    return 0, false
-  }
-  defer delete(data)
-  return create_texture_from_data(r, data, format, generate_mips)
-}

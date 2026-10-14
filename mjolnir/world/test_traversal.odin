@@ -1,3 +1,4 @@
+#+build !js
 package world
 
 import "core:fmt"

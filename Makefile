@@ -26,6 +26,28 @@ build-debug: shader
 shader: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 	@echo "Shader compilation complete."
 
+# The WebGPU backend: WGSL shaders are embedded, nothing to compile ahead. Natively it needs
+# wgpu-native in Odin's vendor/wgpu/lib (see vendor/wgpu/doc.odin).
+run-wgpu:
+	odin run . -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
+
+build-wgpu:
+	odin build . -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
+
+# An example on the web: web/$(EXAMPLE).wasm beside Odin's JS runtime and WebGPU glue.
+# Linking needs wasm-ld (LLVM's lld) on PATH. `make serve` and open
+# http://localhost:8000/?example=$(EXAMPLE) in a WebGPU browser.
+ODIN_ROOT := $(shell odin root)
+EXAMPLE ?= cube
+
+web:
+	odin build examples/$(EXAMPLE) -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
+		-target-features:"atomics,bulk-memory" -extra-linker-flags:"--export-table" -out:web/$(EXAMPLE).wasm
+	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js web/
+
+serve: web
+	python3 -m http.server -d web 8000
+
 EXAMPLES := $(patsubst examples/%/main.odin,%,$(wildcard examples/*/main.odin))
 
 examples:
@@ -124,4 +146,4 @@ compare-physics:
 	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt
 	perf report -i perf.data --stdio --no-children -n --percent-limit 1 >perf_report_after.txt
 
-.PHONY: build build-debug run run-max debug shader check clean vtest examples golden capture long-proc long-file long-example doc doc-dev record compare-physics
+.PHONY: build build-debug build-wgpu run-wgpu web serve run run-max debug shader check clean vtest examples golden capture long-proc long-file long-example doc doc-dev record compare-physics

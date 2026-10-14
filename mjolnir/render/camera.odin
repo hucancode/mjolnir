@@ -275,7 +275,7 @@ camera_attachment :: proc(
   ok: bool,
 ) #optional_ok {
   cam := camera(self, handle) or_return
-  return cam.attachments[attachment_type][frame_index.? or_else write_frame(self)], true
+  return cam.attachments[attachment_type][frame_index.? or_else current_frame(self)], true
 }
 
 // resize_camera resizes a camera's render targets; a perspective projection follows the new aspect ratio.

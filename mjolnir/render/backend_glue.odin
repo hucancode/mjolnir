@@ -2,6 +2,7 @@
 package render
 
 import vulkan "vulkan"
+import wgpu "wgpu"
 
 // The internal half of the backend boundary (see backend.odin).
 when RENDER_BACKEND == "vulkan" {
@@ -22,6 +23,9 @@ when RENDER_BACKEND == "vulkan" {
   PREFILTER_MIPS :: vulkan.PREFILTER_MIPS
   MAX_SEGMENTS :: vulkan.MAX_SEGMENTS
   DEBUG_RING :: vulkan.DEBUG_RING
+  TABLE_REGIONS :: vulkan.TABLE_REGIONS
+  UI_MAX_VERTICES :: vulkan.UI_MAX_VERTICES
+  UI_MAX_INDICES :: vulkan.UI_MAX_INDICES
   TextureDesc :: vulkan.TextureDesc
   HDR_COLOR_FORMAT :: vulkan.HDR_COLOR_FORMAT
   ATTACHMENTS :: vulkan.ATTACHMENTS
@@ -36,13 +40,13 @@ when RENDER_BACKEND == "vulkan" {
   FrameDesc :: vulkan.FrameDesc
 
   backend_init :: vulkan.init
+  backend_ready :: vulkan.ready
   backend_shutdown :: vulkan.shutdown
   backend_wait_idle :: vulkan.wait_idle
   backend_tick :: vulkan.tick
   backend_frame_serial :: vulkan.frame_serial
   backend_extent :: vulkan.extent
   backend_resize :: vulkan.resize
-  backend_table :: vulkan.table
   backend_mesh_write :: vulkan.mesh_write
   backend_texture_create :: vulkan.texture_create
   backend_texture_destroy :: vulkan.texture_destroy
@@ -53,6 +57,58 @@ when RENDER_BACKEND == "vulkan" {
   backend_precompute_ibl :: vulkan.precompute_ibl
   backend_particles_reset :: vulkan.particles_reset
   backend_draw_count :: vulkan.draw_count
-  backend_ui_memory :: vulkan.ui_memory
   backend_frame :: vulkan.frame
+} else when RENDER_BACKEND == "wgpu" {
+  Backend :: wgpu.Backend
+  MAX_NODES_IN_SCENE :: wgpu.MAX_NODES_IN_SCENE
+  MAX_ACTIVE_CAMERAS :: wgpu.MAX_ACTIVE_CAMERAS
+  RETIRE_GRACE :: wgpu.RETIRE_GRACE
+  MAX_SHADOW_MAPS :: wgpu.MAX_SHADOW_MAPS
+  SHADOW_MAP_SIZE :: wgpu.SHADOW_MAP_SIZE
+  MAX_PARTICLES :: wgpu.MAX_PARTICLES
+  MAX_TEXTURES :: wgpu.MAX_TEXTURES
+  CAMERA_VIEW_BASE :: wgpu.CAMERA_VIEW_BASE
+  SHADOW_VIEW_BASE :: wgpu.SHADOW_VIEW_BASE
+  MAX_VIEWS :: wgpu.MAX_VIEWS
+  MAX_PYRAMID_SLOTS :: wgpu.MAX_PYRAMID_SLOTS
+  MAX_SHADOW_VIEWS :: wgpu.MAX_SHADOW_VIEWS
+  MAX_DRAW_LIST_SLOTS :: wgpu.MAX_DRAW_LIST_SLOTS
+  PREFILTER_MIPS :: wgpu.PREFILTER_MIPS
+  MAX_SEGMENTS :: wgpu.MAX_SEGMENTS
+  DEBUG_RING :: wgpu.DEBUG_RING
+  TABLE_REGIONS :: wgpu.TABLE_REGIONS
+  UI_MAX_VERTICES :: wgpu.UI_MAX_VERTICES
+  UI_MAX_INDICES :: wgpu.UI_MAX_INDICES
+  TextureDesc :: wgpu.TextureDesc
+  HDR_COLOR_FORMAT :: wgpu.HDR_COLOR_FORMAT
+  ATTACHMENTS :: wgpu.ATTACHMENTS
+  FIRST_FORWARD_TYPE :: wgpu.FIRST_FORWARD_TYPE
+  Table :: wgpu.Table
+  MeshStream :: wgpu.MeshStream
+  MeshData :: wgpu.MeshData
+  ParticleSystemParams :: wgpu.ParticleSystemParams
+  PostPass :: wgpu.PostPass
+  UIBatch :: wgpu.UIBatch
+  FrameCamera :: wgpu.FrameCamera
+  FrameDesc :: wgpu.FrameDesc
+
+  backend_init :: wgpu.init
+  backend_ready :: wgpu.ready
+  backend_shutdown :: wgpu.shutdown
+  backend_wait_idle :: wgpu.wait_idle
+  backend_tick :: wgpu.tick
+  backend_frame_serial :: wgpu.frame_serial
+  backend_extent :: wgpu.extent
+  backend_resize :: wgpu.resize
+  backend_mesh_write :: wgpu.mesh_write
+  backend_texture_create :: wgpu.texture_create
+  backend_texture_destroy :: wgpu.texture_destroy
+  backend_draw_list_create :: wgpu.draw_list_create
+  backend_draw_list_destroy :: wgpu.draw_list_destroy
+  backend_pyramid_create :: wgpu.pyramid_create
+  backend_pyramid_destroy :: wgpu.pyramid_destroy
+  backend_precompute_ibl :: wgpu.precompute_ibl
+  backend_particles_reset :: wgpu.particles_reset
+  backend_draw_count :: wgpu.draw_count
+  backend_frame :: wgpu.frame
 }

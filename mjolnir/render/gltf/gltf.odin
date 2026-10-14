@@ -3,8 +3,6 @@ package gltf_render
 import render ".."
 import "core:log"
 import "core:mem"
-import "core:os"
-import path "core:path/filepath"
 import "core:slice"
 import "vendor:cgltf"
 
@@ -59,21 +57,16 @@ load_texture :: proc(
 ) {
   if handle, ok = cache[texture]; ok do return
   if texture.image_ == nil do return {}, false
-  pixel_data: []u8
   if texture.image_.uri != nil {
-    texture_path, jerr := path.join({path.dir(gltf_path), string(texture.image_.uri)}, context.temp_allocator)
-    if jerr != nil do return {}, false
-    err: os.Error
-    pixel_data, err = os.read_entire_file(texture_path, context.allocator)
-    if err != nil do return {}, false
+    texture_path := sibling_path(gltf_path, string(texture.image_.uri)) or_return
+    handle = render.create_texture_from_path(r, texture_path, format) or_return
   } else if texture.image_.buffer_view != nil {
     view := texture.image_.buffer_view
-    pixel_data = slice.clone(slice.from_ptr(mem.ptr_offset(cast(^u8)view.buffer.data, view.offset), int(view.size)))
+    pixel_data := slice.from_ptr(mem.ptr_offset(cast(^u8)view.buffer.data, view.offset), int(view.size))
+    handle = render.create_texture_from_data(r, pixel_data, format) or_return
   } else {
     return {}, false
   }
-  defer delete(pixel_data)
-  handle = render.create_texture_from_data(r, pixel_data, format) or_return
   cache[texture] = handle
   log.infof("Created texture %v", handle)
   return handle, true

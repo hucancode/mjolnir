@@ -1,3 +1,4 @@
+#+build !js
 package platform
 
 import "base:runtime"
@@ -8,7 +9,7 @@ import "../input"
 import "vendor:glfw"
 
 // Platform is a GLFW window that writes device events into `input`. Must not move after
-// init (the window callbacks keep a pointer to it).
+// init (the window callbacks keep a pointer to it). `window` is what render.init takes.
 Platform :: struct {
   window:   glfw.WindowHandle,
   input:    input.Accumulator,

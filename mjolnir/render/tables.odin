@@ -26,17 +26,10 @@ BONE_CAPACITY ::
   int(BONE_SLAB_CONFIG[5].block_size * BONE_SLAB_CONFIG[5].block_count)
 #assert(BONE_SLAB_CONFIG[6].block_count == 0 && BONE_SLAB_CONFIG[7].block_count == 0)
 
-// A write sets its regions' debt to the frames that miss it; each hand_off pays one off.
-// The frame arena holds one copy of every CPU-written table (TABLES) per frame in flight;
-// only the write frame is written, and mark_dirty + hand_off carry writes into the next copy.
-@(private)
-REGION_COUNT :: 64
-@(private)
-RegionDebt :: [Table][REGION_COUNT]u8
-
-// The tables render writes: `capacity` entries of `stride` bytes, one copy per frame in flight
-// in the backend's frame arena. The entry layouts are the GPU data contract: every backend's
-// shaders mirror them.
+// The tables render writes: `capacity` entries of `stride` bytes. render keeps the one copy
+// (FrameDesc.tables) and marks what it writes in FrameDesc.dirty; the backend brings its GPU
+// copies up to date from those each frame. The entry layouts are the GPU data contract: every
+// backend's shaders mirror them.
 @(private)
 TABLES := [Table]struct {
   stride:   int,
@@ -54,52 +47,42 @@ TABLES := [Table]struct {
 }
 
 @(private)
-write_frame :: #force_inline proc(self: ^Renderer) -> u32 {
-  return u32(backend_frame_serial(&self.gpu) % FRAMES_IN_FLIGHT)
+tables_init :: proc(self: ^Renderer) {
+  for t, i in TABLES do self.tables[i] = make([]u8, t.stride * t.capacity)
 }
 
 @(private)
-frame_table :: proc(self: ^Renderer, t: Table, $T: typeid, frame_index: u32) -> []T {
-  return slice.reinterpret([]T, backend_table(&self.gpu, t, frame_index))
+tables_destroy :: proc(self: ^Renderer) {
+  for table in self.tables do delete(table)
+}
+
+// The frame in flight frame records next: it picks this frame's copy of per-frame resources.
+@(private)
+current_frame :: #force_inline proc(self: ^Renderer) -> u32 {
+  return u32(backend_frame_serial(&self.gpu) % FRAMES_IN_FLIGHT)
 }
 
 // Callers mark what they change with mark_dirty.
 @(private)
 write_table :: #force_inline proc(self: ^Renderer, t: Table, $T: typeid) -> []T {
-  return frame_table(self, t, T, write_frame(self))
+  return slice.reinterpret([]T, self.tables[t])
 }
 
-// Zeroes `count` entries of the write table from `index` and marks them.
+// Zeroes `count` entries from `index` and marks them.
 @(private)
 clear_entry :: proc(self: ^Renderer, t: Table, index: u32, count: u32 = 1) {
   if count == 0 do return
   stride := TABLES[t].stride
-  slice.zero(backend_table(&self.gpu, t, write_frame(self))[int(index) * stride:][:int(count) * stride])
+  slice.zero(self.tables[t][int(index) * stride:][:int(count) * stride])
   mark_dirty(self, t, int(index), int(count))
 }
 
 @(private)
 mark_dirty :: proc(self: ^Renderer, t: Table, index: int, count := 1) {
+  if count == 0 do return
   stride := TABLES[t].stride
-  region := (len(backend_table(&self.gpu, t, write_frame(self))) + REGION_COUNT - 1) / REGION_COUNT
+  region := (len(self.tables[t]) + TABLE_REGIONS - 1) / TABLE_REGIONS
   first := index * stride / region
-  last := min(((index + count) * stride - 1) / region, REGION_COUNT - 1)
-  for r in first ..= last do self.region_debt[t][r] = FRAMES_IN_FLIGHT - 1
-}
-
-// Call once the backend submitted `from`, which holds every write so far, and freed the next copy.
-@(private)
-hand_off :: proc(self: ^Renderer, from: u32) {
-  to := write_frame(self)
-  for t in Table {
-    src, dst := backend_table(&self.gpu, t, from), backend_table(&self.gpu, t, to)
-    region := (len(src) + REGION_COUNT - 1) / REGION_COUNT
-    for &debt, r in self.region_debt[t] {
-      if debt == 0 do continue
-      debt -= 1
-      lo := min(r * region, len(src))
-      hi := min(lo + region, len(src))
-      copy(dst[lo:hi], src[lo:hi])
-    }
-  }
+  last := min(((index + count) * stride - 1) / region, TABLE_REGIONS - 1)
+  for r in first ..= last do self.dirty[t] |= 1 << u64(r)
 }
