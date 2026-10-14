@@ -10,5 +10,4 @@ screenshots/*.png
 docs/node_modules
 docs/build
 docs/.svelte-kit
-docs/src/lib/data.json
 /mjolnir/recast

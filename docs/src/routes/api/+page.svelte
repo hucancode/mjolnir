@@ -1,6 +1,6 @@
 <script>
   import { base } from '$app/paths';
-  import data from '$lib/data.json';
+  let { data } = $props();
 </script>
 
 <svelte:head><title>API - Mjolnir</title></svelte:head>
@@ -10,7 +10,7 @@
   Generated from <code>odin doc</code>.
 </p>
 <ul class="cols">
-  {#each data.api as p (p.path)}
-    <li><a href="{base}/api/{p.path}">{p.path}</a></li>
+  {#each data.paths as p (p)}
+    <li><a href="{base}/api/{p}">{p}</a></li>
   {/each}
 </ul>

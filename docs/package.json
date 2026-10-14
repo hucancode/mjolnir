@@ -3,9 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "gen": "node scripts/gen.mjs",
-    "dev": "npm run gen && vite dev",
-    "build": "npm run gen && vite build",
+    "dev": "vite dev",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "devDependencies": {

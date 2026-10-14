@@ -1,6 +1,6 @@
 <script>
   import { base } from '$app/paths';
-  import data from '$lib/data.json';
+  let { data } = $props();
 </script>
 
 <svelte:head><title>Examples - Mjolnir</title></svelte:head>
