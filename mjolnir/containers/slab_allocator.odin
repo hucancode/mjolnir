@@ -18,6 +18,7 @@ SlabAllocator :: struct {
     free_list:   [dynamic]u32, // Recycled indices
     next:        u32, // Next fresh index to allocate
     base:        u32, // Base index for this class
+    mark:        u32, // slab_rewind frees every block from here on
   },
   capacity: u32, // Total capacity across all classes
 }
@@ -33,6 +34,7 @@ slab_init :: proc(allocator: ^SlabAllocator, config: SlabConfig) {
       free_list   = make([dynamic]u32, 0, c.block_count),
       next        = base,
       base        = base,
+      mark        = base,
     }
     base += c.block_size * c.block_count
   }
@@ -78,11 +80,18 @@ slab_free :: proc(allocator: ^SlabAllocator, index: u32) {
   }
 }
 
-// slab_reset frees every block at once.
-slab_reset :: proc(allocator: ^SlabAllocator) {
+// slab_mark keeps every block allocated so far through slab_rewind.
+slab_mark :: proc(allocator: ^SlabAllocator) {
+  for &class in allocator.classes do class.mark = class.next
+}
+
+// slab_rewind frees every block allocated since slab_mark (since slab_init without one) at once.
+slab_rewind :: proc(allocator: ^SlabAllocator) {
   for &class in allocator.classes {
-    clear(&class.free_list)
-    class.next = class.base
+    n := 0
+    for i in class.free_list do if i < class.mark {class.free_list[n] = i; n += 1}
+    resize(&class.free_list, n)
+    class.next = class.mark
   }
 }
 

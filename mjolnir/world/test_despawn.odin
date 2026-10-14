@@ -213,3 +213,25 @@ test_despawn_reports_removed_node :: proc(t: ^testing.T) {
   update(&w)
   testing.expectf(t, len(changes(&w)) == 0, "removal reported once")
 }
+
+@(test)
+test_teardown_keeps_root :: proc(t: ^testing.T) {
+  w: World
+  init(&w)
+  defer shutdown(&w)
+  parent := spawn(&w)
+  child := spawn_child(&w, parent)
+  despawn(&w, spawn(&w)) // retiring at teardown
+  update(&w)
+  teardown(&w)
+  testing.expect(t, valid(&w, w.root))
+  testing.expect(t, !valid(&w, parent))
+  testing.expect(t, !valid(&w, child))
+  testing.expect_value(t, node_count(&w), 1)
+  testing.expect_value(t, len(node(&w, w.root).children), 0)
+  // the next map spawns into the freed slots and traverses cleanly
+  again := spawn(&w, {1, 0, 0})
+  testing.expect_value(t, again.index, parent.index)
+  update(&w)
+  testing.expect_value(t, len(changes(&w)), 1)
+}

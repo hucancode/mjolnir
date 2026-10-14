@@ -65,8 +65,9 @@ PipelineId :: enum {
 
 // Renderer is the whole renderer. Public fields: builtin_meshes, builtin_materials,
 // main_camera, ibl_intensity, skybox_intensity, skybox_blur and effect_stack; the rest is
-// internal state. init/shutdown own the device and every resource (application lifetime);
-// setup/teardown reset map state between maps.
+// internal state. init/shutdown own the device, pipelines, buffers and what init makes
+// (builtin meshes and materials, the main camera): application lifetime. Everything made
+// after init lives for the map: teardown frees it in one go, back to the marks init leaves.
 Renderer :: struct {
   gctx:                    gpu.GPUContext,
   swapchain:               gpu.Swapchain,
@@ -112,6 +113,8 @@ Renderer :: struct {
   material_pipelines:      [MaterialType]vk.Pipeline,
   light_pipelines:         [LightType]vk.Pipeline,
   textures:                []gpu.Image,
+  // render targets below MAX_RENDER_TARGETS, every other texture above (bindless_textures.odin)
+  target_slots:            cont.Slots,
   texture_slots:           cont.Slots,
   samplers:                [SamplerType]vk.Sampler,
   mesh_buffers:            [MeshStream]gpu.Buffer,
@@ -206,7 +209,8 @@ init_vulkan :: proc(
   cont.slots_init(&self.mesh_slots, MAX_MESHES, gpu.RETIRE_GRACE)
   cont.slots_init(&self.material_slots, MAX_MATERIALS, gpu.RETIRE_GRACE)
   // retired, not reclaimed: submitted frames may still sample the slot
-  cont.slots_init(&self.texture_slots, MAX_TEXTURES, gpu.RETIRE_GRACE)
+  cont.slots_init(&self.target_slots, MAX_RENDER_TARGETS, gpu.RETIRE_GRACE)
+  cont.slots_init(&self.texture_slots, MAX_TEXTURES, gpu.RETIRE_GRACE, first = MAX_RENDER_TARGETS)
   // Attachments have no handle to go stale and each frame reads its own copy of the
   // table, so no grace. Index 0 is never handed out and the ambient light takes it, so
   // every light fits the frame's table.
@@ -237,12 +241,16 @@ init_vulkan :: proc(
   cam, created := create_camera(self, extent.width, extent.height, position = {3, 4, 3}, far_plane = 1000.0)
   if !created do return .ERROR_INITIALIZATION_FAILED
   self.main_camera = cam
+  // what init made outlives teardown
+  cont.slots_mark(&self.mesh_slots)
+  for &slab in self.mesh_slabs do cont.slab_mark(&slab)
+  cont.slots_mark(&self.material_slots)
+  cont.slots_mark(&self.texture_slots)
+  cont.slots_mark(&self.camera_slots)
   return .SUCCESS
 }
 
-// setup starts a map: no particle is alive. init/shutdown own every resource;
-// setup/teardown only reset map state, so meshes, materials, textures and
-// cameras outlive them.
+// setup starts a map: no particle is alive.
 setup :: proc(self: ^Renderer) -> bool {
   guard(self)
   res := particles_reset(self)
@@ -250,9 +258,40 @@ setup :: proc(self: ^Renderer) -> bool {
   return res == .SUCCESS
 }
 
-// teardown ends a map: every slot forgets its attachment and bone palette.
+// teardown ends a map in one go, waiting for the GPU: every slot forgets its attachment
+// and bone palette, and every camera, mesh, material and texture made since init is freed,
+// the environment map too. What init made stays: builtin meshes and materials, the main
+// camera, render targets, pipelines. Handles to freed resources are stale.
 teardown :: proc(self: ^Renderer) {
-  clear_slots(self)
+  guard(self)
+  gctx := &self.gctx
+  // their render targets and draw lists retire, and go with the flushes below
+  c := self.camera_slots.mark
+  for i in cont.slots_next(&self.camera_slots, &c) do destroy_camera(self, CameraHandle(i))
+  // queued uploads may be init's: they land before anything is freed
+  if res := gpu.submit_uploads(gctx); res != .SUCCESS do log.errorf("Renderer teardown upload failed: %v", res)
+  vk.DeviceWaitIdle(gctx.device)
+  gpu.deferred_flush(gctx)
+  for r in cont.slots_flush(&self.target_slots) do gpu.image_destroy(gctx.device, &self.textures[r.index])
+  for &img in self.textures[self.texture_slots.mark:self.texture_slots.high_water] do gpu.image_destroy(gctx.device, &img)
+  cont.slots_rewind(&self.texture_slots)
+  self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
+  cont.slots_rewind(&self.camera_slots)
+  clear_entry(self, .MESHES, self.mesh_slots.mark, self.mesh_slots.high_water - self.mesh_slots.mark)
+  cont.slots_rewind(&self.mesh_slots)
+  for &slab in self.mesh_slabs do cont.slab_rewind(&slab)
+  clear_entry(self, .MATERIALS, self.material_slots.mark, self.material_slots.high_water - self.material_slots.mark)
+  cont.slots_rewind(&self.material_slots)
+  slice.zero(write_table(self, .NODES, NodeData)[:self.node_count])
+  mark_dirty(self, .NODES, 0, int(self.node_count))
+  self.node_count = 0
+  cont.slab_rewind(&self.bone_matrix_slab)
+  cont.slots_rewind(&self.light_slots)
+  clear_entry(self, .EMITTERS, 0, self.emitter_slots.high_water)
+  cont.slots_rewind(&self.emitter_slots)
+  clear_entry(self, .FORCEFIELDS, 0, self.forcefield_slots.high_water)
+  cont.slots_rewind(&self.forcefield_slots)
+  self.shadow_casters = {}
 }
 
 // Replace the environment map with the equirectangular HDR image at `path`
@@ -264,17 +303,14 @@ load_environment_map :: proc(self: ^Renderer, path: string) -> bool {
   return res == .SUCCESS
 }
 
-// Destroy everything init created.
+// Destroy everything, whatever map is up.
 shutdown :: proc(self: ^Renderer) {
   gctx := &self.gctx
   vk.DeviceWaitIdle(gctx.device)
-  c: u32
-  for i in cont.slots_next(&self.camera_slots, &c) do destroy_camera(self, CameraHandle(i))
-  draw_lists_destroy(self, SHADOW_DRAW_SLOT_BASE)
-  for r in cont.slots_flush(&self.texture_slots) do gpu.image_destroy(gctx.device, &self.textures[r.index])
-  c = 0
-  for i in cont.slots_next(&self.texture_slots, &c) do gpu.image_destroy(gctx.device, &self.textures[i])
   gpu.deferred_flush(gctx)
+  for &img in self.textures do gpu.image_destroy(gctx.device, &img)
+  for &b in self.draw_lists do gpu.buffer_destroy(gctx.device, &b)
+  for views in self.pyramid_views do for v in views do vk.DestroyImageView(gctx.device, v, nil)
   overlay_shutdown(self)
   for p in self.pipelines do vk.DestroyPipeline(gctx.device, p, nil)
   for p in self.material_pipelines do vk.DestroyPipeline(gctx.device, p, nil)
@@ -293,6 +329,7 @@ shutdown :: proc(self: ^Renderer) {
   cont.slots_destroy(&self.forcefield_slots)
   cont.slots_destroy(&self.light_slots)
   cont.slots_destroy(&self.texture_slots)
+  cont.slots_destroy(&self.target_slots)
   delete(self.cameras)
   delete(self.lights)
   delete(self.textures)
@@ -353,6 +390,7 @@ guard :: proc(self: ^Renderer) {
 @(private)
 tick_resource_pools :: proc(self: ^Renderer) {
   gpu.deferred_tick(&self.gctx)
+  for r in cont.slots_tick(&self.target_slots) do gpu.image_destroy(self.gctx.device, &self.textures[r.index])
   for r in cont.slots_tick(&self.texture_slots) do gpu.image_destroy(self.gctx.device, &self.textures[r.index])
   for r in cont.slots_tick(&self.mesh_slots) {
     free_mesh(self, write_table(self, .MESHES, MeshData)[r.index])
@@ -482,28 +520,6 @@ stage_slot_removal :: proc(self: ^Renderer, slot: u32) {
   release_bones(self, slot)
   write_table(self, .NODES, NodeData)[slot] = {}
   mark_dirty(self, .NODES, int(slot))
-}
-
-// Every slot at once: what stage_slot_removal does per slot, in one pass per table.
-@(private = "file")
-clear_slots :: proc(self: ^Renderer) {
-  guard(self)
-  slice.zero(write_table(self, .NODES, NodeData)[:self.node_count])
-  mark_dirty(self, .NODES, 0, int(self.node_count))
-  self.node_count = 0
-  cont.slab_reset(&self.bone_matrix_slab)
-  c: u32
-  for i in cont.slots_next(&self.light_slots, &c) do cont.slots_free(&self.light_slots, i)
-  c = 0
-  for i in cont.slots_next(&self.emitter_slots, &c) {
-    cont.slots_free(&self.emitter_slots, i)
-    clear_entry(self, .EMITTERS, i)
-  }
-  c = 0
-  for i in cont.slots_next(&self.forcefield_slots, &c) {
-    cont.slots_free(&self.forcefield_slots, i)
-    clear_entry(self, .FORCEFIELDS, i)
-  }
 }
 
 // whether mesh_id carries skinning data, so a bone palette may deform it

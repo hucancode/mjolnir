@@ -206,3 +206,58 @@ test_slots_generation :: proc(t: ^testing.T) {
   testing.expect(t, !slots_valid(&s, h), "stale handle stays stale after reuse")
   testing.expect(t, slots_valid(&s, reused))
 }
+
+@(test)
+test_slots_rewind :: proc(t: ^testing.T) {
+  s: Slots
+  slots_init(&s, 8, grace = 2)
+  defer slots_destroy(&s)
+  kept := slots_alloc(&s)
+  slots_mark(&s)
+  a := slots_alloc(&s)
+  b := slots_alloc(&s)
+  ha := slots_handle(&s, a)
+  slots_free(&s, b)
+  slots_rewind(&s)
+  testing.expect(t, slots_live(&s, kept))
+  testing.expect(t, !slots_valid(&s, ha))
+  testing.expect_value(t, s.count, 1)
+  testing.expect_value(t, len(s.retiring), 0)
+  // rewound indices come back at once, in order
+  testing.expect_value(t, slots_alloc(&s), a)
+  testing.expect_value(t, slots_alloc(&s), b)
+}
+
+@(test)
+test_slots_first :: proc(t: ^testing.T) {
+  s: Slots
+  slots_init(&s, 8, first = 5)
+  defer slots_destroy(&s)
+  testing.expect_value(t, slots_alloc(&s), 5)
+  slots_rewind(&s)
+  testing.expect_value(t, s.count, 0)
+  testing.expect_value(t, slots_alloc(&s), 5)
+}
+
+@(test)
+test_slab_rewind :: proc(t: ^testing.T) {
+  slab: SlabAllocator
+  slab_init(&slab, {{block_size = 4, block_count = 4}, {block_size = 16, block_count = 2}, {}, {}, {}, {}, {}, {}})
+  defer slab_destroy(&slab)
+  kept := slab_alloc(&slab, 3)
+  big := slab_alloc(&slab, 10)
+  slab_mark(&slab)
+  a := slab_alloc(&slab, 2)
+  slab_alloc(&slab, 12)
+  slab_free(&slab, a)
+  slab_rewind(&slab)
+  testing.expect_value(t, slab_alloc(&slab, 1), kept + 4)
+  testing.expect_value(t, slab_alloc(&slab, 16), big + 16)
+  // without a mark, rewind frees everything
+  plain: SlabAllocator
+  slab_init(&plain, {{block_size = 4, block_count = 2}, {}, {}, {}, {}, {}, {}, {}})
+  defer slab_destroy(&plain)
+  first := slab_alloc(&plain, 4)
+  slab_rewind(&plain)
+  testing.expect_value(t, slab_alloc(&plain, 4), first)
+}

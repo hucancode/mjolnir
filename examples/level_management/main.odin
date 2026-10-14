@@ -219,8 +219,7 @@ act_destroy_meshes :: proc(app: ^App) {
 }
 
 act_reset_level :: proc(app: ^App) {
-  for m in example_materials do render.destroy_material(&app.renderer, m)
-  for m in example_meshes do render.destroy_mesh(&app.renderer, m)
+  // render.teardown frees every mesh, material and texture the level made in one go
   clear(&example_materials)
   clear(&example_meshes)
   clear(&example_nodes)

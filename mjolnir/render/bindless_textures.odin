@@ -11,6 +11,11 @@ import vk "vendor:vulkan"
 
 @(private)
 MAX_TEXTURES :: 1000
+// Textures below it are render targets (target_slots): camera attachments, depth pyramids
+// and the post-process ring, which the renderer reallocates on resize. The rest are
+// texture_slots: the renderer's own from init, then the map's.
+@(private)
+MAX_RENDER_TARGETS :: 256
 @(private)
 MAX_STORAGE_IMAGES :: PRECOMPUTE_STORAGE_BASE + PRECOMPUTE_DISPATCHES
 
@@ -100,9 +105,15 @@ bindless_shutdown :: proc(r: ^Renderer) {
   r.scene.bindless_layout = 0
 }
 
+// The pool handing out handle's index.
+@(private)
+texture_pool :: proc(r: ^Renderer, handle: TextureHandle) -> ^cont.Slots {
+  return &r.target_slots if handle < MAX_RENDER_TARGETS else &r.texture_slots
+}
+
 @(private)
 texture_image :: proc(r: ^Renderer, handle: TextureHandle) -> ^gpu.Image {
-  if !cont.slots_live(&r.texture_slots, u32(handle)) do return nil
+  if !cont.slots_live(texture_pool(r, handle), u32(handle)) do return nil
   return &r.textures[handle]
 }
 
@@ -119,6 +130,7 @@ allocate_texture :: proc(
   // channel remapping applied when sampling; identity by default
   swizzle: vk.ComponentMapping = {},
   shared := false, // also accessed by the async compute queue
+  target := false, // from the render target range
 ) -> (
   handle: TextureHandle,
   ret: vk.Result,
@@ -133,7 +145,7 @@ allocate_texture :: proc(
       return
     }
   }
-  h, ok := cont.slots_alloc(&r.texture_slots)
+  h, ok := cont.slots_alloc(&r.target_slots if target else &r.texture_slots)
   if !ok {
     gpu.image_destroy(gctx.device, &img)
     return 0, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -144,10 +156,10 @@ allocate_texture :: proc(
 }
 
 // destroy_texture invalidates handle at once; its slot and image are released once no
-// frame in flight samples them. shutdown frees every texture.
+// frame in flight samples them. teardown frees every texture made since init.
 destroy_texture :: proc(r: ^Renderer, handle: TextureHandle) {
   guard(r)
-  cont.slots_free(&r.texture_slots, u32(handle))
+  cont.slots_free(texture_pool(r, handle), u32(handle))
 }
 
 // NO_TEXTURE is the TextureHandle of none, as materials, emitters and draw2d commands hold it.

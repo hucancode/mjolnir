@@ -149,7 +149,7 @@ post_process_pass_count :: proc(effects: []PostprocessEffect) -> (count: int) {
 post_process_create_images :: proc(r: ^Renderer) -> vk.Result {
   for &frame in r.post_process_images {
     for &handle in frame {
-      handle = allocate_texture(r, r.swapchain.extent, gpu.HDR_COLOR_FORMAT, {.COLOR_ATTACHMENT, .SAMPLED}) or_return
+      handle = allocate_texture(r, r.swapchain.extent, gpu.HDR_COLOR_FORMAT, {.COLOR_ATTACHMENT, .SAMPLED}, target = true) or_return
     }
   }
   return .SUCCESS

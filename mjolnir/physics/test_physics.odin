@@ -1007,3 +1007,25 @@ test_kinematic_body_pushes_dynamic :: proc(t: ^testing.T) {
   testing.expectf(t, abs(p.velocity.x - 2) < 1e-4, "kinematic velocity kept: %v", p.velocity)
   testing.expectf(t, b.position.x > p.position.x + 0.9, "box pushed ahead: box %v pusher %v", b.position, p.position)
 }
+
+@(test)
+test_physics_teardown_reuse :: proc(t: ^testing.T) {
+  w: World
+  init(&w, thread_count = 1)
+  defer shutdown(&w)
+  ground := create_body(&w, {0, -1, 0}, collider = BoxCollider{half_extents = {10, 1, 10}})
+  ball := create_body(&w, {0, 1, 0}, collider = SphereCollider{radius = 0.5}, mass = 1)
+  for _ in 0 ..< 30 do step(&w, 1.0 / 60)
+  teardown(&w)
+  _, ground_live := get_body(&w, ground)
+  _, ball_live := get_body(&w, ball)
+  testing.expect(t, !ground_live && !ball_live)
+  testing.expect_value(t, len(w.contacts), 0)
+  // the next map: no stale BVH entry or contact survives
+  step(&w, 1.0 / 60)
+  next := create_body(&w, {0, 5, 0}, collider = SphereCollider{radius = 0.5}, mass = 1)
+  step(&w, 1.0 / 60)
+  testing.expect_value(t, len(w.contacts), 0)
+  body, ok := get_body(&w, next)
+  testing.expect(t, ok && body.velocity.y < 0)
+}

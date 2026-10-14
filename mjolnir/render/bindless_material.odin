@@ -66,7 +66,7 @@ material :: proc(r: ^Renderer, h: MaterialHandle) -> (^Material, bool) #optional
   return &write_table(r, .MATERIALS, Material)[h], true
 }
 
-// create_material creates a material; it lives until destroy_material or shutdown.
+// create_material creates a material; it lives until destroy_material or teardown.
 create_material :: proc(
   self: ^Renderer,
   type: MaterialType = .PBR,

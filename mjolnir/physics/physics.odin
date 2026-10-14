@@ -123,7 +123,8 @@ KilledBody :: struct {
   user: cont.Handle,
 }
 
-// World owns the bodies, broad-phase BVHs and per-step contact state; create with init, free with shutdown.
+// World owns the bodies, broad-phase BVHs and per-step contact state. init/shutdown own its
+// memory and thread pool (application lifetime); teardown empties it between maps.
 World :: struct {
   // indexed by BodyHandle.index; body_slots says which are live
   bodies:               []Body,
@@ -211,10 +212,10 @@ shutdown :: proc(self: ^World) {
   self^ = {}
 }
 
-// teardown destroys every body; the world stays ready for reuse.
+// teardown drops every body at once; the world stays ready for the next map.
 teardown :: proc(self: ^World) {
-  c: u32
-  for i in cont.slots_next(&self.body_slots, &c) do destroy_body(self, body_handle(self, i))
+  cont.slots_rewind(&self.body_slots)
+  self.dynamic_bvh_stale = 0
   clear(&self.contacts)
   clear(&self.sensor_overlaps)
   clear(&self.killed)

@@ -215,7 +215,8 @@ main_camera :: proc(self: ^Renderer) -> (^Camera, bool) #optional_ok {
   return camera(self, self.main_camera)
 }
 
-// create_camera creates a perspective camera with its own render targets.
+// create_camera creates a perspective camera with its own render targets; it lives until
+// destroy_camera or teardown.
 // Every camera is drawn each frame; the main camera is presented to the swapchain.
 create_camera :: proc(
   self: ^Renderer,
@@ -317,6 +318,7 @@ create_targets :: proc(self: ^Renderer, index: u32) -> vk.Result {
         ATTACHMENTS[a].format,
         ATTACHMENTS[a].usage,
         shared = ATTACHMENTS[a].shared,
+        target = true,
       ) or_return
     }
   }

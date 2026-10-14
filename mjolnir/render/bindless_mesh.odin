@@ -153,7 +153,7 @@ upload_mesh :: proc(render: ^Renderer, index: u32, g: mesh.Geometry) -> (ret: vk
   return .SUCCESS
 }
 
-// create_mesh uploads geometry_data into the mesh arena.
+// create_mesh uploads geometry_data into the mesh arena; it lives until destroy_mesh or teardown.
 // Ownership of the geometry transfers: it is deleted.
 create_mesh :: proc(
   self: ^Renderer,

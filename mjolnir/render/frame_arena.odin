@@ -76,12 +76,13 @@ write_table :: #force_inline proc(self: ^Renderer, b: SceneBinding, $T: typeid) 
   return frame_table(self, b, T, write_frame(self))
 }
 
-// Zeroes entry `index` of the write table and marks it.
+// Zeroes `count` entries of the write table from `index` and marks them.
 @(private)
-clear_entry :: proc(self: ^Renderer, b: SceneBinding, index: u32) {
+clear_entry :: proc(self: ^Renderer, b: SceneBinding, index: u32, count: u32 = 1) {
+  if count == 0 do return
   stride := BINDINGS[b].stride
-  slice.zero(table_bytes(self, b, write_frame(self))[int(index) * stride:][:stride])
-  mark_dirty(self, b, int(index))
+  slice.zero(table_bytes(self, b, write_frame(self))[int(index) * stride:][:int(count) * stride])
+  mark_dirty(self, b, int(index), int(count))
 }
 
 @(private)

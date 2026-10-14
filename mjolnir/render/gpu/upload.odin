@@ -194,6 +194,14 @@ record_uploads :: proc(gctx: ^GPUContext, cmd: vk.CommandBuffer) {
   )
 }
 
+// submit_uploads records every queued upload into a one-shot command buffer and waits for it,
+// so a following deferred_flush drops none. Not while a frame is being recorded.
+submit_uploads :: proc(gctx: ^GPUContext) -> vk.Result {
+  cmd := begin_single_time_command(gctx) or_return
+  record_uploads(gctx, cmd)
+  return end_single_time_command(gctx, &cmd)
+}
+
 @(private = "file")
 record_image_uploads :: proc(cmd: vk.CommandBuffer, images: []PendingImage) {
   discards := make([]ImageDiscard, len(images), context.temp_allocator)

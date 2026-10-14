@@ -91,6 +91,7 @@ occlusion_setup_pyramid :: proc(r: ^Renderer, slot: u32, extent: vk.Extent2D) ->
     {.SAMPLED, .STORAGE, .TRANSFER_DST},
     gpu.calculate_mip_levels(extent.width, extent.height),
     shared = true,
+    target = true,
   ) or_return
   r.pyramid_bound[slot] = false
   img := texture_image(r, r.pyramids[slot])

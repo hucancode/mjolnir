@@ -30,19 +30,23 @@ Slots :: struct {
   reclaimed:  int,
   grace:      u64,
   tick:       u64,
-  // indices ever handed out, plus the reserved 0; every live index is below it
+  // indices ever handed out, plus the reserved ones below `first`; every live index is below it
   high_water: u32,
+  // slots_rewind frees every index from here on; slots_mark moves it to high_water
+  mark:       u32,
   count:      u32, // live indices
   capacity:   u32,
 }
 
-// slots_init sets up s for capacity indices (index 0 is reserved) with an optional reuse grace in ticks.
-slots_init :: proc(s: ^Slots, capacity: u32, grace: u64 = 0) {
+// slots_init sets up s for indices first ..< capacity (index 0 is always reserved) with an
+// optional reuse grace in ticks. Pools splitting one array take disjoint ranges.
+slots_init :: proc(s: ^Slots, capacity: u32, grace: u64 = 0, first: u32 = 1) {
   s.live = make([]u64, (capacity + 63) / 64)
   s.generation = make([]u32, capacity)
   s.grace = grace
   s.capacity = capacity
-  s.high_water = 1
+  s.high_water = max(first, 1)
+  s.mark = s.high_water
 }
 
 // slots_destroy frees the memory held by s and zeroes it.
@@ -119,6 +123,32 @@ reclaim :: proc(s: ^Slots, tick: u64) -> []Retiring {
     s.reclaimed += 1
   }
   return s.retiring[:s.reclaimed]
+}
+
+// slots_mark keeps every index handed out so far through slots_rewind.
+slots_mark :: proc(s: ^Slots) {
+  s.mark = s.high_water
+}
+
+// slots_rewind frees every index from the mark on at once, live or retiring, ignoring the
+// grace. Use once no consumer can still read them; the caller drops what its storage holds
+// in mark ..< the old high_water.
+slots_rewind :: proc(s: ^Slots) {
+  for i in s.mark ..< s.high_water {
+    if !slots_live(s, i) do continue
+    s.live[i / 64] &~= 1 << (i % 64)
+    s.generation[i] += 1
+    s.count -= 1
+  }
+  remove_range(&s.retiring, 0, s.reclaimed)
+  s.reclaimed = 0
+  n := 0
+  for r in s.retiring do if r.index < s.mark {s.retiring[n] = r; n += 1}
+  resize(&s.retiring, n)
+  n = 0
+  for i in s.free do if i < s.mark {s.free[n] = i; n += 1}
+  resize(&s.free, n)
+  s.high_water = s.mark
 }
 
 // slots_next walks the live indices in order:

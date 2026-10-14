@@ -33,7 +33,8 @@ NodeChange :: struct {
   removed:      bool,
 }
 
-// World is the scene graph. Set up with init, free with shutdown.
+// World is the scene graph. init/shutdown own its memory (application lifetime);
+// teardown empties it between maps.
 World :: struct {
   root:             NodeHandle,
   // indexed by NodeHandle.index; slots says which are live
@@ -170,6 +171,8 @@ init :: proc(world: ^World) -> bool {
   world.nodes = make([]Node, MAX_NODES_IN_SCENE)
   world.root = alloc_node(world, "root") or_return
   world.nodes[world.root.index].parent = world.root
+  // the root outlives teardown
+  cont.slots_mark(&world.slots)
   return true
 }
 
@@ -191,9 +194,7 @@ changes :: proc(world: ^World) -> []NodeChange {
 
 // shutdown frees everything `world` owns.
 shutdown :: proc(world: ^World) {
-  for r in cont.slots_flush(&world.slots) do node_retire(world, r.index)
-  c: u32
-  for i in cont.slots_next(&world.slots, &c) do node_destroy(&world.nodes[i])
+  for &n in world.nodes[:world.slots.high_water] do node_destroy(&n)
   cont.slots_destroy(&world.slots)
   delete(world.nodes)
   delete(world.traversal_stack)
@@ -201,21 +202,14 @@ shutdown :: proc(world: ^World) {
   delete(world.pending_removed)
 }
 
-// teardown despawns every node under root. Slots are reclaimed immediately and
-// removals are not reported: index-keyed consumers (render.teardown) must reset
-// their own slots, before the next level spawns into the freed ones.
+// teardown drops every node but the root at once. Removals are not reported:
+// index-keyed consumers (render.teardown) must reset their own slots, before the
+// next level spawns into the freed ones.
 teardown :: proc(world: ^World) {
-  root := lookup(world, world.root)
-  if root == nil do return
-  kids := make([dynamic]NodeHandle, 0, len(root.children), context.temp_allocator)
-  append(&kids, ..root.children[:])
-  clear(&root.children)
-  for h in kids {
-    node := lookup(world, h) or_continue
-    node.parent = h // detached, matching detach()'s self-parent convention
-    despawn_subtree(world, h, node)
-  }
-  for r in cont.slots_flush(&world.slots) do node_retire(world, r.index)
+  for &n in world.nodes[world.slots.mark:world.slots.high_water] do node_destroy(&n)
+  slice.zero(world.nodes[world.slots.mark:world.slots.high_water])
+  cont.slots_rewind(&world.slots)
+  clear(&world.nodes[world.root.index].children)
   clear(&world.pending_removed)
   clear(&world.feed)
 }
