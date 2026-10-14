@@ -35,7 +35,8 @@ CameraProjection :: union {
   OrthographicProjection,
 }
 
-// Camera is a view into the scene: pose and projection, plus the GPU resources it renders into.
+// Camera is a view into the scene: pose and projection, plus the images it renders into.
+// Its draw lists and depth pyramids live in Renderer arrays at its slot (camera_slot).
 Camera :: struct {
   position:                     [3]f32,
   rotation:                     quaternion128,
@@ -44,9 +45,6 @@ Camera :: struct {
   near, far:                    f32,
   extent:                       [2]u32, // width, height
   attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]TextureHandle,
-  // frame N's culling writes the lists frame N+1 draws
-  draws:                        DrawLists,
-  depth_pyramid:                [gpu.FRAMES_IN_FLIGHT]DepthPyramid,
   // first serial whose compute work may read depth and pyramids; until then no occlusion, no lists
   ready_serial:                 u64,
 }
@@ -127,16 +125,17 @@ camera_pose :: proc(self: ^Camera) -> (position: [3]f32, rotation: quaternion128
   return self.position, self.rotation
 }
 
-// camera_forward, camera_right and camera_up are the camera's world-space axes, for
-// controllers that move it (fly, pan) without matrix math.
+// camera_forward returns the camera's world-space forward (-Z) axis.
 camera_forward :: proc(self: ^Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(self.rotation, [3]f32{0, 0, -1})
 }
 
+// camera_right returns the camera's world-space right (+X) axis.
 camera_right :: proc(self: ^Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(self.rotation, [3]f32{1, 0, 0})
 }
 
+// camera_up returns the camera's world-space up (+Y) axis.
 camera_up :: proc(self: ^Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(self.rotation, [3]f32{0, 1, 0})
 }
@@ -237,9 +236,9 @@ create_camera :: proc(
   }
   camera_set_perspective(cam, fov, near_plane, far_plane)
   camera_look_at(cam, position, target)
-  slot := u32(handle) * gpu.FRAMES_IN_FLIGHT
-  res := draw_lists_init(&cam.draws, self, CAMERA_DRAW_SLOT_BASE + slot, len(MaterialType), MAX_NODES_IN_SCENE)
-  if res == .SUCCESS do res = create_targets(self, cam, slot)
+  // frame N's culling writes the lists frame N+1 draws
+  res := draw_lists_create(self, CAMERA_DRAW_SLOT_BASE + camera_slot(u32(handle)), len(MaterialType), CAMERA_LIST_CAPACITY)
+  if res == .SUCCESS do res = create_targets(self, u32(handle))
   if res != .SUCCESS {
     destroy_camera(self, handle)
     return 0, false
@@ -251,8 +250,8 @@ create_camera :: proc(
 destroy_camera :: proc(self: ^Renderer, handle: CameraHandle) {
   cam := camera(self, handle)
   if cam == nil do return
-  destroy_targets(self, cam)
-  draw_lists_destroy(&cam.draws, &self.gctx)
+  destroy_targets(self, u32(handle))
+  draw_lists_destroy(self, CAMERA_DRAW_SLOT_BASE + camera_slot(u32(handle)))
   cont.slots_free(&self.camera_slots, u32(handle))
   if handle == self.main_camera do self.main_camera = 0
 }
@@ -268,7 +267,7 @@ camera_attachment :: proc(
   ok: bool,
 ) #optional_ok {
   cam := camera(self, handle) or_return
-  return cam.attachments[attachment_type][frame_index.? or_else u32(self.gctx.frame_serial % gpu.FRAMES_IN_FLIGHT)], true
+  return cam.attachments[attachment_type][frame_index.? or_else write_frame(self)], true
 }
 
 // resize_camera resizes a camera's render targets; a perspective projection follows the new aspect ratio.
@@ -281,8 +280,8 @@ resize_camera :: proc(
   if !ok do return .SUCCESS
   if cam.extent == {width, height} do return .SUCCESS
   cam.extent = {width, height}
-  destroy_targets(self, cam)
-  create_targets(self, cam, u32(handle) * gpu.FRAMES_IN_FLIGHT) or_return
+  destroy_targets(self, u32(handle))
+  create_targets(self, u32(handle)) or_return
   log.infof("Camera resized to %dx%d", width, height)
   return .SUCCESS
 }
@@ -306,13 +305,9 @@ ATTACHMENTS := [AttachmentType]struct {
 }
 
 @(private)
-create_targets :: proc(
-  self: ^Renderer,
-  camera: ^Camera,
-  // the camera's first pyramid slot; frame f takes slot + f
-  pyramid_slot: u32,
-) -> vk.Result {
+create_targets :: proc(self: ^Renderer, index: u32) -> vk.Result {
   gctx := &self.gctx
+  camera := &self.cameras[index]
   extent := vk.Extent2D{camera.extent[0], camera.extent[1]}
   for a in AttachmentType {
     for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
@@ -331,17 +326,16 @@ create_targets :: proc(
     gpu.queue_image_init(gctx, {depth.image, {.DEPTH}, {.DEPTH_STENCIL_ATTACHMENT_READ}, {.EARLY_FRAGMENT_TESTS}})
   }
   camera.ready_serial = gctx.frame_serial + 1
-  for &pyramid, frame in camera.depth_pyramid {
-    occlusion_setup_pyramid(self, &pyramid, extent, pyramid_slot + u32(frame)) or_return
-  }
+  for frame in 0 ..< u32(gpu.FRAMES_IN_FLIGHT) do occlusion_setup_pyramid(self, camera_slot(index) + frame, extent) or_return
   return .SUCCESS
 }
 
 @(private)
-destroy_targets :: proc(self: ^Renderer, camera: ^Camera) {
+destroy_targets :: proc(self: ^Renderer, index: u32) {
+  camera := &self.cameras[index]
   for frames in camera.attachments do for handle in frames do destroy_texture(self, handle)
   camera.attachments = {}
-  for &pyramid in camera.depth_pyramid do occlusion_destroy_pyramid(self, &pyramid)
+  for frame in 0 ..< u32(gpu.FRAMES_IN_FLIGHT) do occlusion_destroy_pyramid(self, camera_slot(index) + frame)
 }
 
 // main_camera_orbit is camera_orbit on the main camera. The controller owns yaw, pitch and

@@ -7,8 +7,7 @@ import "core:slice"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-// Command positions are framebuffer pixels. Each draws inside its `clip`
-// rect (x, y, width, height), the whole framebuffer when zero.
+// Positions are framebuffer pixels; `clip` is (x, y, w, h), zero = whole framebuffer.
 
 // DrawQuadCommand draws a solid or textured rectangle.
 DrawQuadCommand :: struct {
@@ -16,16 +15,12 @@ DrawQuadCommand :: struct {
   size:       [2]f32,
   color:      [4]u8,
   texture_id: u32,
-  z_order:    i32,
-  clip:       [4]f32,
 }
 
 // A run of glyphs of the DrawList's font atlas (font.glyphs), in one color.
 DrawTextCommand :: struct {
-  glyphs:  []font.Glyph,
-  color:   [4]u8,
-  z_order: i32,
-  clip:    [4]f32,
+  glyphs: []font.Glyph,
+  color:  [4]u8,
 }
 
 // Vertex2D is one vertex of a DrawMeshCommand.
@@ -42,15 +37,18 @@ DrawMeshCommand :: struct {
   vertices:   []Vertex2D,
   indices:    []u32,
   texture_id: u32,
-  z_order:    i32,
-  clip:       [4]f32,
 }
 
-// RenderCommand is one 2D draw staged through DrawList.
-RenderCommand :: union {
-  DrawQuadCommand,
-  DrawTextCommand,
-  DrawMeshCommand,
+// RenderCommand is one 2D draw staged through DrawList: a shape, drawn in z_order
+// (ascending, stable) inside clip.
+RenderCommand :: struct {
+  shape:   union {
+    DrawQuadCommand,
+    DrawTextCommand,
+    DrawMeshCommand,
+  },
+  z_order: i32,
+  clip:    [4]f32,
 }
 
 // One frame of 2D output. `atlas` holds the producer's R8 font atlas
@@ -89,10 +87,6 @@ OverlayRenderer :: struct {
   commands:        []RenderCommand,
   white_texture:   TextureHandle, // drawn for NO_TEXTURE
   font_atlas:      TextureHandle, // sampled by text commands
-  // CPU copy of the font atlas, uploaded by flush when dirty
-  atlas_pixels:    []u8,
-  atlas_extent:    [2]u32,
-  atlas_dirty:     bool,
   debug_ctx:       mu.Context,
   debug_open:      bool, // mu.begin ran this frame; frame closes it
   debug_atlas:     TextureHandle, // microui's builtin atlas
@@ -131,12 +125,6 @@ overlay_init :: proc(r: ^Renderer, dpi_scale: f32) -> vk.Result {
       layout = r.scene.layout,
     },
   ) or_return
-  return .SUCCESS
-}
-
-@(private)
-overlay_setup :: proc(r: ^Renderer) -> vk.Result {
-  self := &r.ui
   white_pixel := [4]u8{255, 255, 255, 255}
   self.white_texture = allocate_texture(r, {1, 1}, .R8G8B8A8_UNORM, {.SAMPLED}, data = white_pixel[:]) or_return
   self.debug_atlas = allocate_alpha_texture(r, mu.default_atlas_alpha[:], mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT) or_return
@@ -147,16 +135,15 @@ overlay_setup :: proc(r: ^Renderer) -> vk.Result {
   return .SUCCESS
 }
 
+// Its textures go with every other texture.
 @(private)
-overlay_teardown :: proc(r: ^Renderer) {
+overlay_shutdown :: proc(r: ^Renderer) {
   self := &r.ui
   for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
     gpu.buffer_destroy(r.gctx.device, &self.vertex_buffers[i])
     gpu.buffer_destroy(r.gctx.device, &self.index_buffers[i])
   }
-  self.white_texture = 0
-  self.font_atlas = 0
-  self.debug_atlas = 0
+  delete(self.batches)
 }
 
 // R8 coverage samples as white with alpha = coverage, so the shader multiplies every sample with the vertex color.
@@ -187,7 +174,7 @@ overlay_record :: proc(
   self.index_count = 0
   clear(&self.batches)
   full := vk.Rect2D{extent = extent}
-  if draw_commands do batch_commands(self, extent, frame_index)
+  if draw_commands do batch_commands(self, extent, frame_index, texture_image(r, self.font_atlas))
   if draw_debug {
     begin_batch(self, full)
     batch_debug_ui(self, extent, frame_index)
@@ -253,43 +240,32 @@ push_quad :: proc(
   self.index_count += 6
 }
 
+// Text draws nothing until a font atlas is staged.
 @(private)
-batch_commands :: proc(self: ^OverlayRenderer, extent: vk.Extent2D, frame_index: u32) {
+batch_commands :: proc(self: ^OverlayRenderer, extent: vk.Extent2D, frame_index: u32, font_atlas: ^gpu.Image) {
   CommandSortKey :: struct {
     z_order:   i32,
     cmd_index: int,
   }
   keys := make([]CommandSortKey, len(self.commands), context.temp_allocator)
-  for command, i in self.commands {
-    z: i32
-    switch c in command {
-    case DrawQuadCommand: z = c.z_order
-    case DrawMeshCommand: z = c.z_order
-    case DrawTextCommand: z = c.z_order
-    }
-    keys[i] = {z, i}
-  }
+  for command, i in self.commands do keys[i] = {command.z_order, i}
   slice.stable_sort_by(keys, proc(a, b: CommandSortKey) -> bool {
     return a.z_order < b.z_order
   })
-  atlas_size := [2]f32{f32(self.atlas_extent.x), f32(self.atlas_extent.y)}
   scissor := vk.Rect2D{{-1, -1}, {}}
   for key in keys {
-    clip: [4]f32
-    switch c in self.commands[key.cmd_index] {
-    case DrawQuadCommand: clip = c.clip
-    case DrawMeshCommand: clip = c.clip
-    case DrawTextCommand: clip = c.clip
-    }
+    command := &self.commands[key.cmd_index]
     // a new batch wherever the clip changes
-    if s := clip_scissor(clip, extent); s != scissor {
+    if s := clip_scissor(command.clip, extent); s != scissor {
       scissor = s
       begin_batch(self, s)
     }
-    switch c in self.commands[key.cmd_index] {
+    switch c in command.shape {
     case DrawQuadCommand:
       push_quad(self, frame_index, c.position, c.position + c.size, {0, 0}, {1, 1}, c.color, resolve_texture(self, c.texture_id))
     case DrawTextCommand:
+      if font_atlas == nil do continue
+      atlas_size := [2]f32{f32(font_atlas.extent.width), f32(font_atlas.extent.height)}
       for g in c.glyphs {
         push_quad(self, frame_index, g.p0, g.p1, g.uv0 / atlas_size, g.uv1 / atlas_size, c.color, u32(self.font_atlas))
       }

@@ -37,8 +37,7 @@ TEXTURE_FILES := [?]string{
 textures:            [dynamic]TextureEntry
 selected_tex_index:  i32 = 0
 emitter_node:        world.NodeHandle
-emitter_handle:      render.EmitterHandle
-enabled:             bool = true
+enabled:            bool = true
 
 emission_rate:    mu.Real = 200
 lifetime:         mu.Real = 2.0
@@ -71,7 +70,7 @@ main :: proc() {
   render.main_camera_look_at(&app.renderer, {0, 5, 10}, {0, 2, 0})
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  app.renderer.ambient.skybox_intensity = 0
+  app.renderer.skybox_intensity = 0
 
   for name in TEXTURE_FILES {
     path := fmt.tprintf("assets/particles/%s.png", name)
@@ -81,9 +80,8 @@ main :: proc() {
   }
   if len(textures) > 0 && int(selected_tex_index) >= len(textures) do selected_tex_index = 0
 
-  emitter_handle = render.create_emitter(&app.renderer)
   emitter_node = world.spawn(&app.scene, {0, 2, 0})
-  render.attach(&app.renderer, emitter_node.index, emitter_handle)
+  render.attach(&app.renderer, emitter_node.index, render.emitter_attachment())
 
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -107,7 +105,7 @@ update :: proc(app: ^App, dt: f32) {
   if len(textures) > 0 && int(selected_tex_index) < len(textures) {
     tex = textures[selected_tex_index].handle
   }
-  if em, ok := render.emitter(&app.renderer, emitter_handle); ok {
+  if em, ok := render.attachment(&app.renderer, emitter_node.index, render.Emitter); ok {
     em.texture_index     = tex
     em.enabled           = b32(enabled)
     em.emission_rate     = f32(emission_rate)
@@ -121,6 +119,7 @@ update :: proc(app: ^App, dt: f32) {
     em.velocity_spread   = f32(velocity_spread)
     em.color_start       = color_start
     em.color_end         = color_end
+    render.attach(&app.renderer, emitter_node.index, em)
   }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

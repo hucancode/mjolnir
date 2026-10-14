@@ -14,8 +14,7 @@ Glyph :: struct {
   uv0, uv1: [2]f32,
 }
 
-// DEFAULT_PREWARM_SIZES are the glyph sizes rasterized at init so the first atlas upload covers typical
-// text without growing the atlas; other sizes rasterize on first use.
+// DEFAULT_PREWARM_SIZES are the glyph sizes rasterized at init; others rasterize on first use.
 DEFAULT_PREWARM_SIZES :: []f32{14, 16, 20, 24}
 
 @(private = "file")

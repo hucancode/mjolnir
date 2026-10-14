@@ -1,13 +1,12 @@
 package render
 
 import "base:intrinsics"
-import "core:log"
 import "core:reflect"
 import "gpu"
 import vk "vendor:vulkan"
 
 // GrayscaleEffect desaturates the image. Effect structs are pushed verbatim, so their layout
-// must match each shader's push block. Append effects to r.post_process.effect_stack;
+// must match each shader's push block. Append effects to r.effect_stack;
 // every camera runs the stack in order.
 GrayscaleEffect :: struct {
   weights:  [3]f32, // zero = Rec. 601 luma
@@ -117,22 +116,11 @@ PostProcessPushConstant :: struct {
 POST_PROCESS_RING :: 3
 
 @(private)
-PostProcessRenderer :: struct {
-  // [is_last][tag]: every pass writes an HDR ring image but the last, which
-  // writes the swapchain format
-  pipelines:       [2][len(EFFECTS)]vk.Pipeline,
-  effect_stack:    [dynamic]PostprocessEffect,
-  // pass i writes slot i % POST_PROCESS_RING; its input and original are the two slots before
-  images:          [gpu.FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
-}
-
-@(private)
 post_process_init :: proc(r: ^Renderer) -> vk.Result {
-  self := &r.post_process
-  self.effect_stack = make([dynamic]PostprocessEffect)
+  r.effect_stack = make([dynamic]PostprocessEffect)
   formats := [2]vk.Format{gpu.HDR_COLOR_FORMAT, r.swapchain.format.format}
   blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_OVERRIDE}
-  for &pipelines, is_last in self.pipelines {
+  for &pipelines, is_last in r.post_process_pipelines {
     for effect, tag in EFFECTS {
       pipelines[tag] = gpu.create_graphics_pipeline(
         &r.gctx,
@@ -147,7 +135,7 @@ post_process_init :: proc(r: ^Renderer) -> vk.Result {
       ) or_return
     }
   }
-  return .SUCCESS
+  return post_process_create_images(r)
 }
 
 @(private)
@@ -156,25 +144,20 @@ post_process_pass_count :: proc(effects: []PostprocessEffect) -> (count: int) {
   return
 }
 
+// The whole ring of every frame in flight, at the swapchain extent; recreate_swapchain rebuilds it.
 @(private)
-post_process_image_count :: proc(effects: []PostprocessEffect) -> int {
-  return min(max(post_process_pass_count(effects) - 1, 0), POST_PROCESS_RING)
-}
-
-// Kept until the swapchain is resized or the level torn down.
-@(private)
-post_process_ensure_images :: proc(r: ^Renderer, extent: vk.Extent2D, frame_index: u32) -> vk.Result {
-  self := &r.post_process
-  for &handle in self.images[frame_index][:post_process_image_count(self.effect_stack[:])] {
-    if handle != 0 do continue
-    handle = allocate_texture(r, extent, gpu.HDR_COLOR_FORMAT, {.COLOR_ATTACHMENT, .SAMPLED}) or_return
+post_process_create_images :: proc(r: ^Renderer) -> vk.Result {
+  for &frame in r.post_process_images {
+    for &handle in frame {
+      handle = allocate_texture(r, r.swapchain.extent, gpu.HDR_COLOR_FORMAT, {.COLOR_ATTACHMENT, .SAMPLED}) or_return
+    }
   }
   return .SUCCESS
 }
 
 @(private)
 post_process_release_images :: proc(r: ^Renderer) {
-  for &frame in r.post_process.images {
+  for &frame in r.post_process_images {
     for &handle in frame {
       destroy_texture(r, handle)
       handle = 0
@@ -191,24 +174,18 @@ post_process_record :: proc(
   output_view: vk.ImageView,
   cam: ^Camera,
 ) {
-  self := &r.post_process
   command_buffer := r.command_buffers[frame_index]
-  effects := self.effect_stack[:]
+  effects := r.effect_stack[:]
   // with no effect, a single copy (nil effect) brings the input to output
   copy_only := [1]PostprocessEffect{nil}
   if len(effects) == 0 do effects = copy_only[:]
   ring: [POST_PROCESS_RING]^gpu.Image
   discards: [POST_PROCESS_RING]gpu.ImageDiscard
-  ring_count := post_process_image_count(effects)
-  for &img, slot in ring[:ring_count] {
-    img = texture_image(r, self.images[frame_index][slot])
-    if img == nil {
-      log.errorf("Post-process image handle %v not found", self.images[frame_index][slot])
-      return
-    }
+  for &img, slot in ring {
+    img = texture_image(r, r.post_process_images[frame_index][slot])
     discards[slot] = gpu.attachment_discard(img)
   }
-  gpu.image_discard_barrier(command_buffer, ..discards[:ring_count])
+  gpu.image_discard_barrier(command_buffer, ..discards[:])
   input := u32(cam.attachments[.FINAL_IMAGE][frame_index])
   original := input
   pass_count := post_process_pass_count(effects)
@@ -219,13 +196,7 @@ post_process_record :: proc(
       defer i += 1
       is_last := i == pass_count - 1
       if i > 0 {
-        gpu.memory_barrier(
-          command_buffer,
-          {.COLOR_ATTACHMENT_WRITE},
-          {.SHADER_READ, .COLOR_ATTACHMENT_WRITE},
-          {.COLOR_ATTACHMENT_OUTPUT, .FRAGMENT_SHADER},
-          {.FRAGMENT_SHADER, .COLOR_ATTACHMENT_OUTPUT},
-        )
+        barrier(command_buffer, .POST_PASS)
       }
       dst_view := output_view
       if !is_last do dst_view = ring[i % POST_PROCESS_RING].view
@@ -236,7 +207,7 @@ post_process_record :: proc(
         // the fullscreen triangle overwrites every pixel
         gpu.create_color_attachment(dst_view, .DONT_CARE, .STORE),
       )
-      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipelines[int(is_last)][tag])
+      vk.CmdBindPipeline(command_buffer, .GRAPHICS, r.post_process_pipelines[int(is_last)][tag])
       push := PostProcessPushConstant {
         camera_near          = cam.near,
         camera_far           = cam.far,
@@ -252,7 +223,7 @@ post_process_record :: proc(
       vk.CmdEndRendering(command_buffer)
       if !is_last {
         original = input
-        input = u32(self.images[frame_index][i % POST_PROCESS_RING])
+        input = u32(r.post_process_images[frame_index][i % POST_PROCESS_RING])
       }
     }
   }

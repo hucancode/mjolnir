@@ -301,5 +301,5 @@ on_key :: proc(app: ^App, key: input.Key) {
 label :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand, text: string, pos: [2]f32, size: f32, color: [4]u8) {
   glyphs := make([dynamic]font.Glyph, context.temp_allocator)
   font.glyphs(&app.font, text, pos, size, &glyphs)
-  append(commands, render.DrawTextCommand{glyphs = glyphs[:], color = color})
+  append(commands, render.RenderCommand{shape = render.DrawTextCommand{glyphs = glyphs[:], color = color}})
 }

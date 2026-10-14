@@ -85,7 +85,7 @@ spin_barrier_wait :: proc "contextless" (b: ^SpinBarrier, local_sense: ^bool, ex
 // bodies take color bits.
 @(private)
 build_solver_partition :: proc(world: ^World) {
-  body_count := len(world.bodies.entries)
+  body_count := body_range(world)
   resize(&world.solver_color_used, body_count)
   if body_count > 0 {
     mem.zero_slice(world.solver_color_used[:])

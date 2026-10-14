@@ -124,8 +124,7 @@ allocate_texture :: proc(
   ret: vk.Result,
 ) {
   gctx := &r.gctx
-  sync.recursive_mutex_lock(&r.mutex)
-  defer sync.recursive_mutex_unlock(&r.mutex)
+  guard(r)
   usage := usage | ({.TRANSFER_DST, .TRANSFER_SRC} if data != nil else {})
   img := gpu.image_create(gctx, extent, format, usage, mip_levels, cube = cube, shared = shared, components = swizzle) or_return
   if data != nil {
@@ -145,10 +144,9 @@ allocate_texture :: proc(
 }
 
 // destroy_texture invalidates handle at once; its slot and image are released once no
-// frame in flight samples them. teardown frees every texture.
+// frame in flight samples them. shutdown frees every texture.
 destroy_texture :: proc(r: ^Renderer, handle: TextureHandle) {
-  sync.recursive_mutex_lock(&r.mutex)
-  defer sync.recursive_mutex_unlock(&r.mutex)
+  guard(r)
   cont.slots_free(&r.texture_slots, u32(handle))
 }
 

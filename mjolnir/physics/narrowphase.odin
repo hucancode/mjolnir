@@ -1,10 +1,8 @@
 #+private
 package physics
 
-// Narrowphase: broadphase pairs → contacts. Manifolds are analytic only —
-// primitives are sphere, box, cylinder. Multi-point manifolds are what let
-// boxes rest flat and stacks stand still: a single averaged point cannot
-// resist tipping or twisting. Every normal points from A to B.
+// Narrowphase: broadphase pairs → analytic contacts (sphere, box, cylinder). Multi-point
+// manifolds let boxes rest flat. Every normal points from A to B.
 
 import "../geometry"
 import "core:math"

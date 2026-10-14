@@ -113,8 +113,8 @@ update :: proc(app: ^App, dt: f32) {
     l.color[3] = f32(sun_intensity)
     render.attach(&app.renderer, sun_light.index, l)
   }
-  app.renderer.ambient.ibl_intensity = f32(ibl_intensity)
-  app.renderer.ambient.skybox_intensity = skybox_on ? 1 : 0
+  app.renderer.ibl_intensity = f32(ibl_intensity)
+  app.renderer.skybox_intensity = skybox_on ? 1 : 0
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
     mat := render.material(&app.renderer, grid_materials[row][col]) or_continue

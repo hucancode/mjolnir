@@ -177,7 +177,7 @@ spawn :: proc(
 }
 
 setup :: proc(app: ^App) {
-  app.renderer.ambient.ibl_intensity = 0.3
+  app.renderer.ibl_intensity = 0.3
   plain_material_handle := app.renderer.builtin_materials[render.Color.WHITE]
   cube_mesh_handle := app.renderer.builtin_meshes[render.Primitive.CUBE]
   sphere_mesh_handle := app.renderer.builtin_meshes[render.Primitive.SPHERE]
@@ -447,7 +447,7 @@ setup :: proc(app: ^App) {
               radius      = 14.0,
               angle_inner = math.PI * 0.25 * 0.8,
               angle_outer = math.PI * 0.25,
-              cast_shadow = true,
+              should_cast_shadow = true,
             },
           ) or_continue
           world.translate(
@@ -468,7 +468,7 @@ setup :: proc(app: ^App) {
           spawn(
             app,
             parent = lights_root_handle,
-            attachment = render.Light{type = .POINT, color = color, radius = 14.0, cast_shadow = true},
+            attachment = render.Light{type = .POINT, color = color, radius = 14.0, should_cast_shadow = true},
           ) or_continue
           world.translate(
             &app.scene,
@@ -498,7 +498,7 @@ setup :: proc(app: ^App) {
   }
   when false {
     log.info("Setting up bloom...")
-    append(&app.renderer.post_process.effect_stack, render.BloomEffect{threshold = 0.8, intensity = 0.5, blur_radius = 16.0})
+    append(&app.renderer.effect_stack, render.BloomEffect{threshold = 0.8, intensity = 0.5, blur_radius = 16.0})
     // A bright white ball to test the bloom effect
     if emissive_handle, emissive_ok := render.create_material(&app.renderer, emissive_value = 30.0); emissive_ok {
       bright_ball := spawn(
@@ -532,53 +532,45 @@ setup :: proc(app: ^App) {
     }
     psys_handle1 := world.spawn(&app.scene, {-2.0, 1.9, 0.3})
     if goldstar_texture_ok {
-      emitter_handle1, emitter1_ok := render.create_emitter(
-        &app.renderer,
-        texture_handle = goldstar_texture_handle,
-        emission_rate = 70,
-        particle_lifetime = 2.0,
-        position_spread = 0.1,
-        initial_velocity = {0, -0.1, 0},
-        velocity_spread = 0.1,
-        color_start = {1, 1, 0, 1},
-        color_end = {1, 0.5, 0, 0},
-        size_start = 200.0,
-        size_end = 100.0,
-        weight = 0.1,
-        weight_spread = 0.05,
+      spawn(
+        app,
+        parent = psys_handle1,
+        attachment = render.emitter_attachment(
+          texture_handle = goldstar_texture_handle,
+          emission_rate = 70,
+          particle_lifetime = 2.0,
+          position_spread = 0.1,
+          initial_velocity = {0, -0.1, 0},
+          velocity_spread = 0.1,
+          color_start = {1, 1, 0, 1},
+          color_end = {1, 0.5, 0, 0},
+          size_start = 200.0,
+          size_end = 100.0,
+          weight = 0.1,
+          weight_spread = 0.05,
+        ),
       )
-      if emitter1_ok {
-        spawn(
-          app,
-          parent = psys_handle1,
-          attachment = emitter_handle1,
-        )
-      }
     }
     psys_handle2 := world.spawn(&app.scene, {2.0, 1.9, 0.3})
     if black_circle_ok {
-      emitter_handle2, emitter2_ok := render.create_emitter(
-        &app.renderer,
-        texture_handle = black_circle_texture_handle,
-        emission_rate = 70,
-        particle_lifetime = 3.0,
-        position_spread = 0.3,
-        initial_velocity = {0, 0.2, 0},
-        velocity_spread = 0.15,
-        color_start = {0, 0, 1, 1},
-        color_end = {0, 1, 1, 0},
-        size_start = 350.0,
-        size_end = 175.0,
-        weight = 0.1,
-        weight_spread = 0.3,
+      spawn(
+        app,
+        parent = psys_handle2,
+        attachment = render.emitter_attachment(
+          texture_handle = black_circle_texture_handle,
+          emission_rate = 70,
+          particle_lifetime = 3.0,
+          position_spread = 0.3,
+          initial_velocity = {0, 0.2, 0},
+          velocity_spread = 0.15,
+          color_start = {0, 0, 1, 1},
+          color_end = {0, 1, 1, 0},
+          size_start = 350.0,
+          size_end = 175.0,
+          weight = 0.1,
+          weight_spread = 0.3,
+        ),
       )
-      if emitter2_ok {
-        spawn(
-          app,
-          parent = psys_handle2,
-          attachment = emitter_handle2,
-        )
-      }
     }
     forcefield_root_handle := world.spawn(&app.scene, {0, 4, 0})
     add_node_clip(app, forcefield_root_handle, spin_clip("forcefield_rotation", 8, {0, math.PI * 0.5, math.PI, math.PI * 1.5, math.PI * 2}, .LINEAR))
@@ -587,14 +579,11 @@ setup :: proc(app: ^App) {
       forcefield_root_handle,
     )
     world.translate(&app.scene, forcefield_handle, 3.0, 0.0, 0.0)
-    if ff, ok := render.create_forcefield(
-      &app.renderer,
+    render.attach(&app.renderer, forcefield_handle.index, render.forcefield_attachment(
       tangent_strength = 2.0,
       strength = 20.0,
       area_of_effect = 5.0,
-    ); ok {
-      render.attach(&app.renderer, forcefield_handle.index, ff)
-    }
+    ))
     handle := spawn(
       app,
       parent = forcefield_handle,
@@ -612,14 +601,14 @@ setup :: proc(app: ^App) {
     render.debug_arrow(&app.renderer, {0, 0, 0}, {3, 3, 0}, render.DEBUG_YELLOW, life = 5)
     render.debug_axes(&app.renderer, {0, 0, 0}, scale = 2)
   }
-  // append(&app.renderer.post_process.effect_stack, render.FogEffect{color = {0.4, 0.0, 0.8}, density = 0.02, start = 5.0, end = 20.0})
-  // append(&app.renderer.post_process.effect_stack, render.BloomEffect{threshold = 0.2, intensity = 1.0, blur_radius = 4.0})
-  append(&app.renderer.post_process.effect_stack, render.CrossHatchEffect{hatch_offset_y = 1.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
-  // append(&app.renderer.post_process.effect_stack, render.BlurEffect{radius = 18.0, weight_falloff = 1.0})
-  // append(&app.renderer.post_process.effect_stack, render.ToneMapEffect{exposure = 1.5, gamma = 1.3})
-  // append(&app.renderer.post_process.effect_stack, render.DoFEffect{focus_distance = 3.0, focus_range = 2.0, blur_strength = 20.0, bokeh_intensity = 0.5})
-  // append(&app.renderer.post_process.effect_stack, render.GrayscaleEffect{strength = 0.9})
-  append(&app.renderer.post_process.effect_stack, render.OutlineEffect{thickness = 0.8, color = {0.0, 0.0, 0.01}})
+  // append(&app.renderer.effect_stack, render.FogEffect{color = {0.4, 0.0, 0.8}, density = 0.02, start = 5.0, end = 20.0})
+  // append(&app.renderer.effect_stack, render.BloomEffect{threshold = 0.2, intensity = 1.0, blur_radius = 4.0})
+  append(&app.renderer.effect_stack, render.CrossHatchEffect{hatch_offset_y = 1.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
+  // append(&app.renderer.effect_stack, render.BlurEffect{radius = 18.0, weight_falloff = 1.0})
+  // append(&app.renderer.effect_stack, render.ToneMapEffect{exposure = 1.5, gamma = 1.3})
+  // append(&app.renderer.effect_stack, render.DoFEffect{focus_distance = 3.0, focus_range = 2.0, blur_strength = 20.0, bokeh_intensity = 0.5})
+  // append(&app.renderer.effect_stack, render.GrayscaleEffect{strength = 0.9})
+  append(&app.renderer.effect_stack, render.OutlineEffect{thickness = 0.8, color = {0.0, 0.0, 0.01}})
   when true {
     portal_camera_handle = render.create_camera(
       &app.renderer,

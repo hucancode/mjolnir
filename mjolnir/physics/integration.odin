@@ -10,10 +10,9 @@ import "core:math/linalg"
 // bodies keep their velocity.
 @(private)
 integrate_velocities_range :: proc(world: ^World, start, end: int, h: f32) {
-  pool := &world.bodies
   list := world.awake_list[:]
   #no_bounds_check for li in start ..< end {
-    body := &pool.entries[list[li]].item
+    body := &world.bodies[list[li]]
     if body.inv_mass == 0 do continue
     body.velocity += (world.gravity + body.force * body.inv_mass) * h
     body.velocity *= math.pow(1.0 - body.linear_damping, h)
@@ -30,11 +29,10 @@ integrate_velocities_range :: proc(world: ^World, start, end: int, h: f32) {
 // finalize, not here — collision runs once per frame.
 @(private)
 integrate_positions_range :: proc(world: ^World, start, end: int, h: f32, ccd_handled: []bool) {
-  pool := &world.bodies
   list := world.awake_list[:]
   #no_bounds_check for li in start ..< end {
     i := int(list[li])
-    body := &pool.entries[i].item
+    body := &world.bodies[i]
     if ccd_handled[i] do continue // CCD already advanced this body
     // Safety clamps: runaway state breaks CCD sweeps and quaternion integration
     speed_sq := linalg.length2(body.velocity)

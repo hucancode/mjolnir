@@ -5,8 +5,7 @@ import "gpu"
 import vk "vendor:vulkan"
 
 // Bindings of the scene set (set 0), one descriptor each of the type in
-// SCENE_BINDING_TYPES. Shaders repeat these numbers as literals.
-@(private)
+// BINDINGS. Shaders repeat these numbers as literals.
 SceneBinding :: enum u32 {
   VIEWS,
   NODES,
@@ -19,32 +18,37 @@ SceneBinding :: enum u32 {
   PARTICLES,
   PARTICLE_ALIVE,
   LIGHTS,
-  // the shadow atlas
   SHADOW_MAPS,
   DEBUG_LINES,
 }
 
-@(private)
-SCENE_BINDING_TYPES := [SceneBinding]vk.DescriptorType {
-  .VIEWS           = .STORAGE_BUFFER,
-  .NODES           = .STORAGE_BUFFER,
-  .MESHES          = .STORAGE_BUFFER,
-  .MATERIALS       = .STORAGE_BUFFER,
-  .BONES           = .STORAGE_BUFFER,
-  .SKINNING        = .STORAGE_BUFFER,
-  .EMITTERS        = .STORAGE_BUFFER,
-  .FORCEFIELDS     = .STORAGE_BUFFER,
-  .PARTICLES       = .STORAGE_BUFFER,
-  .PARTICLE_ALIVE  = .STORAGE_BUFFER,
-  .LIGHTS          = .STORAGE_BUFFER,
-  .SHADOW_MAPS     = .SAMPLED_IMAGE,
-  .DEBUG_LINES     = .STORAGE_BUFFER,
+// Descriptor type of each binding. A binding with a stride is a table the CPU writes: one copy
+// per frame in flight in the frame arena, `capacity` entries of `stride` bytes (see frame_arena.odin).
+// The others are backed by a resource of their own (scene_write_binding).
+BINDINGS := [SceneBinding]struct {
+  type:     vk.DescriptorType,
+  stride:   int,
+  capacity: int,
+} {
+  .VIEWS          = {.STORAGE_BUFFER, size_of(ViewGPU), MAX_VIEWS},
+  .NODES          = {.STORAGE_BUFFER, size_of(NodeData), MAX_NODES_IN_SCENE},
+  .MESHES         = {.STORAGE_BUFFER, size_of(MeshData), MAX_MESHES},
+  .MATERIALS      = {.STORAGE_BUFFER, size_of(Material), MAX_MATERIALS},
+  .BONES          = {.STORAGE_BUFFER, size_of(matrix[4, 4]f32), BONE_CAPACITY},
+  .SKINNING       = {type = .STORAGE_BUFFER},
+  .EMITTERS       = {.STORAGE_BUFFER, size_of(Emitter), MAX_EMITTERS},
+  .FORCEFIELDS    = {.STORAGE_BUFFER, size_of(ForceField), MAX_FORCE_FIELDS},
+  .PARTICLES      = {type = .STORAGE_BUFFER},
+  .PARTICLE_ALIVE = {type = .STORAGE_BUFFER},
+  .LIGHTS         = {.STORAGE_BUFFER, size_of(Light), MAX_LIGHTS},
+  // the shadow atlas
+  .SHADOW_MAPS    = {type = .SAMPLED_IMAGE},
+  .DEBUG_LINES    = {.STORAGE_BUFFER, size_of(DebugLineSegment), MAX_SEGMENTS},
 }
 
 // One layout for every scene pipeline, so both sets stay bound across pipeline switches.
 @(private = "file")
 PUSH_CONSTANT_SIZE :: 128
-@(private)
 SCENE_STAGES :: vk.ShaderStageFlags{.VERTEX, .FRAGMENT, .COMPUTE}
 
 // SceneDescriptors are the scene and bindless descriptor sets with the pipeline layout over them.
@@ -60,13 +64,12 @@ SceneDescriptors :: struct {
 }
 
 
-@(private)
 scene_descriptors_init :: proc(self: ^Renderer) -> (ret: vk.Result) {
   gctx := &self.gctx
   scene := &self.scene
   defer if ret != .SUCCESS do scene_descriptors_shutdown(scene, gctx)
   bindings: [len(SceneBinding)]gpu.DescriptorBinding
-  for type, b in SCENE_BINDING_TYPES do bindings[b] = {type, 1, SCENE_STAGES}
+  for binding, b in BINDINGS do bindings[b] = {binding.type, 1, SCENE_STAGES}
   scene.set_layout = gpu.create_descriptor_layout(gctx, ..bindings[:]) or_return
   for &set, frame in scene.sets {
     gpu.allocate_descriptor_set(gctx, &set, &scene.set_layout) or_return
@@ -85,7 +88,6 @@ scene_descriptors_init :: proc(self: ^Renderer) -> (ret: vk.Result) {
   return .SUCCESS
 }
 
-@(private)
 scene_descriptors_shutdown :: proc(self: ^SceneDescriptors, gctx: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(gctx.device, self.layout, nil)
   vk.DestroyDescriptorSetLayout(gctx.device, self.set_layout, nil)
@@ -93,24 +95,19 @@ scene_descriptors_shutdown :: proc(self: ^SceneDescriptors, gctx: ^gpu.GPUContex
 }
 
 // The caller guarantees no submitted work still uses the set.
-@(private)
 scene_write_binding :: proc(self: ^Renderer, b: SceneBinding, frame_index: int) {
   atlas := &self.shadow_atlas[frame_index]
-  layout := &self.arena_layout
   // an arena table, unless a resource of its own backs the binding
-  info: gpu.DescriptorInfo = vk.DescriptorBufferInfo{buffer = self.frame_arena[frame_index].buffer, offset = layout.offset[b], range = layout.range[b]}
+  info: gpu.DescriptorInfo = vk.DescriptorBufferInfo{buffer = self.frame_arena[frame_index].buffer, offset = self.arena_offset[b], range = table_range(b)}
   #partial switch b {
-  case .MESHES:          info = gpu.buffer_info(&self.mesh_data_buffer)
   case .SKINNING:        info = gpu.buffer_info(&self.mesh_buffers[.SKINNING])
   case .PARTICLES:       info = gpu.buffer_info(&self.particle_buffer)
   case .PARTICLE_ALIVE:  info = gpu.buffer_info(&self.particle_alive_buffer)
-  case .BONES:           info = gpu.buffer_info(&self.bone_buffers[frame_index])
   case .SHADOW_MAPS:     info = vk.DescriptorImageInfo{imageView = atlas.view, imageLayout = .GENERAL}
   }
-  gpu.write_descriptor(&self.gctx, self.scene.sets[frame_index], u32(b), 0, SCENE_BINDING_TYPES[b], info)
+  gpu.write_descriptor(&self.gctx, self.scene.sets[frame_index], u32(b), 0, BINDINGS[b].type, info)
 }
 
-@(private)
 bind_scene_sets :: proc(
   self: ^Renderer,
   cmd: vk.CommandBuffer,
@@ -124,13 +121,11 @@ bind_scene_sets :: proc(
   vk.CmdBindDescriptorSets(cmd, bind_point, self.scene.layout, 0, len(sets), raw_data(sets[:]), 0, nil)
 }
 
-@(private)
 push_constants :: proc(self: ^Renderer, cmd: vk.CommandBuffer, data: ^$T) {
   #assert(size_of(T) <= PUSH_CONSTANT_SIZE)
   vk.CmdPushConstants(cmd, self.scene.layout, SCENE_STAGES, 0, size_of(T), data)
 }
 
-@(private)
 bind_mesh_buffers :: proc(self: ^Renderer, cmd: vk.CommandBuffer) {
   gpu.bind_vertex_index_buffers(
     cmd,

@@ -90,7 +90,9 @@ Line :: struct {
 
 // UI is a node tree with its layout output and input state. Set up with init, free with destroy.
 UI :: struct {
-  nodes:        cont.Pool(Node),
+  // indexed by NodeHandle.index; slots says which are live
+  nodes:        []Node,
+  slots:        cont.Slots,
   next_order:   i32,
   rects:        [dynamic]Rect,
   clips:        [dynamic]Rect, // where the node is visible
@@ -113,12 +115,16 @@ UI :: struct {
 
 // init prepares `self` to hold up to `max_nodes` nodes.
 init :: proc(self: ^UI, max_nodes: u32 = 4096) {
-  cont.init(&self.nodes, max_nodes)
+  cont.slots_init(&self.slots, max_nodes)
+  self.nodes = make([]Node, max_nodes)
 }
 
 // destroy frees everything `self` owns.
 destroy :: proc(self: ^UI) {
-  cont.destroy(&self.nodes, proc(n: ^Node) {delete(n.text)})
+  c: u32
+  for i in cont.slots_next(&self.slots, &c) do delete(self.nodes[i].text)
+  cont.slots_destroy(&self.slots)
+  delete(self.nodes)
   delete(self.rects)
   delete(self.clips)
   delete(self.line_ranges)
@@ -137,8 +143,9 @@ destroy :: proc(self: ^UI) {
 // create adds `n`; its text is copied and its order is the next one. Laid out by the
 // next layout.
 create :: proc(self: ^UI, n: Node) -> (handle: NodeHandle, ok: bool) #optional_ok {
-  slot: ^Node
-  handle, slot = cont.alloc(&self.nodes, NodeHandle) or_return
+  index := cont.slots_alloc(&self.slots) or_return
+  handle = NodeHandle(cont.slots_handle(&self.slots, index))
+  slot := &self.nodes[index]
   slot^ = n
   slot.text = strings.clone(n.text)
   slot.order = self.next_order
@@ -148,23 +155,31 @@ create :: proc(self: ^UI, n: Node) -> (handle: NodeHandle, ok: bool) #optional_o
 
 // destroy_node removes a node and its subtree.
 destroy_node :: proc(self: ^UI, handle: NodeHandle) {
-  n, ok := cont.get(self.nodes, handle)
+  n, ok := lookup(self, handle)
   if !ok do return
   delete(n.text)
-  cont.free(&self.nodes, handle)
-  it := cont.iterator(&self.nodes)
-  for child, h in cont.next(&it, NodeHandle) do if child.parent == handle do destroy_node(self, h)
+  cont.slots_free(&self.slots, handle.index)
+  c: u32
+  for i in cont.slots_next(&self.slots, &c) {
+    if self.nodes[i].parent == handle do destroy_node(self, NodeHandle(cont.slots_handle(&self.slots, i)))
+  }
 }
 
 // node returns the node behind `handle`, to edit in place; nil when stale. Change text
 // with set_text.
 node :: proc(self: ^UI, handle: NodeHandle) -> ^Node {
-  return cont.get(self.nodes, handle)
+  return lookup(self, handle)
+}
+
+@(private)
+lookup :: #force_inline proc(self: ^UI, handle: NodeHandle) -> (^Node, bool) #optional_ok {
+  if !cont.slots_valid(&self.slots, handle) do return nil, false
+  return &self.nodes[handle.index], true
 }
 
 // set_text replaces a node's text with a copy of `text`.
 set_text :: proc(self: ^UI, handle: NodeHandle, text: string) {
-  n, ok := cont.get(self.nodes, handle)
+  n, ok := lookup(self, handle)
   if !ok do return
   delete(n.text)
   n.text = strings.clone(text)
@@ -194,7 +209,7 @@ within :: proc(self: ^UI, node, handle: NodeHandle) -> bool {
   h := node
   for {
     if h == handle do return true
-    n := cont.get(self.nodes, h) or_return
+    n := lookup(self, h) or_return
     h = n.parent
   }
 }

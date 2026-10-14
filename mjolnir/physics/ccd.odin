@@ -1,6 +1,7 @@
 #+private
 package physics
 
+import cont "../containers"
 import "../geometry"
 import "core:math"
 import "core:math/linalg"
@@ -174,14 +175,13 @@ ccd :: proc(world: ^World, dt: f32, ccd_handled: []bool) -> (bodies_tested, tota
     bodies_tested    = make([]int, tasks, context.temp_allocator),
     total_candidates = make([]int, tasks, context.temp_allocator),
   }
-  parallel_for(world, len(world.bodies.entries), &ctx, proc(world: ^World, ctx: rawptr, task, start, end: int) {
+  parallel_for(world, body_range(world), &ctx, proc(world: ^World, ctx: rawptr, task, start, end: int) {
     ctx := (^CCDContext)(ctx)
     candidates := make([dynamic]BroadPhaseEntry, 0, 64)
     defer delete(candidates)
     #no_bounds_check for i in start ..< end {
-      entry := &world.bodies.entries[i]
-      if !entry.active do continue
-      tested, count := ccd_step_body(world, &entry.item, i, ctx.dt, ctx.ccd_handled, &candidates)
+      if !cont.slots_live(&world.body_slots, u32(i)) do continue
+      tested, count := ccd_step_body(world, &world.bodies[i], i, ctx.dt, ctx.ccd_handled, &candidates)
       if tested do ctx.bodies_tested[task] += 1
       ctx.total_candidates[task] += count
     }

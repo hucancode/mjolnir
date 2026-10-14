@@ -24,7 +24,6 @@ App :: struct {
 FFState :: struct {
   parent:           world.NodeHandle,
   ff_node:          world.NodeHandle,
-  ff_handle:        render.ForceFieldHandle,
   color:            [4]f32,
   enabled:          bool,
   strength:         mu.Real,
@@ -66,9 +65,8 @@ spawn_field :: proc(
 ) -> FFState {
   s: FFState
   s.parent = world.spawn(&app.scene, {0, 2, 0})
-  s.ff_handle = render.create_forcefield(&app.renderer, area_of_effect = area, strength = strength, tangent_strength = tangent)
   s.ff_node = world.spawn_child(&app.scene, s.parent, {offset_x, 0, 0})
-  render.attach(&app.renderer, s.ff_node.index, s.ff_handle)
+  render.attach(&app.renderer, s.ff_node.index, render.forcefield_attachment(area_of_effect = area, strength = strength, tangent_strength = tangent))
   s.color = color
   s.enabled = true
   s.strength = mu.Real(strength)
@@ -82,11 +80,11 @@ spawn_field :: proc(
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 12, 3}, {0, 2, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  app.renderer.ambient.skybox_intensity = 0
+  app.renderer.skybox_intensity = 0
 
   // Particle source at center, large position spread
   if tex, ret := render.create_texture_from_path(&app.renderer, "assets/particles/star_09.png"); ret == .SUCCESS {
-    em := render.create_emitter(&app.renderer,
+    em := render.emitter_attachment(
       texture_handle    = tex,
       emission_rate     = 100,
       initial_velocity  = {0, 0, 0},
@@ -114,12 +112,13 @@ setup :: proc(app: ^App) {
 }
 
 apply_ff :: proc(app: ^App, s: ^FFState) {
-  ff, ok := render.forcefield(&app.renderer, s.ff_handle)
+  ff, ok := render.attachment(&app.renderer, s.ff_node.index, render.ForceField)
   if !ok do return
   ff.strength         = f32(s.strength)
   ff.tangent_strength = f32(s.tangent_strength)
   ff.area_of_effect   = f32(s.area_of_effect)
   ff.enabled          = b32(s.enabled)
+  render.attach(&app.renderer, s.ff_node.index, ff)
 }
 
 draw_ff_marker :: proc(app: ^App, s: ^FFState) {

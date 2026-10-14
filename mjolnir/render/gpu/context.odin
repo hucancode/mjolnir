@@ -7,12 +7,10 @@ import "core:strings"
 import vk "vendor:vulkan"
 
 when ODIN_OS == .Darwin {
-  // NOTE: just a bogus import of the system library,
-  // needed so we can add a linker flag to point to /usr/local/lib (where vulkan is installed by default)
-  // when trying to load vulkan.
-  // Otherwise we will have to `export LD_LIBRARY_PATH=/usr/local/lib/` everytime we run the app
-  // Credit goes to : https://gist.github.com/laytan/ba57af3e5a59ab5cb2fca9e25bcfe262
-  @(require, extra_linker_flags = "-rpath /usr/local/lib")
+  // Dummy import carrying the rpath to /usr/local/lib so Vulkan loads without LD_LIBRARY_PATH.
+  // https://gist.github.com/laytan/ba57af3e5a59ab5cb2fca9e25bcfe262
+  // Odin appends the next flag (-lm) with no space; the trailing comma makes it its own ld argument.
+  @(require, extra_linker_flags = "-Wl,-rpath,/usr/local/lib,")
   foreign import __ "system:System.framework"
 }
 // FRAMES_IN_FLIGHT is the number of frames the CPU may record ahead of the GPU.

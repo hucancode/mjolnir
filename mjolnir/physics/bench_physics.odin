@@ -150,10 +150,10 @@ bench_ccd :: proc(t: ^testing.T) {
 		setup     = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_world_state)opts.user_data
 			s.world = build_serial_world()
-			it := cont.iterator(&s.world.bodies)
-			for body in cont.next(&it, BodyHandle) do body.velocity = {0, -8, 0}
+			c: u32
+			for i in cont.slots_next(&s.world.body_slots, &c) do s.world.bodies[i].velocity = {0, -8, 0}
 			for _ in 0 ..< 3 do step(s.world, 1.0 / 60.0)
-			s.ccd_handled = make([]bool, len(s.world.bodies.entries))
+			s.ccd_handled = make([]bool, body_range(s.world))
 			return .Okay
 		},
 		bench     = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {

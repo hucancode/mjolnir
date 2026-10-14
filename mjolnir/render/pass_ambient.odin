@@ -8,51 +8,28 @@ import vk "vendor:vulkan"
 @(private = "file")
 TEXTURE_LUT_GGX :: #load("assets/lut_ggx.png")
 
-// The environment light's data, drawn as the AMBIENT light. ibl_intensity
-// scales image-based lighting; skybox_intensity 0 hides the skybox.
-AmbientRenderer :: struct {
-  environment_map:  TextureHandle,
-  brdf_lut:         TextureHandle,
-  // precomputed from environment_map
-  irradiance_cube:  TextureHandle,
-  prefilter_cube:   TextureHandle,
-  ibl_intensity:    f32,
-  skybox_intensity: f32,
-  skybox_blur:      f32,
-}
-
-@(private)
-ambient_setup :: proc(r: ^Renderer) -> vk.Result {
-  self := &r.ambient
-  self.brdf_lut = create_texture_from_data(r, TEXTURE_LUT_GGX) or_return
-  self.ibl_intensity = 1.0
-  self.skybox_intensity = 1.0
-  self.skybox_blur = 0.25
+ambient_init :: proc(r: ^Renderer) -> vk.Result {
+  r.brdf_lut = create_texture_from_data(r, TEXTURE_LUT_GGX) or_return
+  r.ibl_intensity = 1.0
+  r.skybox_intensity = 1.0
+  r.skybox_blur = 0.25
   return .SUCCESS
 }
 
-@(private)
 ambient_load_environment :: proc(r: ^Renderer, path: string) -> (ret: vk.Result) {
-  self := &r.ambient
   ambient_free_environment(r)
   defer if ret != .SUCCESS do ambient_free_environment(r)
-  self.environment_map = create_texture_from_path(r, path, .R32G32B32A32_SFLOAT, true) or_return
-  self.irradiance_cube, self.prefilter_cube = ambient_precompute(r, self.environment_map) or_return
+  r.environment_map = create_texture_from_path(r, path, .R32G32B32A32_SFLOAT, true) or_return
+  r.irradiance_cube, r.prefilter_cube = ambient_precompute(r, r.environment_map) or_return
   return .SUCCESS
 }
 
 @(private = "file")
 ambient_free_environment :: proc(r: ^Renderer) {
-  self := &r.ambient
-  destroy_texture(r, self.environment_map)
-  destroy_texture(r, self.irradiance_cube)
-  destroy_texture(r, self.prefilter_cube)
-  self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
-}
-
-@(private)
-ambient_teardown :: proc(r: ^Renderer) {
-  r.ambient.environment_map, r.ambient.irradiance_cube, r.ambient.prefilter_cube, r.ambient.brdf_lut = 0, 0, 0, 0
+  destroy_texture(r, r.environment_map)
+  destroy_texture(r, r.irradiance_cube)
+  destroy_texture(r, r.prefilter_cube)
+  r.environment_map, r.irradiance_cube, r.prefilter_cube = 0, 0, 0
 }
 
 @(private = "file")
@@ -85,9 +62,7 @@ IRRADIANCE_SAMPLE_DELTA :: f32(0.025)
 CUBE_FORMAT :: vk.Format.R16G16B16A16_SFLOAT
 
 // dispatch i writes the cube level bound at PRECOMPUTE_STORAGE_BASE + i, after the depth pyramids' slots
-@(private)
 PRECOMPUTE_STORAGE_BASE :: MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS_LEVEL
-@(private)
 PRECOMPUTE_DISPATCHES :: 2 + PREFILTER_MIPS
 
 // `src` is 2D for the equirect step, a cube otherwise; `value` is the irradiance sample delta or the prefilter roughness.

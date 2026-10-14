@@ -12,7 +12,6 @@ SHADOW_MAP_FORMAT :: vk.Format.D32_SFLOAT
 SHADOW_SLOPE_BIAS :: 1.5
 
 // the material type must also be in GBUFFER_TYPES
-@(private)
 SHADOW_CASTER_FLAGS :: NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
 
 // One cull dispatch tests every node against every shadow view and appends the visible
@@ -21,7 +20,6 @@ SHADOW_CASTER_FLAGS :: NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
 #assert(MAX_NODES_IN_SCENE <= 1 << 16)
 #assert(MAX_VIEWS < 1 << 16)
 
-@(private)
 shadow_atlas_create :: proc(gctx: ^gpu.GPUContext, layers: u32) -> (gpu.Image, vk.Result) {
   return gpu.image_create(
     gctx,
@@ -34,7 +32,6 @@ shadow_atlas_create :: proc(gctx: ^gpu.GPUContext, layers: u32) -> (gpu.Image, v
 }
 
 // Doubles up to MAX_SHADOW_VIEWS and rebinds. Call once the frame's previous submission is done.
-@(private)
 shadow_atlas_reserve :: proc(r: ^Renderer, frame_index: u32, layers: u32) -> vk.Result {
   atlas := &r.shadow_atlas[frame_index]
   if layers <= atlas.layers do return .SUCCESS
@@ -45,9 +42,8 @@ shadow_atlas_reserve :: proc(r: ^Renderer, frame_index: u32, layers: u32) -> vk.
   return .SUCCESS
 }
 
-@(private)
 shadow_init :: proc(r: ^Renderer) -> vk.Result {
-  draw_lists_init(&r.shadow_draws, r, SHADOW_DRAW_SLOT_BASE, 1, SHADOW_MAX_DRAWS) or_return
+  draw_lists_create(r, SHADOW_DRAW_SLOT_BASE, 1, SHADOW_LIST_CAPACITY) or_return
   r.pipelines[.SHADOW_DEPTH] = gpu.create_graphics_pipeline(
     &r.gctx,
     {
@@ -66,7 +62,6 @@ shadow_init :: proc(r: ^Renderer) -> vk.Result {
   return .SUCCESS
 }
 
-@(private)
 shadow_record :: proc(r: ^Renderer, frame_index: u32) {
   cmd := r.command_buffers[frame_index]
   atlas := &r.shadow_atlas[frame_index]
@@ -74,22 +69,16 @@ shadow_record :: proc(r: ^Renderer, frame_index: u32) {
   gpu.image_discard_barrier(cmd, gpu.attachment_discard(atlas))
   view_count := r.shadow_view_count
   if view_count == 0 do return
-  gpu.memory_barrier(cmd, {}, {}, {.DRAW_INDIRECT}, {.TRANSFER})
-  draw_lists_clear(&r.shadow_draws, cmd, frame_index)
-  gpu.memory_barrier(cmd, {.TRANSFER_WRITE}, {.SHADER_READ, .SHADER_WRITE}, {.TRANSFER}, {.COMPUTE_SHADER})
+  barrier(cmd, .INDIRECT_TO_FILL)
+  draw_lists_clear(r, cmd, SHADOW_DRAW_SLOT_BASE + frame_index)
+  barrier(cmd, .FILL_TO_CULL)
   occlusion_cull(r, cmd, SHADOW_VIEW_BASE, view_count)
-  indirect_barrier(cmd)
+  barrier(cmd, .CULL_TO_INDIRECT)
   extent := vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
   gpu.begin_rendering(cmd, extent, gpu.create_depth_attachment(atlas.view), layer_count = view_count)
   vk.CmdBindPipeline(cmd, .GRAPHICS, r.pipelines[.SHADOW_DEPTH])
   bind_mesh_buffers(r, cmd)
-  draw_lists_draw(&r.shadow_draws, cmd, frame_index, 0)
+  draw_lists_draw(r, cmd, SHADOW_DRAW_SLOT_BASE + frame_index, 0, SHADOW_LIST_CAPACITY)
   vk.CmdEndRendering(cmd)
-  gpu.memory_barrier(
-    cmd,
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.LATE_FRAGMENT_TESTS},
-    {.FRAGMENT_SHADER},
-  )
+  barrier(cmd, .SHADOW_TO_LIGHTING)
 }

@@ -160,8 +160,8 @@ test_node_chain_transform :: proc(t: ^testing.T) {
 @(private = "file")
 create_scene :: proc(scene: ^World, max_node: int, max_depth: int) {
   target_nodes := max_node
-  if scene.nodes.capacity > 0 {
-    target_nodes = min(target_nodes, int(scene.nodes.capacity))
+  if scene.slots.capacity > 0 {
+    target_nodes = min(target_nodes, int(scene.slots.capacity))
   }
   if max_depth <= 0 || target_nodes <= 0 do return
   QueueEntry :: struct {

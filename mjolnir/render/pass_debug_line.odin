@@ -13,11 +13,10 @@ MAX_SEGMENTS :: 65536
 @(private)
 DebugLineSegment :: struct {
   a:            [3]f32,
-  // render clock time the segment is dropped at
+  // render clock time the shader stops drawing the segment after
   expiry:       f32,
   b:            [3]f32,
-  // drawn over the scene instead of depth-tested
-  bypass_depth: b32,
+  _:            u32,
   color:        [4]f32,
 }
 #assert(size_of(DebugLineSegment) == 48)
@@ -42,36 +41,46 @@ debug_line_init :: proc(r: ^Renderer) -> vk.Result {
       layout = r.scene.layout,
     },
   ) or_return
-  r.debug_lines = make([dynamic]DebugLineSegment, 0, 1024)
+  for &inbox in r.debug_lines do inbox = make([dynamic]DebugLineSegment, 0, 1024)
   return .SUCCESS
 }
 
-// Sentinel for one-frame draws; dropped after the first debug_line_record() packs them.
+// Segments live in two rings of DEBUG_RING in the frame table, drawn up to their fill:
+// [0] depth-tested, [1] drawn over the scene. The shader skips a segment past its expiry.
 @(private)
-ONE_FRAME_EXPIRY :: f32(-1.0)
+DEBUG_RING :: MAX_SEGMENTS / 2
 
-// The oldest segments make room past MAX_SEGMENTS.
+// Segments beyond DEBUG_RING per ring between two frames are dropped. life <= 0 shows the
+// segment until the next update.
 @(private)
 debug_line_add :: proc(self: ^Renderer, life: f32, bypass_depth: bool, segs: ..DebugLineSegment) {
-  if len(segs) == 0 do return
   sync.mutex_lock(&self.debug_mutex)
   defer sync.mutex_unlock(&self.debug_mutex)
-  total := len(self.debug_lines) + len(segs)
-  if total > MAX_SEGMENTS {
-    overflow := total - MAX_SEGMENTS
-    if overflow >= len(self.debug_lines) {
-      clear(&self.debug_lines)
-    } else {
-      copy(self.debug_lines[:len(self.debug_lines) - overflow], self.debug_lines[overflow:])
-      resize(&self.debug_lines, len(self.debug_lines) - overflow)
-    }
-  }
-  expiry := ONE_FRAME_EXPIRY if life <= 0 else self.debug_time + life
+  inbox := &self.debug_lines[1 if bypass_depth else 0]
+  if len(inbox) + len(segs) > DEBUG_RING do return
+  expiry := self.debug_time + max(life, 0)
   for seg in segs {
     s := seg
     s.expiry = expiry
-    s.bypass_depth = b32(bypass_depth)
-    append(&self.debug_lines, s)
+    append(inbox, s)
+  }
+}
+
+// Moves the segments added since the last frame into the write table's rings; the oldest
+// make room when a ring is full. Caller holds the render mutex.
+@(private)
+flush_debug_lines :: proc(self: ^Renderer) {
+  sync.mutex_lock(&self.debug_mutex)
+  defer sync.mutex_unlock(&self.debug_mutex)
+  table := write_table(self, .DEBUG_LINES, DebugLineSegment)
+  for &inbox, ring in self.debug_lines {
+    for seg in inbox {
+      i := ring * DEBUG_RING + int(self.debug_filled[ring] % DEBUG_RING)
+      table[i] = seg
+      mark_dirty(self, .DEBUG_LINES, i)
+      self.debug_filled[ring] += 1
+    }
+    clear(&inbox)
   }
 }
 
@@ -85,45 +94,29 @@ debug_line_record :: proc(
   depth_image: ^gpu.Image,
 ) {
   cmd := r.command_buffers[frame_index]
+  counts := [2]u32{u32(min(r.debug_filled[0], DEBUG_RING)), u32(min(r.debug_filled[1], DEBUG_RING))}
+  if counts == {} do return
   sync.mutex_lock(&r.debug_mutex)
-  defer sync.mutex_unlock(&r.debug_mutex)
-  if len(r.debug_lines) == 0 do return
-  table := frame_table(r, .DEBUG_LINES, DebugLineSegment, frame_index)
-  // depth-tested lines pack from the front, bypass_depth from the back; expired ones are dropped
-  front, back := 0, MAX_SEGMENTS
-  write := 0
-  for seg in r.debug_lines {
-    if seg.expiry > 0 && seg.expiry < r.debug_time do continue
-    if seg.bypass_depth {
-      back -= 1
-      table[back] = seg
-    } else {
-      table[front] = seg
-      front += 1
-    }
-    if seg.expiry != ONE_FRAME_EXPIRY {
-      r.debug_lines[write] = seg
-      write += 1
-    }
-  }
-  resize(&r.debug_lines, write)
-  if front == 0 && back == MAX_SEGMENTS do return
+  push := struct {
+    camera_index: u32,
+    time:         f32,
+  }{camera_index, r.debug_time}
+  sync.mutex_unlock(&r.debug_mutex)
   gpu.begin_rendering(
     cmd,
     extent,
     gpu.create_depth_attachment(depth_image.view, .LOAD, .STORE),
     gpu.create_color_attachment(color_view, .LOAD, .STORE),
   )
-  camera_index := camera_index
-  push_constants(r, cmd, &camera_index)
+  push_constants(r, cmd, &push)
   vk.CmdBindPipeline(cmd, .GRAPHICS, r.pipelines[.DEBUG_LINE])
-  if front > 0 {
+  if counts[0] > 0 {
     vk.CmdSetDepthTestEnable(cmd, true)
-    vk.CmdDraw(cmd, u32(2 * front), 1, 0, 0)
+    vk.CmdDraw(cmd, 2 * counts[0], 1, 0, 0)
   }
-  if back < MAX_SEGMENTS {
+  if counts[1] > 0 {
     vk.CmdSetDepthTestEnable(cmd, false)
-    vk.CmdDraw(cmd, u32(2 * (MAX_SEGMENTS - back)), 1, u32(2 * back), 0)
+    vk.CmdDraw(cmd, 2 * counts[1], 1, 2 * DEBUG_RING, 0)
   }
   vk.CmdEndRendering(cmd)
 }
@@ -187,17 +180,7 @@ debug_aabb :: proc(
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
-  c := [8][3]f32 {
-    {lo.x, lo.y, lo.z},
-    {hi.x, lo.y, lo.z},
-    {hi.x, hi.y, lo.z},
-    {lo.x, hi.y, lo.z},
-    {lo.x, lo.y, hi.z},
-    {hi.x, lo.y, hi.z},
-    {hi.x, hi.y, hi.z},
-    {lo.x, hi.y, hi.z},
-  }
-  push_box_edges(self, c, color, life, bypass_depth)
+  debug_cube(self, (lo + hi) * 0.5, 1, hi - lo, color, life, bypass_depth)
 }
 
 // debug_cube queues a wireframe cube at center with the given rotation and size.

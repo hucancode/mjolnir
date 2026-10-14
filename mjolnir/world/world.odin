@@ -36,7 +36,9 @@ NodeChange :: struct {
 // World is the scene graph. Set up with init, free with shutdown.
 World :: struct {
   root:             NodeHandle,
-  nodes:           cont.Pool(Node),
+  // indexed by NodeHandle.index; slots says which are live
+  nodes:           []Node,
+  slots:           cont.Slots,
   traversal_stack: [dynamic]TraverseEntry,
   // what the last `update` changed, removals first; the next update replaces it
   feed:            [dynamic]NodeChange,
@@ -46,30 +48,36 @@ World :: struct {
 
 // node returns the node behind `h`; false when stale.
 node :: proc(w: ^World, h: NodeHandle) -> (^Node, bool) #optional_ok {
-  return cont.get(w.nodes, h)
+  return lookup(w, h)
+}
+
+@(private)
+lookup :: #force_inline proc(w: ^World, h: NodeHandle) -> (^Node, bool) #optional_ok {
+  if !cont.slots_valid(&w.slots, h) do return nil, false
+  return &w.nodes[h.index], true
 }
 
 // valid reports whether `h` refers to a live node.
 valid :: proc(w: ^World, h: NodeHandle) -> bool {
-  return cont.is_valid(w.nodes, h)
+  return cont.slots_valid(&w.slots, h)
 }
 
-// Live nodes, root included. O(capacity).
+// Live nodes, root included.
 @(private)
 node_count :: proc(w: ^World) -> int {
-  return cont.count(w.nodes)
+  return int(w.slots.count)
 }
 
 // tag sets user tag bits on a node; false if the node is not found.
 tag :: proc(world: ^World, handle: NodeHandle, bits: u32) -> bool {
-  node := cont.get(world.nodes, handle) or_return
+  node := lookup(world, handle) or_return
   node.tags |= bits
   return true
 }
 
 // untag clears user tag bits on a node; false if the node is not found.
 untag :: proc(world: ^World, handle: NodeHandle, bits: u32) -> bool {
-  node := cont.get(world.nodes, handle) or_return
+  node := lookup(world, handle) or_return
   node.tags &~= bits
   return true
 }
@@ -90,12 +98,12 @@ node_destroy :: proc(self: ^Node) {
 }
 
 @(private)
-detach :: proc(nodes: cont.Pool(Node), child_handle: NodeHandle) {
-  child_node := cont.get(nodes, child_handle)
+detach :: proc(world: ^World, child_handle: NodeHandle) {
+  child_node := lookup(world, child_handle)
   if child_node == nil do return
   parent_handle := child_node.parent
   if parent_handle == child_handle do return
-  parent_node := cont.get(nodes, parent_handle)
+  parent_node := lookup(world, parent_handle)
   if parent_node == nil do return
   if idx, found := slice.linear_search(parent_node.children[:], child_handle); found {
     unordered_remove(&parent_node.children, idx)
@@ -104,11 +112,11 @@ detach :: proc(nodes: cont.Pool(Node), child_handle: NodeHandle) {
 }
 
 @(private)
-attach :: proc(nodes: cont.Pool(Node), parent_handle, child_handle: NodeHandle) {
-  child_node := cont.get(nodes, child_handle)
-  parent_node := cont.get(nodes, parent_handle)
+attach :: proc(world: ^World, parent_handle, child_handle: NodeHandle) {
+  child_node := lookup(world, child_handle)
+  parent_node := lookup(world, parent_handle)
   if child_node == nil || parent_node == nil do return
-  if old_parent_node, ok := cont.get(nodes, child_node.parent); ok {
+  if old_parent_node, ok := lookup(world, child_node.parent); ok {
     if idx, found := slice.linear_search(old_parent_node.children[:], child_handle); found {
       unordered_remove(&old_parent_node.children, idx)
     }
@@ -141,22 +149,27 @@ spawn_child :: proc(
   handle: NodeHandle,
   ok: bool,
 ) #optional_ok {
-  node: ^Node
-  handle, node = cont.alloc(&self.nodes, NodeHandle) or_return
-  node_init(node, name)
+  handle = alloc_node(self, name) or_return
+  node := &self.nodes[handle.index]
   node.transform.position = position
   node.transform.is_dirty = true
-  attach(self.nodes, parent, handle)
+  attach(self, parent, handle)
   return handle, true
 }
 
-// init prepares `world` with its root node; false when the pool cannot allocate.
+@(private = "file")
+alloc_node :: proc(world: ^World, name: string) -> (handle: NodeHandle, ok: bool) {
+  index := cont.slots_alloc(&world.slots) or_return
+  node_init(&world.nodes[index], name)
+  return NodeHandle(cont.slots_handle(&world.slots, index)), true
+}
+
+// init prepares `world` with its root node; false when no slot is free.
 init :: proc(world: ^World) -> bool {
-  cont.init(&world.nodes, MAX_NODES_IN_SCENE, RETIRE_GRACE)
-  root: ^Node
-  world.root, root = cont.alloc(&world.nodes, NodeHandle) or_return
-  node_init(root, "root")
-  root.parent = world.root
+  cont.slots_init(&world.slots, MAX_NODES_IN_SCENE, RETIRE_GRACE)
+  world.nodes = make([]Node, MAX_NODES_IN_SCENE)
+  world.root = alloc_node(world, "root") or_return
+  world.nodes[world.root.index].parent = world.root
   return true
 }
 
@@ -165,7 +178,7 @@ update :: proc(world: ^World) {
   clear(&world.feed)
   for index in world.pending_removed do append(&world.feed, NodeChange{index = index, removed = true})
   clear(&world.pending_removed)
-  cont.tick(&world.nodes, nil, node_retire)
+  for r in cont.slots_tick(&world.slots) do node_retire(world, r.index)
   traverse(world)
 }
 
@@ -178,8 +191,11 @@ changes :: proc(world: ^World) -> []NodeChange {
 
 // shutdown frees everything `world` owns.
 shutdown :: proc(world: ^World) {
-  cont.flush(&world.nodes, nil, node_retire)
-  cont.destroy(&world.nodes, node_destroy)
+  for r in cont.slots_flush(&world.slots) do node_retire(world, r.index)
+  c: u32
+  for i in cont.slots_next(&world.slots, &c) do node_destroy(&world.nodes[i])
+  cont.slots_destroy(&world.slots)
+  delete(world.nodes)
   delete(world.traversal_stack)
   delete(world.feed)
   delete(world.pending_removed)
@@ -189,25 +205,25 @@ shutdown :: proc(world: ^World) {
 // removals are not reported: index-keyed consumers (render.teardown) must reset
 // their own slots, before the next level spawns into the freed ones.
 teardown :: proc(world: ^World) {
-  root := cont.get(world.nodes, world.root)
+  root := lookup(world, world.root)
   if root == nil do return
   kids := make([dynamic]NodeHandle, 0, len(root.children), context.temp_allocator)
   append(&kids, ..root.children[:])
   clear(&root.children)
   for h in kids {
-    node := cont.get(world.nodes, h) or_continue
+    node := lookup(world, h) or_continue
     node.parent = h // detached, matching detach()'s self-parent convention
     despawn_subtree(world, h, node)
   }
-  cont.flush(&world.nodes, nil, node_retire)
+  for r in cont.slots_flush(&world.slots) do node_retire(world, r.index)
   clear(&world.pending_removed)
   clear(&world.feed)
 }
 
 // despawn removes a node and its descendants; changes reports them after the next update.
 despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
-  node := cont.get(world.nodes, handle) or_return
-  detach(world.nodes, handle)
+  node := lookup(world, handle) or_return
+  detach(world, handle)
   despawn_subtree(world, handle, node)
   return true
 }
@@ -218,16 +234,18 @@ despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
 @(private)
 despawn_subtree :: proc(world: ^World, handle: NodeHandle, node: ^Node) {
   for child_handle in node.children {
-    child_node := cont.get(world.nodes, child_handle) or_continue
+    child_node := lookup(world, child_handle) or_continue
     despawn_subtree(world, child_handle, child_node)
   }
   append(&world.pending_removed, handle.index)
-  cont.free_deferred(&world.nodes, handle)
+  cont.slots_free(&world.slots, handle.index)
 }
 
+// The slot is reusable: free what the node held and zero it for the next alloc.
 @(private = "file")
-node_retire :: proc(item: ^Node, _: rawptr) {
-  node_destroy(item)
+node_retire :: proc(world: ^World, index: u32) {
+  node_destroy(&world.nodes[index])
+  world.nodes[index] = {}
 }
 
 // Recompute world transforms of dirty subtrees and record every node whose
@@ -240,7 +258,7 @@ traverse :: proc(world: ^World) {
   )
   for len(world.traversal_stack) > 0 {
     entry := pop(&world.traversal_stack)
-    current_node := cont.get(world.nodes, entry.handle) or_continue
+    current_node := lookup(world, entry.handle) or_continue
     visibility_changed := current_node.parent_visible != entry.parent_is_visible
     current_node.parent_visible = entry.parent_is_visible
     t := &current_node.transform
@@ -284,9 +302,9 @@ set_world_pose :: proc(
   position: [3]f32,
   rotation: quaternion128,
 ) {
-  node := cont.get(world.nodes, handle)
+  node := lookup(world, handle)
   if node == nil do return
-  parent, has_parent := cont.get(world.nodes, node.parent)
+  parent, has_parent := lookup(world, node.parent)
   if !has_parent || node.parent == world.root || node.parent == handle {
     node.transform.position = position
     node.transform.rotation = rotation
@@ -315,14 +333,14 @@ set_local_matrix :: proc(world: ^World, handle: NodeHandle, m: matrix[4, 4]f32) 
 
 // world_matrix returns a node's world matrix as of the last update; identity when stale.
 world_matrix :: proc(world: ^World, handle: NodeHandle) -> matrix[4, 4]f32 {
-  node, ok := cont.get(world.nodes, handle)
+  node, ok := lookup(world, handle)
   if !ok do return linalg.MATRIX4F32_IDENTITY
   return node.transform.world_matrix
 }
 
 // set_visible shows or hides a node and its subtree.
 set_visible :: proc(world: ^World, handle: NodeHandle, visible: bool) {
-  node := cont.get(world.nodes, handle)
+  node := lookup(world, handle)
   if node == nil do return
   if node.visible == visible do return
   node.visible = visible

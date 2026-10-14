@@ -84,7 +84,7 @@ should_close :: proc(app: ^App) -> bool {
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {9, 8, 9}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  app.renderer.ambient.ibl_intensity = 0.3
+  app.renderer.ibl_intensity = 0.3
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))

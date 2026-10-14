@@ -152,9 +152,7 @@ compute_parabolic_height :: proc "contextless" (t: f32, max_height: f32) -> f32 
   return 4.0 * max_height * t * (1.0 - t)
 }
 
-// Modifier updates work on the skeleton-space pose (`positions`/`rotations`,
-// indexed by bone) and blend their result in by `layer_weight`.
-// `root_world` is the skinned object's world matrix.
+// Modifiers edit the skeleton-space pose by bone index, blended by `layer_weight`.
 
 // Aim `bone` so its Y axis points along `direction`, blended by `weight`.
 @(private = "file")

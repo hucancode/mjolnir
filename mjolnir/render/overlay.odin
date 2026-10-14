@@ -1,39 +1,22 @@
 package render
 
 import "core:fmt"
-import "core:math"
-import "core:sync"
+import "core:log"
 import "gpu"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
 // stage_overlay submits the 2D overlay for the next frame only; call it every frame the UI should show.
-// The commands must stay valid until that frame is recorded; a non-empty atlas is copied.
+// The commands must stay valid until that frame is recorded; a non-empty atlas replaces the font atlas.
 stage_overlay :: proc(self: ^Renderer, list: DrawList) {
   ui := &self.ui
   ui.commands = list.commands
   if len(list.atlas) == 0 do return
-  sync.recursive_mutex_lock(&self.mutex)
-  defer sync.recursive_mutex_unlock(&self.mutex)
-  if len(ui.atlas_pixels) != len(list.atlas) {
-    delete(ui.atlas_pixels)
-    ui.atlas_pixels = make([]u8, len(list.atlas))
-  }
-  copy(ui.atlas_pixels, list.atlas)
-  ui.atlas_extent = list.atlas_size
-  ui.atlas_dirty = true
-}
-
-// also when the GPU copy is gone (first frame, after setup)
-@(private)
-flush_ui_atlas :: proc(self: ^Renderer) -> (ret: vk.Result) {
-  ui := &self.ui
-  if len(ui.atlas_pixels) == 0 do return .SUCCESS
-  if !ui.atlas_dirty && ui.font_atlas != 0 do return .SUCCESS
-  ui.atlas_dirty = false
+  guard(self)
   destroy_texture(self, ui.font_atlas)
-  ui.font_atlas, ret = allocate_alpha_texture(self, ui.atlas_pixels, ui.atlas_extent[0], ui.atlas_extent[1])
-  return
+  res: vk.Result
+  ui.font_atlas, res = allocate_alpha_texture(self, list.atlas, list.atlas_size[0], list.atlas_size[1])
+  if res != .SUCCESS do log.errorf("Font atlas upload failed: %v", res)
 }
 
 // debug_ctx returns the microui debug context itself, without opening a frame: the
@@ -69,13 +52,13 @@ stats_panel :: proc(self: ^Renderer) {
   ctx := debug_ui(self)
   draws: u32
   if _, ok := main_camera(self); ok {
-    draws = gpu.mapped(&self.draw_count_readback[self.gctx.frame_serial % gpu.FRAMES_IN_FLIGHT], u32)[MaterialType.PBR]
+    draws = gpu.mapped(&self.draw_count_readback[write_frame(self)], u32)[MaterialType.PBR]
   }
   if mu.window(ctx, "Engine", {40, 40, 200, 200}, {}) {
     mu.label(ctx, fmt.tprintf("Textures %d", self.texture_slots.count))
     mu.label(ctx, fmt.tprintf("Materials %d", self.material_slots.count))
     mu.label(ctx, fmt.tprintf("Meshes %d", self.mesh_slots.count))
-    mu.label(ctx, fmt.tprintf("Render slots %d", len(self.attachments)))
+    mu.label(ctx, fmt.tprintf("Render slots %d", self.node_count))
     mu.label(ctx, fmt.tprintf("Draw count: %d draws", draws))
   }
 }

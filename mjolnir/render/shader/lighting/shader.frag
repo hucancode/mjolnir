@@ -13,7 +13,8 @@ layout(constant_id = 0) const uint LIGHT_TYPE = 0u;
 const uint LIGHT_POINT = 0u;
 const uint LIGHT_SPOT = 1u;
 const uint LIGHT_DIRECTIONAL = 2u;
-const uint NO_SHADOW = 0xFFFFFFFFu;
+// shadowFace past the last cascade
+const uint NO_FACE = 0xFFFFFFFFu;
 
 layout(location = 0) out vec4 outColor;
 
@@ -145,7 +146,7 @@ float shadowMapSize() {
 // The shadow face seen from the light towards p: the cube face on the major
 // axis of the light-to-p direction (+X, -X, +Y, -Y, +Z, -Z) for a point light,
 // the finest cascade whose box holds p, with room for the filter, for a directional
-// light (NO_SHADOW beyond the last), the only face otherwise.
+// light (NO_FACE beyond the last), the only face otherwise.
 uint shadowFace(vec3 p) {
     if (LIGHT_TYPE == LIGHT_DIRECTIONAL) {
         // the normal offset moves p up to SHADOW_FILTER_RADIUS + 0.5 texels
@@ -156,7 +157,7 @@ uint shadowFace(vec3 p) {
             // the view, far points project into the near cascades too
             if (abs(s.x) < edge && abs(s.y) < edge && s.z > 0.0 && s.z < 1.0) return c;
         }
-        return NO_SHADOW;
+        return NO_FACE;
     }
     if (LIGHT_TYPE != LIGHT_POINT) return 0u;
     vec3 d = p - light.position;
@@ -186,7 +187,7 @@ float shadowTexel(vec3 fragPos, View view) {
 // into its atlas layer, rendered with an unflipped viewport (clip y = -1 is
 // texel row 0).
 float calculateShadow(vec3 fragPos, vec3 n, vec3 L) {
-    if (light.shadow_map == NO_SHADOW) return 1.0;
+    if (light.shadow_map == 0u) return 1.0; // no shadow map
     float cosTheta = clamp(dot(n, L), 0.0, 1.0);
     float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
     float offset = 0.5 + SHADOW_FILTER_RADIUS * sinTheta;
@@ -195,7 +196,7 @@ float calculateShadow(vec3 fragPos, vec3 n, vec3 L) {
     if (LIGHT_TYPE == LIGHT_DIRECTIONAL) {
         // the cascade sets the texel size, so pick it before the offset
         face = shadowFace(p);
-        if (face == NO_SHADOW) return 1.0;
+        if (face == NO_FACE) return 1.0;
         p += n * (offset * shadowTexel(p, views[light.shadow_map + face]));
     } else {
         // the texel size doesn't depend on the face; the offset may cross one

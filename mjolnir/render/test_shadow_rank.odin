@@ -89,10 +89,10 @@ test_shadow_selection_grace_limited :: proc(t: ^testing.T) {
 @(test)
 test_shadow_layers_packed_by_type :: proc(t: ^testing.T) {
 	lights := [?]Light {
-		{type = .SPOT, shadow_map = 0},
-		{type = .POINT, shadow_map = NO_SHADOW},
-		{type = .DIRECTIONAL, shadow_map = 0},
-		{type = .POINT, shadow_map = 0},
+		{type = .SPOT, shadow_map = 1},
+		{type = .POINT},
+		{type = .DIRECTIONAL, shadow_map = 1},
+		{type = .POINT, shadow_map = 1},
 	}
 	dst: [len(lights)]Light
 	count, layers := pack_lights(lights[:], dst[:])
@@ -101,7 +101,7 @@ test_shadow_layers_packed_by_type :: proc(t: ^testing.T) {
 	testing.expect_value(t, dst[2].type, LightType.SPOT)
 	testing.expect_value(t, dst[3].type, LightType.DIRECTIONAL)
 	// stable: the unshadowed point light stays ahead of the shadowed one
-	testing.expect_value(t, dst[0].shadow_map, NO_SHADOW)
+	testing.expect_value(t, dst[0].shadow_map, 0)
 	// one shadow view per face: the point light's six, the spot light's one,
 	// then the directional light's cascades
 	testing.expect_value(t, dst[1].shadow_map, SHADOW_VIEW_BASE + 0)

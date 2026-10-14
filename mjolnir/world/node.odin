@@ -1,6 +1,5 @@
 package world
 
-import cont "../containers"
 import "core:math/linalg"
 
 // Local TRS plus cached matrices. Setters mark `is_dirty`; `update`
@@ -37,7 +36,7 @@ rotate :: proc {
 // translate_by moves a node by `v` in its parent's space, on top of its local position
 // (translate sets it, as rotate sets and rotate_by composes).
 translate_by :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
-  node := cont.get(world.nodes, handle)
+  node := lookup(world, handle)
   if node == nil do return
   node.transform.position += v
   node.transform.is_dirty = true
@@ -62,7 +61,7 @@ translate_xyz :: proc(world: ^World, handle: NodeHandle, x: f32 = 0, y: f32 = 0,
 
 @(private = "file")
 translate_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
-  node := cont.get(world.nodes, handle)
+  node := lookup(world, handle)
   if node == nil do return
   node.transform.position = v
   node.transform.is_dirty = true
@@ -70,7 +69,7 @@ translate_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
 
 @(private = "file")
 rotate_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128) {
-  node := cont.get(world.nodes, handle)
+  node := lookup(world, handle)
   if node == nil do return
   node.transform.rotation = q
   node.transform.is_dirty = true
@@ -88,7 +87,7 @@ rotate_angle :: proc(
 
 @(private = "file")
 rotate_by_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128) {
-  node := cont.get(world.nodes, handle)
+  node := lookup(world, handle)
   if node == nil do return
   node.transform.rotation *= q
   node.transform.is_dirty = true
@@ -111,7 +110,7 @@ scale_uniform :: proc(world: ^World, handle: NodeHandle, s: f32) {
 
 @(private = "file")
 scale_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
-  node := cont.get(world.nodes, handle)
+  node := lookup(world, handle)
   if node == nil do return
   node.transform.scale = v
   node.transform.is_dirty = true
@@ -130,7 +129,7 @@ set_local :: proc(
   rotation: quaternion128 = linalg.QUATERNIONF32_IDENTITY,
   scale: [3]f32 = {1, 1, 1},
 ) {
-  node := cont.get(world.nodes, handle)
+  node := lookup(world, handle)
   if node == nil do return
   node.transform.position = position
   node.transform.rotation = rotation

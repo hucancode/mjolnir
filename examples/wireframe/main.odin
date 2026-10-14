@@ -44,7 +44,7 @@ handles: [9]world.NodeHandle
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 4, 9}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  app.renderer.ambient.skybox_intensity = 0
+  app.renderer.skybox_intensity = 0
 
   cube := app.renderer.builtin_meshes[.CUBE]
   mat := render.material_wireframe(&app.renderer)

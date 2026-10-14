@@ -117,7 +117,7 @@ void main() {
     if (id >= emit_total) return;
     uint emitter_idx = find_emitter(id);
     Emitter emitter = emitters[emitter_idx];
-    if (emitter.node_index >= nodes.length()) return;
+    if (emitter.node_index == 0u) return; // unattached
     uint idx = (emit_cursor + id) % uint(MAX_PARTICLES);
     // Varies across frames, emitters and particles: without frame_counter
     // low-rate emitters would spawn at the same point every frame.

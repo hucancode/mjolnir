@@ -101,9 +101,9 @@ update :: proc(app: ^App, dt: f32) {
     l.color[3] = f32(dir_intensity)
     render.attach(&app.renderer, dir_light.index, l)
   }
-  app.renderer.ambient.ibl_intensity = f32(ibl_intensity)
-  app.renderer.ambient.skybox_intensity = skybox_on ? 1 : 0
-  app.renderer.ambient.skybox_blur = f32(skybox_blur)
+  app.renderer.ibl_intensity = f32(ibl_intensity)
+  app.renderer.skybox_intensity = skybox_on ? 1 : 0
+  app.renderer.skybox_blur = f32(skybox_blur)
   if spinning {
     rotation_phase += dt * f32(rotate_speed)
   }

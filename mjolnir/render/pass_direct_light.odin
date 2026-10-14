@@ -37,7 +37,6 @@ DRAW_STATE := [LightType]struct {
   .AMBIENT     = {.ALWAYS, {.BACK}, nil, AMBIENT_SHADER_FRAG},
 }
 
-@(private)
 direct_light_init :: proc(r: ^Renderer) -> vk.Result {
   gctx := &r.gctx
   light_type_entry := vk.SpecializationMapEntry{constantID = 0, size = size_of(u32)}
@@ -74,9 +73,9 @@ direct_light_init :: proc(r: ^Renderer) -> vk.Result {
   return .SUCCESS
 }
 
-@(private)
-lighting_record :: proc(r: ^Renderer, frame_index: u32, cam_index: u32, cam: ^Camera) {
+lighting_record :: proc(r: ^Renderer, frame_index: u32, cam_index: u32) {
   cmd := r.command_buffers[frame_index]
+  cam := &r.cameras[cam_index]
   final_image := texture_image(r, cam.attachments[.FINAL_IMAGE][frame_index])
   depth_texture := texture_image(r, cam.attachments[.DEPTH][frame_index])
   gpu.begin_rendering(
@@ -87,15 +86,14 @@ lighting_record :: proc(r: ^Renderer, frame_index: u32, cam_index: u32, cam: ^Ca
     gpu.create_color_attachment(final_image.view),
   )
   bind_mesh_buffers(r, cmd)
-  ambient := &r.ambient
   push := LightingPushConstants {
     camera_index     = cam_index,
-    irradiance       = u32(ambient.irradiance_cube),
-    prefilter        = u32(ambient.prefilter_cube),
-    brdf_lut         = u32(ambient.brdf_lut),
-    environment      = u32(ambient.environment_map),
-    skybox_intensity = ambient.skybox_intensity,
-    skybox_blur      = ambient.skybox_blur,
+    irradiance       = u32(r.irradiance_cube),
+    prefilter        = u32(r.prefilter_cube),
+    brdf_lut         = u32(r.brdf_lut),
+    environment      = u32(r.environment_map),
+    skybox_intensity = r.skybox_intensity,
+    skybox_blur      = r.skybox_blur,
   }
   push_constants(r, cmd, &push)
   first: u32
@@ -105,7 +103,7 @@ lighting_record :: proc(r: ^Renderer, frame_index: u32, cam_index: u32, cam: ^Ca
     if count == 0 do continue
     vk.CmdBindPipeline(cmd, .GRAPHICS, r.light_pipelines[type])
     if primitive, ok := DRAW_STATE[type].volume.?; ok {
-      volume := &r.meshes[r.builtin_meshes[primitive]]
+      volume := &write_table(r, .MESHES, MeshData)[r.builtin_meshes[primitive]]
       vk.CmdDrawIndexed(cmd, volume.index_count, count, volume.first_index, volume.vertex_offset, first)
     } else {
       vk.CmdDraw(cmd, 3, count, 0, first)

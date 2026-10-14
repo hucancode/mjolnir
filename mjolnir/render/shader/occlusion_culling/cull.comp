@@ -10,8 +10,6 @@
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 
-const uint INVALID_ID = 0xFFFFFFFFu;
-
 struct NodeData {
     mat4 world_matrix;
     uint material_id;
@@ -202,7 +200,8 @@ void main() {
     if (view.type_mask == 0u) return;
 
     NodeData node = nodes[node_id];
-    if (node.mesh_id == INVALID_ID || node.material_id == INVALID_ID) return;
+    // 0 is none
+    if (node.mesh_id == 0u || node.material_id == 0u) return;
     if ((node.flags & view.require_flags) != view.require_flags) return;
     uint type = materials[node.material_id].type;
     if (((view.type_mask >> type) & 1u) == 0u) return;

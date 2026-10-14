@@ -1,5 +1,6 @@
 package ui
 
+import cont "../containers"
 import "../font"
 import "core:slice"
 import "core:strings"
@@ -15,7 +16,7 @@ ALIGN_FACTOR := [Align]f32 {
 // children: a fixed sequence of passes over the nodes in tree order. Widths
 // resolve before text wraps, heights after.
 layout :: proc(self: ^UI, viewport: Rect, f: ^font.Font) {
-  n := len(self.nodes.entries)
+  n := int(self.slots.high_water)
   resize(&self.rects, n)
   resize(&self.clips, n)
   resize(&self.line_ranges, n)
@@ -35,7 +36,7 @@ layout :: proc(self: ^UI, viewport: Rect, f: ^font.Font) {
 
 @(private = "file")
 item :: #force_inline proc(self: ^UI, i: u32) -> ^Node {
-  return &self.nodes.entries[i].item
+  return &self.nodes[i]
 }
 
 @(private = "file")
@@ -47,8 +48,7 @@ children_of :: #force_inline proc(self: ^UI, i: u32) -> []u32 {
 @(private = "file")
 parent_of :: proc(self: ^UI, i: u32) -> int {
   p := item(self, i).parent
-  e := &self.nodes.entries
-  if p == {} || int(p.index) >= len(e) || !e[p.index].active || e[p.index].generation != p.generation do return -1
+  if !cont.slots_valid(&self.slots, p) do return -1
   return int(p.index)
 }
 
@@ -68,10 +68,10 @@ sort_indices :: proc(indices: []u32, key: proc(self: ^UI, i: u32) -> i32, self: 
 build_tree :: proc(self: ^UI) {
   clear(&self.topo)
   slice.zero(self.child_count[:])
-  for e, i in self.nodes.entries {
-    if !e.active do continue
-    p := parent_of(self, u32(i))
-    if p < 0 do append(&self.topo, u32(i))
+  c: u32
+  for i in cont.slots_next(&self.slots, &c) {
+    p := parent_of(self, i)
+    if p < 0 do append(&self.topo, i)
     else do self.child_count[p] += 1
   }
   total: u32
@@ -81,11 +81,11 @@ build_tree :: proc(self: ^UI) {
   }
   resize(&self.children, int(total))
   fill := make([]u32, len(self.child_count), context.temp_allocator)
-  for e, i in self.nodes.entries {
-    if !e.active do continue
-    p := parent_of(self, u32(i))
+  c = 0
+  for i in cont.slots_next(&self.slots, &c) {
+    p := parent_of(self, i)
     if p < 0 do continue
-    self.children[self.child_first[p] + fill[p]] = u32(i)
+    self.children[self.child_first[p] + fill[p]] = i
     fill[p] += 1
   }
   order :: proc(self: ^UI, i: u32) -> i32 {return item(self, i).order}
@@ -298,7 +298,7 @@ place :: proc(self: ^UI, viewport: Rect, f: ^font.Font) {
   slice.sort(keys)
   for key in keys {
     i := shown[u32(key)]
-    append(&self.draw_order, NodeHandle{index = i, generation = self.nodes.entries[i].generation})
+    append(&self.draw_order, NodeHandle(cont.slots_handle(&self.slots, i)))
   }
 }
 

@@ -341,6 +341,29 @@ image_discard_barrier :: proc(command_buffer: vk.CommandBuffer, discards: ..Imag
   vk.CmdPipelineBarrier2(command_buffer, &dep)
 }
 
+// present_barrier moves a swapchain image from GENERAL to PRESENT_SRC, the one layout
+// transition unified image layouts do not cover.
+present_barrier :: proc(command_buffer: vk.CommandBuffer, image: vk.Image) {
+  barrier := vk.ImageMemoryBarrier2 {
+    sType = .IMAGE_MEMORY_BARRIER_2,
+    srcStageMask = {.COLOR_ATTACHMENT_OUTPUT},
+    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    dstStageMask = {.BOTTOM_OF_PIPE},
+    oldLayout = .GENERAL,
+    newLayout = .PRESENT_SRC_KHR,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = image,
+    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
+  }
+  dep := vk.DependencyInfo {
+    sType                   = .DEPENDENCY_INFO,
+    imageMemoryBarrierCount = 1,
+    pImageMemoryBarriers    = &barrier,
+  }
+  vk.CmdPipelineBarrier2(command_buffer, &dep)
+}
+
 // memory_barrier records a global memory dependency between the given stages and accesses.
 memory_barrier :: proc(
   command_buffer: vk.CommandBuffer,

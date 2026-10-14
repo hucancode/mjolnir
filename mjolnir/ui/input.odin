@@ -1,6 +1,5 @@
 package ui
 
-import cont "../containers"
 import "../input"
 
 // pick returns the topmost shown node under `point`, inside its clip, that is interactive
@@ -10,7 +9,7 @@ pick :: proc(self: ^UI, point: [2]f32) -> NodeHandle {
   #reverse for h in self.draw_order {
     if !contains(self.rects[h.index], point) || !contains(self.clips[h.index], point) do continue
     for a := h; a != {}; {
-      n := cont.get(self.nodes, a) or_break
+      n := lookup(self, a) or_break
       if n.interactive do return h
       a = n.parent
     }
@@ -38,7 +37,7 @@ update_input :: proc(self: ^UI, s: ^input.State) {
       if self.pressed == {} do self.pressed = self.hovered
       self.focused = {}
       for a := self.hovered; a != {}; {
-        n := cont.get(self.nodes, a) or_break
+        n := lookup(self, a) or_break
         if n.focusable {
           self.focused = a
           break
@@ -49,7 +48,7 @@ update_input :: proc(self: ^UI, s: ^input.State) {
     if input.mouse_released(s, b) && within(self, self.hovered, self.pressed) do self.clicked = self.pressed
   }
   if s.buttons == {} do self.pressed = {}
-  if _, ok := cont.get(self.nodes, self.focused); !ok do self.focused = {}
+  if _, ok := lookup(self, self.focused); !ok do self.focused = {}
   if self.hovered != {} || self.pressed != {} do s.mouse_captured = true
   if self.focused != {} do s.keyboard_captured = true
 }

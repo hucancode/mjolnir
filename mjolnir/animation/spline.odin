@@ -44,11 +44,7 @@ spline_validate :: proc(spline: Spline($T)) -> bool {
   return slice.is_sorted(spline.times)
 }
 
-// Hermite basis functions for cubic interpolation
-// h00(t) = 2t^3 - 3t^2 + 1
-// h10(t) = t^3 - 2t^2 + t
-// h01(t) = -2t^3 + 3t^2
-// h11(t) = t^3 - t^2
+// Cubic Hermite basis functions.
 @(private)
 hermite_h00 :: proc "contextless" (t: f32) -> f32 {
   return 2 * t * t * t - 3 * t * t + 1
@@ -243,18 +239,9 @@ spline_arc_length :: proc(spline: Spline($T)) -> f32 {
   return slice.last(table.arc_lengths) if len(table.arc_lengths) > 0 else 0
 }
 
-// spline_build_closed builds a closed-loop Catmull-Rom spline from N base points (which must not
-// duplicate the seam — base[N-1] should differ from base[0]).
-//
-// The result has N+3 control points: a ghost-prepend of base[N-1], the N core
-// points, then ghost-appends of base[0] and base[1]. This gives every interior
-// segment — including the wrap segment between base[N-1] and base[0] — real
-// neighbor points for Catmull-Rom tangents, eliminating the seam kink that a
-// straight closed polyline would otherwise produce.
-//
-// The arc-length table is built only over t in [0, N] so that
-// spline_arc_length reports exactly one full loop. Callers can therefore wrap
-// offset with mod(spline_arc_length) without retracing the ghost regions.
+// spline_build_closed builds a closed-loop Catmull-Rom spline through `base` (base[N-1] must
+// differ from base[0]). Ghost points around the seam keep tangents smooth; the arc table
+// covers t in [0, N], so spline_arc_length is exactly one loop.
 spline_build_closed :: proc(base: [][3]f32, samples := 200) -> Spline([3]f32) {
   n := len(base)
   pts := make([][3]f32, n + 3)

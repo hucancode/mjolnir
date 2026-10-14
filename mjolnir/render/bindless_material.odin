@@ -62,12 +62,11 @@ Material :: struct {
 // thread than frame's happen between lock and unlock.
 material :: proc(r: ^Renderer, h: MaterialHandle) -> (^Material, bool) #optional_ok {
   if !cont.slots_live(&r.material_slots, u32(h)) do return nil, false
-  mark_dirty(r, .MATERIALS, Material, int(h))
+  mark_dirty(r, .MATERIALS, int(h))
   return &write_table(r, .MATERIALS, Material)[h], true
 }
 
-// Materials are app-lifetime but textures are level-lifetime: destroy a
-// material that samples textures before teardown.
+// create_material creates a material; it lives until destroy_material or shutdown.
 create_material :: proc(
   self: ^Renderer,
   type: MaterialType = .PBR,
@@ -85,8 +84,7 @@ create_material :: proc(
   handle: MaterialHandle,
   ok: bool,
 ) #optional_ok {
-  sync.recursive_mutex_lock(&self.mutex)
-  defer sync.recursive_mutex_unlock(&self.mutex)
+  guard(self)
   handle = MaterialHandle(cont.slots_alloc(&self.material_slots) or_return)
   material(self, handle)^ = {
     type                     = type,
@@ -160,8 +158,7 @@ material_sprite :: proc(
 // Show cell `frame` (row-major, wrapped to the sheet size) of a sprite
 // material. Animate by calling this as time advances.
 set_sprite_frame :: proc(self: ^Renderer, handle: MaterialHandle, frame: u32) -> bool {
-  sync.recursive_mutex_lock(&self.mutex)
-  defer sync.recursive_mutex_unlock(&self.mutex)
+  guard(self)
   m := material(self, handle) or_return
   m.frame_index = frame % (m.frame_columns * m.frame_rows)
   return true
@@ -169,10 +166,9 @@ set_sprite_frame :: proc(self: ^Renderer, handle: MaterialHandle, frame: u32) ->
 
 // destroy_material frees the material slot; false if handle is not live.
 destroy_material :: proc(self: ^Renderer, handle: MaterialHandle) -> bool {
-  sync.recursive_mutex_lock(&self.mutex)
-  defer sync.recursive_mutex_unlock(&self.mutex)
+  guard(self)
   cont.slots_free(&self.material_slots, u32(handle)) or_return
-  clear_entry(self, .MATERIALS, Material, u32(handle))
+  clear_entry(self, .MATERIALS, u32(handle))
   return true
 }
 
@@ -312,10 +308,10 @@ material_pass_record :: proc(
   r: ^Renderer,
   frame_index: u32,
   cam_index: u32,
-  cam: ^Camera,
   pass: MaterialPass,
 ) {
   cmd := r.command_buffers[frame_index]
+  cam := &r.cameras[cam_index]
   t := &MATERIAL_PASS_TARGETS[pass]
   colors := make([]vk.RenderingAttachmentInfo, len(t.colors), context.temp_allocator)
   for a, i in t.colors do colors[i] = gpu.create_color_attachment(texture_image(r, cam.attachments[a][frame_index]).view, t.load)
@@ -329,7 +325,7 @@ material_pass_record :: proc(
     types := MATERIAL_PASS_TYPES[pass]
     for type in types[0] ..< types[1] {
       vk.CmdBindPipeline(cmd, .GRAPHICS, r.material_pipelines[type])
-      draw_lists_draw(&cam.draws, cmd, frame_index, u32(type))
+      draw_lists_draw(r, cmd, CAMERA_DRAW_SLOT_BASE + camera_slot(cam_index) + frame_index, u32(type), CAMERA_LIST_CAPACITY)
     }
   }
   vk.CmdEndRendering(cmd)

@@ -157,17 +157,17 @@ frame :: proc(app: ^App) -> bool {
     r, c := ui.rect(&app.gui, h), ui.clip(&app.gui, h)
     clip := [4]f32{c.pos.x, c.pos.y, c.size.x, c.size.y} * s
     if look, ok := app.looks[h]; ok {
-      append(&commands, render.DrawQuadCommand{r.pos * s, r.size * s, look.color, look.texture, i32(z), clip})
+      append(&commands, render.RenderCommand{render.DrawQuadCommand{r.pos * s, r.size * s, look.color, look.texture}, i32(z), clip})
     }
     if h == app.star {
       vertices, indices := star_mesh(r.size * s * 0.5, {255, 215, 0, 255})
-      append(&commands, render.DrawMeshCommand{r.pos * s, vertices, indices, render.NO_TEXTURE, i32(z), clip})
+      append(&commands, render.RenderCommand{render.DrawMeshCommand{r.pos * s, vertices, indices, render.NO_TEXTURE}, i32(z), clip})
     }
     n := ui.node(&app.gui, h)
     for line in ui.lines(&app.gui, h) {
       glyphs := make([dynamic]font.Glyph, context.temp_allocator)
       font.glyphs(&app.font, n.text[line.start:line.end], line.pos * s, n.font_size * s, &glyphs)
-      append(&commands, render.DrawTextCommand{glyphs[:], TEXT_COLOR, i32(z), clip})
+      append(&commands, render.RenderCommand{render.DrawTextCommand{glyphs[:], TEXT_COLOR}, i32(z), clip})
     }
   }
   pixels, atlas_size, changed := font.atlas(&app.font)

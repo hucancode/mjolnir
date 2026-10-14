@@ -49,7 +49,7 @@ layout(set = 0, binding = 1) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 
-const uint MESH_FLAG_SKINNED = 1u << 0;
+const uint NODE_FLAG_SKINNED = 1u << 2; // the node holds a bone range
 
 struct MeshData {
     vec3 aabb_min;
@@ -82,8 +82,7 @@ void main() {
     mat4 world = node.world_matrix;
     MeshData mesh = meshes[node.mesh_id];
     vec4 model_position;
-    bool is_skinned = (mesh.flags & MESH_FLAG_SKINNED) != 0u &&
-                      node.attachment_data_index < bones.length();
+    bool is_skinned = (node.flags & NODE_FLAG_SKINNED) != 0u; // only set on a skinned mesh
     if (is_skinned) {
         int local_index = gl_VertexIndex - mesh.vertex_offset;
         uint vertex_index = mesh.vertex_skinning_offset + uint(local_index);

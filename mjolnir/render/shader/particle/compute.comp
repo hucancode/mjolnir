@@ -74,7 +74,7 @@ bool simulate(uint i) {
     for (uint f = 0; f < n; ++f) {
         ForceField ff = forcefields[f];
         // Unused slots are zero: disabled, area_of_effect 0
-        if (ff.enabled == 0u || ff.area_of_effect <= 0.0) continue;
+        if (ff.enabled == 0u || ff.area_of_effect <= 0.0 || ff.node_index == 0u) continue;
         vec3 ff_pos = nodes[ff.node_index].world_matrix[3].xyz;
         vec3 to_particle = p - ff_pos;
         float dist = length(to_particle);

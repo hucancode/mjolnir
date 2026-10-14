@@ -1,12 +1,27 @@
 package containers
 
+// Handle is an index with the generation it was handed out at; it goes stale when the index is freed.
+// The zero Handle is none.
+Handle :: struct {
+  index:      u32,
+  generation: u32,
+}
+
+// Retiring is an index freed but not yet reusable: `ready` is the tick it may be reused at.
+Retiring :: struct {
+  index: u32,
+  ready: u64,
+}
+
 // Slots hands out indices of storage the caller owns (a plain array, a GPU
-// table): liveness and a free list, no items. Index 0 is never handed out, so
-// a zero index means none. With grace > 0 a freed index is reused only
-// `grace` ticks later, so a consumer lagging up to `grace` ticks never sees it
-// reused.
+// table): liveness, generations and a free list, no items. Index 0 is never
+// handed out, so a zero index means none. With grace > 0 a freed index is
+// reused only `grace` ticks later, so a consumer lagging up to `grace` ticks
+// never sees it reused.
 Slots :: struct {
   live:       []u64, // bit per index
+  // per index, bumped when it is freed; stale handles carry an older one
+  generation: []u32,
   free:       [dynamic]u32,
   // Freed indices in free order with the tick they mature at; ticks only
   // grow, so the matured ones are a prefix. The first `reclaimed` entries
@@ -24,6 +39,7 @@ Slots :: struct {
 // slots_init sets up s for capacity indices (index 0 is reserved) with an optional reuse grace in ticks.
 slots_init :: proc(s: ^Slots, capacity: u32, grace: u64 = 0) {
   s.live = make([]u64, (capacity + 63) / 64)
+  s.generation = make([]u32, capacity)
   s.grace = grace
   s.capacity = capacity
   s.high_water = 1
@@ -32,6 +48,7 @@ slots_init :: proc(s: ^Slots, capacity: u32, grace: u64 = 0) {
 // slots_destroy frees the memory held by s and zeroes it.
 slots_destroy :: proc(s: ^Slots) {
   delete(s.live)
+  delete(s.generation)
   delete(s.free)
   delete(s.retiring)
   s^ = {}
@@ -56,6 +73,7 @@ slots_alloc :: proc(s: ^Slots) -> (index: u32, ok: bool) #optional_ok {
 slots_free :: proc(s: ^Slots, index: u32) -> bool {
   if !slots_live(s, index) do return false
   s.live[index / 64] &~= 1 << (index % 64)
+  s.generation[index] += 1
   s.count -= 1
   if s.grace == 0 do append(&s.free, index)
   else do append(&s.retiring, Retiring{index, s.tick + s.grace})
@@ -65,6 +83,16 @@ slots_free :: proc(s: ^Slots, index: u32) -> bool {
 // slots_live reports whether index is currently allocated.
 slots_live :: #force_inline proc "contextless" (s: ^Slots, index: u32) -> bool {
   return index < s.capacity && s.live[index / 64] & (1 << (index % 64)) != 0
+}
+
+// slots_handle returns the handle of a live index.
+slots_handle :: #force_inline proc "contextless" (s: ^Slots, index: u32) -> Handle {
+  return {index, s.generation[index]}
+}
+
+// slots_valid reports whether handle h (a Handle or a distinct Handle) is live and not stale.
+slots_valid :: #force_inline proc "contextless" (s: ^Slots, h: $HT) -> bool {
+  return slots_live(s, h.index) && s.generation[h.index] == h.generation
 }
 
 // slots_tick advances one tick and reuses the indices freed `grace` ticks ago. Returns
