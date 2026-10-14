@@ -7,7 +7,3 @@ perf.data
 perf.data.old
 screenshots/*.ppm
 screenshots/*.png
-docs/node_modules
-docs/build
-docs/.svelte-kit
-/mjolnir/recast

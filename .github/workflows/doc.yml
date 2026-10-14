@@ -46,15 +46,8 @@ jobs:
           version: 1.4.309.0
           cache: true
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
       - name: Build documentation
         run: make doc
-        env:
-          BASE_PATH: /mjolnir
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

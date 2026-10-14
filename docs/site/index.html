@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mjolnir Engine</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-page="home">
+<nav class="bar">
+  <b>Mjolnir</b>
+  <a href="index.html">Home</a>
+  <a href="examples.html">Examples</a>
+  <a href="api.html">API</a>
+  <a href="https://github.com/hucancode/mjolnir">GitHub</a>
+</nav>
+<main>
+<h1>Mjolnir Engine</h1>
+<p>
+  <a href="https://github.com/hucancode/mjolnir">Mjolnir</a> is a minimalistic, bindless,
+  GPU-driven game engine in Odin + Vulkan 1.3.
+</p>
+<img class="hero" src="images/pp.png" alt="Post-process example">
+
+<h2>Get started</h2>
+<p>
+  Run <code>make shader</code> to compile shaders to SPIR-V and copy the <code>mjolnir/</code>
+  directory into your project. See <a href="examples.html">examples</a> and the
+  <a href="api.html">API reference</a>.
+</p>
+
+<section class="features">
+  <article>
+    <div class="text">
+      <h2>Physically-based rendering</h2>
+      <p>Metallic-roughness materials with image-based lighting, driven entirely from bindless GPU buffers.</p>
+      <a href="examples.html#pbr">See PBR example</a>
+    </div>
+    <div class="art">Physically-based rendering</div>
+  </article>
+  <article>
+    <div class="text">
+      <h2>Lights and shadows</h2>
+      <p>Point, spot and directional lights with 2D and cubemap shadow maps.</p>
+      <a href="examples.html#lights">See lights example</a>
+    </div>
+    <div class="art">Lights and shadows</div>
+  </article>
+  <article>
+    <div class="text">
+      <h2>Cameras as render targets</h2>
+      <p>Any camera output can be sampled as a texture: mirrors, minimaps, portals.</p>
+      <a href="examples.html#render_to_texture">See RTT example</a>
+    </div>
+    <div class="art">Cameras as render targets</div>
+  </article>
+  <article>
+    <div class="text">
+      <h2>Skeletal animation</h2>
+      <p>Forward kinematics, FABRIK inverse kinematics, and layering with bone masks, blend modes and transitions.</p>
+      <a href="examples.html#animation_layering">See animation example</a>
+    </div>
+    <div class="art">Skeletal animation</div>
+  </article>
+  <article>
+    <div class="text">
+      <h2>Procedural animation</h2>
+      <p>Tail follow-through, spider legs and path-on-spline modifiers on top of any rig.</p>
+      <a href="examples.html#spider_leg_modifier">See spider example</a>
+    </div>
+    <div class="art">Procedural animation</div>
+  </article>
+  <article>
+    <div class="text">
+      <h2>Rigid-body physics</h2>
+      <p>Physics primitives - boxes, spheres and cylinders with sleeping, sensors, area queries and ray casts.</p>
+      <a href="examples.html#physics">See physics example</a>
+    </div>
+    <div class="art">Rigid-body physics</div>
+  </article>
+  <article>
+    <div class="text">
+      <h2>Navigation</h2>
+      <p>Recast, Detour path queries and crowd steering with local avoidance.</p>
+      <a href="examples.html#crowd_nav">See navigation example</a>
+    </div>
+    <div class="art">Navigation</div>
+  </article>
+  <article>
+    <div class="text">
+      <h2>Particles and force fields</h2>
+      <p>GPU particle simulation, shaped by force fields placed in the scene.</p>
+      <a href="examples.html#particles">See particles example</a>
+    </div>
+    <div class="art">Particles and force fields</div>
+  </article>
+  <article>
+    <div class="text">
+      <h2>Post-processing</h2>
+      <p>Tonemap, bloom, blur, fog, outline, depth of field and crosshatch, stacked per camera.</p>
+      <a href="examples.html#post_process">See post processing example</a>
+    </div>
+    <div class="art">Post-processing</div>
+  </article>
+  <article>
+    <div class="text">
+      <h2>Asset loading</h2>
+      <p>glTF scenes with skins and animations, and OBJ meshes. Procedural cubes, spheres and tori built in.</p>
+      <a href="examples.html#gltf_animation">See GLTF example</a>
+    </div>
+    <div class="art">Asset loading</div>
+  </article>
+  <article>
+    <div class="text">
+      <h2>Billboards, sprites, splines and tweens</h2>
+      <p>The small pieces games reach for first.</p>
+      <a href="examples.html#sprite">See sprite example</a>
+    </div>
+    <div class="art">Billboards, sprites, splines and tweens</div>
+  </article>
+</section>
+</main>
+</body>
+</html>

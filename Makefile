@@ -77,7 +77,7 @@ capture: build
 	echo "Screenshots saved to $$OUT_DIR/"
 
 record: shader
-	@mkdir -p docs/static/videos artifacts/record
+	@mkdir -p docs/site/videos artifacts/record
 	./examples/record.sh $(EXAMPLE)
 
 clean:
@@ -109,7 +109,10 @@ long-example:
 	find examples -type f -name "main.odin" -exec wc -l {} + | sort -rn | head -n20
 
 doc: shader
-	cd docs && npm ci && npm run build
+	rm -rf docs/build
+	mkdir -p docs/build
+	cp -R docs/site/. docs/build/
+	odin run docs/gen -- docs/build/data
 
 compare-physics:
 	git stash -u
