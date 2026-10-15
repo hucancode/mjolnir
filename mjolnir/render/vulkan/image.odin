@@ -13,6 +13,7 @@ Image :: struct {
   mip_levels: u32,
   // array layers; six for a cube
   layers:     u32,
+  cube:       bool,
 }
 
 @(private)
@@ -58,6 +59,7 @@ image_create :: proc(
     format     = format,
     mip_levels = mip_levels,
     layers     = layers,
+    cube       = cube,
   }
   view_type: vk.ImageViewType = .CUBE if cube else .D2_ARRAY if array else .D2
   create_info := vk.ImageCreateInfo {

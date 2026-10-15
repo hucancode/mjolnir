@@ -100,7 +100,7 @@ overlay_batch :: proc(r: ^Renderer, draw_commands, draw_debug: bool) {
   clear(&self.batches)
   r.ui_batches, r.ui_vertices, r.ui_indices = nil, nil, nil
   if !draw_commands && !draw_debug do return
-  extent := backend_extent(&r.gpu)
+  extent := dev.extent(&r.gpu)
   if draw_commands do batch_commands(self, extent)
   if draw_debug {
     begin_batch(self, {0, 0, i32(extent.x), i32(extent.y)})

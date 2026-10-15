@@ -160,7 +160,7 @@ create_graphics_pipeline :: proc(
     pDynamicState       = &dynamic_state,
     layout              = desc.layout,
   }
-  vk.CreateGraphicsPipelines(gctx.device, 0, 1, &info, nil, &pipeline) or_return
+  vk.CreateGraphicsPipelines(gctx.device, gctx.pipeline_cache, 1, &info, nil, &pipeline) or_return
   return pipeline, .SUCCESS
 }
 
@@ -302,20 +302,29 @@ ImageDiscard :: struct {
   stage:  vk.PipelineStageFlags2,
 }
 
-// attachment_discard returns the ImageDiscard of an attachment image, ready for its color or depth writes.
+// attachment_discard returns the ImageDiscard of an image about to be written whole: a color one
+// as an attachment or a storage image (compute), a depth one as an attachment.
 attachment_discard :: proc(img: ^Image) -> ImageDiscard {
   aspect := infer_aspect_mask(img.format)
-  if .COLOR in aspect do return {img.image, aspect, {.COLOR_ATTACHMENT_WRITE}, {.COLOR_ATTACHMENT_OUTPUT}}
+  if .COLOR in aspect do return {img.image, aspect, {.COLOR_ATTACHMENT_WRITE, .SHADER_STORAGE_WRITE}, {.COLOR_ATTACHMENT_OUTPUT, .COMPUTE_SHADER}}
   return {img.image, aspect, {.DEPTH_STENCIL_ATTACHMENT_WRITE}, {.EARLY_FRAGMENT_TESTS}}
 }
 
 // image_discard_barrier records every discard in one dependency.
 image_discard_barrier :: proc(command_buffer: vk.CommandBuffer, discards: ..ImageDiscard) {
+  dep := vk.DependencyInfo{sType = .DEPENDENCY_INFO}
+  image_discards_fill(&dep, discards)
+  vk.CmdPipelineBarrier2(command_buffer, &dep)
+}
+
+// The image barriers of `discards` into dep. Each orders after all earlier work (the source is
+// every stage, no access: a write-after-read), so it chains with any semaphore wait before it.
+image_discards_fill :: proc(dep: ^vk.DependencyInfo, discards: []ImageDiscard) {
   barriers := make([]vk.ImageMemoryBarrier2, len(discards), context.temp_allocator)
   for d, i in discards {
     barriers[i] = {
       sType = .IMAGE_MEMORY_BARRIER_2,
-      srcStageMask = {.TOP_OF_PIPE},
+      srcStageMask = {.ALL_COMMANDS},
       dstStageMask = d.stage,
       dstAccessMask = d.access,
       oldLayout = .UNDEFINED,
@@ -330,12 +339,8 @@ image_discard_barrier :: proc(command_buffer: vk.CommandBuffer, discards: ..Imag
       },
     }
   }
-  dep := vk.DependencyInfo {
-    sType                   = .DEPENDENCY_INFO,
-    imageMemoryBarrierCount = u32(len(barriers)),
-    pImageMemoryBarriers    = raw_data(barriers),
-  }
-  vk.CmdPipelineBarrier2(command_buffer, &dep)
+  dep.imageMemoryBarrierCount = u32(len(barriers))
+  dep.pImageMemoryBarriers = raw_data(barriers)
 }
 
 // present_barrier moves a swapchain image from GENERAL to PRESENT_SRC, the one layout
@@ -407,7 +412,7 @@ create_compute_pipeline :: proc(
     },
     layout = layout,
   }
-  vk.CreateComputePipelines(gctx.device, 0, 1, &info, nil, &pipeline) or_return
+  vk.CreateComputePipelines(gctx.device, gctx.pipeline_cache, 1, &info, nil, &pipeline) or_return
   return pipeline, .SUCCESS
 }
 

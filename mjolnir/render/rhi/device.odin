@@ -24,39 +24,41 @@ Queue :: enum {
   COMPUTE,
 }
 
-// SyncPoint is reached when `queue` has completed the submission that signalled `value`.
+// SyncPoint is reached when `queue` has completed the submission that signalled `value`. As a
+// wait, `stages` are the ones of the waiting submission that hold until then (none: all).
 SyncPoint :: struct {
-  queue: Queue,
-  value: u64,
+  queue:  Queue,
+  value:  u64,
+  stages: bit_set[Stage],
 }
 
 // What the device can do. render branches on these.
 Caps :: struct {
   // textures and storage images reach shaders through global arrays indexed by handle
   bindless:                  bool,
-  // cmd_push: small constants beside every draw or dispatch (Vulkan push constants; WebGPU
-  // a dynamic-offset uniform ring in the pipeline's push group)
-  push_constants:            bool,
   multi_draw_indirect_count: bool,
-  // draws honour first_instance of indirect commands, so it can tag a draw
-  indirect_first_instance:   bool,
   // one pass renders into several layers of a texture (PassDesc.layer_count)
   layered_rendering:         bool,
-  // cmd_barrier and cmd_texture_discard do something: the caller owns hazards. When false the
-  // queue order is the only sync and they are no-ops.
+  // cmd_barrier does something: the caller owns hazards. When false the queue order is the
+  // only sync and it is a no-op.
   explicit_barriers:         bool,
-  // COMPUTE is a queue of its own
+  // the COMPUTE queue runs beside the GRAPHICS one, ordered only by the SyncPoints a submission
+  // waits on. When false a COMPUTE list is recorded into the graphics list instead.
   async_compute:             bool,
-  frames_in_flight:          u32,
-  // frames a retired resource waits before it is destroyed
-  retire_grace:              u32,
-  // granularity of cmd_push offsets and uniform ring entries, in bytes
-  uniform_alignment:         u32,
+}
+
+// SubmitDesc is one submission: `cmds` in order on `queue` once `waits` are reached. `present`
+// makes it the frame's presenting submission: it waits for the image frame_begin acquired and
+// frame_present waits for it; exactly one submission per frame presents.
+SubmitDesc :: struct {
+  queue:   Queue,
+  cmds:    []CommandList,
+  waits:   []SyncPoint,
+  present: bool,
 }
 
 BufferUsage :: enum {
   STORAGE,
-  UNIFORM,
   VERTEX,
   INDEX,
   INDIRECT,
@@ -69,6 +71,8 @@ BufferUsage :: enum {
 MemoryKind :: enum {
   GPU,
   UPLOAD,
+  // GPU-written, CPU-read (buffer_read)
+  READBACK,
 }
 
 BufferDesc :: struct {
@@ -114,22 +118,25 @@ ShaderStage :: enum {
 }
 
 // BindKind is what a binding holds. Textures are sampled through the sampler the backend binds
-// beside them; STORAGE_TEXTURE is write-only R32F.
+// beside them; storage textures are write-only, one mip, of BindEntry.format.
 BindKind :: enum {
   STORAGE_BUFFER,
   STORAGE_BUFFER_READ,
-  UNIFORM_BUFFER,
   TEXTURE_FLOAT,
   TEXTURE_UNFILTERABLE,
   TEXTURE_DEPTH,
   TEXTURE_CUBE,
   TEXTURE_DEPTH_ARRAY,
   STORAGE_TEXTURE,
+  // a mip of a cube seen as six layers
+  STORAGE_TEXTURE_ARRAY,
 }
 
 BindEntry :: struct {
   kind:   BindKind,
   stages: bit_set[ShaderStage],
+  // the texel format of a storage texture
+  format: TextureFormat,
 }
 
 // BindLayout binding i is entries[i].
@@ -144,7 +151,8 @@ BufferRange :: struct {
   size:   int,
 }
 
-// TextureView names one mip of a texture; `mip` -1 is every mip.
+// TextureView names one mip of a texture; `mip` -1 is every mip (the texture's own view: a
+// cube as a cube, a layered texture as an array).
 TextureView :: struct {
   texture: TextureHandle,
   mip:     i32,
@@ -161,17 +169,13 @@ BindGroupDesc :: struct {
   resources: []BindResource,
 }
 
-// Shaders the backends ship, one source per backend (SPIR-V, WGSL); a backend leaves out one
-// whose capability it lacks and pipeline creation fails for it. Grows as passes move into render.
-Shader :: enum {
-  // tests nodes against views and writes draws
-  CULL,
-  // builds a depth pyramid: all mips in one dispatch where Vulkan can, mip by mip otherwise
-  DEPTH_REDUCE,
-  // WebGPU's first reduce step, from the depth image rather than the mip above
-  DEPTH_REDUCE_FROM_DEPTH,
-  // depth-only vertex shader of the shadow maps
-  SHADOW_DEPTH,
+// A shader in the form each backend takes: SPIR-V per stage (entry point "main") or one WGSL
+// module (entry points vs_main, fs_main, main). A pass loads only its backend's form.
+ShaderSource :: struct {
+  spirv: struct {
+    vert, frag, comp: []u8,
+  },
+  wgsl:  string,
 }
 
 VertexStep :: enum {
@@ -180,6 +184,7 @@ VertexStep :: enum {
 }
 
 VertexFormat :: enum {
+  UNORM8X4,
   F32X2,
   F32X3,
   F32X4,
@@ -201,11 +206,13 @@ VertexBuffer :: struct {
 Topology :: enum {
   TRIANGLE_LIST,
   LINE_LIST,
+  POINT_LIST,
 }
 
 CullMode :: enum {
   NONE,
   BACK,
+  FRONT,
 }
 
 BlendMode :: enum {
@@ -217,6 +224,8 @@ BlendMode :: enum {
 CompareOp :: enum {
   LESS_EQUAL,
   ALWAYS,
+  GREATER,
+  GREATER_EQUAL,
 }
 
 DepthState :: struct {
@@ -228,10 +237,13 @@ DepthState :: struct {
   slope_bias: f32,
 }
 
+// PUSH_GROUP in PipelineLayoutDesc.layouts marks where the push group sits, on a backend
+// without push constants (WebGPU); without it the group follows the last layout.
+PUSH_GROUP :: BindLayout(max(u32))
+
 // A pipeline's resource interface: `layouts` are sets 0 .. n - 1. With `bindless` (Caps.bindless)
-// the global texture arrays follow as set n. cmd_push writes `push_size` bytes of constants
-// (Caps.push_constants), or on a backend without them (WebGPU) to a push group that takes set
-// n and that every pipeline has, whether or not it pushes.
+// the global texture arrays follow as set n. cmd_push writes `push_size` bytes of constants, or on a backend without push constants (WebGPU) to a push group that
+// every pipeline has, whether or not it pushes (PUSH_GROUP).
 PipelineLayoutDesc :: struct {
   layouts:   []BindLayout,
   push_size: u32,
@@ -239,12 +251,12 @@ PipelineLayoutDesc :: struct {
 }
 
 ComputePipelineDesc :: struct {
-  shader: Shader,
+  shader: ShaderSource,
   layout: PipelineLayoutDesc,
 }
 
 GraphicsPipelineDesc :: struct {
-  shader:        Shader,
+  shader:        ShaderSource,
   layout:        PipelineLayoutDesc,
   vertex:        []VertexBuffer,
   topology:      Topology,
@@ -253,6 +265,10 @@ GraphicsPipelineDesc :: struct {
   blend:         BlendMode,
   // a pipeline draws depth only when `depth` is set
   depth:         Maybe(DepthState),
+  // shader constants by id (SPIR-V specialization constant id, WGSL @id), all u32
+  constants:     []u32,
+  // lines instead of filled triangles, where the API can (not WebGPU)
+  wireframe:     bool,
 }
 
 LoadOp :: enum {
@@ -269,6 +285,8 @@ ColorTarget :: struct {
 
 DepthTarget :: struct {
   texture:   TextureHandle,
+  // first layer of a layered texture; PassDesc.layer_count layers from it
+  layer:     u32,
   load:      LoadOp,
   clear:     f32,
   store:     bool,
@@ -277,28 +295,62 @@ DepthTarget :: struct {
 
 // PassDesc opens a render pass over its targets, viewport and scissor covering them.
 PassDesc :: struct {
-  colors: []ColorTarget,
-  depth:  Maybe(DepthTarget),
+  colors:      []ColorTarget,
+  depth:       Maybe(DepthTarget),
+  // layers drawn into together (Caps.layered_rendering) when above 1; 0 is 1
+  layer_count: u32,
 }
 
-// Frame is one acquired frame: `index` picks the copy of per-frame resources (below
-// Caps.frames_in_flight).
+// The global arrays beside the textures (bindless_write), as the shaders index them.
+BindlessArray :: enum {
+  // storage images: a TextureView names one mip
+  STORAGE_IMAGES,
+  // indirect draw lists, storage buffers
+  DRAW_LISTS,
+  // one u32 per depth pyramid slot: its groups done
+  PYRAMID_COUNTERS,
+}
+
+// Frame is one frame slot: `index` picks the copy of per-frame resources (below the backend's
+// frames in flight).
 Frame :: struct {
   index: u32,
 }
 
-// Procs is what a backend provides, over its device type. Each backend declares
-// `PROCS :: rhi.Procs(Backend){...}`: that assignment is the conformance check. render calls the
-// backend's procs directly, so none of this costs a dispatch.
-Procs :: struct($Device: typeid) {
+// Procs is what a backend provides, over its device and window types. Each backend declares
+// `PROCS :: rhi.Procs(Backend, WindowHandle){...}`: that assignment is the conformance check.
+// render calls the backend's procs directly, so none of this costs a dispatch.
+Procs :: struct($Device: typeid, $Window: typeid) {
+  // lifecycle: init brings the device up on window (ready says when it is, the web finishes
+  // later); shutdown destroys everything. wait_idle lands every upload and waits for the GPU,
+  // then destroys what was retired. tick destroys what was retired RETIRE_GRACE frames ago,
+  // once per frame. frame_serial counts presented frames; extent is the swapchain's size.
+  init:                          proc(d: ^Device, app_name: string, window: Window, framebuffer_size: [2]u32) -> bool,
+  ready:                         proc(d: ^Device) -> bool,
+  shutdown:                      proc(d: ^Device),
+  wait_idle:                     proc(d: ^Device),
+  tick:                          proc(d: ^Device),
+  frame_serial:                  proc(d: ^Device) -> u64,
+  extent:                        proc(d: ^Device) -> [2]u32,
+  resize:                        proc(d: ^Device, framebuffer_size: [2]u32) -> bool,
+
   caps:                          proc(d: ^Device) -> Caps,
 
-  // resources
+  // resources: a texture's handle is picked by the caller; on a bindless device it is the
+  // texture's index in the global arrays. `data` fills level 0 (the other levels are made).
+  texture_create:                proc(d: ^Device, handle: TextureHandle, desc: TextureDesc, data: []u8) -> bool,
+  // destroyed at once: the caller retires the handle first
+  texture_destroy:               proc(d: ^Device, handle: TextureHandle),
   buffer_create:                 proc(d: ^Device, desc: BufferDesc) -> (Buffer, bool),
   // destroyed once no frame in flight can use it
   buffer_retire:                 proc(d: ^Device, buffer: Buffer),
-  // GPU buffers are written when the next command list is submitted; UPLOAD buffers at once
+  // UPLOAD buffers are written at once; GPU buffers are staged and land where the caller next
+  // records cmd_flush_uploads
   buffer_write:                  proc(d: ^Device, buffer: Buffer, offset: int, data: []u8) -> bool,
+  // Caps.bindless: the textures of texture_create are in their own array already
+  bindless_write:                proc(d: ^Device, array: BindlessArray, index: u32, resource: BindResource),
+  // the last copy a READBACK buffer received from cmd_copy_buffer and a frame completed
+  buffer_read:                   proc(d: ^Device, buffer: Buffer, offset: int, dst: []u8) -> bool,
   bind_layout_create:            proc(d: ^Device, desc: BindLayoutDesc) -> (BindLayout, bool),
   bind_group_create:             proc(d: ^Device, desc: BindGroupDesc) -> (BindGroup, bool),
   bind_group_retire:             proc(d: ^Device, group: BindGroup),
@@ -306,15 +358,19 @@ Procs :: struct($Device: typeid) {
   graphics_pipeline_create:      proc(d: ^Device, desc: GraphicsPipelineDesc) -> (Pipeline, bool),
   pipeline_retire:               proc(d: ^Device, pipeline: Pipeline),
 
-  // frame pacing: wait for the frame slot, acquire, record, submit, present
-  frame_wait:                    proc(d: ^Device) -> bool,
-  frame_begin:                   proc(d: ^Device, framebuffer_size: [2]u32) -> (Frame, FrameStatus),
-  submit:                        proc(d: ^Device, queue: Queue, cmds: []CommandList, wait: []SyncPoint) -> SyncPoint,
-  frame_present:                 proc(d: ^Device, frame: Frame) -> FrameStatus,
+  // frame pacing: wait for the frame slot (its previous submissions are done, its per-frame
+  // resources may be rewritten), acquire, record, submit, present
+  frame_wait:                    proc(d: ^Device) -> (Frame, bool),
+  frame_begin:                   proc(d: ^Device, framebuffer_size: [2]u32) -> FrameStatus,
+  submit:                        proc(d: ^Device, desc: SubmitDesc) -> SyncPoint,
+  frame_present:                 proc(d: ^Device) -> FrameStatus,
 
   // command recording
   cmd_begin:                     proc(d: ^Device, queue: Queue) -> CommandList,
   cmd_end:                       proc(d: ^Device, cmd: CommandList),
+  // records every staged write (buffer_write to GPU buffers, texture data) and makes it
+  // visible to everything after it; first in the first list a frame submits
+  cmd_flush_uploads:             proc(d: ^Device, cmd: CommandList),
   cmd_begin_pass:                proc(d: ^Device, cmd: CommandList, desc: PassDesc),
   cmd_end_pass:                  proc(d: ^Device, cmd: CommandList),
   // a compute scope: a pass on WebGPU, nothing on Vulkan
@@ -326,18 +382,20 @@ Procs :: struct($Device: typeid) {
   // just bound (PipelineLayoutDesc.bindless)
   cmd_bind_bindless:             proc(d: ^Device, cmd: CommandList),
   cmd_push:                      proc(d: ^Device, cmd: CommandList, data: rawptr, size: u32),
+  cmd_set_scissor:               proc(d: ^Device, cmd: CommandList, x, y, w, h: u32),
   cmd_bind_vertex:               proc(d: ^Device, cmd: CommandList, slot: u32, buffer: Buffer, offset: int),
   cmd_bind_index:                proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset: int),
   cmd_draw:                      proc(d: ^Device, cmd: CommandList, vertex_count, instance_count, first_vertex, first_instance: u32),
   cmd_draw_indexed:              proc(d: ^Device, cmd: CommandList, index_count, instance_count, first_index: u32, vertex_offset: i32, first_instance: u32),
-  cmd_draw_indirect:             proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset: int),
-  cmd_draw_indexed_indirect:     proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset: int),
+  // `draw_count` draws read from consecutive commands `stride` bytes apart
+  cmd_draw_indirect:             proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset: int, draw_count, stride: u32),
+  cmd_draw_indexed_indirect:     proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset: int, draw_count, stride: u32),
   // Caps.multi_draw_indirect_count: up to max_count draws, the count read at count_offset
   cmd_draw_indexed_indirect_count: proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset: int, count_buffer: Buffer, count_offset: int, max_count, stride: u32),
   cmd_dispatch:                  proc(d: ^Device, cmd: CommandList, x, y, z: u32),
   cmd_fill_buffer:               proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset, size: int),
   cmd_copy_buffer:               proc(d: ^Device, cmd: CommandList, src: Buffer, src_offset: int, dst: Buffer, dst_offset, size: int),
-  cmd_barrier:                   proc(d: ^Device, cmd: CommandList, barrier: Barrier),
-  // textures about to be rendered into whole, their old contents dropped
-  cmd_texture_discard:           proc(d: ^Device, cmd: CommandList, textures: []TextureHandle),
+  // one dependency: every barrier, and `discards`, textures about to be written whole whose old
+  // contents are dropped (ordered after all earlier work)
+  cmd_barrier:                   proc(d: ^Device, cmd: CommandList, barriers: []Barrier, discards: []TextureHandle),
 }

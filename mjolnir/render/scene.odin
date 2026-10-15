@@ -2,6 +2,7 @@ package render
 
 import geom "../geometry"
 import cont "../containers"
+import "rhi"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -78,6 +79,19 @@ Renderer :: struct {
   debug_mutex:         sync.Mutex,
   ui:                  OverlayRenderer,
   shadow_casters:      [MAX_SHADOW_MAPS]Caster,
+  // what render owns on the device (resources.odin) and each pass's pipelines
+  res:                 Resources,
+  cull:                CullState,
+  shadow:              ShadowState,
+  material:            MaterialState,
+  lighting:            LightingState,
+  post:                PostState,
+  particle_gpu:        ParticleState,
+  debug_line:          DebugLineState,
+  overlay_gpu:         OverlayState,
+  // the last compute submission, which the next frame's graphics waits for
+  last_compute:        rhi.SyncPoint,
+  texture_descs:       [MAX_TEXTURES]TextureDesc,
   // draws are batched per mesh and material (batches.odin), where the backend has no multi-draw
   batched:             bool,
   batches:             BatchState,
@@ -105,34 +119,44 @@ init :: proc(
     cont.slab_init(&self.mesh_slabs[s], stream.slab)
     mesh_size[s] = int(self.mesh_slabs[s].capacity) * stream.elem_size
   }
-  backend_init(&self.gpu, app_name, window, framebuffer_size, table_size, mesh_size) or_return
+  dev.init(&self.gpu, app_name, window, framebuffer_size) or_return
   tables_init(self)
-  self.batched = !backend_caps(&self.gpu).multi_draw_indirect_count
+  self.batched = !dev.caps(&self.gpu).multi_draw_indirect_count
   self.ui.dpi_scale = dpi_scale
-  if backend_ready(&self.gpu) do return ready(self)
+  if dev.ready(&self.gpu) do return ready(self)
   return true
 }
 
 // ready reports whether the renderer is up, finishing init once the backend is.
 ready :: proc(self: ^Renderer) -> bool {
   if self.initialized do return true
-  if !backend_ready(&self.gpu) do return false
+  if !dev.ready(&self.gpu) do return false
   self.initialized = init_resources(self)
   return self.initialized
 }
 
 @(private = "file")
 init_resources :: proc(self: ^Renderer) -> bool {
-  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    lists, capacity := draw_list_shape(self, shadow = true)
-    backend_draw_list_create(&self.gpu, SHADOW_DRAW_SLOT_BASE + frame, lists, capacity) or_return
-  }
   cont.slots_init(&self.camera_slots, MAX_ACTIVE_CAMERAS, RETIRE_GRACE)
   cont.slots_init(&self.mesh_slots, MAX_MESHES, RETIRE_GRACE)
   cont.slots_init(&self.material_slots, MAX_MATERIALS, RETIRE_GRACE)
   // retired, not reclaimed: submitted frames may still sample the slot
   cont.slots_init(&self.target_slots, MAX_RENDER_TARGETS, RETIRE_GRACE)
   cont.slots_init(&self.texture_slots, MAX_TEXTURES, RETIRE_GRACE, first = MAX_RENDER_TARGETS)
+  resources_init(self) or_return
+  resources_bind(self) or_return
+  cull_init(self) or_return
+  shadow_init(self) or_return
+  material_init(self) or_return
+  lighting_init(self) or_return
+  post_init(self) or_return
+  particles_init(self) or_return
+  debug_line_init(self) or_return
+  overlay_init_pass(self) or_return
+  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
+    lists, capacity := draw_list_shape(self, shadow = true)
+    draw_list_create(self, SHADOW_DRAW_SLOT_BASE + frame, lists, capacity) or_return
+  }
   // Attachments have no handle to go stale and each frame reads its own copy of the
   // table, so no grace. Index 0 is never handed out and the ambient light takes it, so
   // every light fits the frame's table.
@@ -149,7 +173,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
   post_process_create_images(self) or_return
   for &inbox in self.debug_lines do inbox = make([dynamic]DebugLineSegment, 0, 1024)
   overlay_init(self) or_return
-  extent := backend_extent(&self.gpu)
+  extent := dev.extent(&self.gpu)
   cam, created := create_camera(self, extent.x, extent.y, position = {3, 4, 3}, far_plane = 1000.0)
   if !created do return false
   self.main_camera = cam
@@ -178,9 +202,11 @@ teardown :: proc(self: ^Renderer) {
   c := self.camera_slots.mark
   for i in cont.slots_next(&self.camera_slots, &c) do destroy_camera(self, CameraHandle(i))
   // queued uploads may be init's: they land before anything is freed
-  backend_wait_idle(&self.gpu)
-  for r in cont.slots_flush(&self.target_slots) do backend_texture_destroy(&self.gpu, TextureHandle(r.index))
-  for i in self.texture_slots.mark ..< self.texture_slots.high_water do backend_texture_destroy(&self.gpu, TextureHandle(i))
+  dev.wait_idle(&self.gpu)
+  for r in cont.slots_flush(&self.target_slots) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
+  for i in self.texture_slots.mark ..< self.texture_slots.high_water do dev.texture_destroy(&self.gpu, TextureHandle(i))
+  texture_groups_clear(self)
+  cull_groups_clear(self)
   cont.slots_rewind(&self.texture_slots)
   self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
   cont.slots_rewind(&self.camera_slots)
@@ -212,7 +238,9 @@ load_environment_map :: proc(self: ^Renderer, data: []u8) -> bool {
 
 // Destroy everything, whatever map is up.
 shutdown :: proc(self: ^Renderer) {
-  backend_shutdown(&self.gpu)
+  cull_shutdown(self)
+  delete(self.res.texture_groups)
+  dev.shutdown(&self.gpu)
   tables_destroy(self)
   batches_destroy(self)
   delete(self.ui.batches)
@@ -237,9 +265,9 @@ shutdown :: proc(self: ^Renderer) {
 // Cameras that matched the old extent follow the new one.
 @(private)
 recreate_swapchain :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool {
-  old := backend_extent(&self.gpu)
-  backend_resize(&self.gpu, framebuffer_size) or_return
-  extent := backend_extent(&self.gpu)
+  old := dev.extent(&self.gpu)
+  dev.resize(&self.gpu, framebuffer_size) or_return
+  extent := dev.extent(&self.gpu)
   c: u32
   for i in cont.slots_next(&self.camera_slots, &c) {
     if self.cameras[i].extent != old do continue
@@ -260,7 +288,7 @@ POST_PROCESS_RING :: 3
 @(private = "file")
 post_process_create_images :: proc(r: ^Renderer) -> bool {
   desc := TextureDesc {
-    extent = backend_extent(&r.gpu),
+    extent = dev.extent(&r.gpu),
     format = HDR_COLOR_FORMAT,
     usage  = {.COLOR_TARGET, .SAMPLED},
   }
@@ -282,7 +310,7 @@ post_process_release_images :: proc(r: ^Renderer) {
 
 // frame_serial is the number of frames submitted so far; frame records frame_serial % FRAMES_IN_FLIGHT next.
 frame_serial :: proc(self: ^Renderer) -> u64 {
-  return backend_frame_serial(&self.gpu)
+  return dev.frame_serial(&self.gpu)
 }
 
 // lock holds off frame while another thread edits through the pointers material,
@@ -305,9 +333,21 @@ guard :: proc(self: ^Renderer) {
 // The only place retirement advances; once per frame, so ticks follow frame_serial.
 @(private)
 tick_resource_pools :: proc(self: ^Renderer) {
-  backend_tick(&self.gpu)
-  for r in cont.slots_tick(&self.target_slots) do backend_texture_destroy(&self.gpu, TextureHandle(r.index))
-  for r in cont.slots_tick(&self.texture_slots) do backend_texture_destroy(&self.gpu, TextureHandle(r.index))
+  dev.tick(&self.gpu)
+  // bind groups name textures by handle: a destroyed one's go
+  destroyed := false
+  for r in cont.slots_tick(&self.target_slots) {
+    dev.texture_destroy(&self.gpu, TextureHandle(r.index))
+    destroyed = true
+  }
+  for r in cont.slots_tick(&self.texture_slots) {
+    dev.texture_destroy(&self.gpu, TextureHandle(r.index))
+    destroyed = true
+  }
+  if destroyed {
+    texture_groups_clear(self)
+    cull_groups_clear(self)
+  }
   for r in cont.slots_tick(&self.mesh_slots) {
     free_mesh(self, write_table(self, .MESHES, MeshData)[r.index])
     clear_entry(self, .MESHES, r.index)
@@ -825,7 +865,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   }
   slice.sort_by(casters[:caster_count], proc(a, b: Caster) -> bool {return a.score > b.score})
   maps := &self.shadow_casters
-  selected := select_shadow_casters(casters[:caster_count], maps, backend_frame_serial(&self.gpu))
+  selected := select_shadow_casters(casters[:caster_count], maps, dev.frame_serial(&self.gpu))
   // any nonzero view marks the pick; pack_lights assigns the real one
   for c in maps[:selected] do lights[c.light].shadow_map = 1
   dst := write_table(self, .LIGHTS, Light)
@@ -895,7 +935,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) -> (cameras: []FrameCam
   // a slot without a camera keeps an empty view that draws no type
   next_frame_index := (frame_index + 1) % FRAMES_IN_FLIGHT
   prev_frame_index := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
-  serial := backend_frame_serial(&self.gpu)
+  serial := dev.frame_serial(&self.gpu)
   slot_count := self.camera_slots.high_water
   slice.zero(views[CAMERA_VIEW_BASE:][:slot_count])
   mark_dirty(self, .VIEWS, CAMERA_VIEW_BASE, int(slot_count))
@@ -1020,7 +1060,7 @@ frame :: proc(
   guard(self)
   tick_resource_pools(self)
   flush(self, frame_index, debug_ui_drawn)
-  submitted, status := backend_frame(&self.gpu, &self.frame)
+  submitted, status := frame_run(self)
   // staged commands point into caller memory valid for this frame only
   self.ui.commands = nil
   if submitted {

@@ -10,8 +10,19 @@ import vk "vendor:vulkan"
 
 
 
+// Depth pyramids and draw lists live in slots render assigns: a pyramid per camera and frame
+// in flight, a draw-list slot per camera and frame in flight plus one per frame for the shadow
+// views. Storage image slots follow: the pyramids' mips, then the IBL precompute targets.
+MAX_PYRAMID_SLOTS :: rhi.MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
+MAX_DRAW_LIST_SLOTS :: (rhi.MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
+// mips a depth pyramid may have
 @(private)
-MAX_STORAGE_IMAGES :: PRECOMPUTE_STORAGE_BASE + PRECOMPUTE_DISPATCHES
+MAX_DEPTH_MIPS_LEVEL :: 16
+@(private)
+MAX_STORAGE_IMAGES :: MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS_LEVEL + 2 + rhi.PREFILTER_MIPS
+
+@(private)
+SCENE_STAGES :: vk.ShaderStageFlags{.VERTEX, .FRAGMENT, .COMPUTE}
 
 // Bindings of the bindless set (set 1). Shaders repeat these numbers as
 // literals.
@@ -68,6 +79,7 @@ FORMATS := [rhi.TextureFormat]vk.Format {
   .R32F        = .R32_SFLOAT,
   .A8          = .R8_UNORM,
   .D32F        = .D32_SFLOAT,
+  .BACKBUFFER  = .UNDEFINED,
 }
 
 @(private = "file")
@@ -78,12 +90,11 @@ USAGES := [rhi.TextureUsage]vk.ImageUsageFlags {
   .STORAGE      = {.STORAGE, .TRANSFER_DST},
 }
 
-// After the scene buffers, before pipeline layouts are built.
+// Before pipeline layouts are built.
 @(private)
 bindless_init :: proc(b: ^Backend) -> vk.Result {
   gctx := &b.gctx
-  d := &b.scene
-  d.bindless_layout = create_descriptor_layout(gctx, ..BINDLESS_BINDINGS[:]) or_return
+  b.bindless_layout = create_descriptor_layout(gctx, ..BINDLESS_BINDINGS[:]) or_return
   for &sampler, type in b.samplers {
     desc := SAMPLERS[type]
     info := vk.SamplerCreateInfo {
@@ -101,11 +112,10 @@ bindless_init :: proc(b: ^Backend) -> vk.Result {
     }
     vk.CreateSampler(gctx.device, &info, nil, &sampler) or_return
   }
-  allocate_descriptor_set(gctx, &d.bindless_set, &d.bindless_layout) or_return
+  allocate_descriptor_set(gctx, &b.bindless_set, &b.bindless_layout) or_return
   for sampler, type in b.samplers {
-    write_descriptor(gctx, d.bindless_set, BINDING_SAMPLERS, u32(type), .SAMPLER, vk.DescriptorImageInfo{sampler = sampler})
+    write_descriptor(gctx, b.bindless_set, BINDING_SAMPLERS, u32(type), .SAMPLER, vk.DescriptorImageInfo{sampler = sampler})
   }
-  write_descriptor(gctx, d.bindless_set, BINDING_PYRAMID_COUNTERS, 0, .STORAGE_BUFFER, buffer_info(&b.pyramid_counters))
   return .SUCCESS
 }
 
@@ -115,21 +125,21 @@ bindless_shutdown :: proc(b: ^Backend) {
     vk.DestroySampler(b.gctx.device, sampler, nil)
     sampler = 0
   }
-  vk.DestroyDescriptorSetLayout(b.gctx.device, b.scene.bindless_layout, nil)
-  b.scene.bindless_layout = 0
+  vk.DestroyDescriptorSetLayout(b.gctx.device, b.bindless_layout, nil)
+  b.bindless_layout = 0
 }
 
 // texture_create makes the texture of handle and binds it in the bindless array. `data`
 // fills level 0; the other levels are blitted down. A cube aliases the same binding as the
 // shaders' textureCube array.
-texture_create :: proc(b: ^Backend, handle: rhi.TextureHandle, desc: rhi.TextureDesc, data: []u8 = nil) -> bool {
+texture_create :: proc(b: ^Backend, handle: rhi.TextureHandle, desc: rhi.TextureDesc, data: []u8) -> bool {
   img, res := image_from_desc(b, desc, data)
   if res != .SUCCESS {
     log.errorf("Texture %d (%v %dx%d) creation failed: %v", handle, desc.format, desc.extent.x, desc.extent.y, res)
     return false
   }
   b.textures[handle] = img
-  write_descriptor(&b.gctx, b.scene.bindless_set, BINDING_TEXTURES, u32(handle), .SAMPLED_IMAGE, vk.DescriptorImageInfo{imageView = img.view, imageLayout = .GENERAL})
+  write_descriptor(&b.gctx, b.bindless_set, BINDING_TEXTURES, u32(handle), .SAMPLED_IMAGE, vk.DescriptorImageInfo{imageView = img.view, imageLayout = .GENERAL})
   return true
 }
 
@@ -142,12 +152,16 @@ image_from_desc :: proc(b: ^Backend, desc: rhi.TextureDesc, data: []u8) -> (img:
   // A8 coverage samples as white with alpha = coverage, so shaders multiply every sample with the color
   swizzle := vk.ComponentMapping{r = .ONE, g = .ONE, b = .ONE, a = .R} if desc.format == .A8 else {}
   extent := vk.Extent2D{desc.extent.x, desc.extent.y}
-  img = image_create(gctx, extent, FORMATS[desc.format], usage, max(desc.mip_levels, 1), cube = desc.cube, shared = desc.shared, components = swizzle) or_return
+  img = image_create(gctx, extent, FORMATS[desc.format], usage, max(desc.mip_levels, 1), cube = desc.cube, layers = max(desc.layers, 1), array = desc.layers > 1, shared = desc.shared, components = swizzle) or_return
   if data != nil {
     if ret = queue_image_write(gctx, &img, raw_data(data), len(data)); ret != .SUCCESS {
       image_destroy(gctx.device, &img)
       return
     }
+  }
+  // storage images are written by compute before anything else touches them
+  if .STORAGE in desc.usage && data == nil {
+    queue_image_init(gctx, {img.image, {.COLOR}, {.SHADER_READ, .SHADER_WRITE}, {.COMPUTE_SHADER}})
   }
   // depth leaves UNDEFINED next frame; compute of the frame after is the first reader
   if .DEPTH_TARGET in desc.usage {

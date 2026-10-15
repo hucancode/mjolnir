@@ -252,7 +252,7 @@ create_camera :: proc(
   // the lists' size does not depend on the camera's extent
   lists, capacity := draw_list_shape(self, shadow = false)
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    if !backend_draw_list_create(&self.gpu, camera_slot(u32(handle)) + frame, lists, capacity) {
+    if !draw_list_create(self, camera_slot(u32(handle)) + frame, lists, capacity) {
       destroy_camera(self, handle)
       return 0, false
     }
@@ -269,7 +269,7 @@ destroy_camera :: proc(self: ^Renderer, handle: CameraHandle) {
   cam := camera(self, handle)
   if cam == nil do return
   destroy_targets(self, u32(handle))
-  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) do backend_draw_list_destroy(&self.gpu, camera_slot(u32(handle)) + frame)
+  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) do draw_list_destroy(self, camera_slot(u32(handle)) + frame)
   cont.slots_free(&self.camera_slots, u32(handle))
   if handle == self.main_camera do self.main_camera = 0
 }
@@ -363,9 +363,9 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     slot := camera_slot(index) + frame
     self.pyramids[slot] = allocate_texture(self, pyramid, target = true) or_return
-    backend_pyramid_create(&self.gpu, slot, self.pyramids[slot]) or_return
+    pyramid_create(self, slot, half, pyramid.mip_levels)
   }
-  camera.ready_serial = backend_frame_serial(&self.gpu) + 1
+  camera.ready_serial = dev.frame_serial(&self.gpu) + 1
   return true
 }
 
@@ -376,7 +376,7 @@ destroy_targets :: proc(self: ^Renderer, index: u32) {
   camera.attachments = {}
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     slot := camera_slot(index) + frame
-    backend_pyramid_destroy(&self.gpu, slot)
+    pyramid_destroy(self, slot)
     destroy_texture(self, self.pyramids[slot])
     self.pyramids[slot] = 0
   }

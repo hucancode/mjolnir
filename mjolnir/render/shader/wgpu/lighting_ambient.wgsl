@@ -20,7 +20,7 @@ fn sample_skybox(camera: View, uv: vec2f) -> vec3f {
     let world_far = camera.inv_view_projection * vec4f(ndc, 1.0, 1.0);
     let dir = normalize(world_far.xyz / world_far.w - camera.position.xyz);
     let blur = clamp(u.skybox_blur, 0.0, 1.0);
-    if (blur <= 0.0 || u.has_ibl == 0u) {
+    if (blur <= 0.0 || u.prefilter == 0u) {
         return textureSampleLevel(environment_map, linear_repeat, dir_to_equirect_uv(dir), 0.0).rgb;
     }
     return textureSampleLevel(prefilter_cube, linear_clamp, dir, blur * prefilter_max_lod()).rgb;
@@ -36,7 +36,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let depth = scene_depth(pixel);
     // background (depth left at the far clear value): the skybox, if any
     if (depth >= 1.0) {
-        if (u.skybox_intensity > 0.0 && u.has_environment != 0u) {
+        if (u.skybox_intensity > 0.0 && u.environment != 0u) {
             return vec4f(sample_skybox(camera, uv) * u.skybox_intensity, 0.0);
         }
         discard;
@@ -54,7 +54,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let f0 = mix(vec3f(0.04), albedo, metallic);
     let f = fresnel_schlick_roughness(n_dot_v, f0, roughness);
     var ambient = vec3f(0.0);
-    if (ibl_intensity > 0.0 && u.has_ibl != 0u) {
+    if (ibl_intensity > 0.0 && u.prefilter != 0u) {
         let irradiance = textureSampleLevel(irradiance_cube, linear_clamp, normal, 0.0).rgb;
         let diffuse = irradiance * albedo;
         let kd = (vec3f(1.0) - f) * (1.0 - metallic);

@@ -32,7 +32,7 @@ ambient_load_environment :: proc(r: ^Renderer, data: []u8) -> (ok: bool) {
   defer destroy_texture(r, env_cube)
   r.irradiance_cube = allocate_texture(r, cube(IRRADIANCE_SIZE, 1)) or_return
   r.prefilter_cube = allocate_texture(r, cube(PREFILTER_SIZE, PREFILTER_MIPS)) or_return
-  return backend_precompute_ibl(&r.gpu, r.environment_map, env_cube, r.irradiance_cube, r.prefilter_cube)
+  return precompute_ibl(r, r.environment_map, env_cube, r.irradiance_cube, r.prefilter_cube)
 }
 
 @(private = "file")

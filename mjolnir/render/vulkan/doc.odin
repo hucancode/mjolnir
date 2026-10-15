@@ -1,15 +1,17 @@
-// Package vulkan_backend is the Vulkan backend of render. It changes when Vulkan, or how
-// render's frame maps onto it, does; it never imports render or platform and decides nothing.
-// It imports rhi, the contract it shares with render and render/wgpu (FrameDesc, Table,
-// Vertex, MaterialType, the budgets, ...), and declares the names of its own that render
-// aliases in backend.odin and backend_glue.odin: Backend, FRAMES_IN_FLIGHT, RETIRE_GRACE, the
-// slot counts that follow from them (MAX_PYRAMID_SLOTS, MAX_DRAW_LIST_SLOTS) and the procs
-// (init ... frame).
-// rhi.odin is its half of rhi's explicit contract (PROCS).
-// It reads render's scene tables as bytes and the rest of each frame, slots and passes
-// resolved, from FrameDesc. The window is a GLFW window it makes a Vulkan surface on.
-// Below that it wraps Vulkan: GPUContext (instance, device, queues, context.odin), Swapchain,
-// Image and Buffer, pipeline helpers, deferred destruction (defer_destroy, memory.odin) and
-// batched staging uploads (queue_*, upload.odin). The passes (pass_*.odin) and their shaders
-// (shader/) are recorded by frame.odin.
+// Package vulkan_backend is the Vulkan backend of render. It changes when Vulkan does; it never
+// imports render or platform and decides nothing. It is the graphics API behind rhi: rhi.odin
+// is its half of rhi's contract (PROCS, lifecycle included), the rest is what that needs. Beside
+// PROCS render takes only the names it aliases in backend_glue.odin: Backend, FRAMES_IN_FLIGHT,
+// RETIRE_GRACE and the slot counts that follow from them (MAX_PYRAMID_SLOTS, MAX_DRAW_LIST_SLOTS).
+// Vulkan is bindless (the global arrays of textures.odin, written through rhi's bindless_write),
+// takes push constants, draws with indirect count, renders layers together, runs compute on its
+// own queue where the device has one and leaves every hazard to the caller's barriers: those
+// are Caps. Staged uploads land where the caller records cmd_flush_uploads, and only the
+// submission the caller marks present touches the swapchain. Pipelines of one interface share a
+// pipeline layout, so a command list binds a set once for all of them, and UPLOAD buffers sit
+// in mappable device memory where there is room. Below rhi it wraps Vulkan: GPUContext
+// (instance, device, queues, context.odin), Swapchain, Image and Buffer, pipeline helpers,
+// deferred destruction (defer_destroy, memory.odin) and batched staging uploads (queue_*,
+// upload.odin). The window is a GLFW window it makes a Vulkan surface on. It owns no shaders,
+// scene data or passes: render does.
 package vulkan_backend

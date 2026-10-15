@@ -61,7 +61,7 @@ tables_destroy :: proc(self: ^Renderer) {
 // The frame in flight frame records next: it picks this frame's copy of per-frame resources.
 @(private)
 current_frame :: #force_inline proc(self: ^Renderer) -> u32 {
-  return u32(backend_frame_serial(&self.gpu) % FRAMES_IN_FLIGHT)
+  return u32(dev.frame_serial(&self.gpu) % FRAMES_IN_FLIGHT)
 }
 
 // Callers mark what they change with mark_dirty.

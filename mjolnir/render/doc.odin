@@ -5,13 +5,18 @@
 // returns); setup/teardown bracket a map, and teardown frees everything made since init in one go.
 // Each tick, stage_* and attach write scene data, update advances time and frame renders and presents.
 // Cameras are in camera.odin, materials, meshes and textures in bindless_*.odin, CPU geometry in mesh*.odin.
-// render makes every decision: handles, scene tables (tables.odin), lights, particles,
-// debug lines, overlay batches, and every slot and schedule (draw lists, depth pyramids,
-// post-process passes). It keeps the one CPU copy of each table and marks what it writes;
-// each frame the backend (render/vulkan, render/wgpu) brings its GPU copies up to date and
-// turns the rest of FrameDesc into GPU work. It changes when rendering does.
+// render makes every decision. It keeps the one CPU copy of each scene table (tables.odin,
+// gpu_data.odin for their layouts) and marks what it writes; flush resolves the frame (slots,
+// lights, post-process passes) and frame.odin records it through rhi: the table copies per frame
+// in flight (resources.odin), then one file per pass (pass_cull, pass_shadow, pass_material,
+// pass_lighting, pass_post, pass_particles, pass_debug_line, pass_overlay; pass_ibl is one-shot),
+// with the barriers between them. Shaders are the passes' too: shader/vulkan (GLSL and its
+// SPIR-V, built by make shader) and shader/wgpu (WGSL), loaded by the pass that uses them.
+// Where the backends differ a pass branches on rhi.Caps (resources.odin: bindless or bind
+// groups; pass_cull.odin: compacted multi-draw or per-batch draws, batches.odin; pass_shadow.odin:
+// one layered draw or a pass per view) and shaders keep one push layout per pass.
 // Its seams are rhi, the contract both sides share, and the backend, which it imports and which
-// never imports it: backend.odin (names in render's API) and backend_glue.odin (the rest) alias
-// every name it uses, and are the only files naming a backend. It never touches the host: images, environment maps and
+// never imports it: backend.odin (names in render's API) and backend_glue.odin (the rest) are
+// the only files naming a backend. It never touches the host: images, environment maps and
 // glTF arrive as bytes, the window as platform's handle, its size with each frame.
 package render

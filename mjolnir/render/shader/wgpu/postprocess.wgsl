@@ -1,6 +1,6 @@
 // The vertex shader and bindings of every post-process effect (texture group POST). An effect
 // file follows with its fs_main and its Effect struct: the active PostprocessEffect variant's
-// fields, at offset 16 of the uniforms.
+// fields, at offset 32 of the uniforms.
 
 @group(1) @binding(0) var input_texture: texture_2d<f32>;
 // the previous pass's input (bloom V composites over the scene as it entered bloom H)
@@ -12,6 +12,11 @@ struct PostUniforms {
     // camera clip planes, for effects that linearize depth (fog, dof, outline)
     camera_near: f32,
     camera_far: f32,
+    // texture handles; a bindless shader indexes with them, here they are bound as a group
+    normal_texture: u32,
+    depth_texture: u32,
+    input_image: u32,
+    original_image: u32,
     // this pass of the effect
     pass_index: u32,
     _pad0: u32,

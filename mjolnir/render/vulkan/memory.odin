@@ -12,12 +12,15 @@ Buffer :: struct {
 }
 
 // buffer_create allocates a buffer and its memory, persistently mapped when host_visible.
+// `prefer_device_local` puts a host-visible buffer in device memory the CPU can map (resizable
+// BAR, unified memory) when there is room, so shaders read it at device speed.
 buffer_create :: proc(
   gctx: ^GPUContext,
   size: vk.DeviceSize,
   usage: vk.BufferUsageFlags,
   host_visible := true,
   host_cached := false,
+  prefer_device_local := false,
 ) -> (
   buffer: Buffer,
   ret: vk.Result,
@@ -40,7 +43,13 @@ buffer_create :: proc(
       properties += {.HOST_CACHED}
     }
   }
-  buffer.memory = allocate_memory(gctx, mem_reqs, properties) or_return
+  if host_visible && prefer_device_local {
+    if _, ok := find_memory_type_index(gctx.physical_device, mem_reqs.memoryTypeBits, properties + {.DEVICE_LOCAL}); ok {
+      // the mappable device heap may be small (256 MiB without resizable BAR): fall back
+      if memory, res := allocate_memory(gctx, mem_reqs, properties + {.DEVICE_LOCAL}); res == .SUCCESS do buffer.memory = memory
+    }
+  }
+  if buffer.memory == 0 do buffer.memory = allocate_memory(gctx, mem_reqs, properties) or_return
   vk.BindBufferMemory(gctx.device, buffer.buffer, buffer.memory, 0) or_return
   if host_visible {
     vk.MapMemory(gctx.device, buffer.memory, 0, size, {}, auto_cast &buffer.mapped) or_return

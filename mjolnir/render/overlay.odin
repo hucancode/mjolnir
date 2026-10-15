@@ -51,7 +51,7 @@ stats_panel :: proc(self: ^Renderer) {
   ctx := debug_ui(self)
   draws: u32
   if _, ok := main_camera(self); ok {
-    draws = backend_draw_count(&self.gpu, current_frame(self))
+    draws = draw_count(self, current_frame(self))
   }
   if mu.window(ctx, "Engine", {40, 40, 200, 200}, {}) {
     mu.label(ctx, fmt.tprintf("Textures %d", self.texture_slots.count))

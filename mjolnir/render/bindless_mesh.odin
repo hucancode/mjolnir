@@ -54,7 +54,7 @@ mesh_arena_upload :: proc(r: ^Renderer, stream: MeshStream, data: []$T) -> (offs
   if len(data) == 0 do return 0, true
   slab := &r.mesh_slabs[stream]
   offset = cont.slab_alloc(slab, u32(len(data))) or_return
-  ok = backend_mesh_write(&r.gpu, stream, data, offset)
+  ok = mesh_write(r, stream, data, offset)
   if !ok do cont.slab_free(slab, offset)
   return
 }

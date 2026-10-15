@@ -5,6 +5,9 @@
 @group(3) @binding(1) var destination: texture_storage_2d_array<rgba16float, write>;
 
 struct PrecomputeUniforms {
+    // bindless indices; here source and destination are bound as a group
+    source_index: u32,
+    destination_index: u32,
     // edge length of the destination level
     face_size: u32,
     // the irradiance sample step, or the prefilter roughness

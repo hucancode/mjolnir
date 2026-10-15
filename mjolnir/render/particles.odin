@@ -10,7 +10,7 @@ MAX_FORCE_FIELDS :: 32
 particles_reset :: proc(r: ^Renderer) -> bool {
   r.particle_params.emit_cursor = 0
   r.particle_params.emit_total = 0
-  return backend_particles_reset(&r.gpu)
+  return particles_gpu_reset(r)
 }
 
 // Emitter is stored as the emit shader reads it; #align(16) keeps the array stride equal to

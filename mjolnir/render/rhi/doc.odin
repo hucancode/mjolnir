@@ -1,17 +1,17 @@
 // Package rhi is the render hardware interface: the contract between render and its GPU
 // backends (render/vulkan, render/wgpu). It is a leaf: render and each backend import it, it
-// imports neither, so the dependency still runs one way, render to backend.
-// It declares what both sides must agree on, once: the data contract (Vertex, Table and the
-// layout of render's scene tables, MaterialType, LightType, AttachmentType, texture formats
-// and descriptors, post-process effects) and the budgets (MAX_*, *_VIEW_BASE, ...), and
-// today FrameDesc, the description of one frame the backend turns into GPU work.
-// device.odin is the explicit half: buffers, bind layouts and groups, pipelines (named by
-// Shader, whose sources each backend ships), command lists with passes, draws, dispatches and
-// barriers, submission with sync points, and frame pacing (frame_wait, frame_begin, submit,
-// frame_present). Caps says what the device can do (bindless, push constants, indirect count,
-// layered rendering, explicit barriers, async compute) and render chooses by it. Each backend
-// declares PROCS :: rhi.Procs(Backend), whose assignment is the conformance check.
-// FrameDesc and the pass types (PostPass, ParticleSystemParams, UIBatch, FrameCamera) are on
-// their way out: passes are moving into render, which records them through those procs,
-// leaving backends only the graphics API (see the render package comment).
+// imports neither, so the dependency runs one way, render to backend.
+// It knows devices, not scenes. types.odin is the vocabulary of textures and the few budgets a
+// device sizes itself by; device.odin is the rest: buffers, bind layouts and groups, pipelines
+// (shaders arrive as ShaderSource, SPIR-V or WGSL, from the pass that owns them), command lists
+// with passes, draws, dispatches, upload flushes and batched barriers, submission with sync
+// points, and the device's lifecycle and frame pacing (frame_wait, frame_begin, submit with
+// `present`, frame_present). Nothing happens implicitly: uploads land where the caller flushes
+// them, the swapchain is touched only by the submission marked present. Caps says what the
+// device can do (bindless, indirect count, layered rendering, explicit barriers, async compute)
+// and render branches on it; a backend never emulates a capability behind the caller's back.
+// Each backend declares PROCS :: rhi.Procs(Backend, WindowHandle), whose assignment is the
+// conformance check, and render calls those procs directly, so none of it costs a dispatch.
+// pool.odin is the handle storage both backends keep their objects in.
+// To add a backend, implement Procs; to add a pass, write it in render.
 package rhi

@@ -13,6 +13,11 @@ FRAMES_IN_FLIGHT :: 1
 // reused: WebGPU keeps destroyed objects alive for submitted work and orders uploads after it.
 RETIRE_GRACE :: 1
 
+// Depth pyramids and draw lists live in slots render assigns: a pyramid and a draw-list slot
+// per camera and frame in flight, plus a draw-list slot per frame for the shadow views.
+MAX_PYRAMID_SLOTS :: rhi.MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
+MAX_DRAW_LIST_SLOTS :: (rhi.MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
+
 
 
 
@@ -30,82 +35,31 @@ Backend :: struct {
   surface_extent:             [2]u32,
   frame_serial:               u64,
   // what init was given, for finishing once the device arrives
-  pending:                    struct {
-    table_size:       [rhi.Table]int,
-    mesh_size:        [rhi.MeshStream]int,
-    framebuffer_size: [2]u32,
-  },
+  framebuffer_size:           [2]u32,
   // the device is up and every resource made; failed: it never will be
   up, failed:                 bool,
   context_:                   runtime.Context,
-  table_buffers:              [rhi.Table]wgpu.Buffer,
-  mesh_buffers:               [rhi.MeshStream]wgpu.Buffer,
   textures:                   []Texture,
-  white, black_cube:          Texture,
   samplers:                   [SamplerType]wgpu.Sampler,
-  scene_layouts:              [ScenePass]wgpu.BindGroupLayout,
-  scene_groups:               [ScenePass]wgpu.BindGroup,
-  group_layouts:              [GroupLayout]wgpu.BindGroupLayout,
-  groups:                     map[GroupKey]wgpu.BindGroup,
-  // bind groups made for this frame, released once it is submitted
-  frame_groups:               [dynamic]wgpu.BindGroup,
+  // the push group (pipeline.odin): its layout, group and the uniform ring
   frame_layout:               wgpu.BindGroupLayout,
   frame_group:                wgpu.BindGroup,
   uniform_buffer:             wgpu.Buffer,
-  // this frame's uniforms so far (uniform), written to uniform_buffer before submission
+  // the ring's entries so far this frame (rhi_cmd_push), written to uniform_buffer on submission
   uniforms:                   []u8,
   uniform_cursor:             int,
   mipgen_layout:              wgpu.BindGroupLayout,
   mipgen_pipelines:           [dynamic]MipgenPipeline,
-  // by MaterialType
-  material_pipelines:         [len(rhi.MaterialType)]wgpu.RenderPipeline,
-  light_pipelines:            [rhi.LightType]wgpu.RenderPipeline,
-  // [is_last][tag]: every pass writes an HDR texture but the last, which presents
-  post_pipelines:             [2][EFFECT_COUNT]wgpu.RenderPipeline,
-  shadow_pipeline:            wgpu.RenderPipeline,
-  overlay_pipeline:           wgpu.RenderPipeline,
-  debug_line_pipelines:       [2]wgpu.RenderPipeline,
-  particle_emit_pipeline:     wgpu.ComputePipeline,
-  particle_simulate_pipeline: wgpu.ComputePipeline,
-  particle_draw_pipeline:     wgpu.RenderPipeline,
-  cull_layout:                wgpu.BindGroupLayout,
-  cull_pipeline:              wgpu.ComputePipeline,
-  // [from_depth]: mip 0 reduces the depth image, the others the mip above
-  reduce_layouts:             [2]wgpu.BindGroupLayout,
-  reduce_pipelines:           [2]wgpu.ComputePipeline,
-  finalize_pipeline:          wgpu.ComputePipeline,
-  draw_lists:                 [MAX_DRAW_LIST_SLOTS]DrawList,
-  // cull and pyramid bind groups, kept until a texture or draw list they name changes
-  cull_groups:                map[CullKey]wgpu.BindGroup,
-  reduce_groups:              map[ReduceKey]wgpu.BindGroup,
-  draw_count_readback:        [3]DrawCountReadback,
-  draw_count_value:           u32,
-  // per pyramid slot: a view per mip
-  pyramid_views:              [MAX_PYRAMID_SLOTS][MAX_DEPTH_MIPS]wgpu.TextureView,
-  shadow_atlas:               ShadowAtlas,
-  // alive list: an indirect draw header followed by one particle index per instance
-  particle_buffer:            wgpu.Buffer,
-  particle_alive_buffer:      wgpu.Buffer,
-  ui_vertex_buffer:           wgpu.Buffer,
-  ui_index_buffer:            wgpu.Buffer,
   // what rhi's handles name (rhi.odin)
   rhi:                        RhiState,
 }
 
 // init brings WebGPU up on window: instance, surface, then adapter and device, which the web
-// hands over asynchronously; once they are there it makes the table buffers of `table_size`
-// bytes, the mesh buffers of `mesh_size` bytes per stream, and every pipeline (ready). Paired
-// with shutdown.
-init :: proc(
-  b: ^Backend,
-  app_name: string,
-  window: WindowHandle,
-  framebuffer_size: [2]u32,
-  table_size: [rhi.Table]int,
-  mesh_size: [rhi.MeshStream]int,
-) -> bool {
+// hands over asynchronously; once they are there it makes the samplers and the push group
+// (ready). Paired with shutdown.
+init :: proc(b: ^Backend, app_name: string, window: WindowHandle, framebuffer_size: [2]u32) -> bool {
   b.context_ = context
-  b.pending = {table_size, mesh_size, framebuffer_size}
+  b.framebuffer_size = framebuffer_size
   b.instance = wgpu.CreateInstance(nil)
   if b.instance == nil {
     log.errorf("WebGPU: no instance")
@@ -176,22 +130,10 @@ on_lost :: proc "c" (device: ^wgpu.Device, reason: wgpu.DeviceLostReason, messag
 // Everything but the device: made once it arrives.
 @(private = "file")
 resources_init :: proc(b: ^Backend) {
-  surface_configure(b, b.pending.framebuffer_size)
+  surface_configure(b, b.framebuffer_size)
   b.textures = make([]Texture, rhi.MAX_TEXTURES)
-  tables_init(b, b.pending.table_size, b.pending.mesh_size)
-  particles_init_buffers(b)
   samplers_init(b)
-  layouts_init(b)
-  cull_init(b)
-  scene_groups_init(b)
-  defaults_init(b)
-  material_pipelines_init(b)
-  lighting_init(b)
-  shadow_init(b)
-  particles_init(b)
-  post_process_init(b)
-  debug_line_init(b)
-  overlay_init(b)
+  frame_group_init(b)
 }
 
 // ready reports whether the device is up and init has finished.
@@ -233,36 +175,11 @@ surface_configure :: proc(b: ^Backend, size: [2]u32) {
 shutdown :: proc(b: ^Backend) {
   if b.up {
     for &t in b.textures do texture_release(&t)
-    texture_release(&b.white)
-    texture_release(&b.black_cube)
-    groups_clear(b)
-    shadow_atlas_release(&b.shadow_atlas)
-    for slot in 0 ..< u32(MAX_DRAW_LIST_SLOTS) do draw_list_destroy(b, slot)
-    for slot in 0 ..< u32(MAX_PYRAMID_SLOTS) do pyramid_destroy(b, slot)
-    for buffer in b.table_buffers do wgpu.BufferRelease(buffer)
-    for buffer in b.mesh_buffers do wgpu.BufferRelease(buffer)
-    buffers := [?]wgpu.Buffer {
-      b.particle_buffer, b.particle_alive_buffer,
-      b.ui_vertex_buffer, b.ui_index_buffer, b.uniform_buffer,
-    }
-    for buffer in buffers do wgpu.BufferRelease(buffer)
-    for r in b.draw_count_readback do wgpu.BufferRelease(r.buffer)
-    for p in b.material_pipelines do wgpu.RenderPipelineRelease(p)
-    for p in b.light_pipelines do wgpu.RenderPipelineRelease(p)
-    for pipelines in b.post_pipelines do for p in pipelines do wgpu.RenderPipelineRelease(p)
-    for p in b.debug_line_pipelines do wgpu.RenderPipelineRelease(p)
+    rhi_shutdown(b)
     for p in b.mipgen_pipelines do wgpu.RenderPipelineRelease(p.pipeline)
-    for p in b.reduce_pipelines do wgpu.ComputePipelineRelease(p)
-    render_pipelines := [?]wgpu.RenderPipeline{b.shadow_pipeline, b.overlay_pipeline, b.particle_draw_pipeline}
-    for p in render_pipelines do wgpu.RenderPipelineRelease(p)
-    compute_pipelines := [?]wgpu.ComputePipeline{b.cull_pipeline, b.finalize_pipeline, b.particle_emit_pipeline, b.particle_simulate_pipeline}
-    for p in compute_pipelines do wgpu.ComputePipelineRelease(p)
-    for g in b.scene_groups do wgpu.BindGroupRelease(g)
     wgpu.BindGroupRelease(b.frame_group)
-    for l in b.scene_layouts do wgpu.BindGroupLayoutRelease(l)
-    for l in b.group_layouts do wgpu.BindGroupLayoutRelease(l)
-    for l in b.reduce_layouts do wgpu.BindGroupLayoutRelease(l)
-    layouts := [?]wgpu.BindGroupLayout{b.frame_layout, b.cull_layout, b.mipgen_layout}
+    wgpu.BufferRelease(b.uniform_buffer)
+    layouts := [?]wgpu.BindGroupLayout{b.frame_layout, b.mipgen_layout}
     for l in layouts do if l != nil do wgpu.BindGroupLayoutRelease(l)
     for s in b.samplers do wgpu.SamplerRelease(s)
     wgpu.SurfaceUnconfigure(b.surface)
@@ -270,11 +187,7 @@ shutdown :: proc(b: ^Backend) {
     wgpu.DeviceRelease(b.device)
   }
   delete(b.textures)
-  delete(b.groups)
-  delete(b.frame_groups)
   delete(b.mipgen_pipelines)
-  delete(b.cull_groups)
-  delete(b.reduce_groups)
   delete(b.uniforms)
   if b.adapter != nil do wgpu.AdapterRelease(b.adapter)
   if b.surface != nil do wgpu.SurfaceRelease(b.surface)
@@ -303,10 +216,3 @@ resize :: proc(b: ^Backend, framebuffer_size: [2]u32) -> bool {
   return true
 }
 
-// Writes this frame's uniforms and starts the next frame's at the front.
-@(private)
-uniforms_flush :: proc(b: ^Backend) {
-  if b.uniform_cursor == 0 do return
-  wgpu.QueueWriteBuffer(b.queue, b.uniform_buffer, 0, raw_data(b.uniforms), uint(b.uniform_cursor))
-  b.uniform_cursor = 0
-}

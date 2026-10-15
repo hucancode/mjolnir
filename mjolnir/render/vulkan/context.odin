@@ -55,6 +55,8 @@ GPUContext :: struct {
   descriptor_pool:      vk.DescriptorPool,
   command_pool:         vk.CommandPool,
   compute_command_pool: vk.CommandPool,
+  // every pipeline is created through it
+  pipeline_cache:       vk.PipelineCache,
   device_properties:    vk.PhysicalDeviceProperties,
   trash:                [dynamic]TrashItem, // loose vk resources awaiting deferred destruction
   uploads:              Uploads, // staged writes for the next command buffer
@@ -69,7 +71,7 @@ GPUContext :: struct {
 }
 
 // only a dedicated compute queue family submits compute separately
-@(private = "file")
+@(private)
 has_async_compute :: proc(self: ^GPUContext) -> bool {
   return self.compute_family != self.graphics_family
 }
@@ -111,6 +113,7 @@ device_init :: proc(self: ^GPUContext) -> vk.Result {
   logical_device_init(self) or_return
   command_pool_init(self) or_return
   timelines_init(self) or_return
+  vk.CreatePipelineCache(self.device, &{sType = .PIPELINE_CACHE_CREATE_INFO}, nil, &self.pipeline_cache) or_return
   return .SUCCESS
 }
 
@@ -138,6 +141,7 @@ shutdown_context :: proc(self: ^GPUContext) {
   vk.DestroyDescriptorPool(self.device, self.descriptor_pool, nil)
   vk.DestroyCommandPool(self.device, self.command_pool, nil)
   vk.DestroyCommandPool(self.device, self.compute_command_pool, nil)
+  vk.DestroyPipelineCache(self.device, self.pipeline_cache, nil)
   vk.DestroySemaphore(self.device, self.graphics_timeline, nil)
   vk.DestroySemaphore(self.device, self.compute_timeline, nil)
   vk.DestroyDevice(self.device, nil)

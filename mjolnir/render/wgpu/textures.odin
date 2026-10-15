@@ -22,6 +22,7 @@ FORMATS := [rhi.TextureFormat]wgpu.TextureFormat {
   .R32F        = .R32Float,
   .A8          = .RGBA8Unorm,
   .D32F        = .Depth32Float,
+  .BACKBUFFER  = .Undefined,
 }
 
 // Bytes per texel as stored.
@@ -34,6 +35,7 @@ TEXEL_SIZE := [rhi.TextureFormat]u32 {
   .R32F        = 4,
   .A8          = 4,
   .D32F        = 4,
+  .BACKBUFFER  = 4,
 }
 
 @(private = "file")
@@ -98,25 +100,16 @@ samplers_init :: proc(b: ^Backend) {
   }
 }
 
-// The textures bound where a slot has none: white 2D, black cube, and the empty shadow atlas.
-@(private)
-defaults_init :: proc(b: ^Backend) {
-  b.white = texture_make(b, {extent = {1, 1}, format = .RGBA8_UNORM, usage = {.SAMPLED}}, {255, 255, 255, 255})
-  b.black_cube = texture_make(b, {extent = {1, 1}, format = .RGBA16F, usage = {.SAMPLED}, cube = true}, make([]u8, 6 * 8, context.temp_allocator))
-}
-
 // texture_create makes the texture of handle. `data` fills level 0; the other levels are
 // rendered down from it.
-texture_create :: proc(b: ^Backend, handle: rhi.TextureHandle, desc: rhi.TextureDesc, data: []u8 = nil) -> bool {
+texture_create :: proc(b: ^Backend, handle: rhi.TextureHandle, desc: rhi.TextureDesc, data: []u8) -> bool {
   b.textures[handle] = texture_make(b, desc, data)
-  groups_clear(b)
   return b.textures[handle].texture != nil
 }
 
 // texture_destroy destroys handle's texture: WebGPU keeps it alive for submitted work.
 texture_destroy :: proc(b: ^Backend, handle: rhi.TextureHandle) {
   texture_release(&b.textures[handle])
-  groups_clear(b)
 }
 
 @(private)
@@ -135,7 +128,7 @@ texture_make :: proc(b: ^Backend, desc: rhi.TextureDesc, data: []u8 = nil) -> (t
   mips := max(desc.mip_levels, 1)
   if data != nil do usage += {.CopyDst}
   if data != nil && mips > 1 do usage += {.RenderAttachment}
-  layers: u32 = 6 if desc.cube else 1
+  layers: u32 = 6 if desc.cube else max(desc.layers, 1)
   t.desc = desc
   t.texture = wgpu.DeviceCreateTexture(
     b.device,
@@ -152,7 +145,7 @@ texture_make :: proc(b: ^Backend, desc: rhi.TextureDesc, data: []u8 = nil) -> (t
     log.errorf("Texture (%v %dx%d) creation failed", desc.format, desc.extent.x, desc.extent.y)
     return {}
   }
-  t.view = wgpu.TextureCreateView(t.texture, &{dimension = .Cube if desc.cube else ._2D, mipLevelCount = mips, arrayLayerCount = layers})
+  t.view = wgpu.TextureCreateView(t.texture, &{dimension = .Cube if desc.cube else ._2DArray if desc.layers > 1 else ._2D, mipLevelCount = mips, arrayLayerCount = layers})
   if data != nil {
     texels := stored_texels(desc.format, data)
     size := TEXEL_SIZE[desc.format]
@@ -253,52 +246,10 @@ mipgen_pipeline :: proc(b: ^Backend, format: wgpu.TextureFormat) -> wgpu.RenderP
 }
 
 @(private = "file")
-MIPGEN_WGSL :: #load("shader/mipgen.wgsl", string)
+MIPGEN_WGSL :: #load("mipgen.wgsl", string)
 
 @(private)
 MipgenPipeline :: struct {
   format:   wgpu.TextureFormat,
   pipeline: wgpu.RenderPipeline,
-}
-
-// Texture bind groups by what they bind; textures change only between frames (loads, resizes),
-// so any change drops them all.
-@(private)
-GroupKey :: struct {
-  layout:   GroupLayout,
-  textures: [MAX_GROUP_TEXTURES]rhi.TextureHandle,
-}
-
-@(private)
-groups_clear :: proc(b: ^Backend) {
-  for _, group in b.groups do wgpu.BindGroupRelease(group)
-  clear(&b.groups)
-  cull_groups_clear(b)
-}
-
-// The bind group of key: its layout's texture slots take key.textures in order, a
-// slot without a texture the default of its kind.
-@(private)
-group :: proc(b: ^Backend, key: GroupKey) -> wgpu.BindGroup {
-  if g, ok := b.groups[key]; ok do return g
-  slots := GROUP_LAYOUTS[key.layout]
-  entries: [MAX_GROUP_TEXTURES]wgpu.BindGroupEntry
-  for slot, i in slots {
-    view: wgpu.TextureView
-    switch slot {
-    case .FLOAT, .UNFILTERABLE, .DEPTH:
-      view = b.textures[key.textures[i]].view if key.textures[i] != 0 else b.white.view
-    case .CUBE:
-      view = b.textures[key.textures[i]].view if key.textures[i] != 0 else b.black_cube.view
-    case .SHADOW_ATLAS:
-      view = b.shadow_atlas.view
-    }
-    entries[i] = {binding = u32(i), textureView = view}
-  }
-  g := wgpu.DeviceCreateBindGroup(
-    b.device,
-    &{layout = b.group_layouts[key.layout], entryCount = uint(len(slots)), entries = raw_data(entries[:])},
-  )
-  b.groups[key] = g
-  return g
 }

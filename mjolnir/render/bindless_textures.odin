@@ -31,10 +31,11 @@ allocate_texture :: proc(r: ^Renderer, desc: TextureDesc, data: []u8 = nil, targ
   guard(r)
   pool := &r.target_slots if target else &r.texture_slots
   h := cont.slots_alloc(pool) or_return
-  if !backend_texture_create(&r.gpu, TextureHandle(h), desc, data) {
+  if !dev.texture_create(&r.gpu, TextureHandle(h), desc, data) {
     cont.slots_free(pool, h)
     return 0, false
   }
+  r.texture_descs[h] = desc
   return TextureHandle(h), true
 }
 

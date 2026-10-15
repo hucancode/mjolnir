@@ -1,7 +1,7 @@
 // The vertex shader of the lighting pipelines (scene group LIGHTING, texture group LIGHTING):
 // a light's volume mesh for point and spot, a far-plane triangle over the screen otherwise.
 
-override LIGHT_TYPE: u32 = 0u;
+@id(0) override LIGHT_TYPE: u32 = 0u;
 
 @group(0) @binding(0) var<storage, read> views: array<View>;
 @group(0) @binding(1) var<storage, read> lights: array<Light>;
@@ -19,11 +19,13 @@ override LIGHT_TYPE: u32 = 0u;
 
 struct LightingUniforms {
     camera_index: u32,
+    // texture handles; a bindless shader indexes with them, here only whether there is one
+    irradiance: u32,
+    prefilter: u32,
+    brdf_lut: u32,
+    environment: u32,
     skybox_intensity: f32,
     skybox_blur: f32,
-    // the environment map and the IBL cubes are bound
-    has_environment: u32,
-    has_ibl: u32,
 }
 @group(2) @binding(0) var<uniform> u: LightingUniforms;
 
