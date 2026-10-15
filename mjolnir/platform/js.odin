@@ -2,6 +2,7 @@
 package platform
 
 import "base:runtime"
+import "core:log"
 import "core:unicode/utf8"
 import "../input"
 import js "core:sys/wasm/js"
@@ -58,6 +59,44 @@ framebuffer_size :: proc(self: ^Platform) -> [2]u32 {
 // dpi_scale returns the device pixel ratio.
 dpi_scale :: proc(self: ^Platform) -> f32 {
   return f32(js.device_pixel_ratio())
+}
+
+// The step run was given and the context to call it in: the browser calls it through step_js.
+@(private = "file")
+web: struct {
+  step:     proc() -> bool,
+  context_: runtime.Context,
+}
+
+// run hands step to the browser and returns at once: odin.js calls it each animation frame
+// until it returns false.
+run :: proc(step: proc() -> bool) {
+  web = {step, context}
+}
+
+// Called by odin.js each animation frame; false ends the loop.
+@(export, link_name = "step")
+step_js :: proc "contextless" (dt: f64) -> bool {
+  context = web.context_
+  if web.step == nil do return false
+  if web.step() do return true
+  web.step = nil
+  return false
+}
+
+// sleep does nothing: the browser paces the animation frames.
+sleep :: proc(ms: f64) {}
+
+// read_file fails: the web has no file system. #load the bytes instead.
+read_file :: proc(path: string, allocator := context.allocator) -> (data: []u8, ok: bool) {
+  log.errorf("Failed to read '%s': no file system on the web", path)
+  return nil, false
+}
+
+// write_file fails: the web has no file system.
+write_file :: proc(path: string, data: []u8) -> bool {
+  log.errorf("Failed to write '%s': no file system on the web", path)
+  return false
 }
 
 // The canvas backing store follows its CSS box at the device pixel ratio.

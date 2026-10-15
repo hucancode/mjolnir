@@ -52,14 +52,15 @@ destroy :: proc(nav: ^NavMesh) {
   nav^ = {}
 }
 
-// save writes the mesh tiles to path in the detour .navmesh format.
-save :: proc(nav: ^NavMesh, path: string) -> bool {
-  return detour.save_navmesh_to_file(&nav.detour_mesh, path)
+// save encodes the mesh tiles in the detour .navmesh format, in memory the caller frees
+// (platform.write_file stores it).
+save :: proc(nav: ^NavMesh, allocator := context.allocator) -> []u8 {
+  return detour.save_navmesh(&nav.detour_mesh, allocator)
 }
 
-// load reads a mesh written by save, replacing any previous mesh.
-load :: proc(nav: ^NavMesh, path: string, max_query_nodes: i32 = 2048) -> bool {
-  mesh := detour.load_navmesh_from_file(path) or_return
+// load decodes a mesh encoded by save, replacing any previous mesh.
+load :: proc(nav: ^NavMesh, data: []u8, max_query_nodes: i32 = 2048) -> bool {
+  mesh := detour.load_navmesh(data) or_return
   destroy(nav)
   nav.detour_mesh = mesh^
   free(mesh)

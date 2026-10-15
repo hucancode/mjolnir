@@ -1,7 +1,7 @@
 package detour
 
 import "core:log"
-import "core:os"
+import "core:mem"
 
 @(private = "file")
 NAVMESH_FILE_MAGIC :: 'N' << 24 | 'A' << 16 | 'V' << 8 | 'M'
@@ -22,78 +22,42 @@ Nav_Mesh_Tile_Entry :: struct {
   data_size: u32,
 }
 
-// save_navmesh_to_file writes all tiles of nav_mesh to filepath.
-save_navmesh_to_file :: proc(nav_mesh: ^Nav_Mesh, filepath: string) -> bool {
-  file, err := os.open(filepath, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, os.perm(0o644))
-  if err != os.ERROR_NONE {
-    log.errorf("Failed to create navmesh file: %s", filepath)
-    return false
-  }
-  defer os.close(file)
-  tile_count := u32(0)
-  for i in 0 ..< nav_mesh.max_tiles {
-    tile := &nav_mesh.tiles[i]
-    if tile.header != nil && len(tile.data) > 0 {
-      tile_count += 1
-    }
-  }
+// save_navmesh encodes all tiles of nav_mesh in the .navmesh format, in memory the caller frees.
+save_navmesh :: proc(nav_mesh: ^Nav_Mesh, allocator := context.allocator) -> []u8 {
   file_header := Nav_Mesh_File_Header {
-    magic      = NAVMESH_FILE_MAGIC,
-    version    = NAVMESH_FILE_VERSION,
-    tile_count = tile_count,
-    params     = nav_mesh.params,
+    magic   = NAVMESH_FILE_MAGIC,
+    version = NAVMESH_FILE_VERSION,
+    params  = nav_mesh.params,
   }
-  _, err = os.write_ptr(file, &file_header, size_of(Nav_Mesh_File_Header))
-  if err != os.ERROR_NONE {
-    log.error("Failed to write navmesh file header")
-    return false
-  }
+  size := size_of(Nav_Mesh_File_Header)
   for i in 0 ..< nav_mesh.max_tiles {
     tile := &nav_mesh.tiles[i]
-    if tile.header == nil || len(tile.data) <= 0 do continue
-    tile_ref := get_tile_ref(nav_mesh, tile)
+    if tile.header == nil || len(tile.data) == 0 do continue
+    file_header.tile_count += 1
+    size += size_of(Nav_Mesh_Tile_Entry) + len(tile.data)
+  }
+  data := make([]u8, size, allocator)
+  at := copy(data, mem.ptr_to_bytes(&file_header))
+  for i in 0 ..< nav_mesh.max_tiles {
+    tile := &nav_mesh.tiles[i]
+    if tile.header == nil || len(tile.data) == 0 do continue
     tile_entry := Nav_Mesh_Tile_Entry {
-      ref       = tile_ref,
+      ref       = get_tile_ref(nav_mesh, tile),
       data_size = u32(len(tile.data)),
     }
-    bytes_written, err := os.write_ptr(
-      file,
-      &tile_entry,
-      size_of(Nav_Mesh_Tile_Entry),
-    )
-    if err != os.ERROR_NONE || bytes_written != size_of(Nav_Mesh_Tile_Entry) {
-      log.errorf("Failed to write tile entry for tile %d", i)
-      return false
-    }
-    bytes_written, err = os.write(file, tile.data)
-    if err != os.ERROR_NONE || bytes_written != len(tile.data) {
-      log.errorf("Failed to write tile data for tile %d", i)
-      return false
-    }
+    at += copy(data[at:], mem.ptr_to_bytes(&tile_entry))
+    at += copy(data[at:], tile.data)
   }
-  log.infof("Saved navmesh with %d tiles to: %s", tile_count, filepath)
-  return true
+  log.infof("Saved navmesh with %d tiles (%d bytes)", file_header.tile_count, size)
+  return data
 }
 
-// load_navmesh_from_file reads a mesh written by save_navmesh_to_file.
-load_navmesh_from_file :: proc(
-  filepath: string,
-  allocator := context.allocator,
-) -> (
-  ^Nav_Mesh,
-  bool,
-) {
+// load_navmesh decodes a mesh encoded by save_navmesh; data is copied, the caller keeps it.
+load_navmesh :: proc(data: []u8, allocator := context.allocator) -> (^Nav_Mesh, bool) {
   context.allocator = allocator
-  file, err := os.open(filepath, os.O_RDONLY)
-  if err != os.ERROR_NONE {
-    log.errorf("Failed to open navmesh file: %s", filepath)
-    return nil, false
-  }
-  defer os.close(file)
   file_header: Nav_Mesh_File_Header
-  _, err = os.read_ptr(file, &file_header, size_of(Nav_Mesh_File_Header))
-  if err != os.ERROR_NONE {
-    log.error("Failed to read navmesh file header")
+  if copy(mem.ptr_to_bytes(&file_header), data) != size_of(Nav_Mesh_File_Header) {
+    log.error("Navmesh data too short for its header")
     return nil, false
   }
   if file_header.magic != NAVMESH_FILE_MAGIC {
@@ -111,35 +75,21 @@ load_navmesh_from_file :: proc(
     free(nav_mesh, allocator)
     return nil, false
   }
-  tiles_loaded := u32(0)
+  at := size_of(Nav_Mesh_File_Header)
   for i in 0 ..< file_header.tile_count {
     tile_entry: Nav_Mesh_Tile_Entry
-    bytes_read, err := os.read_ptr(
-      file,
-      &tile_entry,
-      size_of(Nav_Mesh_Tile_Entry),
-    )
-    if err != os.ERROR_NONE || bytes_read != size_of(Nav_Mesh_Tile_Entry) {
-      log.errorf("Failed to read tile entry %d", i)
+    if copy(mem.ptr_to_bytes(&tile_entry), data[at:]) != size_of(Nav_Mesh_Tile_Entry) ||
+       len(data) - at - size_of(Nav_Mesh_Tile_Entry) < int(tile_entry.data_size) {
+      log.errorf("Navmesh data truncated at tile %d", i)
       nav_mesh_destroy(nav_mesh)
       free(nav_mesh, allocator)
       return nil, false
     }
+    at += size_of(Nav_Mesh_Tile_Entry)
+    // the mesh frees its tiles (DT_TILE_FREE_DATA): each gets its own copy
     tile_data := make([]u8, tile_entry.data_size, allocator)
-    bytes_read, err = os.read(file, tile_data)
-    if err != os.ERROR_NONE || bytes_read != len(tile_data) {
-      log.errorf("Failed to read tile data for tile %d", i)
-      delete(tile_data, allocator)
-      nav_mesh_destroy(nav_mesh)
-      free(nav_mesh, allocator)
-      return nil, false
-    }
-    _, add_status := nav_mesh_add_tile(
-      nav_mesh,
-      tile_data,
-      DT_TILE_FREE_DATA,
-      tile_entry.ref,
-    )
+    at += copy(tile_data, data[at:])
+    _, add_status := nav_mesh_add_tile(nav_mesh, tile_data, DT_TILE_FREE_DATA, tile_entry.ref)
     if !status_succeeded(add_status) {
       log.errorf("Failed to add tile %d to navigation mesh", i)
       delete(tile_data, allocator)
@@ -147,50 +97,14 @@ load_navmesh_from_file :: proc(
       free(nav_mesh, allocator)
       return nil, false
     }
-    tiles_loaded += 1
   }
-  log.infof("Loaded navmesh with %d tiles from: %s", tiles_loaded, filepath)
+  log.infof("Loaded navmesh with %d tiles", file_header.tile_count)
   return nav_mesh, true
 }
 
-// save_navmesh_data_to_file writes raw single-tile data to filepath.
-save_navmesh_data_to_file :: proc(data: []u8, filepath: string) -> bool {
-  file, err := os.open(filepath, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, os.perm(0o644))
-  if err != os.ERROR_NONE {
-    log.errorf("Failed to create navmesh data file: %s", filepath)
-    return false
-  }
-  defer os.close(file)
-  _, err = os.write(file, data)
-  if err != os.ERROR_NONE {
-    log.error("Failed to write navmesh data")
-    return false
-  }
-  log.infof("Saved navmesh data (%d bytes) to: %s", len(data), filepath)
-  return true
-}
-
-// load_navmesh_data_from_file reads raw single-tile data written by save_navmesh_data_to_file.
-load_navmesh_data_from_file :: proc(
-  filepath: string,
-  allocator := context.allocator,
-) -> (
-  []u8,
-  bool,
-) {
-  context.allocator = allocator
-  data, read_err := os.read_entire_file(filepath, allocator)
-  if read_err != nil {
-    log.errorf("Failed to read navmesh data file: %s", filepath)
-    return nil, false
-  }
-  log.infof("Loaded navmesh data (%d bytes) from: %s", len(data), filepath)
-  return data, true
-}
-
-// load_navmesh_for_runtime loads a mesh from filepath and initializes a query on it.
+// load_navmesh_for_runtime decodes a mesh encoded by save_navmesh and initializes a query on it.
 load_navmesh_for_runtime :: proc(
-  filepath: string,
+  data: []u8,
   allocator := context.allocator,
 ) -> (
   ^Nav_Mesh,
@@ -198,7 +112,7 @@ load_navmesh_for_runtime :: proc(
   bool,
 ) {
   context.allocator = allocator
-  nav_mesh, load_ok := load_navmesh_from_file(filepath, allocator)
+  nav_mesh, load_ok := load_navmesh(data, allocator)
   if !load_ok {
     return nil, nil, false
   }

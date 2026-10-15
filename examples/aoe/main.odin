@@ -45,7 +45,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   cube_body_to_mesh = make(map[physics.BodyHandle]world.NodeHandle)
   cube_mesh := app.renderer.builtin_meshes[.CUBE]

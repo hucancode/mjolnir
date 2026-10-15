@@ -39,7 +39,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   light := world.spawn(&app.scene, {10, 18, 10})
   render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.97, 0.92, 3.0}, 60.0, false))

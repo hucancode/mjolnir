@@ -59,7 +59,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -72,7 +72,7 @@ setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {3, 2, 3}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
-  fox_scene = mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Fox2.glb")
+  fox_scene = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/Fox2.glb"))
   if len(fox_scene.skinned) == 0 {
     log.error("Fox2.glb has no skinned mesh")
     return

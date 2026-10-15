@@ -52,7 +52,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   font_data, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
   if err != nil do return
   defer delete(font_data)
@@ -106,7 +106,7 @@ build_ui :: proc(app: ^App) {
   app.looks[hint] = {{0, 0, 0, 160}, render.NO_TEXTURE}
   text(app, hint, "drag: orbit   wheel over list: scroll", 14)
   // an image anchored bottom-right, and a star mesh bottom-left
-  if star_texture, ok := render.create_texture_from_path(&app.renderer, "assets/gold-star.png"); ok {
+  if star_texture, ok := render.create_texture_from_data(&app.renderer, #load("../../assets/gold-star.png")); ok {
     image := ui.create(&app.gui, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, size = {{.FIXED, 128}, {.FIXED, 128}}})
     app.looks[image] = {{255, 255, 255, 255}, u32(star_texture)}
   }

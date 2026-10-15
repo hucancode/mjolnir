@@ -3,7 +3,6 @@ package mjolnir
 import anim "animation"
 import gltf_animation "animation/gltf"
 import "core:log"
-import "core:strings"
 import "render"
 import gltf_render "render/gltf"
 import "vendor:cgltf"
@@ -32,38 +31,39 @@ gltf_scene_destroy :: proc(self: ^GltfScene) {
   self^ = {}
 }
 
-// load_gltf instantiates a glTF file: render looks (see gltf_render.load_meshes),
+// load_gltf instantiates a glTF held in memory, a .glb or a glTF whose buffers and images are
+// all embedded (the engine reads no files: #load it or platform.read_file it): render looks (see gltf_render.load_meshes),
 // one rig per skin (see gltf_animation.load_rig) and one world node per glTF
 // node, spawned under `parent` (the world root by default).
 load_gltf :: proc(
   w: ^world.World,
   r: ^render.Renderer,
-  path: string,
+  data: []u8,
   parent: world.NodeHandle = {},
 ) -> (
   scene: GltfScene,
   ok: bool,
 ) #optional_ok {
-  result := load_gltf_file(w, r, path, parent if parent != {} else w.root, &scene)
-  if result != .success do log.errorf("Failed to load glTF %s: %v", path, result)
+  result := load_gltf_data(w, r, data, parent if parent != {} else w.root, &scene)
+  if result != .success do log.errorf("Failed to load glTF: %v", result)
   return scene, result == .success
 }
 
 @(private = "file")
-load_gltf_file :: proc(
+load_gltf_data :: proc(
   w: ^world.World,
   r: ^render.Renderer,
-  path: string,
+  bytes: []u8,
   parent: world.NodeHandle,
   scene: ^GltfScene,
 ) -> cgltf.result {
-  path_cstr := strings.clone_to_cstring(path, context.temp_allocator)
   options: cgltf.options
-  data := cgltf.parse_file(options, path_cstr) or_return
+  data := cgltf.parse(options, raw_data(bytes), uint(len(bytes))) or_return
   defer cgltf.free(data)
-  if len(data.buffers) > 0 do cgltf.load_buffers(options, data, path_cstr) or_return
+  // no gltf path: a .glb's BIN chunk and data: URIs load, a buffer in another file fails
+  if len(data.buffers) > 0 do cgltf.load_buffers(options, data, nil) or_return
   if len(data.nodes) == 0 do return .success
-  looks, looks_ok := gltf_render.load_meshes(r, data, path, context.temp_allocator)
+  looks, looks_ok := gltf_render.load_meshes(r, data, context.temp_allocator)
   if !looks_ok do return .invalid_gltf
   // rig index per skin; -1 when no mesh node uses the skin or it failed to load
   skin_rigs := make([]int, len(data.skins), context.temp_allocator)

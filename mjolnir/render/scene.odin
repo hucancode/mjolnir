@@ -196,20 +196,11 @@ teardown :: proc(self: ^Renderer) {
   self.shadow_casters = {}
 }
 
-// Replace the environment map with the equirectangular HDR image at `path`
-// and precompute image-based lighting from it. Without one, IBL and the
-// skybox are black.
-load_environment_map :: proc(self: ^Renderer, path: string) -> bool {
-  ok := ambient_load_environment(self, path)
-  if !ok do log.warnf("Failed to load environment map %s", path)
-  return ok
-}
-
-// load_environment_map_from_data is load_environment_map for an image held in memory (the web
-// has no file system: #load it).
-load_environment_map_from_data :: proc(self: ^Renderer, data: []u8) -> bool {
-  ok := ambient_load_environment(self, "", data)
-  if !ok do log.warnf("Failed to load environment map from memory")
+// Replace the environment map with the equirectangular HDR image encoded in `data` and
+// precompute image-based lighting from it. Without one, IBL and the skybox are black.
+load_environment_map :: proc(self: ^Renderer, data: []u8) -> bool {
+  ok := ambient_load_environment(self, data)
+  if !ok do log.warnf("Failed to load environment map")
   return ok
 }
 
@@ -1012,6 +1003,7 @@ frame :: proc(
   show_stats := false,
 ) -> bool {
   frame_index := current_frame(self)
+  self.frame.framebuffer_size = framebuffer_size
   if show_stats do stats_panel(self)
   debug_ui_drawn := debug_ui_close(self)
   guard(self)

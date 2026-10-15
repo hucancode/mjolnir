@@ -10,3 +10,4 @@ screenshots/*.png
 web/*.wasm
 web/odin.js
 web/wgpu.js
+web/index.html

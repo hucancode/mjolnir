@@ -45,7 +45,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   half := f32(GRID - 1) * 0.5 * SPACING
   render.main_camera_look_at(&app.renderer, {half + 2, half + 4, half * 2.4}, {0, half - 1, 0})

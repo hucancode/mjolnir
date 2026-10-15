@@ -677,12 +677,15 @@ partition_polygons_by_axis :: proc(
 }
 
 @(private)
-bake_and_save_navmesh :: proc(
+bake_navmesh :: proc(
   pmesh: ^recast.Poly_Mesh,
   dmesh: ^recast.Poly_Mesh_Detail,
   walkable_height, walkable_radius, walkable_climb: f32,
-  filepath: string,
-) -> bool {
+  allocator := context.allocator,
+) -> (
+  data: []u8,
+  ok: bool,
+) {
   params := Create_Nav_Mesh_Data_Params {
     poly_mesh          = pmesh,
     poly_mesh_detail   = dmesh,
@@ -698,7 +701,7 @@ bake_and_save_navmesh :: proc(
   nav_data, create_status := create_nav_mesh_data(&params)
   if !detour.status_succeeded(create_status) {
     log.error("Failed to create navigation mesh data")
-    return false
+    return nil, false
   }
   defer delete(nav_data)
   nav_mesh := new(detour.Nav_Mesh)
@@ -716,7 +719,7 @@ bake_and_save_navmesh :: proc(
   init_status := detour.nav_mesh_init(nav_mesh, &mesh_params)
   if !detour.status_succeeded(init_status) {
     log.error("Failed to initialize navigation mesh")
-    return false
+    return nil, false
   }
   // Make a copy of nav_data since nav_mesh_add_tile may take ownership
   nav_data_copy := make([]u8, len(nav_data))
@@ -729,7 +732,7 @@ bake_and_save_navmesh :: proc(
   if !detour.status_succeeded(add_status) {
     log.error("Failed to add tile to navigation mesh")
     delete(nav_data_copy)
-    return false
+    return nil, false
   }
-  return detour.save_navmesh_to_file(nav_mesh, filepath)
+  return detour.save_navmesh(nav_mesh, allocator), true
 }

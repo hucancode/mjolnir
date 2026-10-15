@@ -34,16 +34,18 @@ run-wgpu:
 build-wgpu:
 	odin build . -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
 
-# An example on the web: web/$(EXAMPLE).wasm beside Odin's JS runtime and WebGPU glue.
+# An example on the web: web/$(EXAMPLE).wasm beside Odin's JS runtime, WebGPU glue and the
+# host page (mjolnir/platform/web/index.html).
 # Linking needs wasm-ld (LLVM's lld) on PATH. `make serve` and open
 # http://localhost:8000/?example=$(EXAMPLE) in a WebGPU browser.
 ODIN_ROOT := $(shell odin root)
 EXAMPLE ?= cube
 
 web:
+	mkdir -p web
 	odin build examples/$(EXAMPLE) -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
 		-target-features:"atomics,bulk-memory" -extra-linker-flags:"--export-table" -out:web/$(EXAMPLE).wasm
-	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js web/
+	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js mjolnir/platform/web/index.html web/
 
 serve: web
 	python3 -m http.server -d web 8000

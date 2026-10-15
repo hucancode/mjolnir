@@ -40,7 +40,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   setup(app)
 
@@ -55,7 +55,7 @@ setup :: proc(app: ^App) {
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 6.0)
 
-  tex, tex_ok := render.create_texture_from_path(&app.renderer, "assets/Warrior_Sheet-Effect.png")
+  tex, tex_ok := render.create_texture_from_data(&app.renderer, #load("../../assets/Warrior_Sheet-Effect.png"))
   if !tex_ok {
     log.error("failed to load warrior sheet")
     return

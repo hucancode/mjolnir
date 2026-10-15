@@ -37,6 +37,8 @@ FrameCamera :: struct {
 
 // FrameDesc is everything frame records.
 FrameDesc :: struct {
+  // the window's size in pixels, as the platform reports it
+  framebuffer_size:     [2]u32,
   // render's tables, the one copy; bit r of dirty[t] is region r of tables[t] (TABLE_REGIONS),
   // written since the last submitted frame
   tables:               [Table][]u8,

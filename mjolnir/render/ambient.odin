@@ -20,15 +20,11 @@ ambient_init :: proc(r: ^Renderer) -> bool {
 }
 
 // The irradiance and prefiltered cubes are precomputed from a temporary env cube made from
-// the equirectangular image at path, or encoded in data when path is empty.
-ambient_load_environment :: proc(r: ^Renderer, path: string, data: []u8 = nil) -> (ok: bool) {
+// the equirectangular image encoded in data.
+ambient_load_environment :: proc(r: ^Renderer, data: []u8) -> (ok: bool) {
   ambient_free_environment(r)
   defer if !ok do ambient_free_environment(r)
-  if path != "" {
-    r.environment_map = create_texture_from_path(r, path, .RGBA32F, true) or_return
-  } else {
-    r.environment_map = create_texture_from_data(r, data, .RGBA32F, true) or_return
-  }
+  r.environment_map = create_texture_from_data(r, data, .RGBA32F, true) or_return
   cube :: proc(size, mips: u32) -> TextureDesc {
     return {extent = {size, size}, format = .RGBA16F, usage = {.SAMPLED, .STORAGE}, mip_levels = mips, cube = true}
   }

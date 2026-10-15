@@ -25,13 +25,29 @@ TextureEntry :: struct {
   handle: render.TextureHandle,
 }
 
-TEXTURE_FILES := [?]string{
-  "circle_01", "circle_02", "circle_03", "circle_04", "circle_05",
-  "light_01", "light_02", "light_03",
-  "scorch_01", "scorch_02", "scorch_03",
-  "smoke_01", "smoke_02", "smoke_03",
-  "star_01", "star_02", "star_03",
-  "symbol_01", "symbol_02",
+TEXTURE_FILES := [?]struct {
+  name: string,
+  data: []u8,
+}{
+  {"circle_01", #load("../../assets/particles/circle_01.png")},
+  {"circle_02", #load("../../assets/particles/circle_02.png")},
+  {"circle_03", #load("../../assets/particles/circle_03.png")},
+  {"circle_04", #load("../../assets/particles/circle_04.png")},
+  {"circle_05", #load("../../assets/particles/circle_05.png")},
+  {"light_01",  #load("../../assets/particles/light_01.png")},
+  {"light_02",  #load("../../assets/particles/light_02.png")},
+  {"light_03",  #load("../../assets/particles/light_03.png")},
+  {"scorch_01", #load("../../assets/particles/scorch_01.png")},
+  {"scorch_02", #load("../../assets/particles/scorch_02.png")},
+  {"scorch_03", #load("../../assets/particles/scorch_03.png")},
+  {"smoke_01",  #load("../../assets/particles/smoke_01.png")},
+  {"smoke_02",  #load("../../assets/particles/smoke_02.png")},
+  {"smoke_03",  #load("../../assets/particles/smoke_03.png")},
+  {"star_01",   #load("../../assets/particles/star_01.png")},
+  {"star_02",   #load("../../assets/particles/star_02.png")},
+  {"star_03",   #load("../../assets/particles/star_03.png")},
+  {"symbol_01", #load("../../assets/particles/symbol_01.png")},
+  {"symbol_02", #load("../../assets/particles/symbol_02.png")},
 }
 
 textures:            [dynamic]TextureEntry
@@ -65,18 +81,17 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   render.main_camera_look_at(&app.renderer, {0, 5, 10}, {0, 2, 0})
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   app.renderer.skybox_intensity = 0
 
-  for name in TEXTURE_FILES {
-    path := fmt.tprintf("assets/particles/%s.png", name)
-    handle, ok := render.create_texture_from_path(&app.renderer, path)
+  for file in TEXTURE_FILES {
+    handle, ok := render.create_texture_from_data(&app.renderer, file.data)
     if !ok do continue
-    append(&textures, TextureEntry{name = strings.clone(name), handle = handle})
+    append(&textures, TextureEntry{name = strings.clone(file.name), handle = handle})
   }
   if len(textures) > 0 && int(selected_tex_index) >= len(textures) do selected_tex_index = 0
 

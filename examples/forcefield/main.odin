@@ -47,7 +47,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -83,7 +83,7 @@ setup :: proc(app: ^App) {
   app.renderer.skybox_intensity = 0
 
   // Particle source at center, large position spread
-  if tex, ok := render.create_texture_from_path(&app.renderer, "assets/particles/star_09.png"); ok {
+  if tex, ok := render.create_texture_from_data(&app.renderer, #load("../../assets/particles/star_09.png")); ok {
     em := render.emitter_attachment(
       texture_handle    = tex,
       emission_rate     = 100,

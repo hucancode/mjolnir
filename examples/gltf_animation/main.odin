@@ -33,7 +33,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   defer mjolnir.gltf_scene_destroy(&app.gltf)
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
@@ -46,7 +46,7 @@ should_close :: proc(app: ^App) -> bool {
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {1.5, 1.5, 1.5}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  app.gltf = mjolnir.load_gltf(&app.scene, &app.renderer, "assets/CesiumMan.glb")
+  app.gltf = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb"))
   for s in app.gltf.skinned {
     rig := &app.gltf.rigs[s.rig]
     a: anim.Animator

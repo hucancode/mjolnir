@@ -13,18 +13,18 @@ import mu "vendor:microui"
 
 Model :: struct {
   label:  string,
-  path:   string,
+  data:   []u8,
   scale:  f32,
   offset: [3]f32,
   rot_x:  f32,
 }
 
 MODELS := [?]Model{
-  {"Mjolnir",        "assets/Mjolnir.glb",        0.3,   {0, -1, 0},    math.PI * -0.3},
-  {"Suzanne",        "assets/Suzanne.glb",        1.0,   {0, 0, 0},     0},
-  {"Duck",           "assets/Duck.glb",           0.4,   {0, -1, 0},    0},
-  {"Damaged Helmet", "assets/DamagedHelmet.glb",  1.0,   {0, 0, 0},     math.PI * 0.5},
-  {"SciFi Helmet",   "assets/SciFiHelmet.glb",    1.0,   {0, -1, 0},    0},
+  {"Mjolnir",        #load("../../assets/Mjolnir.glb"),        0.3,   {0, -1, 0},    math.PI * -0.3},
+  {"Suzanne",        #load("../../assets/Suzanne.glb"),        1.0,   {0, 0, 0},     0},
+  {"Duck",           #load("../../assets/Duck.glb"),           0.4,   {0, -1, 0},    0},
+  {"Damaged Helmet", #load("../../assets/DamagedHelmet.glb"),  1.0,   {0, 0, 0},     math.PI * 0.5},
+  {"SciFi Helmet",   #load("../../assets/SciFiHelmet.glb"),    1.0,   {0, -1, 0},    0},
 }
 
 model: mjolnir.GltfScene
@@ -60,7 +60,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   render.main_camera_look_at(&app.renderer, {0, 0.2, 3.5}, {0, 0, 0})
 
@@ -82,7 +82,7 @@ swap_model :: proc(app: ^App, index: int) {
   mjolnir.gltf_scene_destroy(&model)
   current_model = index
   m := MODELS[index]
-  model = mjolnir.load_gltf(&app.scene, &app.renderer, m.path)
+  model = mjolnir.load_gltf(&app.scene, &app.renderer, m.data)
   rotation_phase = 0
 }
 

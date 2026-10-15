@@ -144,7 +144,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("assets/Cannon_Exterior.hdr"))
   defer for &c in characters do mjolnir.gltf_scene_destroy(&c.scene)
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
@@ -240,7 +240,7 @@ setup :: proc(app: ^App) {
   when true {
     brick_wall_mat_handle: render.MaterialHandle
     brick_wall_mat_ok := false
-    brick_albedo_handle, brick_albedo_ok := render.create_texture_from_path(&app.renderer, "assets/t_brick_floor_002_diffuse_1k.jpg",
+    brick_albedo_handle, brick_albedo_ok := render.create_texture_from_data(&app.renderer, #load("assets/t_brick_floor_002_diffuse_1k.jpg"),
     )
     if brick_albedo_ok {
       brick_wall_mat_handle, brick_wall_mat_ok = render.create_material(
@@ -329,7 +329,7 @@ setup :: proc(app: ^App) {
   }
   when true {
     log.info("loading Hammer GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Mjolnir.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/Mjolnir.glb")); ok {
       defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
@@ -340,7 +340,7 @@ setup :: proc(app: ^App) {
   }
   when true {
     log.info("loading Warrior GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Warrior.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/Warrior.glb")); ok {
       for armature in gltf_nodes.roots do world.translate(&app.scene, armature, 0, 0, 1)
       character := add_character(gltf_nodes, "idle")
       // Attach a spinning cube to the hand.L bone of the first skinned mesh
@@ -367,7 +367,7 @@ setup :: proc(app: ^App) {
   }
   when true {
     log.info("loading Damaged Helmet GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/DamagedHelmet.glb");
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/DamagedHelmet.glb"));
        ok {
       defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
@@ -379,7 +379,7 @@ setup :: proc(app: ^App) {
   }
   when true {
     log.info("loading Suzanne GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Suzanne.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/Suzanne.glb")); ok {
       defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
@@ -389,7 +389,7 @@ setup :: proc(app: ^App) {
   }
   when true {
     log.info("loading SciFiHelmet GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/SciFiHelmet.glb");
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/SciFiHelmet.glb"));
        ok {
       defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
@@ -401,7 +401,7 @@ setup :: proc(app: ^App) {
   }
   when true {
     log.info("loading Fox GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Fox2.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/Fox2.glb")); ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 6, 0, 0)
@@ -515,9 +515,9 @@ setup :: proc(app: ^App) {
   }
   when true {
     log.info("Setting up particles...")
-    black_circle_texture_handle, black_circle_ok := render.create_texture_from_path(&app.renderer, "assets/particles/circle_05.png",
+    black_circle_texture_handle, black_circle_ok := render.create_texture_from_data(&app.renderer, #load("assets/particles/circle_05.png"),
     )
-    goldstar_texture_handle, goldstar_texture_ok := render.create_texture_from_path(&app.renderer, "assets/particles/star_07.png",
+    goldstar_texture_handle, goldstar_texture_ok := render.create_texture_from_data(&app.renderer, #load("assets/particles/star_07.png"),
     )
     goldstar_material_handle: render.MaterialHandle
     goldstar_material_ok := false
@@ -642,7 +642,7 @@ setup :: proc(app: ^App) {
     log.info(
       "spawning Warrior effect sprite with animation (99 frames @ 24fps)...",
     )
-    warrior_sprite_texture, warrior_sprite_ok := render.create_texture_from_path(&app.renderer, "assets/Warrior_Sheet-Effect.png",
+    warrior_sprite_texture, warrior_sprite_ok := render.create_texture_from_data(&app.renderer, #load("assets/Warrior_Sheet-Effect.png"),
     )
     if warrior_sprite_ok {
       // 6x17 sprite sheet using frames 0-98, animated in update

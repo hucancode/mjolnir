@@ -95,7 +95,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -254,7 +254,7 @@ update :: proc(app: ^App, dt: f32) {
     world.teardown(&app.scene)
     render.teardown(&app.renderer)
     if render.setup(&app.renderer) {
-      render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+      render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
       setup(app)
     }
     render.update(&app.renderer, dt)

@@ -39,7 +39,7 @@ main :: proc() {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map_from_data(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   cube := world.spawn(&app.scene)
   render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, .RED))
   render.main_camera_look_at(&app.renderer, {3, 2, 3}, {0, 0, 0})

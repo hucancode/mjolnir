@@ -1,7 +1,6 @@
 #+build js
 package wgpu_backend
 
-import js "core:sys/wasm/js"
 import wgpu "vendor:wgpu"
 
 // WindowHandle is the window render draws into: the CSS selector of a canvas on the web.
@@ -23,13 +22,6 @@ device_wait :: proc(b: ^Backend) {}
 // The browser fires callbacks on its own.
 @(private)
 events_process :: proc(b: ^Backend) {}
-
-// The canvas size (its backing store, which the platform fits to the page).
-@(private)
-window_size :: proc(b: ^Backend) -> [2]u32 {
-  id := string(b.window)[1:]
-  return {u32(js.get_element_key_f64(id, "width")), u32(js.get_element_key_f64(id, "height"))}
-}
 
 // wgpu.js hands out the canvas texture without a status: having one is success.
 @(private)

@@ -6,11 +6,12 @@ import wgpu "vendor:wgpu"
 // frame records, submits and presents the frame render described, in one command encoder:
 // uploads, cull, shadows, each camera's G-buffer, lighting and forward passes, post-process,
 // debug lines, overlay, then the particle simulation the next frame draws. Queue order is the
-// only sync. RESIZE: the surface no longer matches the window.
+// only sync. RESIZE: the surface no longer matches desc.framebuffer_size.
 frame :: proc(b: ^Backend, desc: ^FrameDesc) -> (submitted: bool, status: FrameStatus) {
   if !b.up do return false, .OK
   events_process(b)
-  if window_size(b) != b.surface_extent do return false, .RESIZE
+  size := desc.framebuffer_size
+  if ([2]u32{max(size.x, 1), max(size.y, 1)}) != b.surface_extent do return false, .RESIZE
   surface_texture := surface_texture_get(b)
   #partial switch surface_texture.status {
   case .SuccessOptimal, .SuccessSuboptimal:

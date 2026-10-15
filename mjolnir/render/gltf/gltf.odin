@@ -8,11 +8,11 @@ import "vendor:cgltf"
 
 // load_meshes creates a render mesh, material and textures for every glTF mesh a node references.
 // looks[i] draws data.meshes[i]; it is nil for meshes no node uses or that failed to upload.
-// Meshes used by a skinned node carry skinning data. gltf_path resolves relative texture URIs.
+// Meshes used by a skinned node carry skinning data. Images must be embedded (a .glb's buffer
+// views): render reads no files.
 load_meshes :: proc(
   r: ^render.Renderer,
   data: ^cgltf.data,
-  gltf_path: string,
   allocator := context.allocator,
 ) -> (
   looks: []Maybe(render.MeshAttachment),
@@ -33,7 +33,7 @@ load_meshes :: proc(
     // One material per mesh: the first primitive's.
     material: render.MaterialHandle
     if mat := gltf_mesh.primitives[0].material; mat != nil {
-      material = load_material(r, mat, gltf_path, &textures, &materials) or_return
+      material = load_material(r, mat, &textures, &materials) or_return
     }
     geometry := load_geometry(&gltf_mesh, skinned[i])
     log.infof("Processed mesh with %d vertices, %d indices", len(geometry.vertices), len(geometry.indices))
@@ -48,7 +48,6 @@ load_meshes :: proc(
 load_texture :: proc(
   r: ^render.Renderer,
   texture: ^cgltf.texture,
-  gltf_path: string,
   cache: ^map[^cgltf.texture]render.TextureHandle,
   format: render.TextureFormat = .RGBA8_SRGB,
 ) -> (
@@ -56,17 +55,13 @@ load_texture :: proc(
   ok: bool,
 ) {
   if handle, ok = cache[texture]; ok do return
-  if texture.image_ == nil do return {}, false
-  if texture.image_.uri != nil {
-    texture_path := sibling_path(gltf_path, string(texture.image_.uri)) or_return
-    handle = render.create_texture_from_path(r, texture_path, format) or_return
-  } else if texture.image_.buffer_view != nil {
-    view := texture.image_.buffer_view
-    pixel_data := slice.from_ptr(mem.ptr_offset(cast(^u8)view.buffer.data, view.offset), int(view.size))
-    handle = render.create_texture_from_data(r, pixel_data, format) or_return
-  } else {
+  if texture.image_ == nil || texture.image_.buffer_view == nil {
+    log.errorf("glTF texture: external images are unsupported, embed them (.glb)")
     return {}, false
   }
+  view := texture.image_.buffer_view
+  pixel_data := slice.from_ptr(mem.ptr_offset(cast(^u8)view.buffer.data, view.offset), int(view.size))
+  handle = render.create_texture_from_data(r, pixel_data, format) or_return
   cache[texture] = handle
   log.infof("Created texture %v", handle)
   return handle, true
@@ -76,7 +71,6 @@ load_texture :: proc(
 load_material :: proc(
   r: ^render.Renderer,
   mat: ^cgltf.material,
-  gltf_path: string,
   textures: ^map[^cgltf.texture]render.TextureHandle,
   cache: ^map[^cgltf.material]render.MaterialHandle,
 ) -> (
@@ -103,7 +97,7 @@ load_material :: proc(
   }
   tex: [4]render.TextureHandle
   for src, i in sources do if src.texture != nil {
-    tex[i] = load_texture(r, src.texture, gltf_path, textures, src.format) or_return
+    tex[i] = load_texture(r, src.texture, textures, src.format) or_return
   }
   // render keeps one emissive scale; take the brightest factor channel
   emissive_value := max(mat.emissive_factor[0], mat.emissive_factor[1], mat.emissive_factor[2])

@@ -30,12 +30,12 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   render.main_camera_look_at(&app.renderer, {5, 6, 5}, {0, 5, 0})
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  app.gltf = mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Duck.glb")
+  app.gltf = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/Duck.glb"))
   defer mjolnir.gltf_scene_destroy(&app.gltf)
   light := world.spawn(&app.scene)
   render.attach(&app.renderer, light.index, render.directional_light_attachment())

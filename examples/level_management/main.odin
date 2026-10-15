@@ -48,7 +48,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   defer mjolnir.gltf_scene_destroy(&character)
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
@@ -126,7 +126,7 @@ setup :: proc(app: ^App) {
   // glTF models join the mix. Their loader-created meshes/materials land in the
   // same render pools, so fold them into the tracked lists — the destroy buttons
   // then free them exactly like the grid resources, and reset rebuilds them.
-  if duck, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Duck.glb"); ok {
+  if duck, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/Duck.glb")); ok {
     defer mjolnir.gltf_scene_destroy(&duck)
     for h in duck.roots {
       world.scale(&app.scene, h, 1.3)
@@ -135,7 +135,7 @@ setup :: proc(app: ^App) {
     }
     collect_gltf_resources(app, duck.roots[:])
   }
-  if scene, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/CesiumMan.glb"); ok {
+  if scene, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb")); ok {
     character = scene
     for h in character.roots {
       world.scale(&app.scene, h, 6.0)
@@ -244,7 +244,7 @@ update :: proc(app: ^App, delta_time: f32) {
     world.teardown(&app.scene)
     render.teardown(&app.renderer)
     if render.setup(&app.renderer) {
-      render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+      render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
       setup(app)
     }
     render.update(&app.renderer, delta_time)

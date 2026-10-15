@@ -29,13 +29,6 @@ events_process :: proc(b: ^Backend) {
   wgpu.InstanceProcessEvents(b.instance)
 }
 
-// The window's framebuffer size: a resized window keeps the surface's old size until resize.
-@(private)
-window_size :: proc(b: ^Backend) -> [2]u32 {
-  w, h := glfw.GetFramebufferSize(b.window)
-  return {u32(w), u32(h)}
-}
-
 @(private)
 surface_texture_get :: proc(b: ^Backend) -> wgpu.SurfaceTexture {
   return wgpu.SurfaceGetCurrentTexture(b.surface)

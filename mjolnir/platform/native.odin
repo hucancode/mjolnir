@@ -4,7 +4,9 @@ package platform
 import "base:runtime"
 import "core:c"
 import "core:log"
+import "core:os"
 import "core:strings"
+import "core:time"
 import "../input"
 import "vendor:glfw"
 
@@ -75,6 +77,36 @@ dpi_scale :: proc(self: ^Platform) -> f32 {
     log.warnf("DPI scale x (%v) and y (%v) not the same, using x", sw, sh)
   }
   return sw
+}
+
+// run calls step until it returns false, then returns.
+run :: proc(step: proc() -> bool) {
+  for step() {}
+}
+
+// sleep blocks the calling thread for `ms` milliseconds.
+sleep :: proc(ms: f64) {
+  time.sleep(time.Duration(ms * f64(time.Millisecond)))
+}
+
+// read_file reads the file at path into memory the caller frees; false when it cannot.
+read_file :: proc(path: string, allocator := context.allocator) -> (data: []u8, ok: bool) {
+  err: os.Error
+  data, err = os.read_entire_file(path, allocator)
+  if err != nil {
+    log.errorf("Failed to read '%s': %v", path, err)
+    return nil, false
+  }
+  return data, true
+}
+
+// write_file writes data to the file at path, replacing it; false when it cannot.
+write_file :: proc(path: string, data: []u8) -> bool {
+  if err := os.write_entire_file(path, data); err != nil {
+    log.errorf("Failed to write '%s': %v", path, err)
+    return false
+  }
+  return true
 }
 
 @(private = "file")

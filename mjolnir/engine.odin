@@ -3,6 +3,7 @@ package mjolnir
 import "core:log"
 import "core:thread"
 import "core:time"
+import "platform"
 
 // RENDER_FPS is the target frame rate of Loop.frame (-define:RENDER_FPS=n).
 RENDER_FPS :: #config(RENDER_FPS, 60)
@@ -20,6 +21,7 @@ UPDATE_FRAME_TIME_MILIS :: UPDATE_FRAME_TIME * 1_000.0
 MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
 // USE_PARALLEL_UPDATE runs Loop.update on its own thread (-define:USE_PARALLEL_UPDATE=true).
 USE_PARALLEL_UPDATE :: #config(USE_PARALLEL_UPDATE, false)
+#assert(ODIN_OS != .JS || !USE_PARALLEL_UPDATE, "no threads on the web")
 // FRAME_LIMIT stops run after this many frames; 0 means no limit (-define:FRAME_LIMIT=n).
 FRAME_LIMIT :: #config(FRAME_LIMIT, 0)
 
@@ -40,10 +42,11 @@ Loop :: struct($T: typeid) {
 // that created the window); on the web it returns at once and the browser calls step each
 // animation frame.
 run :: proc(loop: Loop($T)) {
-  run_loop(transmute(Loop(byte))loop)
+  runner = {loop = transmute(Loop(byte))loop}
+  platform.run(advance)
 }
 
-@(private)
+@(private = "file")
 Runner :: struct {
   loop:        Loop(byte),
   last_update: time.Time,
@@ -57,8 +60,20 @@ Runner :: struct {
   thread:      ^thread.Thread,
 }
 
-// One iteration of the loop; false when it is over. Sleeps until the next frame natively.
-@(private)
+// The loop run drives; it outlives run on the web.
+@(private = "file")
+runner: Runner
+
+// One iteration of the loop, stopping it once over; false then.
+@(private = "file")
+advance :: proc() -> bool {
+  if step(&runner) do return true
+  stop(&runner)
+  return false
+}
+
+// One iteration of the loop; false when it is over. Sleeps until the next frame.
+@(private = "file")
 step :: proc(r: ^Runner) -> bool {
   loop := &r.loop
   if loop.should_close(loop.app) do return false
@@ -85,9 +100,7 @@ step :: proc(r: ^Runner) -> bool {
       until_tick := UPDATE_FRAME_TIME_MILIS - time.duration_milliseconds(time.since(r.last_update))
       if until_tick < remaining do remaining = until_tick
     }
-    when ODIN_OS != .JS {
-      if remaining > 0.2 do time.sleep(time.Duration(remaining * f64(time.Millisecond)))
-    }
+    if remaining > 0.2 do platform.sleep(remaining)
     return true
   }
   r.last_frame = time.now()
@@ -113,7 +126,7 @@ step :: proc(r: ^Runner) -> bool {
 }
 
 // Stops the update thread and shuts the app down.
-@(private)
+@(private = "file")
 stop :: proc(r: ^Runner) {
   when USE_PARALLEL_UPDATE {
     if r.thread != nil {

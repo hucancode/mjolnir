@@ -58,7 +58,7 @@ main :: proc() {
   defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
   defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   setup(app)
   mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
@@ -73,7 +73,7 @@ setup :: proc(app: ^App) {
   ground := world.spawn(&app.scene, {0, GROUND_Y, 0})
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
-  scene = mjolnir.load_gltf(&app.scene, &app.renderer, "assets/stuffed_snake_rigged.glb")
+  scene = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
   if len(scene.skinned) == 0 do return
   snake_child_node = scene.skinned[0].node
   rig = &scene.rigs[scene.skinned[0].rig]

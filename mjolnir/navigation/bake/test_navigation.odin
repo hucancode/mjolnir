@@ -3,7 +3,6 @@ package bake
 
 import ".."
 import "core:math"
-import "core:os"
 import "core:testing"
 
 @(test)
@@ -29,11 +28,10 @@ test_save_load_roundtrip :: proc(t: ^testing.T) {
   nav: navigation.NavMesh
   build_plane(t, &nav)
   defer navigation.destroy(&nav)
-  path := "test_roundtrip.navmesh"
-  defer os.remove(path)
-  testing.expect(t, navigation.save(&nav, path), "save")
+  data := navigation.save(&nav)
+  defer delete(data)
   loaded: navigation.NavMesh
-  testing.expect(t, navigation.load(&loaded, path), "load")
+  testing.expect(t, navigation.load(&loaded, data), "load")
   defer navigation.destroy(&loaded)
 
   a, _ := navigation.debug_triangles(&nav, context.temp_allocator)

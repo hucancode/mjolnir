@@ -5,7 +5,6 @@ import "../detour"
 import "../recast"
 import "core:math"
 import "core:math/linalg"
-import "core:os"
 import "core:testing"
 
 @(private = "file")
@@ -151,12 +150,10 @@ test_navmesh_file_serialization :: proc(t: ^testing.T) {
     detour.nav_mesh_destroy(nav_mesh)
     free(nav_mesh)
   }
-  navmesh_file := "test_navmesh.navmesh"
-  defer os.remove(navmesh_file)
-  save_ok := detour.save_navmesh_to_file(nav_mesh, navmesh_file)
-  testing.expect(t, save_ok, "Failed to save navigation mesh to file")
-  loaded_nav_mesh, load_ok := detour.load_navmesh_from_file(navmesh_file)
-  testing.expect(t, load_ok, "Failed to load navigation mesh from file")
+  data := detour.save_navmesh(nav_mesh)
+  defer delete(data)
+  loaded_nav_mesh, load_ok := detour.load_navmesh(data)
+  testing.expect(t, load_ok, "Failed to load navigation mesh")
   testing.expect(
     t,
     loaded_nav_mesh != nil,
@@ -187,60 +184,7 @@ test_navmesh_file_serialization :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_navmesh_data_serialization :: proc(t: ^testing.T) {
-  vertices := [][3]f32{{-10, 0, -10}, {10, 0, -10}, {10, 0, 10}, {-10, 0, 10}}
-  indices := []i32{0, 1, 2, 0, 2, 3}
-  areas := []u8{recast.RC_WALKABLE_AREA, recast.RC_WALKABLE_AREA}
-  pmesh, dmesh, build_ok := build_test_mesh(vertices, indices, areas)
-  testing.expect(t, build_ok, "Failed to build test mesh")
-  defer {
-    recast.destroy_poly_mesh(pmesh)
-    recast.destroy_poly_mesh_detail(dmesh)
-  }
-  params := Create_Nav_Mesh_Data_Params {
-    poly_mesh          = pmesh,
-    poly_mesh_detail   = dmesh,
-    walkable_height    = 2.0,
-    walkable_radius    = 0.6,
-    walkable_climb     = 0.9,
-    tile_x             = 0,
-    tile_y             = 0,
-    tile_layer         = 0,
-    user_id            = 12345,
-    off_mesh_con_count = 0,
-  }
-  nav_data, create_status := create_nav_mesh_data(&params)
-  testing.expect(
-    t,
-    detour.status_succeeded(create_status),
-    "Failed to create nav mesh data",
-  )
-  testing.expect(t, len(nav_data) > 0, "Navigation data should not be empty")
-  defer delete(nav_data)
-  data_file := "test_navdata.bin"
-  defer os.remove(data_file)
-  save_ok := detour.save_navmesh_data_to_file(nav_data, data_file)
-  testing.expect(t, save_ok, "Failed to save navigation data to file")
-  loaded_data, load_ok := detour.load_navmesh_data_from_file(data_file)
-  testing.expect(t, load_ok, "Failed to load navigation data from file")
-  testing.expect(
-    t,
-    len(loaded_data) == len(nav_data),
-    "Data sizes should match",
-  )
-  defer delete(loaded_data)
-  data_match := true
-  for i in 0 ..< len(nav_data) {
-    if nav_data[i] != loaded_data[i] {
-      data_match = false
-      break
-    }
-  }
-  testing.expect(t, data_match, "Loaded data should match original data")
-}
-
-@(test)
-test_bake_and_save_workflow :: proc(t: ^testing.T) {
+test_bake_and_load_workflow :: proc(t: ^testing.T) {
   vertices := [][3]f32 {
     {-8, 0, -8},
     {8, 0, -8},
@@ -280,18 +224,10 @@ test_bake_and_save_workflow :: proc(t: ^testing.T) {
     recast.destroy_poly_mesh(pmesh)
     recast.destroy_poly_mesh_detail(dmesh)
   }
-  baked_file := "test_baked.navmesh"
-  defer os.remove(baked_file)
-  bake_ok := bake_and_save_navmesh(
-    pmesh,
-    dmesh,
-    2.0,
-    0.6,
-    0.9,
-    baked_file,
-  )
-  testing.expect(t, bake_ok, "Failed to bake and save navigation mesh")
-  nav_mesh, query, runtime_ok := detour.load_navmesh_for_runtime(baked_file)
+  baked, bake_ok := bake_navmesh(pmesh, dmesh, 2.0, 0.6, 0.9)
+  testing.expect(t, bake_ok, "Failed to bake navigation mesh")
+  defer delete(baked)
+  nav_mesh, query, runtime_ok := detour.load_navmesh_for_runtime(baked)
   testing.expect(t, runtime_ok, "Failed to load navigation mesh for runtime")
   testing.expect(
     t,
