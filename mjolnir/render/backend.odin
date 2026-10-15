@@ -3,10 +3,6 @@ package render
 import vulkan "vulkan"
 import wgpu "wgpu"
 
-// RENDER_BACKEND picks the GPU backend at compile time (-define:RENDER_BACKEND=vulkan|wgpu).
-// backend.odin and backend_glue.odin are the only files naming a backend package: the
-// types, constants and procs aliased there are the whole boundary, and a backend exports
-// every one of them under the same names. This file holds the ones in render's API.
 RENDER_BACKEND :: #config(RENDER_BACKEND, "vulkan")
 #assert(RENDER_BACKEND == "vulkan" || RENDER_BACKEND == "wgpu", "unknown RENDER_BACKEND")
 #assert(RENDER_BACKEND == "wgpu" || ODIN_OS != .JS, "the web takes RENDER_BACKEND=wgpu")

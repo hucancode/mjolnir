@@ -4,7 +4,6 @@ package render
 import vulkan "vulkan"
 import wgpu "wgpu"
 
-// The internal half of the backend boundary (see backend.odin).
 when RENDER_BACKEND == "vulkan" {
   Backend :: vulkan.Backend
   MAX_NODES_IN_SCENE :: vulkan.MAX_NODES_IN_SCENE
