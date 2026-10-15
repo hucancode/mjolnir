@@ -36,8 +36,7 @@ build-wgpu:
 
 # An example on the web: web/$(EXAMPLE).wasm beside Odin's JS runtime, WebGPU glue and the
 # host page (mjolnir/platform/web/index.html).
-# Linking needs wasm-ld (LLVM's lld) on PATH. `make serve` and open
-# http://localhost:8000/?example=$(EXAMPLE) in a WebGPU browser.
+# Linking needs wasm-ld (LLVM's lld) on PATH.
 ODIN_ROOT := $(shell odin root)
 EXAMPLE ?= cube
 
@@ -46,9 +45,6 @@ web:
 	odin build examples/$(EXAMPLE) -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
 		-target-features:"atomics,bulk-memory" -extra-linker-flags:"--export-table" -out:web/$(EXAMPLE).wasm
 	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js mjolnir/platform/web/index.html web/
-
-serve: web
-	python3 -m http.server -d web 8000
 
 EXAMPLES := $(patsubst examples/%/main.odin,%,$(wildcard examples/*/main.odin))
 
@@ -132,10 +128,23 @@ long-file:
 long-example:
 	find examples -type f -name "main.odin" -exec wc -l {} + | sort -rn | head -n20
 
+# Live builds for the examples page: docs/build/live/<example>.wasm plus the host page.
+# Best effort: examples that do not build for the web are skipped and fall back to their video.
+doc-live:
+	mkdir -p docs/build/live
+	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js mjolnir/platform/web/index.html docs/build/live/
+	@for name in $(EXAMPLES); do \
+		echo "wasm: $$name"; \
+		odin build examples/$$name -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
+			-target-features:"atomics,bulk-memory" -extra-linker-flags:"--export-table" \
+			-out:docs/build/live/$$name.wasm >/dev/null 2>&1 || echo "  skipped $$name (no web build)"; \
+	done
+
 doc: shader
 	rm -rf docs/build
 	mkdir -p docs/build
 	cp -R docs/site/. docs/build/
+	$(MAKE) doc-live
 	odin run docs/gen -- docs/build/data
 
 compare-physics:
@@ -148,4 +157,4 @@ compare-physics:
 	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt
 	perf report -i perf.data --stdio --no-children -n --percent-limit 1 >perf_report_after.txt
 
-.PHONY: build build-debug build-wgpu run-wgpu web serve run run-max debug shader check clean vtest examples golden capture long-proc long-file long-example doc doc-dev record compare-physics
+.PHONY: doc-live build build-debug build-wgpu run-wgpu web run run-max debug shader check clean vtest examples golden capture long-proc long-file long-example doc doc-dev record compare-physics

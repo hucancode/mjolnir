@@ -45,21 +45,61 @@ function renderApi(root) {
 }
 
 function renderExamples(root) {
-  const grid = el('ul');
-  for (const e of window.EXAMPLES) {
-    const media = e.video
-      ? el('video', { src: `videos/${e.name}.mp4`, autoplay: true, muted: true, loop: true, playsInline: true, preload: 'metadata' })
-      : el('p', { textContent: 'video not yet recorded' });
-    media.muted = true; // the muted attribute must be set for autoplay to be allowed
-    grid.append(
-      el('li', { id: e.name },
-        el('figure', {}, media, el('figcaption', {}, el('code', { textContent: e.name }), el('small', { textContent: e.desc }))),
-        el('details', {}, el('summary', { textContent: 'Show code' }), el('pre', {}, el('code', { textContent: e.source })))
-      )
-    );
+  const list = window.EXAMPLES;
+  const hasGpu = !!navigator.gpu;
+  const nav = el('nav');
+  const stage = el('div', { className: 'stage' });
+  const title = el('h1');
+  const desc = el('p');
+  const modeBtn = el('button', { type: 'button' });
+  const codeBtn = el('button', { type: 'button', textContent: 'Show code' });
+  const code = el('code');
+  const pre = el('pre', { hidden: true }, code);
+  const view = el('section', {}, title, desc, el('p', { className: 'toolbar' }, modeBtn, codeBtn), stage, pre);
+  root.append(el('div', { className: 'examples' }, el('search', {}, nav), view));
+
+  for (const e of list) nav.append(el('a', { href: '#' + e.name, textContent: e.name }));
+
+  let current, live; // live: whether the current example runs as a WebGPU build rather than a video
+
+  function mount() {
+    const e = current;
+    modeBtn.hidden = !(e.wasm && e.video && hasGpu);
+    modeBtn.textContent = live ? 'Watch video' : 'Run live';
+    if (live) {
+      stage.replaceChildren(el('iframe', { src: `live/index.html?example=${encodeURIComponent(e.name)}`, title: e.name, allow: 'fullscreen; gamepad' }));
+    } else if (e.video) {
+      const v = el('video', { src: `videos/${e.name}.mp4`, autoplay: true, muted: true, loop: true, playsInline: true, controls: true });
+      v.muted = true; // the muted attribute must be set for autoplay to be allowed
+      stage.replaceChildren(v);
+    } else {
+      stage.replaceChildren(el('p', { textContent: 'No live build or video for this example yet.' }));
+    }
   }
-  root.append(grid);
-  if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView();
+
+  function show() {
+    const name = decodeURIComponent(location.hash.slice(1));
+    const e = list.find((x) => x.name === name) ?? list[0];
+    if (e === current) return;
+    current = e;
+    live = hasGpu && e.wasm; // fall back to the video without WebGPU or a wasm build
+    document.title = e.name + ' - Examples - Mjolnir';
+    for (const a of nav.children) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + e.name);
+    title.textContent = e.name;
+    desc.textContent = e.desc;
+    code.textContent = e.source;
+    pre.scrollTop = 0;
+    mount();
+  }
+
+  modeBtn.addEventListener('click', () => { live = !live; mount(); });
+  codeBtn.addEventListener('click', () => {
+    pre.hidden = !pre.hidden;
+    codeBtn.textContent = pre.hidden ? 'Show code' : 'Hide code';
+    view.classList.toggle('with-code', !pre.hidden);
+  });
+  addEventListener('hashchange', show);
+  show();
 }
 
 const page = document.body.dataset.page;

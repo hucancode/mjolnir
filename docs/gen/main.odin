@@ -32,6 +32,7 @@ Example :: struct {
 	desc:   string,
 	source: string,
 	video:  bool,
+	wasm:   bool, // a WebGPU build exists at live/<name>.wasm
 }
 
 // raw symbol straight out of `odin doc`, before filtering
@@ -203,11 +204,13 @@ load_examples :: proc() -> []Example {
 			append(&desc, strings.trim_left_space(line[2:]))
 		}
 		video_path, _ := filepath.join({"docs", "site", "videos", fmt.tprintf("%s.mp4", fi.name)})
+		wasm_path, _ := filepath.join({"docs", "build", "live", fmt.tprintf("%s.wasm", fi.name)})
 		append(&out, Example{
 			name = fi.name,
 			desc = strings.join(desc[:], " "),
 			source = source,
 			video = os.exists(video_path),
+			wasm = os.exists(wasm_path),
 		})
 	}
 	// cube first, as the hello world; the rest alphabetical

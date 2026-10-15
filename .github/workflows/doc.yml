@@ -53,6 +53,10 @@ jobs:
           version: 1.4.309.0
           cache: true
 
+      # wasm-ld links the live WebGPU builds of the examples
+      - name: Install lld
+        run: sudo apt-get update && sudo apt-get install -y lld
+
       - name: Build documentation
         run: make doc
 
