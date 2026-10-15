@@ -3,7 +3,7 @@ package detour
 import "core:container/priority_queue"
 import "core:math"
 import "core:math/linalg"
-import "core:mem/virtual"
+import "core:mem"
 
 @(private = "file")
 Find_Path_Options :: enum u8 {
@@ -42,7 +42,7 @@ Node_Flags :: bit_set[Node_Flag;u8]
 @(private)
 Pathfinding_Context :: struct {
   nodes: map[Poly_Ref]^Node,
-  arena: virtual.Arena,
+  arena: mem.Dynamic_Arena,
 }
 
 @(private)
@@ -55,9 +55,7 @@ pathfinding_context_init :: proc(
   ctx: ^Pathfinding_Context,
   max_nodes: i32,
 ) -> Status {
-  if err := virtual.arena_init_growing(&ctx.arena); err != .None {
-    return {.Out_Of_Memory}
-  }
+  mem.dynamic_arena_init(&ctx.arena)
   ctx.nodes = make(map[Poly_Ref]^Node, max_nodes)
   return {.Success}
 }
@@ -65,13 +63,13 @@ pathfinding_context_init :: proc(
 @(private)
 pathfinding_context_clear :: proc(ctx: ^Pathfinding_Context) {
   clear(&ctx.nodes)
-  free_all(virtual.arena_allocator(&ctx.arena))
+  mem.dynamic_arena_free_all(&ctx.arena)
 }
 
 @(private)
 pathfinding_context_destroy :: proc(ctx: ^Pathfinding_Context) {
   delete(ctx.nodes)
-  virtual.arena_destroy(&ctx.arena)
+  mem.dynamic_arena_destroy(&ctx.arena)
   ctx^ = {}
 }
 
@@ -84,13 +82,9 @@ get_node :: proc(ctx: ^Pathfinding_Context, id: Poly_Ref) -> ^Node {
 @(private)
 create_node :: proc(ctx: ^Pathfinding_Context, id: Poly_Ref) -> ^Node {
   if existing, ok := ctx.nodes[id]; ok do return existing
-  node_mem, err := virtual.arena_alloc(
-    &ctx.arena,
-    size_of(Node),
-    align_of(Node),
-  )
+  node_mem, err := mem.dynamic_arena_alloc(&ctx.arena, size_of(Node), align_of(Node))
   if err != .None do return nil
-  node := cast(^Node)raw_data(node_mem)
+  node := cast(^Node)node_mem
   node.id = id
   node.flags = {}
   node.cost = 0

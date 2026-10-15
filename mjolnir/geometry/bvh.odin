@@ -4,7 +4,6 @@ import "base:intrinsics"
 import "core:log"
 import "core:math"
 import "core:mem"
-import "core:mem/virtual"
 import "core:slice"
 import "core:sync"
 import "core:thread"
@@ -85,13 +84,10 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
   if len(items) == 0 do return
   reserve(&bvh.primitives, len(items))
   append(&bvh.primitives, ..items)
-  arena: virtual.Arena
-  if err := virtual.arena_init_growing(&arena); err != nil {
-    log.error("Failed to init arena:", err)
-    return
-  }
-  defer virtual.arena_free_all(&arena)
-  arena_allocator := virtual.arena_allocator(&arena)
+  arena: mem.Dynamic_Arena
+  mem.dynamic_arena_init(&arena)
+  defer mem.dynamic_arena_destroy(&arena)
+  arena_allocator := mem.dynamic_arena_allocator(&arena)
   build_prims := make([]BVHPrimitive, len(items), arena_allocator)
   for item, i in items {
     bounds := bvh.bounds_func(item)
@@ -969,14 +965,12 @@ bvh_build_parallel :: proc(
   num_threads := len(thread_pool.threads)
   if num_threads == 0 do num_threads = 1
 
-  arena: virtual.Arena
-  if err := virtual.arena_init_growing(&arena); err != nil {
-    log.error("Failed to init arena:", err)
-    bvh_build(bvh, items, max_leaf_size)
-    return
-  }
-  defer virtual.arena_free_all(&arena)
-  arena_allocator := virtual.arena_allocator(&arena)
+  arena: mem.Dynamic_Arena
+  mem.dynamic_arena_init(&arena)
+  defer mem.dynamic_arena_destroy(&arena)
+  arena_mutex: mem.Mutex_Allocator
+  mem.mutex_allocator_init(&arena_mutex, mem.dynamic_arena_allocator(&arena))
+  arena_allocator := mem.mutex_allocator(&arena_mutex)
 
   build_prims := parallel_prepare_primitives(
     items,
