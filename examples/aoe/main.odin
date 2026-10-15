@@ -35,18 +35,27 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   physics.init(&phys)
-  defer physics.shutdown(&phys)
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 800, 600, "AOE Query") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "AOE Query", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
 
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   cube_body_to_mesh = make(map[physics.BodyHandle]world.NodeHandle)
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
@@ -81,8 +90,15 @@ main :: proc() {
   render.main_camera_look_at(&app.renderer, {10, 30, 10}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   log.infof("AOE test setup complete: %d cubes", len(cube_mesh_handles))
+  return true
+}
 
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+shutdown :: proc(app: ^App) {
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
+  physics.shutdown(&phys)
 }
 
 should_close :: proc(app: ^App) -> bool {

@@ -45,31 +45,36 @@ App :: struct {
 
 main :: proc() {
   context.logger = log.create_console_logger()
-  defer mjolnir.gltf_scene_destroy(&scene)
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 800, 600, "IK") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "IK", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  setup(app)
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
 }
 
 should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.main_camera_look_at(&app.renderer, {0, 20, 20}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   scene = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
-  if len(scene.roots) == 0 || len(scene.skinned) == 0 do return
+  if len(scene.roots) == 0 || len(scene.skinned) == 0 do return true
   spider_root_node = scene.roots[0]
   world.translate(&app.scene, spider_root_node, [3]f32{0, 5, 0})
   mesh_node = scene.skinned[0].node
@@ -122,6 +127,15 @@ setup :: proc(app: ^App) {
   world.scale(&app.scene, ground_plane, [3]f32{40, 0.2, 40})
   light := world.spawn(&app.scene)
   render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 1, 1, 1}, 10.0))
+  return true
+}
+
+shutdown :: proc(app: ^App) {
+  mjolnir.gltf_scene_destroy(&scene)
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
 }
 
 update :: proc(app: ^App, dt: f32) {

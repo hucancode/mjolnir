@@ -29,17 +29,20 @@ phase: f32
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 1000, 700, "Orthographic Camera") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Orthographic Camera", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  setup(app)
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -53,7 +56,10 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
   return n
 }
 
-setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   spawn_primitive(app, .CUBE,     .RED,    {-2.5, 0.5, 0})
   spawn_primitive(app, .SPHERE,   .GREEN,  {2.5, 0.5, 0},  0.7)
   spawn_primitive(app, .CYLINDER, .BLUE,   {0, 1.0, 2.5},  0.5)
@@ -71,6 +77,14 @@ setup :: proc(app: ^App) {
   render.camera_set_orthographic(cam, f32(ortho_width), f32(ortho_height))
   render.camera_look_at(cam, {0, f32(cam_height), 0.01}, {0, 0, 0})
   log.info("Orthographic Main Camera — top-down view")
+  return true
+}
+
+shutdown :: proc(app: ^App) {
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
 }
 
 update :: proc(app: ^App, dt: f32) {

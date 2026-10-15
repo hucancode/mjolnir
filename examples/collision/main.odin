@@ -83,21 +83,31 @@ default_bodies :: proc() -> [3]Body {
 }
 
 main :: proc() {
-  physics.init(&phys)
-  defer physics.shutdown(&phys)
   context.logger = log.create_console_logger()
+  physics.init(&phys)
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 1100, 760, "Collision") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Collision", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  setup(app)
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
+
+shutdown :: proc(app: ^App) {
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
+  physics.shutdown(&phys)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -110,12 +120,16 @@ frame :: proc(app: ^App) -> bool {
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
-setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.main_camera_look_at(&app.renderer, {16, 14, 16}, {0, 1.5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-6, 14, 6})
   render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.96, 0.9, 1}, 6.0, true))
   spawn_scene(app)
+  return true
 }
 
 // One-time creation of nodes + visuals + physics bodies.
@@ -253,10 +267,7 @@ update :: proc(app: ^App, dt: f32) {
     physics.teardown(&phys)
     world.teardown(&app.scene)
     render.teardown(&app.renderer)
-    if render.setup(&app.renderer) {
-      render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-      setup(app)
-    }
+    if render.setup(&app.renderer) do setup(app)
     render.update(&app.renderer, dt)
     return
   }

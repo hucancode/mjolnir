@@ -11,7 +11,6 @@ import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/rand"
-import "core:os"
 
 GRID_W :: 20
 GRID_H :: 20
@@ -75,22 +74,29 @@ state: State
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 1024, 768, "Torus Tetris") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Torus Tetris", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  font_data, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
-  if err != nil do return
-  defer delete(font_data)
-  if !font.init(&app.font, font_data) do return
-  defer font.destroy(&app.font)
-  setup(app)
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
+
+shutdown :: proc(app: ^App) {
+  font.destroy(&app.font)
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -115,7 +121,10 @@ cell_world_pos :: proc(col: i32, row: i32) -> [3]f32 {
   return {RADIUS * math.cos(a), f32(row) * CELL + 0.5 * CELL, RADIUS * math.sin(a)}
 }
 
-setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   ground := app.renderer.builtin_meshes[.QUAD_XZ]
   dark_mat := render.create_material(&app.renderer, type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0})
   floor := world.spawn(&app.scene)
@@ -132,6 +141,7 @@ setup :: proc(app: ^App) {
   }
   state.fall_period = FALL_PERIOD
   reset_game(app)
+  return true
 }
 
 reset_game :: proc(app: ^App) {

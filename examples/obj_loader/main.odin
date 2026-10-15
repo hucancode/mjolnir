@@ -11,7 +11,7 @@ import "core:log"
 import "core:math/linalg"
 import mu "vendor:microui"
 
-OBJ_FILES :: [3]string{"assets/nav_test.obj", "assets/floor_with_5_obstacles.obj", "assets/dungeon.obj"}
+obj_files := [3][]u8{#load("../../assets/nav_test.obj"), #load("../../assets/floor_with_5_obstacles.obj"), #load("../../assets/dungeon.obj")}
 OBJ_SCALES :: [3]f32{1.0, 1.0, 0.05}
 OBJ_LABELS :: [3]string{"nav_test", "5 obstacles", "dungeon"}
 
@@ -33,14 +33,25 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 1000, 700, "OBJ Loader") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "OBJ Loader", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
+
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
   render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   light := world.spawn(&app.scene, {10, 18, 10})
@@ -49,18 +60,18 @@ main :: proc() {
 
   display_material = render.create_material(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1})
 
-  files := OBJ_FILES
   scales := OBJ_SCALES
+  labels := OBJ_LABELS
   for i in 0 ..< 3 {
-    obj, ok := load_obj(files[i], scales[i])
+    obj, ok := load_obj(obj_files[i], scales[i])
     if !ok {
-      log.errorf("failed to load %s", files[i])
+      log.errorf("failed to load %s", labels[i])
       continue
     }
     geom := render.from_triangles(obj.positions, obj.indices)
     obj_mesh_destroy(&obj)
     aabb := render.aabb_from_vertices(geom.vertices)
-    log.infof("%s: %d verts, %d tris, aabb %v..%v", files[i], len(geom.vertices), len(geom.indices) / 3, aabb.min, aabb.max)
+    log.infof("%s: %d verts, %d tris, aabb %v..%v", labels[i], len(geom.vertices), len(geom.indices) / 3, aabb.min, aabb.max)
     loaded_aabb[i] = {aabb.min, aabb.max}
     loaded_meshes[i] = render.create_mesh(&app.renderer, geom)
   }
@@ -68,8 +79,14 @@ main :: proc() {
   display_node = world.spawn(&app.scene)
   render.attach(&app.renderer, display_node.index, render.MeshAttachment{handle = loaded_meshes[0], material = display_material, cast_shadow = true})
   swap_model(app, 0)
+  return true
+}
 
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+shutdown :: proc(app: ^App) {
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {

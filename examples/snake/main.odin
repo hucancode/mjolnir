@@ -12,7 +12,6 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
-import "core:os"
 
 GRID :: 15
 CELL :: 1.0
@@ -54,22 +53,29 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 1024, 768, "Snake 3D") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Snake 3D", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  font_data, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
-  if err != nil do return
-  defer delete(font_data)
-  if !font.init(&app.font, font_data) do return
-  defer font.destroy(&app.font)
-  setup(app)
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
+
+shutdown :: proc(app: ^App) {
+  font.destroy(&app.font)
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -93,7 +99,10 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
   return n
 }
 
-setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   half := f32(GRID) * CELL * 0.5
   wall_t :: 0.2
   wall_h :: 0.5
@@ -122,6 +131,7 @@ setup :: proc(app: ^App) {
 
   reset_game(app)
   log.info("Controls: WASD or arrows. Auto-restart on game over.")
+  return true
 }
 
 spawn_wall :: proc(app: ^App, pos: [3]f32, sx, sy, sz: f32) {

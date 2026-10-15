@@ -43,22 +43,21 @@ App :: struct {
 
 main :: proc() {
   context.logger = log.create_console_logger()
-  defer {
-    nav.destroy(&navmesh)
-    bake.builder_destroy(&nav_builder)
-  }
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 800, 600, "Navigation Mesh") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Navigation Mesh", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  demo_setup(app)
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -76,7 +75,10 @@ spawn_mesh :: proc(app: ^App, mesh_handle: render.MeshHandle, material: render.M
   return n
 }
 
-demo_setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   log.info("Navigation mesh demo setup with world integration")
   bake.builder_destroy(&nav_builder)
   render.main_camera_look_at(&app.renderer, {35, 25, 35}, {0, 0, 0})
@@ -90,6 +92,16 @@ demo_setup :: proc(app: ^App) {
   update_position_marker(app, &end_marker_handle, end_pos, {1, 0, 0, 1})
   create_agent(app)
   start_find_path(app)
+  return true
+}
+
+shutdown :: proc(app: ^App) {
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
+  nav.destroy(&navmesh)
+  bake.builder_destroy(&nav_builder)
 }
 
 create_demo_scene :: proc(app: ^App) {

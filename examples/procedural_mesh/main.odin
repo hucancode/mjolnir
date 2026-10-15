@@ -34,17 +34,27 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 1000, 700, "Procedural Mesh") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Procedural Mesh", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  setup(app)
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
+
+shutdown :: proc(app: ^App) {
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -62,7 +72,10 @@ spawn_mesh :: proc(app: ^App, mesh_handle: render.MeshHandle, material: render.M
   return n
 }
 
-setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.main_camera_look_at(&app.renderer, {0, 6, 14}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {6, 12, 6})
@@ -78,6 +91,7 @@ setup :: proc(app: ^App) {
   wave_node   = spawn_mesh(app, render.create_mesh(&app.renderer, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0})
   knot_node   = spawn_mesh(app, render.create_mesh(&app.renderer, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0})
   spiral_node = spawn_mesh(app, render.create_mesh(&app.renderer, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0})
+  return true
 }
 
 build_wave :: proc(n: int, size: f32, amp: f32) -> render.Geometry {

@@ -44,24 +44,32 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  defer free(app)
   world_def := b2.DefaultWorldDef()
   world_def.gravity = {0, -9.81}
   app.phys = b2.CreateWorld(world_def)
-  defer b2.DestroyWorld(app.phys)
-  defer delete(app.pieces)
   w := &app.window
   if !platform.init(w, 800, 600, "Physics (Box2D)") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Physics (Box2D)", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
 
-  setup(app)
-
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+shutdown :: proc(app: ^App) {
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  delete(app.pieces)
+  b2.DestroyWorld(app.phys)
+  free(app)
 }
 
 spawn_mesh :: proc(app: ^App, m: render.MeshHandle, mat: render.MaterialHandle, parent: world.NodeHandle) -> world.NodeHandle {
@@ -85,7 +93,10 @@ create_body :: proc(app: ^App, type: b2.BodyType, position: [2]f32) -> b2.BodyId
   return b2.CreateBody(app.phys, def)
 }
 
-setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   ground_mesh := app.renderer.builtin_meshes[.CUBE]
   ground_mat := app.renderer.builtin_materials[.GRAY]
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
@@ -140,6 +151,7 @@ setup :: proc(app: ^App) {
   light := world.spawn(&app.scene, {0, 20, 0})
   render.attach(&app.renderer, light.index, render.spot_light_attachment({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  return true
 }
 
 should_close :: proc(app: ^App) -> bool {

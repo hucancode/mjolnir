@@ -136,18 +136,28 @@ update :: proc(app: ^App, dt: f32) {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 1280, 720, "Mjolnir") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Mjolnir", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("assets/Cannon_Exterior.hdr"))
-  defer for &c in characters do mjolnir.gltf_scene_destroy(&c.scene)
-  setup(app)
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
+
+shutdown :: proc(app: ^App) {
+  for &c in characters do mjolnir.gltf_scene_destroy(&c.scene)
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -176,7 +186,10 @@ spawn :: proc(
   return handle, true
 }
 
-setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("assets/Cannon_Exterior.hdr"))
   app.renderer.ibl_intensity = 0.3
   plain_material_handle := app.renderer.builtin_materials[render.Color.WHITE]
   cube_mesh_handle := app.renderer.builtin_meshes[render.Primitive.CUBE]
@@ -666,6 +679,7 @@ setup :: proc(app: ^App) {
     }
   }
   log.info("setup complete")
+  return true
 }
 
 on_key :: proc(app: ^App, key: input.Key, pressed: bool) {

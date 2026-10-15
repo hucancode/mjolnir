@@ -42,16 +42,26 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 1000, 700, "Camera Controllers") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Camera Controllers", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
 
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.main_camera_look_at(&app.renderer, {0, 6, 12}, {0, 0, 0})
   if cam, ok := render.main_camera(&app.renderer); ok {
     app.orbit.yaw, app.orbit.pitch, app.orbit.distance = render.camera_orbit_state(cam)
@@ -74,8 +84,14 @@ main :: proc() {
   world.scale(&app.scene, runner_handle, 0.6)
 
   log.info("Camera controllers — switch live via UI (ORBIT/FREE/FOLLOW)")
+  return true
+}
 
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+shutdown :: proc(app: ^App) {
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {

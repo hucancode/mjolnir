@@ -44,19 +44,29 @@ auto_play: bool = true
 
 main :: proc() {
   context.logger = log.create_console_logger()
-  defer mjolnir.gltf_scene_destroy(&snake)
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 900, 650, "Path Modifier") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Path Modifier", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  setup(app)
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
+
+shutdown :: proc(app: ^App) {
+  mjolnir.gltf_scene_destroy(&snake)
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -97,7 +107,10 @@ draw_path_debug :: proc(app: ^App) {
   }
 }
 
-setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.main_camera_look_at(&app.renderer, {5, 3, 5}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   snake = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
@@ -120,6 +133,7 @@ setup :: proc(app: ^App) {
   world.scale(&app.scene, ground, 30.0)
   light := world.spawn(&app.scene, {0, 10, 0})
   render.attach(&app.renderer, light.index, render.point_light_attachment({1, 0.9, 0.8, 1}, 15.0, true))
+  return true
 }
 
 update :: proc(app: ^App, dt: f32) {

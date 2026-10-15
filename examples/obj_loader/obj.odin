@@ -1,7 +1,6 @@
 package main
 
 import "core:log"
-import "core:os"
 import "core:strconv"
 import "core:strings"
 
@@ -18,18 +17,15 @@ obj_mesh_destroy :: proc(self: ^ObjMesh) {
   self^ = {}
 }
 
-// Load the vertex positions and faces (fan-triangulated) of an OBJ file,
+// Load the vertex positions and faces (fan-triangulated) of OBJ text,
 // scaled by `scale`.
 load_obj :: proc(
-  filename: string,
+  data: []u8,
   scale: f32 = 1.0,
 ) -> (
   obj: ObjMesh,
   ok: bool,
 ) {
-  data, err := os.read_entire_file(filename, context.allocator)
-  if err != nil do return
-  defer delete(data)
   content := string(data)
   lines := strings.split_lines(content)
   defer delete(lines)
@@ -93,7 +89,7 @@ load_obj :: proc(
     }
   }
   if len(positions) == 0 || len(indices) == 0 {
-    log.errorf("No valid geometry found in OBJ file: %s", filename)
+    log.errorf("No valid geometry found in OBJ data")
     delete(positions)
     delete(indices)
     return {}, false

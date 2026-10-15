@@ -40,18 +40,20 @@ test_frame: int
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 1100, 760, "Level Management") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Level Management", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  defer mjolnir.gltf_scene_destroy(&character)
-  setup(app)
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -64,7 +66,10 @@ frame :: proc(app: ^App) -> bool {
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
-setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   clear(&example_materials)
   clear(&example_meshes)
   clear(&example_nodes)
@@ -159,6 +164,15 @@ setup :: proc(app: ^App) {
     len(example_nodes),
     reset_count,
   )
+  return true
+}
+
+shutdown :: proc(app: ^App) {
+  mjolnir.gltf_scene_destroy(&character)
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
 }
 
 collect_gltf_resources :: proc(app: ^App, roots: []world.NodeHandle) {
@@ -243,10 +257,7 @@ update :: proc(app: ^App, delta_time: f32) {
     reset_requested = false
     world.teardown(&app.scene)
     render.teardown(&app.renderer)
-    if render.setup(&app.renderer) {
-      render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-      setup(app)
-    }
+    if render.setup(&app.renderer) do setup(app)
     render.update(&app.renderer, delta_time)
     return
   }

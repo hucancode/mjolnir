@@ -10,4 +10,6 @@
 // platform the host (desktop or web). Nothing above platform reads files or names a host:
 // the engine takes and returns bytes (#load them, or platform.read_file / write_file) and an
 // opaque window handle.
+// An app builds its scene in Loop.setup once render.ready, and frees it in Loop.shutdown:
+// on the web the device arrives after init, and main returns as soon as run does.
 package mjolnir

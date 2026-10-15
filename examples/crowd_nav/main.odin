@@ -49,22 +49,27 @@ App :: struct {
 
 main :: proc() {
   context.logger = log.create_console_logger()
-  defer {
-    crowd.destroy(agent_crowd)
-    nav.destroy(&navmesh)
-    bake.builder_destroy(&nav_builder)
-  }
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 1000, 700, "Crowd Navigation") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Crowd Navigation", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
 
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.main_camera_look_at(&app.renderer, {32, 28, 32}, {0, 0, 0})
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
@@ -75,8 +80,17 @@ main :: proc() {
   visualize_navmesh(app)
   spawn_agents(app)
   assign_swap_targets(app)
+  return true
+}
 
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+shutdown :: proc(app: ^App) {
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
+  crowd.destroy(agent_crowd)
+  nav.destroy(&navmesh)
+  bake.builder_destroy(&nav_builder)
 }
 
 should_close :: proc(app: ^App) -> bool {

@@ -11,7 +11,6 @@ import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
-import "core:os"
 
 // How the app draws a node: ui lays nodes out, the app gives them a look.
 Look :: struct {
@@ -44,29 +43,44 @@ BUTTON_PRESSED :: [4]u8{110, 200, 110, 255}
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 900, 700, "UI") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "UI", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  font_data, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
-  if err != nil do return
-  defer delete(font_data)
-  if !font.init(&app.font, font_data) do return
-  defer font.destroy(&app.font)
+  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return
   ui.init(&app.gui)
-  defer ui.destroy(&app.gui)
-  defer delete(app.looks)
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
+
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   build_ui(app)
   cube := world.spawn(&app.scene)
   render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, .BLUE))
   render.main_camera_look_at(&app.renderer, {3, 2, 3}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  return true
+}
+
+shutdown :: proc(app: ^App) {
+  delete(app.looks)
+  ui.destroy(&app.gui)
+  font.destroy(&app.font)
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
 }
 
 text :: proc(app: ^App, parent: ui.NodeHandle, s: string, size: f32 = 18, n: ui.Node = {}) -> ui.NodeHandle {

@@ -32,22 +32,33 @@ elapsed: f32
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 800, 600, "Sprite") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Sprite", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-
-  setup(app)
-
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
 }
 
-setup :: proc(app: ^App) {
+shutdown :: proc(app: ^App) {
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
+}
+
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.main_camera_look_at(&app.renderer, {0, 1.5, 6}, {0, 1.5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
@@ -58,7 +69,7 @@ setup :: proc(app: ^App) {
   tex, tex_ok := render.create_texture_from_data(&app.renderer, #load("../../assets/Warrior_Sheet-Effect.png"))
   if !tex_ok {
     log.error("failed to load warrior sheet")
-    return
+    return true
   }
 
   xs := [Mode]f32{.LOOP = -3.0, .PINGPONG = 0.0, .ONCE = 3.0}
@@ -75,6 +86,7 @@ setup :: proc(app: ^App) {
 
   light := world.spawn(&app.scene, {2, 6, 4})
   render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 1, 1, 1}, shadow_radius = 8))
+  return true
 }
 
 should_close :: proc(app: ^App) -> bool {

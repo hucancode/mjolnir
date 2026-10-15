@@ -53,30 +53,43 @@ App :: struct {
 
 main :: proc() {
   context.logger = log.create_console_logger()
-  defer mjolnir.gltf_scene_destroy(&scene)
   app := new(App)
-  defer free(app)
   w := &app.window
   if !platform.init(w, 900, 700, "Spider Leg") do return
-  defer platform.shutdown(w)
   if !render.init(&app.renderer, "Spider Leg", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
-  defer render.shutdown(&app.renderer)
   if !world.init(&app.scene) do return
-  defer world.shutdown(&app.scene)
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  setup(app)
-  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+  mjolnir.run(
+    mjolnir.Loop(App) {
+      app = app,
+      setup = setup,
+      shutdown = shutdown,
+      should_close = should_close,
+      update = update,
+      frame = frame,
+    },
+  )
+}
+
+shutdown :: proc(app: ^App) {
+  world.shutdown(&app.scene)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.window)
+  free(app)
+  mjolnir.gltf_scene_destroy(&scene)
 }
 
 should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-setup :: proc(app: ^App) {
+// On the web the renderer's device arrives after main returns: build the scene once it is up.
+setup :: proc(app: ^App) -> bool {
+  if !render.ready(&app.renderer) do return false
+  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.main_camera_look_at(&app.renderer, {0, 30, 15}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   scene = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
-  if len(scene.roots) == 0 || len(scene.skinned) == 0 do return
+  if len(scene.roots) == 0 || len(scene.skinned) == 0 do return true
   spider_root_node = scene.roots[0]
   world.translate(&app.scene, spider_root_node, y = 5)
   spider_mesh_node = scene.skinned[0].node
@@ -120,6 +133,7 @@ setup :: proc(app: ^App) {
   world.scale(&app.scene, ground_plane, [3]f32{20, 0.2, 20})
   light := world.spawn(&app.scene, {0, 10, 0})
   render.attach(&app.renderer, light.index, render.point_light_attachment(radius=15))
+  return true
 }
 
 apply_group :: proc(app: ^App, group: []int, lift_height, lift_duration, lift_frequency, time_offset: f32) {
