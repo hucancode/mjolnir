@@ -32,6 +32,10 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # wasm-ld links the live WebGPU builds of the examples
+      - name: Install lld
+        run: sudo apt-get update && sudo apt-get install -y lld
+
       - name: Build Odin vendor libraries
         run: |
           bash /home/runner/odin/vendor/stb/src/build_stb.sh
@@ -52,10 +56,6 @@ jobs:
         with:
           version: 1.4.309.0
           cache: true
-
-      # wasm-ld links the live WebGPU builds of the examples
-      - name: Install lld
-        run: sudo apt-get update && sudo apt-get install -y lld
 
       - name: Build documentation
         run: make doc
