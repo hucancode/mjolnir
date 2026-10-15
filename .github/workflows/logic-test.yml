@@ -30,6 +30,13 @@ jobs:
         # only fail if it is actually absent.
         bash /home/runner/odin/vendor/box3d/src/build.sh || test -f /home/runner/odin/vendor/box3d/lib/linux-amd64/libbox3d.a
 
+    # render imports both backends, so vendor:wgpu is compiled even for the vulkan build
+    - name: Get wgpu-native
+      run: |
+        curl -fsSL -o wgpu.zip https://github.com/gfx-rs/wgpu-native/releases/download/v29.0.1.1/wgpu-linux-x86_64-release.zip
+        unzip -q wgpu.zip -d /home/runner/odin/vendor/wgpu/lib/wgpu-linux-x86_64-release
+        rm wgpu.zip
+
     - name: Setup Vulkan SDK
       uses: humbletim/install-vulkan-sdk@v1.2
       with:
