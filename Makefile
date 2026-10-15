@@ -102,15 +102,15 @@ clean:
 
 %.spv: %.comp
 	@echo "Compiling compute shader $<..."
-	@glslc "$<" -o "$@"
+	@glslc --target-env=vulkan1.3 "$<" -o "$@"
 
 $(SHADER_DIR)/%/vert.spv: $(SHADER_DIR)/%/shader.vert
 	@echo "Compiling vertex shader $<..."
-	@glslc "$<" -o "$@"
+	@glslc --target-env=vulkan1.3 "$<" -o "$@"
 
 $(SHADER_DIR)/%/frag.spv: $(SHADER_DIR)/%/shader.frag
 	@echo "Compiling fragment shader $<..."
-	@glslc "$<" -o "$@"
+	@glslc --target-env=vulkan1.3 "$<" -o "$@"
 
 long-proc:
 	grep -rhE "^\s*[a-zA-Z0-9_]+\s*::\s*proc" mjolnir --include \*.odin | \

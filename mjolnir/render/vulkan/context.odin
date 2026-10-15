@@ -64,10 +64,11 @@ GPUContext :: struct {
   graphics_timeline:    vk.Semaphore,
   compute_timeline:     vk.Semaphore,
   frame_serial:         u64, // frames submitted so far
-  depth_clamp: b32,
   // optional features the device may lack; set by physical_device_init, enabled when present
+  depth_clamp:         b32, // shadow casters behind the light's near plane
   draw_indirect_count: bool,
   fill_mode_non_solid: bool,
+  geometry_shader:     bool, // gl_PrimitiveID in fragment shaders (random_color)
 }
 
 // only a dedicated compute queue family submits compute separately
@@ -355,10 +356,14 @@ physical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   vk.GetPhysicalDeviceFeatures2(self.physical_device, &supported)
   self.draw_indirect_count = bool(supported_12.drawIndirectCount)
   self.fill_mode_non_solid = bool(supported.features.fillModeNonSolid)
+  self.geometry_shader = bool(supported.features.geometryShader)
+  self.depth_clamp = supported.features.depthClamp
   log.infof(
-    "Optional features: drawIndirectCount=%v fillModeNonSolid=%v",
+    "Optional features: drawIndirectCount=%v fillModeNonSolid=%v geometryShader=%v depthClamp=%v",
     self.draw_indirect_count,
     self.fill_mode_non_solid,
+    self.geometry_shader,
+    self.depth_clamp,
   )
   log.infof(
     "\nSelected physical device: %s (score %d)",
@@ -458,6 +463,7 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
     fillModeNonSolid          = b32(self.fill_mode_non_solid), // VK_POLYGON_MODE_LINE wireframe rendering
     depthClamp                = self.depth_clamp,
+    geometryShader            = b32(self.geometry_shader),
     // depth pyramid mips indexed by loop counter
     shaderStorageImageArrayDynamicIndexing = true,
     // draw list buffers indexed by view
@@ -484,10 +490,6 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     enabledExtensionCount   = u32(len(DEVICE_EXTENSIONS)),
     pEnabledFeatures        = &basic_features,
     pNext                   = &vulkan_12_features,
-  }
-  when ENABLE_VALIDATION_LAYERS {
-    device_create_info.enabledLayerCount = u32(len(VALIDATION_LAYERS))
-    device_create_info.ppEnabledLayerNames = raw_data(VALIDATION_LAYERS)
   }
   vk.CreateDevice(
     self.physical_device,
