@@ -1,50 +1,20 @@
 package wgpu_backend
 
+import rhi "../rhi"
+
 import "core:log"
 import "core:math"
 import wgpu "vendor:wgpu"
 
-// A handle is the index of its texture in Backend.textures; 0 is none.
-TextureHandle :: distinct u32
-MAX_TEXTURES :: 1000
 
-// TextureFormat is the texel format of a texture. A8 is coverage, sampled as white with
-// alpha = coverage.
-TextureFormat :: enum {
-  RGBA8_SRGB,
-  RGBA8_UNORM,
-  RGBA16F,
-  RGBA32F,
-  R32F,
-  A8,
-  D32F,
-}
 
-TextureUsage :: enum {
-  SAMPLED,
-  COLOR_TARGET,
-  DEPTH_TARGET,
-  STORAGE,
-}
 
-// TextureDesc describes a texture: `mip_levels` levels, six layers when `cube`. `shared` is
-// Vulkan's async compute queue; one queue here.
-TextureDesc :: struct {
-  extent:     [2]u32,
-  format:     TextureFormat,
-  usage:      bit_set[TextureUsage],
-  mip_levels: u32,
-  cube:       bool,
-  shared:     bool,
-}
 
-// HDR_COLOR_FORMAT is the format of the scene color target.
-HDR_COLOR_FORMAT :: TextureFormat.RGBA16F
 
 // A8 is stored as white RGBA with alpha = coverage (WebGPU has no swizzle), RGBA32F as
 // RGBA16F so it filters without float32-filterable.
 @(private)
-FORMATS := [TextureFormat]wgpu.TextureFormat {
+FORMATS := [rhi.TextureFormat]wgpu.TextureFormat {
   .RGBA8_SRGB  = .RGBA8UnormSrgb,
   .RGBA8_UNORM = .RGBA8Unorm,
   .RGBA16F     = .RGBA16Float,
@@ -56,7 +26,7 @@ FORMATS := [TextureFormat]wgpu.TextureFormat {
 
 // Bytes per texel as stored.
 @(private = "file")
-TEXEL_SIZE := [TextureFormat]u32 {
+TEXEL_SIZE := [rhi.TextureFormat]u32 {
   .RGBA8_SRGB  = 4,
   .RGBA8_UNORM = 4,
   .RGBA16F     = 8,
@@ -67,7 +37,7 @@ TEXEL_SIZE := [TextureFormat]u32 {
 }
 
 @(private = "file")
-USAGES := [TextureUsage]wgpu.TextureUsageFlags {
+USAGES := [rhi.TextureUsage]wgpu.TextureUsageFlags {
   .SAMPLED      = {.TextureBinding},
   .COLOR_TARGET = {.RenderAttachment},
   .DEPTH_TARGET = {.RenderAttachment},
@@ -104,7 +74,7 @@ SAMPLERS := [SamplerType]struct {
 Texture :: struct {
   texture: wgpu.Texture,
   view:    wgpu.TextureView,
-  desc:    TextureDesc,
+  desc:    rhi.TextureDesc,
 }
 
 @(private)
@@ -137,14 +107,14 @@ defaults_init :: proc(b: ^Backend) {
 
 // texture_create makes the texture of handle. `data` fills level 0; the other levels are
 // rendered down from it.
-texture_create :: proc(b: ^Backend, handle: TextureHandle, desc: TextureDesc, data: []u8 = nil) -> bool {
+texture_create :: proc(b: ^Backend, handle: rhi.TextureHandle, desc: rhi.TextureDesc, data: []u8 = nil) -> bool {
   b.textures[handle] = texture_make(b, desc, data)
   groups_clear(b)
   return b.textures[handle].texture != nil
 }
 
 // texture_destroy destroys handle's texture: WebGPU keeps it alive for submitted work.
-texture_destroy :: proc(b: ^Backend, handle: TextureHandle) {
+texture_destroy :: proc(b: ^Backend, handle: rhi.TextureHandle) {
   texture_release(&b.textures[handle])
   groups_clear(b)
 }
@@ -159,7 +129,7 @@ texture_release :: proc(t: ^Texture) {
 }
 
 @(private)
-texture_make :: proc(b: ^Backend, desc: TextureDesc, data: []u8 = nil) -> (t: Texture) {
+texture_make :: proc(b: ^Backend, desc: rhi.TextureDesc, data: []u8 = nil) -> (t: Texture) {
   usage: wgpu.TextureUsageFlags
   for u in desc.usage do usage += USAGES[u]
   mips := max(desc.mip_levels, 1)
@@ -204,7 +174,7 @@ texture_make :: proc(b: ^Backend, desc: TextureDesc, data: []u8 = nil) -> (t: Te
 
 // data as the texture stores it, in the temp allocator.
 @(private = "file")
-stored_texels :: proc(format: TextureFormat, data: []u8) -> []u8 {
+stored_texels :: proc(format: rhi.TextureFormat, data: []u8) -> []u8 {
   #partial switch format {
   case .A8:
     out := make([]u8, len(data) * 4, context.temp_allocator)
@@ -296,13 +266,14 @@ MipgenPipeline :: struct {
 @(private)
 GroupKey :: struct {
   layout:   GroupLayout,
-  textures: [MAX_GROUP_TEXTURES]TextureHandle,
+  textures: [MAX_GROUP_TEXTURES]rhi.TextureHandle,
 }
 
 @(private)
 groups_clear :: proc(b: ^Backend) {
   for _, group in b.groups do wgpu.BindGroupRelease(group)
   clear(&b.groups)
+  cull_groups_clear(b)
 }
 
 // The bind group of key: its layout's texture slots take key.textures in order, a

@@ -72,6 +72,16 @@ mapped :: proc(buffer: ^Buffer, $T: typeid, offset: vk.DeviceSize = 0, count := 
 Trash :: union {
   Buffer,
   vk.ImageView,
+  vk.Pipeline,
+  vk.PipelineLayout,
+  vk.DescriptorSetLayout,
+  RetiredSet,
+}
+
+// RetiredSet is a descriptor set to return to its pool.
+RetiredSet :: struct {
+  pool: vk.DescriptorPool,
+  set:  vk.DescriptorSet,
 }
 
 @(private)
@@ -92,6 +102,15 @@ destroy_item :: proc(device: vk.Device, item: ^TrashItem) {
     buffer_destroy(device, &t)
   case vk.ImageView:
     vk.DestroyImageView(device, t, nil)
+  case vk.Pipeline:
+    vk.DestroyPipeline(device, t, nil)
+  case vk.PipelineLayout:
+    vk.DestroyPipelineLayout(device, t, nil)
+  case vk.DescriptorSetLayout:
+    vk.DestroyDescriptorSetLayout(device, t, nil)
+  case RetiredSet:
+    set := t.set
+    vk.FreeDescriptorSets(device, t.pool, 1, &set)
   }
 }
 

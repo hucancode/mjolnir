@@ -1,5 +1,7 @@
 package vulkan_backend
 
+import rhi "../rhi"
+
 import vk "vendor:vulkan"
 
 // Every global memory dependency the frame records, by the work it orders: a barrier is
@@ -69,7 +71,7 @@ barrier :: proc(cmd: vk.CommandBuffer, b: Barrier) {
 }
 
 @(private)
-record_compute_commands :: proc(b: ^Backend, desc: ^FrameDesc, cmd: vk.CommandBuffer) {
+record_compute_commands :: proc(b: ^Backend, desc: ^rhi.FrameDesc, cmd: vk.CommandBuffer) {
   // ordering against graphics N-1 is in submit_queue_and_present
   vk.CmdBindPipeline(cmd, .COMPUTE, b.pipelines[.DEPTH_REDUCE])
   for &cam in desc.live_cameras {
@@ -78,18 +80,18 @@ record_compute_commands :: proc(b: ^Backend, desc: ^FrameDesc, cmd: vk.CommandBu
     occlusion_build_pyramid(b, cmd, cam.slot, cam.pyramid, u32(cam.prev_depth))
   }
   barrier(cmd, .FILL_TO_COMPUTE)
-  occlusion_cull(b, cmd, desc.node_count, CAMERA_VIEW_BASE + 1, desc.camera_view_count)
+  occlusion_cull(b, cmd, desc.node_count, rhi.CAMERA_VIEW_BASE + 1, desc.camera_view_count)
 }
 
 // Phase by phase across cameras (G-buffer, lighting, forward) so one barrier
 // serves every camera; render scopes cannot hold barriers.
 @(private)
-record_camera_passes :: proc(b: ^Backend, desc: ^FrameDesc, frame_index: u32) {
+record_camera_passes :: proc(b: ^Backend, desc: ^rhi.FrameDesc, frame_index: u32) {
   cmd := b.command_buffers[frame_index]
   if len(desc.live_cameras) == 0 do return
   discards := make([dynamic]ImageDiscard, context.temp_allocator)
   for &cam in desc.live_cameras {
-    for a in AttachmentType do append(&discards, attachment_discard(texture_image(b, cam.attachments[a])))
+    for a in rhi.AttachmentType do append(&discards, attachment_discard(texture_image(b, cam.attachments[a])))
   }
   barrier(cmd, .CULL_TO_INDIRECT)
   // render-to-texture: a material may sample last frame's lit image
@@ -105,7 +107,7 @@ record_camera_passes :: proc(b: ^Backend, desc: ^FrameDesc, frame_index: u32) {
 
 // PRESENT_SRC is the one layout transition unified image layouts do not cover.
 @(private)
-record_frame :: proc(b: ^Backend, desc: ^FrameDesc, frame_index: u32) -> vk.Result {
+record_frame :: proc(b: ^Backend, desc: ^rhi.FrameDesc, frame_index: u32) -> vk.Result {
   cmd := b.command_buffers[frame_index]
   sc := &b.swapchain
   swapchain_image, swapchain_view := sc.images[sc.image_index], sc.views[sc.image_index]

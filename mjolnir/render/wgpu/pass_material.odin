@@ -1,42 +1,11 @@
 package wgpu_backend
 
+import rhi "../rhi"
+
 import wgpu "vendor:wgpu"
 
-// AttachmentType names the images a camera renders into.
-AttachmentType :: enum {
-  FINAL_IMAGE        = 0,
-  NORMAL             = 1,
-  ALBEDO             = 2,
-  METALLIC_ROUGHNESS = 3,
-  EMISSIVE           = 4,
-  DEPTH              = 5,
-}
 
-// Each camera attachment's texture; pipelines drawing into an attachment take its format.
-ATTACHMENTS :: [AttachmentType]TextureDesc {
-  .FINAL_IMAGE        = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED}},
-  .NORMAL             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
-  .ALBEDO             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
-  .METALLIC_ROUGHNESS = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
-  // HDR, feeds bloom
-  .EMISSIVE           = {format = .RGBA16F, usage = {.COLOR_TARGET, .SAMPLED}},
-  // the depth pyramid build reads it
-  .DEPTH              = {format = .D32F, usage = {.DEPTH_TARGET, .SAMPLED}, shared = true},
-}
 
-// How a material is drawn: one pipeline per type, drawn in this order. The types before
-// FIRST_FORWARD_TYPE are opaque: drawn into the G-buffer, lit by the lighting pass, tested
-// against the depth pyramid and drawn into shadow maps. The rest are drawn forward,
-// alpha-blended over the lit image.
-MaterialType :: enum u32 {
-  PBR,
-  TRANSPARENT,
-  WIREFRAME,
-  RANDOM_COLOR,
-  // camera-facing billboard showing one cell of the albedo sprite sheet
-  SPRITE,
-}
-FIRST_FORWARD_TYPE :: MaterialType.TRANSPARENT
 
 @(private)
 MaterialPass :: enum {
@@ -54,7 +23,7 @@ MESH :: COMMON + #load("shader/mesh.wgsl", string)
 // Wireframe and random-color pull their vertices from the index buffer (no line polygon mode,
 // no primitive index in core WebGPU): mesh_pulled.wgsl.
 @(private = "file")
-MATERIAL_SHADERS := [MaterialType]struct {
+MATERIAL_SHADERS := [rhi.MaterialType]struct {
   source:   string,
   topology: wgpu.PrimitiveTopology,
   cull:     wgpu.CullMode,
@@ -67,15 +36,15 @@ MATERIAL_SHADERS := [MaterialType]struct {
 }
 
 @(private = "file")
-MATERIAL_PASS_TARGETS := [MaterialPass][]AttachmentType {
+MATERIAL_PASS_TARGETS := [MaterialPass][]rhi.AttachmentType {
   .GBUFFER = {.NORMAL, .ALBEDO, .METALLIC_ROUGHNESS, .EMISSIVE},
   .FORWARD = {.FINAL_IMAGE},
 }
 
 @(private)
-MATERIAL_PASS_TYPES := [MaterialPass][2]MaterialType {
-  .GBUFFER = {MaterialType(0), FIRST_FORWARD_TYPE},
-  .FORWARD = {FIRST_FORWARD_TYPE, MaterialType(len(MaterialType))},
+MATERIAL_PASS_TYPES := [MaterialPass][2]rhi.MaterialType {
+  .GBUFFER = {rhi.MaterialType(0), rhi.FIRST_FORWARD_TYPE},
+  .FORWARD = {rhi.FIRST_FORWARD_TYPE, rhi.MaterialType(len(rhi.MaterialType))},
 }
 
 // The pipeline fields of a material pass's targets.
@@ -83,7 +52,7 @@ MATERIAL_PASS_TYPES := [MaterialPass][2]MaterialType {
 material_pass_desc :: proc(pass: MaterialPass, desc: ^GraphicsPipelineDesc) {
   targets := MATERIAL_PASS_TARGETS[pass]
   formats := make([]wgpu.TextureFormat, len(targets), context.temp_allocator)
-  attachments := ATTACHMENTS
+  attachments := rhi.ATTACHMENTS
   for a, i in targets do formats[i] = FORMATS[attachments[a].format]
   desc.color_formats = formats
   desc.blend = &BLEND_ALPHA if pass == .FORWARD else nil
@@ -115,7 +84,7 @@ material_pipelines_init :: proc(b: ^Backend) {
 
 // The forward pass draws particles first.
 @(private)
-material_pass_record :: proc(b: ^Backend, desc: ^FrameDesc, encoder: wgpu.CommandEncoder, cam: ^FrameCamera, pass: MaterialPass) {
+material_pass_record :: proc(b: ^Backend, desc: ^rhi.FrameDesc, encoder: wgpu.CommandEncoder, cam: ^rhi.FrameCamera, pass: MaterialPass) {
   targets := MATERIAL_PASS_TARGETS[pass]
   colors := make([]wgpu.RenderPassColorAttachment, len(targets), context.temp_allocator)
   load: wgpu.LoadOp = .Clear if pass == .GBUFFER else .Load
@@ -144,11 +113,11 @@ material_pass_record :: proc(b: ^Backend, desc: ^FrameDesc, encoder: wgpu.Comman
   wgpu.RenderPassEncoderSetBindGroup(rp, 0, b.scene_groups[.MESH])
   mesh_buffers_bind(b, rp)
   types := MATERIAL_PASS_TYPES[pass]
-  draw_candidates(b, desc, rp, cam.next_slot, 0, MATERIAL_TYPES[types[0]:types[1]], b.material_pipelines[types[0]:types[1]])
+  draw_batches(b, desc, rp, cam.next_slot, 0, MATERIAL_TYPES[types[0]:types[1]], b.material_pipelines[types[0]:types[1]])
 }
 
 @(private)
-MATERIAL_TYPES := [len(MaterialType)]MaterialType{.PBR, .TRANSPARENT, .WIREFRAME, .RANDOM_COLOR, .SPRITE}
+MATERIAL_TYPES := [len(rhi.MaterialType)]rhi.MaterialType{.PBR, .TRANSPARENT, .WIREFRAME, .RANDOM_COLOR, .SPRITE}
 
 @(private)
 mesh_buffers_bind :: proc(b: ^Backend, rp: wgpu.RenderPassEncoder) {

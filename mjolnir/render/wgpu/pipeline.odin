@@ -1,5 +1,7 @@
 package wgpu_backend
 
+import rhi "../rhi"
+
 import "core:log"
 import "core:mem"
 import wgpu "vendor:wgpu"
@@ -25,8 +27,8 @@ SceneBuffer :: enum {
   PARTICLE_ALIVE,
   LIGHTS,
   DEBUG_LINES,
-  CANDIDATES,
-  DRAW_COUNTS,
+  BATCHES,
+  NODE_BATCH,
 }
 
 @(private)
@@ -55,7 +57,7 @@ SCENE_PASSES := [ScenePass]struct {
   .MESH              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .BONES, .SKINNING, .VERTICES, .INDICES}, {.Vertex, .Fragment}, {}},
   .LIGHTING          = {{.VIEWS, .LIGHTS}, {.Vertex, .Fragment}, {}},
   .SHADOW            = {{.VIEWS, .NODES, .MESHES, .BONES, .SKINNING}, {.Vertex}, {}},
-  .CULL              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .CANDIDATES, .DRAW_COUNTS}, {.Compute}, {.DRAW_COUNTS}},
+  .CULL              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .BATCHES, .NODE_BATCH}, {.Compute}, {}},
   .PARTICLE_EMIT     = {{.NODES, .EMITTERS, .PARTICLES}, {.Compute}, {.PARTICLES}},
   .PARTICLE_SIMULATE = {{.NODES, .FORCEFIELDS, .PARTICLES, .PARTICLE_ALIVE}, {.Compute}, {.PARTICLES, .PARTICLE_ALIVE}},
   .PARTICLE_DRAW     = {{.VIEWS, .PARTICLES, .PARTICLE_ALIVE}, {.Vertex}, {}},
@@ -182,8 +184,8 @@ scene_buffer :: proc(b: ^Backend, buffer: SceneBuffer) -> wgpu.Buffer {
   case .PARTICLE_ALIVE: return b.particle_alive_buffer
   case .LIGHTS:         return b.table_buffers[.LIGHTS]
   case .DEBUG_LINES:    return b.table_buffers[.DEBUG_LINES]
-  case .CANDIDATES:     return b.candidate_buffer
-  case .DRAW_COUNTS:    return b.draw_count_buffer
+  case .BATCHES:        return b.table_buffers[.BATCHES]
+  case .NODE_BATCH:     return b.table_buffers[.NODE_BATCH]
   }
   return nil
 }
@@ -310,14 +312,14 @@ compute_pipeline :: proc(b: ^Backend, source: string, scene: ScenePass, textures
 }
 
 // The vertex stream of mesh draws: the vertex, then the node index of the draw (instance step,
-// from the candidate list; WebGPU indirect draws have no first instance).
+// from a draw list's instance array; WebGPU indirect draws have no first instance).
 @(private)
 VERTEX_ATTRIBUTES := [?]wgpu.VertexAttribute {
-  {format = .Float32x3, offset = u64(offset_of(Vertex, position)), shaderLocation = 0},
-  {format = .Float32x3, offset = u64(offset_of(Vertex, normal)), shaderLocation = 1},
-  {format = .Float32x4, offset = u64(offset_of(Vertex, color)), shaderLocation = 2},
-  {format = .Float32x2, offset = u64(offset_of(Vertex, uv)), shaderLocation = 3},
-  {format = .Float32x4, offset = u64(offset_of(Vertex, tangent)), shaderLocation = 4},
+  {format = .Float32x3, offset = u64(offset_of(rhi.Vertex, position)), shaderLocation = 0},
+  {format = .Float32x3, offset = u64(offset_of(rhi.Vertex, normal)), shaderLocation = 1},
+  {format = .Float32x4, offset = u64(offset_of(rhi.Vertex, color)), shaderLocation = 2},
+  {format = .Float32x2, offset = u64(offset_of(rhi.Vertex, uv)), shaderLocation = 3},
+  {format = .Float32x4, offset = u64(offset_of(rhi.Vertex, tangent)), shaderLocation = 4},
 }
 @(private)
 NODE_ATTRIBUTE := wgpu.VertexAttribute{format = .Uint32, offset = 0, shaderLocation = 5}
@@ -325,7 +327,7 @@ NODE_ATTRIBUTE := wgpu.VertexAttribute{format = .Uint32, offset = 0, shaderLocat
 @(private)
 mesh_vertex_buffers :: proc() -> []wgpu.VertexBufferLayout {
   layouts := make([]wgpu.VertexBufferLayout, 2, context.temp_allocator)
-  layouts[0] = {stepMode = .Vertex, arrayStride = size_of(Vertex), attributeCount = len(VERTEX_ATTRIBUTES), attributes = raw_data(VERTEX_ATTRIBUTES[:])}
+  layouts[0] = {stepMode = .Vertex, arrayStride = size_of(rhi.Vertex), attributeCount = len(VERTEX_ATTRIBUTES), attributes = raw_data(VERTEX_ATTRIBUTES[:])}
   layouts[1] = {stepMode = .Instance, arrayStride = size_of(u32), attributeCount = 1, attributes = &NODE_ATTRIBUTE}
   return layouts
 }

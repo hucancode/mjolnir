@@ -1,54 +1,14 @@
 package vulkan_backend
 
+import rhi "../rhi"
+
 import vk "vendor:vulkan"
 
-MAX_NODES_IN_SCENE :: 65536
-MAX_ACTIVE_CAMERAS :: 128
 
-// The views table holds every camera at CAMERA_VIEW_BASE + camera, then the shadow views.
-CAMERA_VIEW_BASE :: 0
-SHADOW_VIEW_BASE :: MAX_ACTIVE_CAMERAS
-MAX_VIEWS :: MAX_ACTIVE_CAMERAS + MAX_SHADOW_VIEWS
 
-// The tables render writes, one copy per frame in flight (table); their sizes are given at
-// init. The entries' layouts are render's, mirrored by the shaders.
-Table :: enum {
-  VIEWS,
-  NODES,
-  MESHES,
-  MATERIALS,
-  BONES,
-  EMITTERS,
-  FORCEFIELDS,
-  LIGHTS,
-  DEBUG_LINES,
-}
 
-// Vertex is the mesh vertex format.
-Vertex :: struct {
-  position: [3]f32,
-  normal:   [3]f32,
-  color:    [4]f32,
-  uv:       [2]f32,
-  tangent:  [4]f32, // xyz = tangent, w = handedness (for bitangent reconstruction)
-}
 
-// MeshData is a mesh as the cull shader reads it from the mesh table.
-MeshData :: struct {
-  aabb_min:        [3]f32,
-  index_count:     u32,
-  aabb_max:        [3]f32,
-  first_index:     u32,
-  vertex_offset:   i32,
-  skinning_offset: u32,
-  flags:           MeshFlagSet,
-  vertex_count:    u32,
-}
 
-MeshFlag :: enum u32 {
-  SKINNED,
-}
-MeshFlagSet :: bit_set[MeshFlag;u32]
 
 // Bindings of the scene set: render's tables in the frame arena (TABLE_BINDING) and the
 // buffers the backend owns. Shaders repeat these numbers.
@@ -67,9 +27,12 @@ SceneBinding :: enum u32 {
   LIGHTS,
   SHADOW_MAPS,
   DEBUG_LINES,
+  // tables only the WebGPU backend's cull reads; no shader here does
+  BATCHES,
+  NODE_BATCH,
 }
 
-TABLE_BINDING := [Table]SceneBinding {
+TABLE_BINDING := [rhi.Table]SceneBinding {
   .VIEWS       = .VIEWS,
   .NODES       = .NODES,
   .MESHES      = .MESHES,
@@ -79,6 +42,8 @@ TABLE_BINDING := [Table]SceneBinding {
   .FORCEFIELDS = .FORCEFIELDS,
   .LIGHTS      = .LIGHTS,
   .DEBUG_LINES = .DEBUG_LINES,
+  .BATCHES     = .BATCHES,
+  .NODE_BATCH  = .NODE_BATCH,
 }
 
 // Descriptor type of each scene set (set 0) binding, one descriptor each. A binding render
@@ -99,6 +64,8 @@ SCENE_BINDING_TYPES := [SceneBinding]vk.DescriptorType {
   // the shadow atlas
   .SHADOW_MAPS    = .SAMPLED_IMAGE,
   .DEBUG_LINES    = .STORAGE_BUFFER,
+  .BATCHES        = .STORAGE_BUFFER,
+  .NODE_BATCH     = .STORAGE_BUFFER,
 }
 
 // One layout for every scene pipeline, so both sets stay bound across pipeline switches.
@@ -201,13 +168,13 @@ bind_mesh_buffers :: proc(b: ^Backend, cmd: vk.CommandBuffer) {
 }
 
 VERTEX_BINDING_DESCRIPTION := [?]vk.VertexInputBindingDescription {
-  {binding = 0, stride = size_of(Vertex), inputRate = .VERTEX},
+  {binding = 0, stride = size_of(rhi.Vertex), inputRate = .VERTEX},
 }
 
 VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
-  {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(Vertex, position))},
-  {location = 1, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(Vertex, normal))},
-  {location = 2, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(Vertex, color))},
-  {location = 3, binding = 0, format = .R32G32_SFLOAT, offset = u32(offset_of(Vertex, uv))},
-  {location = 4, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(Vertex, tangent))},
+  {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(rhi.Vertex, position))},
+  {location = 1, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(rhi.Vertex, normal))},
+  {location = 2, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(rhi.Vertex, color))},
+  {location = 3, binding = 0, format = .R32G32_SFLOAT, offset = u32(offset_of(rhi.Vertex, uv))},
+  {location = 4, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(rhi.Vertex, tangent))},
 }

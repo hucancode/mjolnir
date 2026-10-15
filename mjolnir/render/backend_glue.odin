@@ -1,42 +1,15 @@
 #+private
 package render
 
+import "rhi"
 import vulkan "vulkan"
 import wgpu "wgpu"
 
 when RENDER_BACKEND == "vulkan" {
   Backend :: vulkan.Backend
-  MAX_NODES_IN_SCENE :: vulkan.MAX_NODES_IN_SCENE
-  MAX_ACTIVE_CAMERAS :: vulkan.MAX_ACTIVE_CAMERAS
   RETIRE_GRACE :: vulkan.RETIRE_GRACE
-  MAX_SHADOW_MAPS :: vulkan.MAX_SHADOW_MAPS
-  SHADOW_MAP_SIZE :: vulkan.SHADOW_MAP_SIZE
-  MAX_PARTICLES :: vulkan.MAX_PARTICLES
-  MAX_TEXTURES :: vulkan.MAX_TEXTURES
-  CAMERA_VIEW_BASE :: vulkan.CAMERA_VIEW_BASE
-  SHADOW_VIEW_BASE :: vulkan.SHADOW_VIEW_BASE
-  MAX_VIEWS :: vulkan.MAX_VIEWS
   MAX_PYRAMID_SLOTS :: vulkan.MAX_PYRAMID_SLOTS
-  MAX_SHADOW_VIEWS :: vulkan.MAX_SHADOW_VIEWS
   MAX_DRAW_LIST_SLOTS :: vulkan.MAX_DRAW_LIST_SLOTS
-  PREFILTER_MIPS :: vulkan.PREFILTER_MIPS
-  MAX_SEGMENTS :: vulkan.MAX_SEGMENTS
-  DEBUG_RING :: vulkan.DEBUG_RING
-  TABLE_REGIONS :: vulkan.TABLE_REGIONS
-  UI_MAX_VERTICES :: vulkan.UI_MAX_VERTICES
-  UI_MAX_INDICES :: vulkan.UI_MAX_INDICES
-  TextureDesc :: vulkan.TextureDesc
-  HDR_COLOR_FORMAT :: vulkan.HDR_COLOR_FORMAT
-  ATTACHMENTS :: vulkan.ATTACHMENTS
-  FIRST_FORWARD_TYPE :: vulkan.FIRST_FORWARD_TYPE
-  Table :: vulkan.Table
-  MeshStream :: vulkan.MeshStream
-  MeshData :: vulkan.MeshData
-  ParticleSystemParams :: vulkan.ParticleSystemParams
-  PostPass :: vulkan.PostPass
-  UIBatch :: vulkan.UIBatch
-  FrameCamera :: vulkan.FrameCamera
-  FrameDesc :: vulkan.FrameDesc
 
   backend_init :: vulkan.init
   backend_ready :: vulkan.ready
@@ -56,40 +29,13 @@ when RENDER_BACKEND == "vulkan" {
   backend_precompute_ibl :: vulkan.precompute_ibl
   backend_particles_reset :: vulkan.particles_reset
   backend_draw_count :: vulkan.draw_count
+  backend_caps :: vulkan.rhi_caps
   backend_frame :: vulkan.frame
 } else when RENDER_BACKEND == "wgpu" {
   Backend :: wgpu.Backend
-  MAX_NODES_IN_SCENE :: wgpu.MAX_NODES_IN_SCENE
-  MAX_ACTIVE_CAMERAS :: wgpu.MAX_ACTIVE_CAMERAS
   RETIRE_GRACE :: wgpu.RETIRE_GRACE
-  MAX_SHADOW_MAPS :: wgpu.MAX_SHADOW_MAPS
-  SHADOW_MAP_SIZE :: wgpu.SHADOW_MAP_SIZE
-  MAX_PARTICLES :: wgpu.MAX_PARTICLES
-  MAX_TEXTURES :: wgpu.MAX_TEXTURES
-  CAMERA_VIEW_BASE :: wgpu.CAMERA_VIEW_BASE
-  SHADOW_VIEW_BASE :: wgpu.SHADOW_VIEW_BASE
-  MAX_VIEWS :: wgpu.MAX_VIEWS
   MAX_PYRAMID_SLOTS :: wgpu.MAX_PYRAMID_SLOTS
-  MAX_SHADOW_VIEWS :: wgpu.MAX_SHADOW_VIEWS
   MAX_DRAW_LIST_SLOTS :: wgpu.MAX_DRAW_LIST_SLOTS
-  PREFILTER_MIPS :: wgpu.PREFILTER_MIPS
-  MAX_SEGMENTS :: wgpu.MAX_SEGMENTS
-  DEBUG_RING :: wgpu.DEBUG_RING
-  TABLE_REGIONS :: wgpu.TABLE_REGIONS
-  UI_MAX_VERTICES :: wgpu.UI_MAX_VERTICES
-  UI_MAX_INDICES :: wgpu.UI_MAX_INDICES
-  TextureDesc :: wgpu.TextureDesc
-  HDR_COLOR_FORMAT :: wgpu.HDR_COLOR_FORMAT
-  ATTACHMENTS :: wgpu.ATTACHMENTS
-  FIRST_FORWARD_TYPE :: wgpu.FIRST_FORWARD_TYPE
-  Table :: wgpu.Table
-  MeshStream :: wgpu.MeshStream
-  MeshData :: wgpu.MeshData
-  ParticleSystemParams :: wgpu.ParticleSystemParams
-  PostPass :: wgpu.PostPass
-  UIBatch :: wgpu.UIBatch
-  FrameCamera :: wgpu.FrameCamera
-  FrameDesc :: wgpu.FrameDesc
 
   backend_init :: wgpu.init
   backend_ready :: wgpu.ready
@@ -109,5 +55,36 @@ when RENDER_BACKEND == "vulkan" {
   backend_precompute_ibl :: wgpu.precompute_ibl
   backend_particles_reset :: wgpu.particles_reset
   backend_draw_count :: wgpu.draw_count
+  backend_caps :: wgpu.rhi_caps
   backend_frame :: wgpu.frame
 }
+
+MAX_NODES_IN_SCENE :: rhi.MAX_NODES_IN_SCENE
+MAX_BATCHES :: rhi.MAX_BATCHES
+MAX_ACTIVE_CAMERAS :: rhi.MAX_ACTIVE_CAMERAS
+MAX_SHADOW_MAPS :: rhi.MAX_SHADOW_MAPS
+SHADOW_MAP_SIZE :: rhi.SHADOW_MAP_SIZE
+MAX_PARTICLES :: rhi.MAX_PARTICLES
+MAX_TEXTURES :: rhi.MAX_TEXTURES
+CAMERA_VIEW_BASE :: rhi.CAMERA_VIEW_BASE
+SHADOW_VIEW_BASE :: rhi.SHADOW_VIEW_BASE
+MAX_VIEWS :: rhi.MAX_VIEWS
+MAX_SHADOW_VIEWS :: rhi.MAX_SHADOW_VIEWS
+PREFILTER_MIPS :: rhi.PREFILTER_MIPS
+MAX_SEGMENTS :: rhi.MAX_SEGMENTS
+DEBUG_RING :: rhi.DEBUG_RING
+TABLE_REGIONS :: rhi.TABLE_REGIONS
+UI_MAX_VERTICES :: rhi.UI_MAX_VERTICES
+UI_MAX_INDICES :: rhi.UI_MAX_INDICES
+TextureDesc :: rhi.TextureDesc
+HDR_COLOR_FORMAT :: rhi.HDR_COLOR_FORMAT
+ATTACHMENTS :: rhi.ATTACHMENTS
+FIRST_FORWARD_TYPE :: rhi.FIRST_FORWARD_TYPE
+Table :: rhi.Table
+MeshStream :: rhi.MeshStream
+MeshData :: rhi.MeshData
+ParticleSystemParams :: rhi.ParticleSystemParams
+PostPass :: rhi.PostPass
+UIBatch :: rhi.UIBatch
+FrameCamera :: rhi.FrameCamera
+FrameDesc :: rhi.FrameDesc

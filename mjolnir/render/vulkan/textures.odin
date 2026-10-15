@@ -1,44 +1,14 @@
 package vulkan_backend
 
+import rhi "../rhi"
+
 import "core:log"
 import vk "vendor:vulkan"
 
-// A handle is the index of its texture in the bindless texture array; 0 is none.
-TextureHandle :: distinct u32
-MAX_TEXTURES :: 1000
 
-// TextureFormat is the texel format of a texture. A8 is coverage, sampled as white with
-// alpha = coverage.
-TextureFormat :: enum {
-  RGBA8_SRGB,
-  RGBA8_UNORM,
-  RGBA16F,
-  RGBA32F,
-  R32F,
-  A8,
-  D32F,
-}
 
-TextureUsage :: enum {
-  SAMPLED,
-  COLOR_TARGET,
-  DEPTH_TARGET,
-  STORAGE,
-}
 
-// TextureDesc describes a texture: `mip_levels` levels, six layers when `cube`. `shared`
-// textures are also accessed by the async compute queue.
-TextureDesc :: struct {
-  extent:     [2]u32,
-  format:     TextureFormat,
-  usage:      bit_set[TextureUsage],
-  mip_levels: u32,
-  cube:       bool,
-  shared:     bool,
-}
 
-// HDR_COLOR_FORMAT is the format of the scene color target.
-HDR_COLOR_FORMAT :: TextureFormat.RGBA16F
 
 @(private)
 MAX_STORAGE_IMAGES :: PRECOMPUTE_STORAGE_BASE + PRECOMPUTE_DISPATCHES
@@ -57,7 +27,7 @@ BINDING_DRAW_LISTS :: 3 // [MAX_DRAW_LIST_SLOTS] indirect draw list buffers
 BINDING_PYRAMID_COUNTERS :: 4 // one u32 per depth pyramid
 @(private)
 BINDLESS_BINDINGS := [?]DescriptorBinding {
-  BINDING_TEXTURES         = {.SAMPLED_IMAGE, MAX_TEXTURES, SCENE_STAGES},
+  BINDING_TEXTURES         = {.SAMPLED_IMAGE, rhi.MAX_TEXTURES, SCENE_STAGES},
   BINDING_SAMPLERS         = {.SAMPLER, len(SamplerType), SCENE_STAGES},
   BINDING_STORAGE_IMAGES   = {.STORAGE_IMAGE, MAX_STORAGE_IMAGES, {.COMPUTE}},
   BINDING_DRAW_LISTS       = {.STORAGE_BUFFER, MAX_DRAW_LIST_SLOTS, {.COMPUTE}},
@@ -90,7 +60,7 @@ SAMPLERS := [SamplerType]struct {
 }
 
 @(private)
-FORMATS := [TextureFormat]vk.Format {
+FORMATS := [rhi.TextureFormat]vk.Format {
   .RGBA8_SRGB  = .R8G8B8A8_SRGB,
   .RGBA8_UNORM = .R8G8B8A8_UNORM,
   .RGBA16F     = .R16G16B16A16_SFLOAT,
@@ -101,7 +71,7 @@ FORMATS := [TextureFormat]vk.Format {
 }
 
 @(private = "file")
-USAGES := [TextureUsage]vk.ImageUsageFlags {
+USAGES := [rhi.TextureUsage]vk.ImageUsageFlags {
   .SAMPLED      = {.SAMPLED},
   .COLOR_TARGET = {.COLOR_ATTACHMENT},
   .DEPTH_TARGET = {.DEPTH_STENCIL_ATTACHMENT},
@@ -152,7 +122,7 @@ bindless_shutdown :: proc(b: ^Backend) {
 // texture_create makes the texture of handle and binds it in the bindless array. `data`
 // fills level 0; the other levels are blitted down. A cube aliases the same binding as the
 // shaders' textureCube array.
-texture_create :: proc(b: ^Backend, handle: TextureHandle, desc: TextureDesc, data: []u8 = nil) -> bool {
+texture_create :: proc(b: ^Backend, handle: rhi.TextureHandle, desc: rhi.TextureDesc, data: []u8 = nil) -> bool {
   img, res := image_from_desc(b, desc, data)
   if res != .SUCCESS {
     log.errorf("Texture %d (%v %dx%d) creation failed: %v", handle, desc.format, desc.extent.x, desc.extent.y, res)
@@ -164,7 +134,7 @@ texture_create :: proc(b: ^Backend, handle: TextureHandle, desc: TextureDesc, da
 }
 
 @(private = "file")
-image_from_desc :: proc(b: ^Backend, desc: TextureDesc, data: []u8) -> (img: Image, ret: vk.Result) {
+image_from_desc :: proc(b: ^Backend, desc: rhi.TextureDesc, data: []u8) -> (img: Image, ret: vk.Result) {
   gctx := &b.gctx
   usage: vk.ImageUsageFlags
   for u in desc.usage do usage |= USAGES[u]
@@ -187,12 +157,12 @@ image_from_desc :: proc(b: ^Backend, desc: TextureDesc, data: []u8) -> (img: Ima
 }
 
 // texture_destroy destroys handle's texture at once: render retires the handle first.
-texture_destroy :: proc(b: ^Backend, handle: TextureHandle) {
+texture_destroy :: proc(b: ^Backend, handle: rhi.TextureHandle) {
   image_destroy(b.gctx.device, &b.textures[handle])
 }
 
 @(private)
-texture_image :: proc(b: ^Backend, handle: TextureHandle) -> ^Image {
+texture_image :: proc(b: ^Backend, handle: rhi.TextureHandle) -> ^Image {
   img := &b.textures[handle]
   return img if img.image != 0 else nil
 }

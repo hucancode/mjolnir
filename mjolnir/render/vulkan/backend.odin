@@ -1,5 +1,7 @@
 package vulkan_backend
 
+import rhi "../rhi"
+
 import "core:log"
 import "core:mem"
 import "core:strings"
@@ -12,73 +14,9 @@ FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 // destroyed or reused: frames in flight plus one for async compute.
 RETIRE_GRACE :: FRAMES_IN_FLIGHT + 1
 
-// One buffer per stream, sub-allocated by render; skinning is read through the scene set.
-MeshStream :: enum {
-  VERTEX,
-  INDEX,
-  SKINNING,
-}
 
-// FrameCamera is a live camera as frame records it; textures and slots are this frame's.
-FrameCamera :: struct {
-  index:        u32,
-  attachments:  [AttachmentType]TextureHandle,
-  // the previous frame's depth, which the depth pyramid is built from
-  prev_depth:   TextureHandle,
-  // the depth pyramid built this frame
-  pyramid:      TextureHandle,
-  // this frame's pyramid and draw-list slot; this frame's cull writes the lists of next_slot
-  slot:         u32,
-  next_slot:    u32,
-  near, far:    f32,
-  // its draw lists and pyramid hold data: until then the camera draws nothing
-  ready:       bool,
-}
 
-// FrameDesc is everything frame records.
-FrameDesc :: struct {
-  // the window's size in pixels, as the platform reports it
-  framebuffer_size:     [2]u32,
-  // render's tables, the one copy; bit r of dirty[t] is region r of tables[t] (TABLE_REGIONS),
-  // written since the last submitted frame
-  tables:               [Table][]u8,
-  dirty:                [Table]u64,
-  live_cameras:         []FrameCamera,
-  // index into live_cameras of the camera presented to the swapchain, -1 for none
-  main_live:            int,
-  // camera views covered by the cull dispatch, from CAMERA_VIEW_BASE + 1
-  camera_view_count:    u32,
-  node_count:           u32,
-  // lights are sorted by type; point and spot draw these volume meshes
-  light_count:          [LightType]u32,
-  light_volumes:        [LightType]MeshData,
-  shadow_view_count:    u32,
-  // draw-list slot the shadow views cull into and draw from
-  shadow_draw_list:     u32,
-  environment_map:      TextureHandle,
-  brdf_lut:             TextureHandle,
-  irradiance_cube:      TextureHandle,
-  prefilter_cube:       TextureHandle,
-  skybox_intensity:     f32,
-  skybox_blur:          f32,
-  // over the main camera's image, the last one presenting
-  post_passes:          []PostPass,
-  particle_params:      ParticleSystemParams,
-  // filled segments of each debug line ring
-  debug_line_counts:    [2]u32,
-  // render clock time; the shader skips segments past their expiry
-  debug_line_time:      f32,
-  ui_batches:           []UIBatch,
-  ui_vertices:          []Vertex2D,
-  ui_indices:           []u32,
-}
 
-// FrameStatus is how frame went: RESIZE asks for resize at the new framebuffer size.
-FrameStatus :: enum {
-  OK,
-  RESIZE,
-  ERROR,
-}
 
 // Single-variant pipelines; the others are indexed by MaterialType, LightType and effect.
 @(private)
@@ -102,21 +40,21 @@ Backend :: struct {
   compute_command_buffers: [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   scene:                   SceneDescriptors,
   pipelines:               [PipelineId]vk.Pipeline,
-  material_pipelines:      [MaterialType]vk.Pipeline,
-  light_pipelines:         [LightType]vk.Pipeline,
+  material_pipelines:      [rhi.MaterialType]vk.Pipeline,
+  light_pipelines:         [rhi.LightType]vk.Pipeline,
   // [is_last][tag]: every pass writes an HDR ring image but the last, which writes the
   // swapchain format
   post_process_pipelines:  [2][len(EFFECTS)]vk.Pipeline,
   textures:                []Image,
   samplers:                [SamplerType]vk.Sampler,
-  mesh_buffers:            [MeshStream]Buffer,
+  mesh_buffers:            [rhi.MeshStream]Buffer,
   // one copy of every table render writes per frame in flight, at table_offset of its
   // binding; the other bindings have no table (size 0)
   frame_arena:             [FRAMES_IN_FLIGHT]Buffer,
   table_offset:            [SceneBinding]int,
   table_size:              [SceneBinding]int,
   // per table, per copy: regions render wrote since the copy was last brought up to date
-  table_stale:             [Table][FRAMES_IN_FLIGHT]u64,
+  table_stale:             [rhi.Table][FRAMES_IN_FLIGHT]u64,
   draw_count_readback:     [FRAMES_IN_FLIGHT]Buffer,
   // per pyramid slot: groups done this dispatch; the last one resets it
   pyramid_counters:        Buffer,
@@ -133,6 +71,8 @@ Backend :: struct {
   pyramid_bound:           [MAX_PYRAMID_SLOTS]bool,
   ui_vertex_buffers:       [FRAMES_IN_FLIGHT]Buffer,
   ui_index_buffers:        [FRAMES_IN_FLIGHT]Buffer,
+  // what rhi's handles name (rhi.odin)
+  rhi:                     RhiState,
 }
 
 // WindowHandle is the window render draws into.
@@ -146,8 +86,8 @@ init :: proc(
   app_name: string,
   window: WindowHandle,
   framebuffer_size: [2]u32,
-  table_size: [Table]int,
-  mesh_size: [MeshStream]int,
+  table_size: [rhi.Table]int,
+  mesh_size: [rhi.MeshStream]int,
 ) -> bool {
   return check(init_vulkan(b, app_name, window, framebuffer_size, table_size, mesh_size), "Vulkan init")
 }
@@ -165,8 +105,8 @@ init_vulkan :: proc(
   app_name: string,
   window: glfw.WindowHandle,
   framebuffer_size: [2]u32,
-  table_size: [Table]int,
-  mesh_size: [MeshStream]int,
+  table_size: [rhi.Table]int,
+  mesh_size: [rhi.MeshStream]int,
 ) -> vk.Result {
   if !glfw.VulkanSupported() {
     log.errorf("GLFW: Vulkan Not Supported")
@@ -179,7 +119,7 @@ init_vulkan :: proc(
   device_init(gctx) or_return
   swapchain_init(&b.swapchain, gctx, framebuffer_size) or_return
   init_descriptor_pool(gctx) or_return
-  b.textures = make([]Image, MAX_TEXTURES)
+  b.textures = make([]Image, rhi.MAX_TEXTURES)
   allocate_command_buffer(gctx, b.command_buffers[:]) or_return
   allocate_command_buffer(gctx, b.compute_command_buffers[:], gctx.compute_command_pool) or_return
   for &buffer, s in b.mesh_buffers {
@@ -200,7 +140,7 @@ init_vulkan :: proc(
 }
 
 @(private = "file")
-MESH_STREAM_USAGE := [MeshStream]vk.BufferUsageFlags {
+MESH_STREAM_USAGE := [rhi.MeshStream]vk.BufferUsageFlags {
   .VERTEX   = {.VERTEX_BUFFER},
   .INDEX    = {.INDEX_BUFFER},
   .SKINNING = {.STORAGE_BUFFER},
@@ -220,7 +160,7 @@ init_descriptor_pool :: proc(gctx: ^GPUContext) -> vk.Result {
 
 // Every table is aligned to the device's storage buffer offset alignment.
 @(private = "file")
-init_scene_buffers :: proc(b: ^Backend, table_size: [Table]int) -> vk.Result {
+init_scene_buffers :: proc(b: ^Backend, table_size: [rhi.Table]int) -> vk.Result {
   gctx := &b.gctx
   alignment := int(gctx.device_properties.limits.minStorageBufferOffsetAlignment)
   arena_size: int
@@ -254,6 +194,7 @@ shutdown :: proc(b: ^Backend) {
   gctx := &b.gctx
   vk.DeviceWaitIdle(gctx.device)
   deferred_flush(gctx)
+  rhi_shutdown(b)
   for &img in b.textures do image_destroy(gctx.device, &img)
   delete(b.textures)
   for &buf in b.draw_lists do buffer_destroy(gctx.device, &buf)
@@ -310,22 +251,22 @@ resize :: proc(b: ^Backend, framebuffer_size: [2]u32) -> bool {
 }
 
 // mesh_write uploads data at element `first` of stream's buffer before the next frame.
-mesh_write :: proc(b: ^Backend, stream: MeshStream, data: []$T, first: u32) -> bool {
+mesh_write :: proc(b: ^Backend, stream: rhi.MeshStream, data: []$T, first: u32) -> bool {
   return check(queue_buffer_write(&b.gctx, &b.mesh_buffers[stream], data, int(first)), "Mesh upload")
 }
 
 // draw_count is the PBR draws the main camera's cull of frame_index wrote.
 draw_count :: proc(b: ^Backend, frame_index: u32) -> u32 {
-  return mapped(&b.draw_count_readback[frame_index], u32)[MaterialType.PBR]
+  return mapped(&b.draw_count_readback[frame_index], u32)[rhi.MaterialType.PBR]
 }
 
 // frame records, submits and presents the frame render described. Once submitted it waits
 // until the next frame's copy of the tables is free. RESIZE: the swapchain is out of date.
-frame :: proc(b: ^Backend, desc: ^FrameDesc) -> (submitted: bool, status: FrameStatus) {
+frame :: proc(b: ^Backend, desc: ^rhi.FrameDesc) -> (submitted: bool, status: rhi.FrameStatus) {
   gctx := &b.gctx
   frame_index := u32(gctx.frame_serial % FRAMES_IN_FLIGHT)
   tables_sync(b, desc, frame_index)
-  copy(mapped(&b.ui_vertex_buffers[frame_index], Vertex2D), desc.ui_vertices)
+  copy(mapped(&b.ui_vertex_buffers[frame_index], rhi.Vertex2D), desc.ui_vertices)
   copy(mapped(&b.ui_index_buffers[frame_index], u32), desc.ui_indices)
   for &cam in desc.live_cameras do occlusion_bind_pyramid(b, cam.slot)
   sc := &b.swapchain

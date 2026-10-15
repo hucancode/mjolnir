@@ -44,6 +44,8 @@ TABLES := [Table]struct {
   .FORCEFIELDS = {size_of(ForceField), MAX_FORCE_FIELDS},
   .LIGHTS = {size_of(Light), MAX_LIGHTS},
   .DEBUG_LINES = {size_of(DebugLineSegment), MAX_SEGMENTS},
+  .BATCHES = {size_of(Batch), MAX_BATCHES},
+  .NODE_BATCH = {size_of(u32), MAX_NODES_IN_SCENE},
 }
 
 @(private)

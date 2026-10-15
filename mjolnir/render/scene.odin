@@ -78,6 +78,9 @@ Renderer :: struct {
   debug_mutex:         sync.Mutex,
   ui:                  OverlayRenderer,
   shadow_casters:      [MAX_SHADOW_MAPS]Caster,
+  // draws are batched per mesh and material (batches.odin), where the backend has no multi-draw
+  batched:             bool,
+  batches:             BatchState,
   // per pyramid slot: the depth pyramid camera_slot(c) + frame of camera c
   pyramids:            [MAX_PYRAMID_SLOTS]TextureHandle,
   mutex:               sync.Recursive_Mutex,
@@ -104,6 +107,7 @@ init :: proc(
   }
   backend_init(&self.gpu, app_name, window, framebuffer_size, table_size, mesh_size) or_return
   tables_init(self)
+  self.batched = !backend_caps(&self.gpu).multi_draw_indirect_count
   self.ui.dpi_scale = dpi_scale
   if backend_ready(&self.gpu) do return ready(self)
   return true
@@ -120,7 +124,8 @@ ready :: proc(self: ^Renderer) -> bool {
 @(private = "file")
 init_resources :: proc(self: ^Renderer) -> bool {
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    backend_draw_list_create(&self.gpu, SHADOW_DRAW_SLOT_BASE + frame, 1, SHADOW_LIST_CAPACITY) or_return
+    lists, capacity := draw_list_shape(self, shadow = true)
+    backend_draw_list_create(&self.gpu, SHADOW_DRAW_SLOT_BASE + frame, lists, capacity) or_return
   }
   cont.slots_init(&self.camera_slots, MAX_ACTIVE_CAMERAS, RETIRE_GRACE)
   cont.slots_init(&self.mesh_slots, MAX_MESHES, RETIRE_GRACE)
@@ -187,6 +192,7 @@ teardown :: proc(self: ^Renderer) {
   slice.zero(write_table(self, .NODES, NodeData)[:self.node_count])
   mark_dirty(self, .NODES, 0, int(self.node_count))
   self.node_count = 0
+  if self.batched do batches_reset(self)
   cont.slab_rewind(&self.bone_matrix_slab)
   cont.slots_rewind(&self.light_slots)
   clear_entry(self, .EMITTERS, 0, self.emitter_slots.high_water)
@@ -208,6 +214,7 @@ load_environment_map :: proc(self: ^Renderer, data: []u8) -> bool {
 shutdown :: proc(self: ^Renderer) {
   backend_shutdown(&self.gpu)
   tables_destroy(self)
+  batches_destroy(self)
   delete(self.ui.batches)
   delete(self.ui.vertices)
   delete(self.ui.indices)
@@ -432,6 +439,7 @@ stage_slot_removal :: proc(self: ^Renderer, slot: u32) {
   unbind(self, slot)
   if slot >= self.node_count do return
   release_bones(self, slot)
+  batch_leave(self, slot)
   write_table(self, .NODES, NodeData)[slot] = {}
   mark_dirty(self, .NODES, int(slot))
 }
@@ -486,11 +494,13 @@ attach :: proc(self: ^Renderer, slot: u32, attachment: Attachment) {
   guard(self)
   node := slot_node(self, slot)
   unbind(self, slot)
+  batch_leave(self, slot)
   node.mesh_id, node.material_id = 0, 0
   node.flags -= {.CASTS_SHADOW}
   switch a in attachment {
   case MeshAttachment:
     node.mesh_id, node.material_id = u32(a.handle), u32(a.material)
+    batch_join(self, slot, node.mesh_id, node.material_id)
     if a.cast_shadow do node.flags += {.CASTS_SHADOW}
   case Light:
     if i, ok := cont.slots_alloc(&self.light_slots); ok do self.lights[i] = {slot, a}
@@ -978,6 +988,7 @@ flush :: proc(self: ^Renderer, frame_index: u32, debug_ui: bool) {
   flush_particles(self)
   collect_lights(self, frame_index)
   flush_debug_lines(self)
+  batches_flush(self)
   // cull dispatches cover the slots up to the last one holding anything
   nodes := write_table(self, .NODES, NodeData)
   for self.node_count > 0 && nodes[self.node_count - 1] == {} do self.node_count -= 1

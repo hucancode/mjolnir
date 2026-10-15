@@ -1,15 +1,9 @@
 package wgpu_backend
 
+import rhi "../rhi"
+
 import wgpu "vendor:wgpu"
 
-// LightType selects the light branch of the lighting shaders.
-// AMBIENT is the environment light (image-based lighting, emissive, skybox), one per frame.
-LightType :: enum u16 {
-  POINT,
-  SPOT,
-  DIRECTIONAL,
-  AMBIENT,
-}
 
 @(private = "file")
 LIGHTING_VS :: #load("shader/common.wgsl", string) + #load("shader/lighting_vs.wgsl", string)
@@ -32,7 +26,7 @@ LightingUniforms :: struct {
 // directional and ambient cover the screen with a far-plane triangle, directional only where
 // the scene lies in front of it.
 @(private = "file")
-DRAW_STATE := [LightType]struct {
+DRAW_STATE := [rhi.LightType]struct {
   depth_compare: wgpu.CompareFunction,
   cull:          wgpu.CullMode,
   source:        string,
@@ -48,9 +42,9 @@ POSITION_ATTRIBUTE := wgpu.VertexAttribute{format = .Float32x3, offset = 0, shad
 
 @(private)
 lighting_init :: proc(b: ^Backend) {
-  formats := [?]wgpu.TextureFormat{FORMATS[HDR_COLOR_FORMAT]}
-  buffers := [?]wgpu.VertexBufferLayout{{stepMode = .Vertex, arrayStride = size_of(Vertex), attributeCount = 1, attributes = &POSITION_ATTRIBUTE}}
-  for type in LightType {
+  formats := [?]wgpu.TextureFormat{FORMATS[rhi.HDR_COLOR_FORMAT]}
+  buffers := [?]wgpu.VertexBufferLayout{{stepMode = .Vertex, arrayStride = size_of(rhi.Vertex), attributeCount = 1, attributes = &POSITION_ATTRIBUTE}}
+  for type in rhi.LightType {
     state := DRAW_STATE[type]
     constants := [?]wgpu.ConstantEntry{{key = "LIGHT_TYPE", value = f64(type)}}
     b.light_pipelines[type] = graphics_pipeline(
@@ -74,7 +68,7 @@ lighting_init :: proc(b: ^Backend) {
 }
 
 @(private)
-lighting_record :: proc(b: ^Backend, desc: ^FrameDesc, encoder: wgpu.CommandEncoder, cam: ^FrameCamera) {
+lighting_record :: proc(b: ^Backend, desc: ^rhi.FrameDesc, encoder: wgpu.CommandEncoder, cam: ^rhi.FrameCamera) {
   color := wgpu.RenderPassColorAttachment {
     view       = b.textures[cam.attachments[.FINAL_IMAGE]].view,
     depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
@@ -117,7 +111,7 @@ lighting_record :: proc(b: ^Backend, desc: ^FrameDesc, encoder: wgpu.CommandEnco
   wgpu.RenderPassEncoderSetBindGroup(rp, 2, b.frame_group, {offset})
   mesh_buffers_bind(b, rp)
   first: u32
-  for type in LightType {
+  for type in rhi.LightType {
     count := desc.light_count[type]
     defer first += count
     if count == 0 do continue

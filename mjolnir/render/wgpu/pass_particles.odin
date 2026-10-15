@@ -1,19 +1,10 @@
 package wgpu_backend
 
+import rhi "../rhi"
+
 import wgpu "vendor:wgpu"
 
-MAX_PARTICLES :: 65536
 
-ParticleSystemParams :: struct {
-  emitter_count:    u32,
-  forcefield_count: u32,
-  delta_time:       f32,
-  frame_counter:    u32,
-  // new particles this frame, all emitters together
-  emit_total:       u32,
-  // ring slot of the frame's first new particle
-  emit_cursor:      u32,
-}
 
 // Particles live in a ring buffer of MAX_PARTICLES slots (oldest overwritten when full).
 // Emit spawns each emitter's share at its ring cursor; simulate advances live slots in place
@@ -21,7 +12,7 @@ ParticleSystemParams :: struct {
 // (six vertices) per alive particle, instanced (WebGPU points are one pixel).
 @(private)
 COMPUTE_PARTICLE_BATCH :: 256
-#assert(MAX_PARTICLES % COMPUTE_PARTICLE_BATCH == 0)
+#assert(rhi.MAX_PARTICLES % COMPUTE_PARTICLE_BATCH == 0)
 
 // a slot is dead when life <= 0
 @(private)
@@ -46,7 +37,7 @@ PARTICLE_ALIVE_HEADER :: 4
 @(private = "file")
 EmitterData :: struct {
   _:       [19]u32,
-  texture: TextureHandle,
+  texture: rhi.TextureHandle,
   _:       [4]u32,
 }
 #assert(size_of(EmitterData) == 96)
@@ -68,8 +59,8 @@ DRAW_WGSL :: #load("shader/common.wgsl", string) + #load("shader/particle.wgsl",
 
 @(private)
 particles_init_buffers :: proc(b: ^Backend) {
-  b.particle_alive_buffer = buffer_create(b, (PARTICLE_ALIVE_HEADER + MAX_PARTICLES) * size_of(u32), {.Storage, .Indirect, .CopyDst})
-  b.particle_buffer = buffer_create(b, MAX_PARTICLES * size_of(Particle), {.Storage, .CopyDst})
+  b.particle_alive_buffer = buffer_create(b, (PARTICLE_ALIVE_HEADER + rhi.MAX_PARTICLES) * size_of(u32), {.Storage, .Indirect, .CopyDst})
+  b.particle_buffer = buffer_create(b, rhi.MAX_PARTICLES * size_of(Particle), {.Storage, .CopyDst})
 }
 
 @(private)
@@ -103,7 +94,7 @@ particles_reset :: proc(b: ^Backend) -> bool {
 
 // After drawing: the next frame draws what this simulates.
 @(private)
-particles_simulate :: proc(b: ^Backend, encoder: wgpu.CommandEncoder, params: ^ParticleSystemParams) {
+particles_simulate :: proc(b: ^Backend, encoder: wgpu.CommandEncoder, params: ^rhi.ParticleSystemParams) {
   // the instance count; the vertex count stays six
   wgpu.CommandEncoderClearBuffer(encoder, b.particle_alive_buffer, size_of(u32), size_of(u32))
   pass := wgpu.CommandEncoderBeginComputePass(encoder)
@@ -121,13 +112,13 @@ particles_simulate :: proc(b: ^Backend, encoder: wgpu.CommandEncoder, params: ^P
   }
   wgpu.ComputePassEncoderSetPipeline(pass, b.particle_simulate_pipeline)
   wgpu.ComputePassEncoderSetBindGroup(pass, 0, b.scene_groups[.PARTICLE_SIMULATE])
-  wgpu.ComputePassEncoderDispatchWorkgroups(pass, MAX_PARTICLES / COMPUTE_PARTICLE_BATCH, 1, 1)
+  wgpu.ComputePassEncoderDispatchWorkgroups(pass, rhi.MAX_PARTICLES / COMPUTE_PARTICLE_BATCH, 1, 1)
 }
 
 // Inside the forward pass, after the camera's uniforms are bound. Particles sample the first
 // MAX_PARTICLE_TEXTURES distinct emitter textures; the rest draw untextured.
 @(private)
-particles_draw :: proc(b: ^Backend, desc: ^FrameDesc, rp: wgpu.RenderPassEncoder, camera_index: u32) {
+particles_draw :: proc(b: ^Backend, desc: ^rhi.FrameDesc, rp: wgpu.RenderPassEncoder, camera_index: u32) {
   u := ParticleDrawUniforms{camera_index = camera_index}
   key := GroupKey{layout = .PARTICLES}
   n := 0

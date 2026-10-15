@@ -1,32 +1,18 @@
 package wgpu_backend
 
+import rhi "../rhi"
+
 import "core:math/linalg"
 import wgpu "vendor:wgpu"
 
-// Vertex2D is one vertex of the 2D overlay.
-Vertex2D :: struct {
-  pos:   [2]f32,
-  uv:    [2]f32,
-  color: [4]u8,
-}
 
-// UIBatch is a run of overlay indices drawn with one texture inside one scissor (x, y, w, h).
-UIBatch :: struct {
-  first_index: u32,
-  index_count: u32,
-  scissor:     [4]i32,
-  texture:     TextureHandle,
-}
 
-// UI_MAX_VERTICES and UI_MAX_INDICES are the overlay's capacity per frame.
-UI_MAX_VERTICES :: 65536
-UI_MAX_INDICES :: 98304
 
 @(private = "file")
 VERTEX2D_ATTRIBUTES := [?]wgpu.VertexAttribute {
-  {format = .Float32x2, offset = u64(offset_of(Vertex2D, pos)), shaderLocation = 0},
-  {format = .Float32x2, offset = u64(offset_of(Vertex2D, uv)), shaderLocation = 1},
-  {format = .Unorm8x4, offset = u64(offset_of(Vertex2D, color)), shaderLocation = 2},
+  {format = .Float32x2, offset = u64(offset_of(rhi.Vertex2D, pos)), shaderLocation = 0},
+  {format = .Float32x2, offset = u64(offset_of(rhi.Vertex2D, uv)), shaderLocation = 1},
+  {format = .Unorm8x4, offset = u64(offset_of(rhi.Vertex2D, color)), shaderLocation = 2},
 }
 
 @(private = "file")
@@ -36,7 +22,7 @@ OVERLAY_WGSL :: #load("shader/common.wgsl", string) + #load("shader/ui.wgsl", st
 // post-processing, with one pipeline and one vertex stream.
 @(private)
 overlay_init :: proc(b: ^Backend) {
-  buffers := [?]wgpu.VertexBufferLayout{{stepMode = .Vertex, arrayStride = size_of(Vertex2D), attributeCount = len(VERTEX2D_ATTRIBUTES), attributes = raw_data(VERTEX2D_ATTRIBUTES[:])}}
+  buffers := [?]wgpu.VertexBufferLayout{{stepMode = .Vertex, arrayStride = size_of(rhi.Vertex2D), attributeCount = len(VERTEX2D_ATTRIBUTES), attributes = raw_data(VERTEX2D_ATTRIBUTES[:])}}
   formats := [?]wgpu.TextureFormat{b.surface_view_format}
   b.overlay_pipeline = graphics_pipeline(
     b,
@@ -50,14 +36,14 @@ overlay_init :: proc(b: ^Backend) {
       fragment = true,
     },
   )
-  b.ui_vertex_buffer = buffer_create(b, UI_MAX_VERTICES * size_of(Vertex2D), {.Vertex, .CopyDst})
-  b.ui_index_buffer = buffer_create(b, UI_MAX_INDICES * size_of(u32), {.Index, .CopyDst})
+  b.ui_vertex_buffer = buffer_create(b, rhi.UI_MAX_VERTICES * size_of(rhi.Vertex2D), {.Vertex, .CopyDst})
+  b.ui_index_buffer = buffer_create(b, rhi.UI_MAX_INDICES * size_of(u32), {.Index, .CopyDst})
 }
 
 @(private)
-overlay_upload :: proc(b: ^Backend, desc: ^FrameDesc) {
+overlay_upload :: proc(b: ^Backend, desc: ^rhi.FrameDesc) {
   if len(desc.ui_vertices) > 0 {
-    wgpu.QueueWriteBuffer(b.queue, b.ui_vertex_buffer, 0, raw_data(desc.ui_vertices), uint(len(desc.ui_vertices) * size_of(Vertex2D)))
+    wgpu.QueueWriteBuffer(b.queue, b.ui_vertex_buffer, 0, raw_data(desc.ui_vertices), uint(len(desc.ui_vertices) * size_of(rhi.Vertex2D)))
   }
   if len(desc.ui_indices) > 0 {
     wgpu.QueueWriteBuffer(b.queue, b.ui_index_buffer, 0, raw_data(desc.ui_indices), uint(len(desc.ui_indices) * size_of(u32)))
@@ -65,7 +51,7 @@ overlay_upload :: proc(b: ^Backend, desc: ^FrameDesc) {
 }
 
 @(private)
-overlay_record :: proc(b: ^Backend, desc: ^FrameDesc, encoder: wgpu.CommandEncoder, output: wgpu.TextureView) {
+overlay_record :: proc(b: ^Backend, desc: ^rhi.FrameDesc, encoder: wgpu.CommandEncoder, output: wgpu.TextureView) {
   if len(desc.ui_batches) == 0 do return
   color := wgpu.RenderPassColorAttachment{view = output, depthSlice = wgpu.DEPTH_SLICE_UNDEFINED, loadOp = .Load, storeOp = .Store}
   rp := wgpu.CommandEncoderBeginRenderPass(encoder, &{colorAttachmentCount = 1, colorAttachments = &color})

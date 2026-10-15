@@ -1,11 +1,9 @@
 package vulkan_backend
 
+import rhi "../rhi"
+
 import vk "vendor:vulkan"
 
-// Debug line segments live in two rings of DEBUG_RING in the debug line table:
-// [0] depth-tested, [1] drawn over the scene.
-MAX_SEGMENTS :: 65536
-DEBUG_RING :: MAX_SEGMENTS / 2
 
 @(private)
 debug_line_init :: proc(b: ^Backend) -> vk.Result {
@@ -22,7 +20,7 @@ debug_line_init :: proc(b: ^Backend) -> vk.Result {
       depth = READ_ONLY_DEPTH_STATE,
       blend = blend[:],
       color_formats = color_formats[:],
-      depth_format = FORMATS[ATTACHMENTS[.DEPTH].format],
+      depth_format = FORMATS[rhi.ATTACHMENTS[.DEPTH].format],
       dynamic_states = dyn_states[:],
       layout = b.scene.layout,
     },
@@ -35,9 +33,9 @@ debug_line_init :: proc(b: ^Backend) -> vk.Result {
 @(private)
 debug_line_record :: proc(
   b: ^Backend,
-  desc: ^FrameDesc,
+  desc: ^rhi.FrameDesc,
   frame_index: u32,
-  cam: ^FrameCamera,
+  cam: ^rhi.FrameCamera,
   color_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
@@ -62,7 +60,7 @@ debug_line_record :: proc(
   }
   if counts[1] > 0 {
     vk.CmdSetDepthTestEnable(cmd, false)
-    vk.CmdDraw(cmd, 2 * counts[1], 1, 2 * DEBUG_RING, 0)
+    vk.CmdDraw(cmd, 2 * counts[1], 1, 2 * rhi.DEBUG_RING, 0)
   }
   vk.CmdEndRendering(cmd)
 }

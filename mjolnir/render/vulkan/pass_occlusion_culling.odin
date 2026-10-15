@@ -1,12 +1,14 @@
 package vulkan_backend
 
+import rhi "../rhi"
+
 import vk "vendor:vulkan"
 
 // Depth pyramids and draw lists live in slots render assigns: a pyramid per camera and frame
 // in flight; a draw-list slot per camera and frame in flight, plus one per frame for the
 // shadow views.
-MAX_PYRAMID_SLOTS :: MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
-MAX_DRAW_LIST_SLOTS :: (MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
+MAX_PYRAMID_SLOTS :: rhi.MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
+MAX_DRAW_LIST_SLOTS :: (rhi.MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
 
 // Mip 0 texels a depth pyramid group reduces per side (depth_reduce.comp).
 @(private = "file")
@@ -44,7 +46,7 @@ occlusion_init :: proc(b: ^Backend) -> vk.Result {
 // pyramid_create makes pyramid slot `slot` build into `pyramid`, a mipmapped R32F storage
 // texture render made: a storage view per mip, which enter the storage image array at the
 // slot's next frame (occlusion_bind_pyramid), once no frame in flight reads its previous views.
-pyramid_create :: proc(b: ^Backend, slot: u32, pyramid: TextureHandle) -> bool {
+pyramid_create :: proc(b: ^Backend, slot: u32, pyramid: rhi.TextureHandle) -> bool {
   gctx := &b.gctx
   b.pyramid_bound[slot] = false
   img := texture_image(b, pyramid)
@@ -85,7 +87,7 @@ pyramid_destroy :: proc(b: ^Backend, slot: u32) {
 
 // The caller binds the reduce pipeline and orders the dispatch before the cull.
 @(private)
-occlusion_build_pyramid :: proc(b: ^Backend, cmd: vk.CommandBuffer, slot: u32, pyramid: TextureHandle, depth_index: u32) {
+occlusion_build_pyramid :: proc(b: ^Backend, cmd: vk.CommandBuffer, slot: u32, pyramid: rhi.TextureHandle, depth_index: u32) {
   img := texture_image(b, pyramid)
   if img == nil || !b.pyramid_bound[slot] do return
   groups := [2]u32 {
@@ -118,7 +120,7 @@ occlusion_cull :: proc(b: ^Backend, cmd: vk.CommandBuffer, node_count, first_vie
 // counts at the head of a buffer, one per list; commands follow
 @(private)
 DRAW_LIST_HEADER :: 8
-#assert(len(MaterialType) <= DRAW_LIST_HEADER)
+#assert(len(rhi.MaterialType) <= DRAW_LIST_HEADER)
 @(private)
 DRAW_COMMAND_SIZE :: size_of(vk.DrawIndexedIndirectCommand)
 

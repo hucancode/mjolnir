@@ -1,42 +1,11 @@
 package vulkan_backend
 
+import rhi "../rhi"
+
 import vk "vendor:vulkan"
 
-// AttachmentType names the images a camera renders into.
-AttachmentType :: enum {
-  FINAL_IMAGE        = 0,
-  NORMAL             = 1,
-  ALBEDO             = 2,
-  METALLIC_ROUGHNESS = 3,
-  EMISSIVE           = 4,
-  DEPTH              = 5,
-}
 
-// Each camera attachment's texture; pipelines drawing into an attachment take its format.
-ATTACHMENTS :: [AttachmentType]TextureDesc {
-  .FINAL_IMAGE        = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED}},
-  .NORMAL             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
-  .ALBEDO             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
-  .METALLIC_ROUGHNESS = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
-  // HDR, feeds bloom
-  .EMISSIVE           = {format = .RGBA16F, usage = {.COLOR_TARGET, .SAMPLED}},
-  // the depth pyramid build reads it
-  .DEPTH              = {format = .D32F, usage = {.DEPTH_TARGET, .SAMPLED}, shared = true},
-}
 
-// How a material is drawn: one pipeline and, per camera, one indirect draw list per type,
-// drawn in this order. The types before FIRST_FORWARD_TYPE are opaque: drawn into the
-// G-buffer, lit by the lighting pass, tested against the depth pyramid and drawn into
-// shadow maps. The rest are drawn forward, alpha-blended over the lit image.
-MaterialType :: enum u32 {
-  PBR,
-  TRANSPARENT,
-  WIREFRAME,
-  RANDOM_COLOR,
-  // camera-facing billboard showing one cell of the albedo sprite sheet
-  SPRITE,
-}
-FIRST_FORWARD_TYPE :: MaterialType.TRANSPARENT
 
 // Each MaterialType's pipeline is built against the targets of its pass (MATERIAL_PASS_TARGETS).
 @(private)
@@ -51,7 +20,7 @@ MaterialPass :: enum {
 @(private = "file")
 MESH_VERT :: #load("shader/gbuffer/vert.spv")
 
-MATERIAL_SHADERS := [MaterialType]struct {
+MATERIAL_SHADERS := [rhi.MaterialType]struct {
   vert, frag:   []u8,
   polygon_mode: vk.PolygonMode,
   cull_mode:    vk.CullModeFlags,
@@ -66,7 +35,7 @@ MATERIAL_SHADERS := [MaterialType]struct {
 // `colors` and the camera depth, all loaded with `load`.
 @(private)
 MaterialPassTargets :: struct {
-  colors: []AttachmentType,
+  colors: []rhi.AttachmentType,
   blend:  vk.PipelineColorBlendAttachmentState,
   depth:  vk.PipelineDepthStencilStateCreateInfo,
   load:   vk.AttachmentLoadOp,
@@ -87,9 +56,9 @@ MATERIAL_PASS_TARGETS := [MaterialPass]MaterialPassTargets {
   },
 }
 
-MATERIAL_PASS_TYPES := [MaterialPass][2]MaterialType {
-  .GBUFFER = {MaterialType(0), FIRST_FORWARD_TYPE},
-  .FORWARD = {FIRST_FORWARD_TYPE, MaterialType(len(MaterialType))},
+MATERIAL_PASS_TYPES := [MaterialPass][2]rhi.MaterialType {
+  .GBUFFER = {rhi.MaterialType(0), rhi.FIRST_FORWARD_TYPE},
+  .FORWARD = {rhi.FIRST_FORWARD_TYPE, rhi.MaterialType(len(rhi.MaterialType))},
 }
 
 @(private)
@@ -97,7 +66,7 @@ material_pass_desc :: proc(pass: MaterialPass, desc: ^GraphicsPipelineDesc) {
   t := &MATERIAL_PASS_TARGETS[pass]
   formats := make([]vk.Format, len(t.colors), context.temp_allocator)
   blend := make([]vk.PipelineColorBlendAttachmentState, len(t.colors), context.temp_allocator)
-  attachments := ATTACHMENTS
+  attachments := rhi.ATTACHMENTS
   for a, i in t.colors {
     formats[i] = FORMATS[attachments[a].format]
     blend[i] = t.blend
@@ -105,7 +74,7 @@ material_pass_desc :: proc(pass: MaterialPass, desc: ^GraphicsPipelineDesc) {
   desc.color_formats = formats
   desc.blend = blend
   desc.depth = t.depth
-  desc.depth_format = FORMATS[ATTACHMENTS[.DEPTH].format]
+  desc.depth_format = FORMATS[rhi.ATTACHMENTS[.DEPTH].format]
 }
 
 @(private)
@@ -136,7 +105,7 @@ material_pipelines_init :: proc(b: ^Backend) -> vk.Result {
 
 // The forward pass draws particles first. A camera draws nothing until a cull has written its lists.
 @(private)
-material_pass_record :: proc(b: ^Backend, frame_index: u32, cam: ^FrameCamera, pass: MaterialPass) {
+material_pass_record :: proc(b: ^Backend, frame_index: u32, cam: ^rhi.FrameCamera, pass: MaterialPass) {
   cmd := b.command_buffers[frame_index]
   t := &MATERIAL_PASS_TARGETS[pass]
   colors := make([]vk.RenderingAttachmentInfo, len(t.colors), context.temp_allocator)

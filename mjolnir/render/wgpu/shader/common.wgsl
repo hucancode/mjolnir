@@ -112,6 +112,16 @@ struct Skinning {
     weights: vec4f,
 }
 
+// A draw batch: the nodes drawing one mesh with one material (render's Batch).
+struct Batch {
+    mesh_id: u32,
+    material_id: u32,
+    // where the batch's instances start in a draw list's instance array
+    first_instance: u32,
+    // the nodes in it
+    capacity: u32,
+}
+
 // Indexed draws use all five words; non-indexed ones the first four.
 struct DrawCommand {
     index_count: u32,

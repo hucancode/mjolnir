@@ -1,4 +1,4 @@
-// Shadow depth: the opaque candidates through one shadow view (scene group SHADOW), skinned
+// Shadow depth: the opaque batches through one shadow view (scene group SHADOW), skinned
 // like mesh.wgsl. One pass per view, into its atlas layer.
 
 @group(0) @binding(0) var<storage, read> views: array<View>;

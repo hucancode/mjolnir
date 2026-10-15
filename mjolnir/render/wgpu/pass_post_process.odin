@@ -1,83 +1,20 @@
 package wgpu_backend
 
+import rhi "../rhi"
+
 import "base:intrinsics"
 import "core:reflect"
 import wgpu "vendor:wgpu"
 
-// GrayscaleEffect desaturates the image. Effect structs are copied verbatim into the uniforms,
-// so their layout must match each shader's PostUniforms.
-GrayscaleEffect :: struct {
-  weights:  [3]f32, // zero = Rec. 601 luma
-  strength: f32,
-}
 
-// ToneMapEffect maps HDR color to display range with an exposure and gamma.
-ToneMapEffect :: struct {
-  exposure: f32,
-  gamma:    f32,
-}
 
-// BlurEffect blurs the image in two separable passes.
-BlurEffect :: struct {
-  radius:         f32,
-  weight_falloff: f32, // 0.0 = box blur, 1.0 = gaussian blur
-}
 
-// BloomEffect adds a blurred copy of the pixels above threshold.
-BloomEffect :: struct {
-  threshold:   f32,
-  intensity:   f32,
-  blur_radius: f32,
-}
 
-// OutlineEffect draws edges found in the normal and depth images.
-OutlineEffect :: struct {
-  color:     [3]f32,
-  thickness: f32,
-}
 
-// FogEffect blends toward color between depth start and end.
-FogEffect :: struct {
-  color: [3]f32,
-  start: f32,
-  end:   f32,
-}
 
-// CrossHatchEffect hatches pixels darker than lum_thresholds[i] (tonemapped luminance) with
-// stroke family i: the two diagonals, then both shifted by hatch_offset_y.
-CrossHatchEffect :: struct {
-  hatch_offset_y: f32,
-  lum_thresholds: [4]f32,
-}
 
-// DoFEffect blurs pixels away from the focus plane.
-DoFEffect :: struct {
-  focus_distance:  f32, // Distance to the focus plane
-  focus_range:     f32, // Range where objects are in focus
-  blur_strength:   f32, // Maximum blur radius
-  bokeh_intensity: f32, // Bokeh effect intensity
-}
 
-// PostprocessEffect is one entry of the effect stack; nil copies the input to the output unchanged.
-PostprocessEffect :: union {
-  GrayscaleEffect,
-  ToneMapEffect,
-  BlurEffect,
-  BloomEffect,
-  OutlineEffect,
-  FogEffect,
-  CrossHatchEffect,
-  DoFEffect,
-}
 
-// PostPass is one fullscreen pass of the effect stack: pass `pass` of effect (blur and bloom
-// take two) reads input, the previous pass's output, and original, the previous pass's input,
-// and writes output; NO_TEXTURE (0) is the presented image. A nil effect copies input.
-PostPass :: struct {
-  effect:                  PostprocessEffect,
-  pass:                    u32,
-  input, original, output: TextureHandle,
-}
 
 @(private = "file")
 POST_VS :: #load("shader/common.wgsl", string) + #load("shader/postprocess.wgsl", string)
@@ -95,7 +32,7 @@ EFFECTS := [?]string {
   POST_VS + #load("shader/post_crosshatch.wgsl", string),
   POST_VS + #load("shader/post_dof.wgsl", string),
 }
-#assert(len(EFFECTS) == intrinsics.type_union_variant_count(PostprocessEffect) + 1)
+#assert(len(EFFECTS) == intrinsics.type_union_variant_count(rhi.PostprocessEffect) + 1)
 @(private)
 EFFECT_COUNT :: len(EFFECTS)
 
@@ -109,13 +46,13 @@ PostUniforms :: struct {
   // this pass of the effect
   pass:        u32,
   _:           u32,
-  effect:      PostprocessEffect,
+  effect:      rhi.PostprocessEffect,
 }
 #assert(offset_of(PostUniforms, effect) == 16)
 
 @(private)
 post_process_init :: proc(b: ^Backend) {
-  formats := [2]wgpu.TextureFormat{FORMATS[HDR_COLOR_FORMAT], b.surface_view_format}
+  formats := [2]wgpu.TextureFormat{FORMATS[rhi.HDR_COLOR_FORMAT], b.surface_view_format}
   for &pipelines, is_last in b.post_pipelines {
     for source, tag in EFFECTS {
       pipelines[tag] = graphics_pipeline(
@@ -128,7 +65,7 @@ post_process_init :: proc(b: ^Backend) {
 
 // Every pass but the last writes a texture; the last writes output.
 @(private)
-post_process_record :: proc(b: ^Backend, desc: ^FrameDesc, encoder: wgpu.CommandEncoder, output: wgpu.TextureView, cam: ^FrameCamera) {
+post_process_record :: proc(b: ^Backend, desc: ^rhi.FrameDesc, encoder: wgpu.CommandEncoder, output: wgpu.TextureView, cam: ^rhi.FrameCamera) {
   for &p in desc.post_passes {
     is_last := p.output == 0
     color := wgpu.RenderPassColorAttachment {

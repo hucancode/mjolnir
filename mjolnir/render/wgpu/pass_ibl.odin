@@ -1,10 +1,10 @@
 package wgpu_backend
 
+import rhi "../rhi"
+
 import "core:log"
 import wgpu "vendor:wgpu"
 
-// mips of the prefiltered environment cube
-PREFILTER_MIPS :: 5
 
 @(private = "file")
 PrecomputeShader :: enum {
@@ -28,7 +28,7 @@ PREFILTER_SAMPLES :: 1024
 @(private = "file")
 IRRADIANCE_SAMPLE_DELTA :: f32(0.025)
 @(private = "file")
-PRECOMPUTE_DISPATCHES :: 2 + PREFILTER_MIPS
+PRECOMPUTE_DISPATCHES :: 2 + rhi.PREFILTER_MIPS
 
 // `value` is the irradiance sample delta or the prefilter roughness.
 @(private = "file")
@@ -42,11 +42,11 @@ PrecomputeUniforms :: struct {
 // equirect into env_cube, then irradiance and every prefilter mip (PREFILTER_MIPS) from it.
 // Each dispatch binds its source (group 3 binding 0: 2D for the equirect step, a cube
 // otherwise) and one cube level as six storage layers (binding 1).
-precompute_ibl :: proc(b: ^Backend, equirect, env_cube, irradiance_cube, prefilter_cube: TextureHandle) -> bool {
+precompute_ibl :: proc(b: ^Backend, equirect, env_cube, irradiance_cube, prefilter_cube: rhi.TextureHandle) -> bool {
   Dispatch :: struct {
     shader: PrecomputeShader,
-    src:    TextureHandle,
-    dst:    TextureHandle,
+    src:    rhi.TextureHandle,
+    dst:    rhi.TextureHandle,
     mip:    u32,
     value:  f32,
     count:  u32,
@@ -54,8 +54,8 @@ precompute_ibl :: proc(b: ^Backend, equirect, env_cube, irradiance_cube, prefilt
   dispatches: [PRECOMPUTE_DISPATCHES]Dispatch
   dispatches[0] = {.EQUIRECT, equirect, env_cube, 0, 0, 0}
   dispatches[1] = {.IRRADIANCE, env_cube, irradiance_cube, 0, IRRADIANCE_SAMPLE_DELTA, 0}
-  for mip in 0 ..< u32(PREFILTER_MIPS) {
-    roughness := f32(mip) / f32(PREFILTER_MIPS - 1)
+  for mip in 0 ..< u32(rhi.PREFILTER_MIPS) {
+    roughness := f32(mip) / f32(rhi.PREFILTER_MIPS - 1)
     dispatches[2 + mip] = {.PREFILTER, env_cube, prefilter_cube, mip, roughness, PREFILTER_SAMPLES}
   }
   layouts: [PrecomputeShader]wgpu.BindGroupLayout

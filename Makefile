@@ -11,9 +11,6 @@ SPV_COMPUTE_SHADERS := $(patsubst %.comp,%.spv,$(COMP_SHADERS))
 run: shader
 	odin run . -out:bin/main
 
-run-max: shader
-	odin run . -out:bin/main -define:RENDER_FPS=200
-
 debug: shader
 	VK_LOADER_DEBUG=all VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation odin run . -out:bin/main-debug -debug
 

@@ -10,8 +10,8 @@
 // post-process passes). It keeps the one CPU copy of each table and marks what it writes;
 // each frame the backend (render/vulkan, render/wgpu) brings its GPU copies up to date and
 // turns the rest of FrameDesc into GPU work. It changes when rendering does.
-// Its one seam is the backend, which it imports and which never imports it: backend.odin
-// (names in render's API) and backend_glue.odin (the rest) alias every name it uses, and are
-// the only files naming a backend. It never touches the host: images, environment maps and
+// Its seams are rhi, the contract both sides share, and the backend, which it imports and which
+// never imports it: backend.odin (names in render's API) and backend_glue.odin (the rest) alias
+// every name it uses, and are the only files naming a backend. It never touches the host: images, environment maps and
 // glTF arrive as bytes, the window as platform's handle, its size with each frame.
 package render

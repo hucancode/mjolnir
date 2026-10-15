@@ -1,5 +1,7 @@
 package wgpu_backend
 
+import rhi "../rhi"
+
 import "base:runtime"
 import "core:log"
 import wgpu "vendor:wgpu"
@@ -11,66 +13,8 @@ FRAMES_IN_FLIGHT :: 1
 // reused: WebGPU keeps destroyed objects alive for submitted work and orders uploads after it.
 RETIRE_GRACE :: 1
 
-// FrameCamera is a live camera as frame records it; textures and slots are this frame's.
-FrameCamera :: struct {
-  index:       u32,
-  attachments: [AttachmentType]TextureHandle,
-  // the previous frame's depth, which the depth pyramid is built from
-  prev_depth:  TextureHandle,
-  // the depth pyramid built this frame
-  pyramid:     TextureHandle,
-  // this frame's pyramid and draw-list slot; this frame's cull writes the lists of next_slot
-  slot:        u32,
-  next_slot:   u32,
-  near, far:   f32,
-  // its depth and pyramid hold data: until then no occlusion
-  ready:       bool,
-}
 
-// FrameDesc is everything frame records.
-FrameDesc :: struct {
-  // the window's size in pixels, as the platform reports it
-  framebuffer_size:  [2]u32,
-  // render's tables, the one copy; bit r of dirty[t] is region r of tables[t] (TABLE_REGIONS),
-  // written since the last submitted frame
-  tables:            [Table][]u8,
-  dirty:             [Table]u64,
-  live_cameras:      []FrameCamera,
-  // index into live_cameras of the camera presented, -1 for none
-  main_live:         int,
-  // camera views covered by the cull, from CAMERA_VIEW_BASE + 1
-  camera_view_count: u32,
-  node_count:        u32,
-  // lights are sorted by type; point and spot draw these volume meshes
-  light_count:       [LightType]u32,
-  light_volumes:     [LightType]MeshData,
-  shadow_view_count: u32,
-  // draw-list slot the shadow views cull into and draw from
-  shadow_draw_list:  u32,
-  environment_map:   TextureHandle,
-  brdf_lut:          TextureHandle,
-  irradiance_cube:   TextureHandle,
-  prefilter_cube:    TextureHandle,
-  skybox_intensity:  f32,
-  skybox_blur:       f32,
-  // over the main camera's image, the last one presenting
-  post_passes:       []PostPass,
-  particle_params:   ParticleSystemParams,
-  // filled segments of each debug line ring
-  debug_line_counts: [2]u32,
-  // render clock time; the shader skips segments past their expiry
-  debug_line_time:   f32,
-  ui_batches:        []UIBatch,
-  ui_vertices:       []Vertex2D,
-  ui_indices:        []u32,
-}
 
-// FrameStatus is how frame went: RESIZE asks for resize at the new framebuffer size.
-FrameStatus :: enum {
-  OK,
-  RESIZE,
-  ERROR,
-}
 
 // Backend is every WebGPU object the renderer draws with. render keeps it opaque and goes
 // through the procs below; textures are indexed by render's TextureHandle.
@@ -87,15 +31,15 @@ Backend :: struct {
   frame_serial:               u64,
   // what init was given, for finishing once the device arrives
   pending:                    struct {
-    table_size:       [Table]int,
-    mesh_size:        [MeshStream]int,
+    table_size:       [rhi.Table]int,
+    mesh_size:        [rhi.MeshStream]int,
     framebuffer_size: [2]u32,
   },
   // the device is up and every resource made; failed: it never will be
   up, failed:                 bool,
   context_:                   runtime.Context,
-  table_buffers:              [Table]wgpu.Buffer,
-  mesh_buffers:               [MeshStream]wgpu.Buffer,
+  table_buffers:              [rhi.Table]wgpu.Buffer,
+  mesh_buffers:               [rhi.MeshStream]wgpu.Buffer,
   textures:                   []Texture,
   white, black_cube:          Texture,
   samplers:                   [SamplerType]wgpu.Sampler,
@@ -114,8 +58,8 @@ Backend :: struct {
   mipgen_layout:              wgpu.BindGroupLayout,
   mipgen_pipelines:           [dynamic]MipgenPipeline,
   // by MaterialType
-  material_pipelines:         [len(MaterialType)]wgpu.RenderPipeline,
-  light_pipelines:            [LightType]wgpu.RenderPipeline,
+  material_pipelines:         [len(rhi.MaterialType)]wgpu.RenderPipeline,
+  light_pipelines:            [rhi.LightType]wgpu.RenderPipeline,
   // [is_last][tag]: every pass writes an HDR texture but the last, which presents
   post_pipelines:             [2][EFFECT_COUNT]wgpu.RenderPipeline,
   shadow_pipeline:            wgpu.RenderPipeline,
@@ -129,16 +73,11 @@ Backend :: struct {
   // [from_depth]: mip 0 reduces the depth image, the others the mip above
   reduce_layouts:             [2]wgpu.BindGroupLayout,
   reduce_pipelines:           [2]wgpu.ComputePipeline,
-  // this frame's candidates (cull.odin) and each material type's range of them
-  candidates:                 [dynamic]u32,
-  type_first, type_count:     [MaterialType]u32,
-  candidate_buffer:           wgpu.Buffer,
-  // draws per shadow view in the shadow list this frame
-  shadow_stride:              u32,
-  draw_lists:                 [MAX_DRAW_LIST_SLOTS]wgpu.Buffer,
-  draw_list_capacity:         [MAX_DRAW_LIST_SLOTS]u32,
-  // visible opaque draws per draw-list slot this frame
-  draw_count_buffer:          wgpu.Buffer,
+  finalize_pipeline:          wgpu.ComputePipeline,
+  draw_lists:                 [MAX_DRAW_LIST_SLOTS]DrawList,
+  // cull and pyramid bind groups, kept until a texture or draw list they name changes
+  cull_groups:                map[CullKey]wgpu.BindGroup,
+  reduce_groups:              map[ReduceKey]wgpu.BindGroup,
   draw_count_readback:        [3]DrawCountReadback,
   draw_count_value:           u32,
   // per pyramid slot: a view per mip
@@ -149,6 +88,8 @@ Backend :: struct {
   particle_alive_buffer:      wgpu.Buffer,
   ui_vertex_buffer:           wgpu.Buffer,
   ui_index_buffer:            wgpu.Buffer,
+  // what rhi's handles name (rhi.odin)
+  rhi:                        RhiState,
 }
 
 // init brings WebGPU up on window: instance, surface, then adapter and device, which the web
@@ -160,8 +101,8 @@ init :: proc(
   app_name: string,
   window: WindowHandle,
   framebuffer_size: [2]u32,
-  table_size: [Table]int,
-  mesh_size: [MeshStream]int,
+  table_size: [rhi.Table]int,
+  mesh_size: [rhi.MeshStream]int,
 ) -> bool {
   b.context_ = context
   b.pending = {table_size, mesh_size, framebuffer_size}
@@ -236,7 +177,7 @@ on_lost :: proc "c" (device: ^wgpu.Device, reason: wgpu.DeviceLostReason, messag
 @(private = "file")
 resources_init :: proc(b: ^Backend) {
   surface_configure(b, b.pending.framebuffer_size)
-  b.textures = make([]Texture, MAX_TEXTURES)
+  b.textures = make([]Texture, rhi.MAX_TEXTURES)
   tables_init(b, b.pending.table_size, b.pending.mesh_size)
   particles_init_buffers(b)
   samplers_init(b)
@@ -301,7 +242,7 @@ shutdown :: proc(b: ^Backend) {
     for buffer in b.table_buffers do wgpu.BufferRelease(buffer)
     for buffer in b.mesh_buffers do wgpu.BufferRelease(buffer)
     buffers := [?]wgpu.Buffer {
-      b.candidate_buffer, b.draw_count_buffer, b.particle_buffer, b.particle_alive_buffer,
+      b.particle_buffer, b.particle_alive_buffer,
       b.ui_vertex_buffer, b.ui_index_buffer, b.uniform_buffer,
     }
     for buffer in buffers do wgpu.BufferRelease(buffer)
@@ -314,7 +255,7 @@ shutdown :: proc(b: ^Backend) {
     for p in b.reduce_pipelines do wgpu.ComputePipelineRelease(p)
     render_pipelines := [?]wgpu.RenderPipeline{b.shadow_pipeline, b.overlay_pipeline, b.particle_draw_pipeline}
     for p in render_pipelines do wgpu.RenderPipelineRelease(p)
-    compute_pipelines := [?]wgpu.ComputePipeline{b.cull_pipeline, b.particle_emit_pipeline, b.particle_simulate_pipeline}
+    compute_pipelines := [?]wgpu.ComputePipeline{b.cull_pipeline, b.finalize_pipeline, b.particle_emit_pipeline, b.particle_simulate_pipeline}
     for p in compute_pipelines do wgpu.ComputePipelineRelease(p)
     for g in b.scene_groups do wgpu.BindGroupRelease(g)
     wgpu.BindGroupRelease(b.frame_group)
@@ -332,7 +273,8 @@ shutdown :: proc(b: ^Backend) {
   delete(b.groups)
   delete(b.frame_groups)
   delete(b.mipgen_pipelines)
-  delete(b.candidates)
+  delete(b.cull_groups)
+  delete(b.reduce_groups)
   delete(b.uniforms)
   if b.adapter != nil do wgpu.AdapterRelease(b.adapter)
   if b.surface != nil do wgpu.SurfaceRelease(b.surface)

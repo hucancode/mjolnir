@@ -38,6 +38,15 @@ CAMERA_LIST_CAPACITY :: MAX_NODES_IN_SCENE
 @(private)
 SHADOW_LIST_CAPACITY :: 4096 * MAX_SHADOW_VIEWS
 
+// What a draw-list slot holds. Compacted by multi-draw: a camera one list per material type
+// of CAMERA_LIST_CAPACITY draws, the shadow views one list. Batched: one list per view
+// (the shadow slot has a view per shadow map face), each of room for every node's instance.
+@(private)
+draw_list_shape :: proc(self: ^Renderer, shadow: bool) -> (lists, capacity: u32) {
+  if self.batched do return MAX_SHADOW_VIEWS if shadow else 1, MAX_NODES_IN_SCENE
+  return 1 if shadow else len(MaterialType), SHADOW_LIST_CAPACITY if shadow else CAMERA_LIST_CAPACITY
+}
+
 // Camera is a view into the scene: pose and projection, plus the images it renders into.
 // Its depth pyramids live in Renderer.pyramids at its slot (camera_slot).
 Camera :: struct {
@@ -241,8 +250,9 @@ create_camera :: proc(
   camera_set_perspective(cam, fov, near_plane, far_plane)
   camera_look_at(cam, position, target)
   // the lists' size does not depend on the camera's extent
+  lists, capacity := draw_list_shape(self, shadow = false)
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    if !backend_draw_list_create(&self.gpu, camera_slot(u32(handle)) + frame, len(MaterialType), CAMERA_LIST_CAPACITY) {
+    if !backend_draw_list_create(&self.gpu, camera_slot(u32(handle)) + frame, lists, capacity) {
       destroy_camera(self, handle)
       return 0, false
     }

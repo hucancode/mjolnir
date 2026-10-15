@@ -1,15 +1,9 @@
 package vulkan_backend
 
+import rhi "../rhi"
+
 import vk "vendor:vulkan"
 
-// LightType selects the light branch of the lighting shaders.
-// AMBIENT is the environment light (image-based lighting, emissive, skybox), one per frame.
-LightType :: enum u16 {
-  POINT,
-  SPOT,
-  DIRECTIONAL,
-  AMBIENT,
-}
 
 @(private = "file")
 LIGHTING_SHADER_VERT :: #load("shader/lighting/vert.spv")
@@ -33,7 +27,7 @@ LightingPushConstants :: struct {
 // directional and ambient cover the screen with a far-plane triangle, directional only where
 // the scene lies in front of it.
 @(private = "file")
-DRAW_STATE := [LightType]struct {
+DRAW_STATE := [rhi.LightType]struct {
   depth_compare: vk.CompareOp,
   cull:          vk.CullModeFlags,
   frag:          []u8,
@@ -48,9 +42,9 @@ DRAW_STATE := [LightType]struct {
 direct_light_init :: proc(b: ^Backend) -> vk.Result {
   gctx := &b.gctx
   light_type_entry := vk.SpecializationMapEntry{constantID = 0, size = size_of(u32)}
-  color_formats := [?]vk.Format{FORMATS[HDR_COLOR_FORMAT]}
+  color_formats := [?]vk.Format{FORMATS[rhi.HDR_COLOR_FORMAT]}
   blend := [?]vk.PipelineColorBlendAttachmentState{BLEND_ADDITIVE}
-  for type in LightType {
+  for type in rhi.LightType {
     light_type := u32(type)
     specialization := vk.SpecializationInfo {
       mapEntryCount = 1,
@@ -73,7 +67,7 @@ direct_light_init :: proc(b: ^Backend) -> vk.Result {
         depth = depth,
         blend = blend[:],
         color_formats = color_formats[:],
-        depth_format = FORMATS[ATTACHMENTS[.DEPTH].format],
+        depth_format = FORMATS[rhi.ATTACHMENTS[.DEPTH].format],
         layout = b.scene.layout,
       },
     ) or_return
@@ -82,7 +76,7 @@ direct_light_init :: proc(b: ^Backend) -> vk.Result {
 }
 
 @(private)
-lighting_record :: proc(b: ^Backend, desc: ^FrameDesc, frame_index: u32, cam: ^FrameCamera) {
+lighting_record :: proc(b: ^Backend, desc: ^rhi.FrameDesc, frame_index: u32, cam: ^rhi.FrameCamera) {
   cmd := b.command_buffers[frame_index]
   final_image := texture_image(b, cam.attachments[.FINAL_IMAGE])
   depth_texture := texture_image(b, cam.attachments[.DEPTH])
@@ -105,7 +99,7 @@ lighting_record :: proc(b: ^Backend, desc: ^FrameDesc, frame_index: u32, cam: ^F
   }
   push_constants(b, cmd, &push)
   first: u32
-  for type in LightType {
+  for type in rhi.LightType {
     count := desc.light_count[type]
     defer first += count
     if count == 0 do continue

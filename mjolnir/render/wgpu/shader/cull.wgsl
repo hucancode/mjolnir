@@ -1,24 +1,30 @@
-// Tests candidate i (x) against view first_view + y and writes its draw at y * stride + i of
-// the draw list: one instance when visible, none when culled. Every slot is written each
-// frame. Wireframe and random-color draws are non-indexed (pulled from the index buffer).
+// Tests node i (x) against view first_view + y and, when it is visible, counts it in its
+// batch's draw and lists it: draw list y of the slot's buffer. The buffer holds words:
+// per list the count of visible opaque nodes, then per list max_batches indirect draws
+// (cull_draws.wgsl writes all but their instance counts), then per list the node indices of
+// each batch's visible instances, from the batch's first_instance.
 
 @group(0) @binding(0) var<storage, read> views: array<View>;
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
 @group(0) @binding(2) var<storage, read> meshes: array<Mesh>;
 @group(0) @binding(3) var<storage, read> materials: array<Material>;
-@group(0) @binding(4) var<storage, read> candidates: array<u32>;
-@group(0) @binding(5) var<storage, read_write> draw_counts: array<atomic<u32>>;
+@group(0) @binding(4) var<storage, read> batches: array<Batch>;
+@group(0) @binding(5) var<storage, read> node_batch: array<u32>;
 
 struct CullUniforms {
-    candidate_count: u32,
+    node_count: u32,
     first_view: u32,
-    stride: u32,
-    // draw_counts entry counting the visible opaque draws
-    count_slot: u32,
+    // words
+    instance_stride: u32,
+    draws_base: u32,
+    instances_base: u32,
+    max_batches: u32,
+    batch_count: u32,
+    _pad: u32,
 }
 @group(2) @binding(0) var<uniform> u: CullUniforms;
 
-@group(3) @binding(0) var<storage, read_write> draws: array<DrawCommand>;
+@group(3) @binding(0) var<storage, read_write> list: array<atomic<u32>>;
 @group(3) @binding(1) var pyramid: texture_2d<f32>;
 
 const DEPTH_BIAS: f32 = 0.0001;
@@ -110,24 +116,19 @@ fn visible(view: View, node: Node, material_type: u32) -> bool {
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wid: vec3u) {
     let i = gid.x;
-    if (i >= u.candidate_count) { return; }
+    if (i >= u.node_count) { return; }
+    let id = node_batch[i];
+    if (id == 0u) { return; }
     let view = views[u.first_view + wid.y];
-    let node = nodes[candidates[i]];
-    let mesh = meshes[node.mesh_id];
+    let node = nodes[i];
     let material_type = materials[node.material_id].material_type;
-    let shown = visible(view, node, material_type);
-    var draw: DrawCommand;
-    draw.instance_count = select(0u, 1u, shown);
-    if (material_type == MATERIAL_WIREFRAME || material_type == MATERIAL_RANDOM_COLOR) {
-        // non-indexed: vertex count, instance count, first vertex, first instance
-        draw.index_count = select(mesh.index_count, mesh.index_count * 2u, material_type == MATERIAL_WIREFRAME);
-    } else {
-        draw.index_count = mesh.index_count;
-        draw.first_index = mesh.first_index;
-        draw.vertex_offset = mesh.vertex_offset;
+    if (!visible(view, node, material_type)) { return; }
+    let batch = batches[id];
+    let slot = atomicAdd(&list[u.draws_base + (wid.y * u.max_batches + id) * 5u + 1u], 1u);
+    if (slot < batch.capacity) {
+        atomicStore(&list[u.instances_base + wid.y * u.instance_stride + batch.first_instance + slot], i);
     }
-    draws[wid.y * u.stride + i] = draw;
-    if (shown && material_type == MATERIAL_PBR) {
-        atomicAdd(&draw_counts[u.count_slot], 1u);
+    if (material_type == MATERIAL_PBR) {
+        atomicAdd(&list[wid.y], 1u);
     }
 }

@@ -1,26 +1,17 @@
 package vulkan_backend
 
+import rhi "../rhi"
+
 import vk "vendor:vulkan"
 
-MAX_PARTICLES :: 65536
 
-ParticleSystemParams :: struct {
-  emitter_count:    u32,
-  forcefield_count: u32,
-  delta_time:       f32,
-  frame_counter:    u32,
-  // new particles this frame, all emitters together
-  emit_total:       u32,
-  // ring slot of the frame's first new particle
-  emit_cursor:      u32,
-}
 
 // Particles live in a ring buffer of MAX_PARTICLES slots (oldest overwritten when full).
 // Emit spawns each emitter's share at its ring cursor; simulate advances live slots in
 // place and appends them to the alive list, whose header is the indirect draw.
 @(private)
 COMPUTE_PARTICLE_BATCH :: 256
-#assert(MAX_PARTICLES % COMPUTE_PARTICLE_BATCH == 0)
+#assert(rhi.MAX_PARTICLES % COMPUTE_PARTICLE_BATCH == 0)
 
 // a slot is dead when life <= 0
 @(private)
@@ -41,7 +32,7 @@ Particle :: struct {
 PARTICLE_ALIVE_HEADER :: size_of(vk.DrawIndirectCommand) / size_of(u32)
 
 @(private)
-particles_simulate :: proc(b: ^Backend, cmd: vk.CommandBuffer, params: ^ParticleSystemParams) {
+particles_simulate :: proc(b: ^Backend, cmd: vk.CommandBuffer, params: ^rhi.ParticleSystemParams) {
   // the previous simulation and this frame's draws use what gets rewritten
   barrier(cmd, .PARTICLES_TO_FILL)
   vk.CmdFillBuffer(cmd, b.particle_alive_buffer.buffer, 0, size_of(u32), 0)
@@ -52,7 +43,7 @@ particles_simulate :: proc(b: ^Backend, cmd: vk.CommandBuffer, params: ^Particle
   }
   barrier(cmd, .FILL_TO_COMPUTE)
   vk.CmdBindPipeline(cmd, .COMPUTE, b.pipelines[.PARTICLE_SIMULATE])
-  vk.CmdDispatch(cmd, MAX_PARTICLES / COMPUTE_PARTICLE_BATCH, 1, 1)
+  vk.CmdDispatch(cmd, rhi.MAX_PARTICLES / COMPUTE_PARTICLE_BATCH, 1, 1)
 }
 
 // particles_reset kills every particle before the next frame.
@@ -71,13 +62,13 @@ queue_particles_reset :: proc(b: ^Backend) -> vk.Result {
 particles_init_buffers :: proc(b: ^Backend) -> vk.Result {
   b.particle_alive_buffer = buffer_create(
     &b.gctx,
-    (PARTICLE_ALIVE_HEADER + MAX_PARTICLES) * size_of(u32),
+    (PARTICLE_ALIVE_HEADER + rhi.MAX_PARTICLES) * size_of(u32),
     {.STORAGE_BUFFER, .INDIRECT_BUFFER},
     host_visible = false,
   ) or_return
   b.particle_buffer = buffer_create(
     &b.gctx,
-    MAX_PARTICLES * size_of(Particle),
+    rhi.MAX_PARTICLES * size_of(Particle),
     {.STORAGE_BUFFER},
     host_visible = false,
   ) or_return

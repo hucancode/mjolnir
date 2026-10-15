@@ -1,5 +1,6 @@
 package render
 
+import "rhi"
 import vulkan "vulkan"
 import wgpu "wgpu"
 
@@ -12,43 +13,28 @@ when RENDER_BACKEND == "vulkan" {
   // WindowHandle is the window render draws into (platform.Platform.window).
   WindowHandle :: vulkan.WindowHandle
 
-  // TextureHandle identifies a bindless texture; NO_TEXTURE is none.
-  TextureHandle :: vulkan.TextureHandle
-  TextureFormat :: vulkan.TextureFormat
-  AttachmentType :: vulkan.AttachmentType
-  MaterialType :: vulkan.MaterialType
-  LightType :: vulkan.LightType
-  Vertex :: vulkan.Vertex
-  Vertex2D :: vulkan.Vertex2D
-  GrayscaleEffect :: vulkan.GrayscaleEffect
-  ToneMapEffect :: vulkan.ToneMapEffect
-  BlurEffect :: vulkan.BlurEffect
-  BloomEffect :: vulkan.BloomEffect
-  OutlineEffect :: vulkan.OutlineEffect
-  FogEffect :: vulkan.FogEffect
-  CrossHatchEffect :: vulkan.CrossHatchEffect
-  DoFEffect :: vulkan.DoFEffect
-  PostprocessEffect :: vulkan.PostprocessEffect
 } else when RENDER_BACKEND == "wgpu" {
   FRAMES_IN_FLIGHT :: wgpu.FRAMES_IN_FLIGHT
   // WindowHandle is the window render draws into (platform.Platform.window).
   WindowHandle :: wgpu.WindowHandle
 
-  // TextureHandle identifies a bindless texture; NO_TEXTURE is none.
-  TextureHandle :: wgpu.TextureHandle
-  TextureFormat :: wgpu.TextureFormat
-  AttachmentType :: wgpu.AttachmentType
-  MaterialType :: wgpu.MaterialType
-  LightType :: wgpu.LightType
-  Vertex :: wgpu.Vertex
-  Vertex2D :: wgpu.Vertex2D
-  GrayscaleEffect :: wgpu.GrayscaleEffect
-  ToneMapEffect :: wgpu.ToneMapEffect
-  BlurEffect :: wgpu.BlurEffect
-  BloomEffect :: wgpu.BloomEffect
-  OutlineEffect :: wgpu.OutlineEffect
-  FogEffect :: wgpu.FogEffect
-  CrossHatchEffect :: wgpu.CrossHatchEffect
-  DoFEffect :: wgpu.DoFEffect
-  PostprocessEffect :: wgpu.PostprocessEffect
 }
+
+// The contract types, declared once in rhi: render's API names them.
+// TextureHandle identifies a bindless texture; NO_TEXTURE is none.
+TextureHandle :: rhi.TextureHandle
+TextureFormat :: rhi.TextureFormat
+AttachmentType :: rhi.AttachmentType
+MaterialType :: rhi.MaterialType
+LightType :: rhi.LightType
+Vertex :: rhi.Vertex
+Vertex2D :: rhi.Vertex2D
+GrayscaleEffect :: rhi.GrayscaleEffect
+ToneMapEffect :: rhi.ToneMapEffect
+BlurEffect :: rhi.BlurEffect
+BloomEffect :: rhi.BloomEffect
+OutlineEffect :: rhi.OutlineEffect
+FogEffect :: rhi.FogEffect
+CrossHatchEffect :: rhi.CrossHatchEffect
+DoFEffect :: rhi.DoFEffect
+PostprocessEffect :: rhi.PostprocessEffect

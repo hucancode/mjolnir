@@ -1,45 +1,31 @@
 package vulkan_backend
 
+import rhi "../rhi"
+
 import "core:math/linalg"
 import vk "vendor:vulkan"
 
-// Vertex2D is one vertex of the 2D overlay.
-Vertex2D :: struct {
-  pos:        [2]f32,
-  uv:         [2]f32,
-  color:      [4]u8,
-}
 
-// UIBatch is a run of overlay indices drawn with one texture inside one scissor (x, y, w, h).
-UIBatch :: struct {
-  first_index: u32,
-  index_count: u32,
-  scissor:     [4]i32,
-  texture:     TextureHandle,
-}
 
-// UI_MAX_VERTICES and UI_MAX_INDICES are the overlay's capacity per frame.
-UI_MAX_VERTICES :: 65536
-UI_MAX_INDICES :: 98304
 
 @(private = "file")
 VERTEX2D_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
-  {binding = 0, location = 0, format = .R32G32_SFLOAT,  offset = u32(offset_of(Vertex2D, pos))},
-  {binding = 0, location = 1, format = .R32G32_SFLOAT,  offset = u32(offset_of(Vertex2D, uv))},
-  {binding = 0, location = 2, format = .R8G8B8A8_UNORM, offset = u32(offset_of(Vertex2D, color))},
+  {binding = 0, location = 0, format = .R32G32_SFLOAT,  offset = u32(offset_of(rhi.Vertex2D, pos))},
+  {binding = 0, location = 1, format = .R32G32_SFLOAT,  offset = u32(offset_of(rhi.Vertex2D, uv))},
+  {binding = 0, location = 2, format = .R8G8B8A8_UNORM, offset = u32(offset_of(rhi.Vertex2D, color))},
 }
 
 @(private = "file")
 OverlayPushConstants :: struct {
   projection: matrix[4, 4]f32,
-  texture:    TextureHandle,
+  texture:    rhi.TextureHandle,
 }
 
 // The overlay draws render's 2D batches (FrameDesc.ui_*) into the swapchain image after
 // post-processing, with one pipeline and one vertex stream.
 @(private)
 overlay_init :: proc(b: ^Backend) -> vk.Result {
-  bindings := [?]vk.VertexInputBindingDescription{{binding = 0, stride = size_of(Vertex2D), inputRate = .VERTEX}}
+  bindings := [?]vk.VertexInputBindingDescription{{binding = 0, stride = size_of(rhi.Vertex2D), inputRate = .VERTEX}}
   color_formats := [?]vk.Format{b.swapchain.format.format}
   blend := [?]vk.PipelineColorBlendAttachmentState{BLEND_ALPHA}
   b.pipelines[.OVERLAY] = create_graphics_pipeline(
@@ -56,8 +42,8 @@ overlay_init :: proc(b: ^Backend) -> vk.Result {
     },
   ) or_return
   for i in 0 ..< FRAMES_IN_FLIGHT {
-    b.ui_vertex_buffers[i] = buffer_create(&b.gctx, UI_MAX_VERTICES * size_of(Vertex2D), {.VERTEX_BUFFER}) or_return
-    b.ui_index_buffers[i] = buffer_create(&b.gctx, UI_MAX_INDICES * size_of(u32), {.INDEX_BUFFER}) or_return
+    b.ui_vertex_buffers[i] = buffer_create(&b.gctx, rhi.UI_MAX_VERTICES * size_of(rhi.Vertex2D), {.VERTEX_BUFFER}) or_return
+    b.ui_index_buffers[i] = buffer_create(&b.gctx, rhi.UI_MAX_INDICES * size_of(u32), {.INDEX_BUFFER}) or_return
   }
   return .SUCCESS
 }
@@ -65,7 +51,7 @@ overlay_init :: proc(b: ^Backend) -> vk.Result {
 @(private)
 overlay_record :: proc(
   b: ^Backend,
-  desc: ^FrameDesc,
+  desc: ^rhi.FrameDesc,
   command_buffer: vk.CommandBuffer,
   color_view: vk.ImageView,
   extent: vk.Extent2D,

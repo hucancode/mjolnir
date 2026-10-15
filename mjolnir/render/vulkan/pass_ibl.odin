@@ -1,10 +1,10 @@
 package vulkan_backend
 
+import rhi "../rhi"
+
 import "core:log"
 import vk "vendor:vulkan"
 
-// mips of the prefiltered environment cube
-PREFILTER_MIPS :: 5
 
 @(private = "file")
 PrecomputeShader :: enum {
@@ -29,7 +29,7 @@ IRRADIANCE_SAMPLE_DELTA :: f32(0.025)
 @(private)
 PRECOMPUTE_STORAGE_BASE :: MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS_LEVEL
 @(private)
-PRECOMPUTE_DISPATCHES :: 2 + PREFILTER_MIPS
+PRECOMPUTE_DISPATCHES :: 2 + rhi.PREFILTER_MIPS
 
 // `src` is 2D for the equirect step, a cube otherwise; `value` is the irradiance sample delta or the prefilter roughness.
 @(private = "file")
@@ -43,18 +43,18 @@ PrecomputePush :: struct {
 
 // precompute_ibl fills the cubes render made for image-based lighting, in one one-shot command
 // buffer: equirect into env_cube, then irradiance and every prefilter mip (PREFILTER_MIPS) from it.
-precompute_ibl :: proc(b: ^Backend, equirect, env_cube, irradiance_cube, prefilter_cube: TextureHandle) -> bool {
+precompute_ibl :: proc(b: ^Backend, equirect, env_cube, irradiance_cube, prefilter_cube: rhi.TextureHandle) -> bool {
   return check(ibl_precompute(b, equirect, env_cube, irradiance_cube, prefilter_cube), "IBL precompute")
 }
 
 @(private = "file")
-ibl_precompute :: proc(b: ^Backend, equirect, env_cube, irradiance_cube, prefilter_cube: TextureHandle) -> vk.Result {
+ibl_precompute :: proc(b: ^Backend, equirect, env_cube, irradiance_cube, prefilter_cube: rhi.TextureHandle) -> vk.Result {
   gctx := &b.gctx
   layout := b.scene.layout
   Dispatch :: struct {
     shader: PrecomputeShader,
-    src:    TextureHandle,
-    dst:    TextureHandle,
+    src:    rhi.TextureHandle,
+    dst:    rhi.TextureHandle,
     mip:    u32,
     value:  f32,
     count:  u32,
@@ -62,8 +62,8 @@ ibl_precompute :: proc(b: ^Backend, equirect, env_cube, irradiance_cube, prefilt
   dispatches: [PRECOMPUTE_DISPATCHES]Dispatch
   dispatches[0] = {.EQUIRECT, equirect, env_cube, 0, 0, 0}
   dispatches[1] = {.IRRADIANCE, env_cube, irradiance_cube, 0, IRRADIANCE_SAMPLE_DELTA, 0}
-  for mip in 0 ..< u32(PREFILTER_MIPS) {
-    roughness := f32(mip) / f32(PREFILTER_MIPS - 1)
+  for mip in 0 ..< u32(rhi.PREFILTER_MIPS) {
+    roughness := f32(mip) / f32(rhi.PREFILTER_MIPS - 1)
     dispatches[2 + mip] = {.PREFILTER, env_cube, prefilter_cube, mip, roughness, PREFILTER_SAMPLES}
   }
 

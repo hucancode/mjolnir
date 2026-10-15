@@ -1,11 +1,9 @@
 package wgpu_backend
 
+import rhi "../rhi"
+
 import wgpu "vendor:wgpu"
 
-// Debug line segments live in two rings of DEBUG_RING in the debug line table:
-// [0] depth-tested, [1] drawn over the scene.
-MAX_SEGMENTS :: 65536
-DEBUG_RING :: MAX_SEGMENTS / 2
 
 @(private = "file")
 DEBUG_LINE_WGSL :: #load("shader/common.wgsl", string) + #load("shader/debug_line.wgsl", string)
@@ -34,7 +32,7 @@ debug_line_init :: proc(b: ^Backend) {
 // The shader pulls each segment's two vertices from the debug line table and skips a segment
 // past its expiry.
 @(private)
-debug_line_record :: proc(b: ^Backend, desc: ^FrameDesc, encoder: wgpu.CommandEncoder, cam: ^FrameCamera, output: wgpu.TextureView) {
+debug_line_record :: proc(b: ^Backend, desc: ^rhi.FrameDesc, encoder: wgpu.CommandEncoder, cam: ^rhi.FrameCamera, output: wgpu.TextureView) {
   counts := desc.debug_line_counts
   if counts == {} do return
   color := wgpu.RenderPassColorAttachment{view = output, depthSlice = wgpu.DEPTH_SLICE_UNDEFINED, loadOp = .Load, storeOp = .Store}
@@ -55,6 +53,6 @@ debug_line_record :: proc(b: ^Backend, desc: ^FrameDesc, encoder: wgpu.CommandEn
   for count, ring in counts {
     if count == 0 do continue
     wgpu.RenderPassEncoderSetPipeline(rp, b.debug_line_pipelines[ring])
-    wgpu.RenderPassEncoderDraw(rp, 2 * count, 1, u32(ring) * 2 * DEBUG_RING, 0)
+    wgpu.RenderPassEncoderDraw(rp, 2 * count, 1, u32(ring) * 2 * rhi.DEBUG_RING, 0)
   }
 }

@@ -1,5 +1,7 @@
 package wgpu_backend
 
+import rhi "../rhi"
+
 import "core:log"
 import wgpu "vendor:wgpu"
 
@@ -7,7 +9,7 @@ import wgpu "vendor:wgpu"
 // uploads, cull, shadows, each camera's G-buffer, lighting and forward passes, post-process,
 // debug lines, overlay, then the particle simulation the next frame draws. Queue order is the
 // only sync. RESIZE: the surface no longer matches desc.framebuffer_size.
-frame :: proc(b: ^Backend, desc: ^FrameDesc) -> (submitted: bool, status: FrameStatus) {
+frame :: proc(b: ^Backend, desc: ^rhi.FrameDesc) -> (submitted: bool, status: rhi.FrameStatus) {
   if !b.up do return false, .OK
   events_process(b)
   size := desc.framebuffer_size
@@ -29,7 +31,6 @@ frame :: proc(b: ^Backend, desc: ^FrameDesc) -> (submitted: bool, status: FrameS
   }
   tables_upload(b, desc)
   overlay_upload(b, desc)
-  candidates_collect(b, desc)
   shadow_atlas_reserve(b, desc.shadow_view_count)
   encoder := wgpu.DeviceCreateCommandEncoder(b.device)
   cull_record(b, desc, encoder)
