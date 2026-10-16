@@ -7,6 +7,11 @@ SPV_SHADERS := $(patsubst $(SHADER_DIR)/%/shader.vert,$(SHADER_DIR)/%/vert.spv,$
                $(patsubst $(SHADER_DIR)/%/shader.frag,$(SHADER_DIR)/%/frag.spv,$(FRAG_SHADERS))
 COMP_SHADERS := $(shell find $(SHADER_DIR) -name "*.comp")
 SPV_COMPUTE_SHADERS := $(patsubst %.comp,%.spv,$(COMP_SHADERS))
+# User shaders of the examples (render.post_shader_create, render.material_shader_create):
+# name.frag compiles to name.frag.spv against the engine's includes.
+SHADER_INCLUDE := $(SHADER_DIR)/include
+EXAMPLE_SHADERS := $(wildcard examples/*/*.vert examples/*/*.frag)
+SPV_EXAMPLE_SHADERS := $(addsuffix .spv,$(EXAMPLE_SHADERS))
 
 run: shader
 	odin run . -out:bin/main
@@ -20,7 +25,7 @@ build: shader
 build-debug: shader
 	odin build . -out:bin/main-debug -debug
 
-shader: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
+shader: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS) $(SPV_EXAMPLE_SHADERS)
 	@echo "Shader compilation complete."
 
 # The WebGPU backend: WGSL shaders are embedded, nothing to compile ahead. Natively it needs
@@ -111,6 +116,10 @@ $(SHADER_DIR)/%/vert.spv: $(SHADER_DIR)/%/shader.vert
 $(SHADER_DIR)/%/frag.spv: $(SHADER_DIR)/%/shader.frag
 	@echo "Compiling fragment shader $<..."
 	@glslc --target-env=vulkan1.3 "$<" -o "$@"
+
+examples/%.spv: examples/% $(wildcard $(SHADER_INCLUDE)/*.glsl)
+	@echo "Compiling example shader $<..."
+	@glslc --target-env=vulkan1.3 -I $(SHADER_INCLUDE) "$<" -o "$@"
 
 long-proc:
 	grep -rhE "^\s*[a-zA-Z0-9_]+\s*::\s*proc" mjolnir --include \*.odin | \

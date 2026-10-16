@@ -14,6 +14,7 @@ const MATERIAL_TRANSPARENT: u32 = 1u;
 const MATERIAL_WIREFRAME: u32 = 2u;
 const MATERIAL_RANDOM_COLOR: u32 = 3u;
 const MATERIAL_SPRITE: u32 = 4u;
+const MATERIAL_CUSTOM: u32 = 5u;
 
 // LightType
 const LIGHT_POINT: u32 = 0u;
@@ -89,7 +90,8 @@ struct Material {
     metallic_value: f32,
     roughness_value: f32,
     emissive_value: f32,
-    _pad0: u32,
+    // MATERIAL_CUSTOM: the user shader drawing it
+    shader: u32,
     base_color_factor: vec4f,
     frame_columns: u32,
     frame_rows: u32,

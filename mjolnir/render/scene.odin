@@ -152,6 +152,10 @@ Renderer :: struct {
   lighting_output_groups: map[TextureHandle]rhi.BindGroup,
   // [is_last][tag]: every pass writes an HDR ring image but the last, which writes the backbuffer
   post_pipelines:         [2][POST_EFFECT_COUNT]rhi.Pipeline,
+  // [PostShader - 1][is_last]; a destroyed shader's slot is zero until reused
+  custom_post_pipelines:  [dynamic][2]rhi.Pipeline,
+  // [MaterialShader - 1], 0 where free
+  custom_material_pipelines: [MAX_MATERIAL_SHADERS]rhi.Pipeline,
   particle_emit_pipeline: rhi.Pipeline,
   particle_sim_pipeline:  rhi.Pipeline,
   particle_draw_pipeline: rhi.Pipeline,
@@ -325,6 +329,7 @@ shutdown :: proc(self: ^Renderer) {
   delete(self.ui_vertices)
   delete(self.ui_indices)
   delete(self.effect_stack)
+  delete(self.custom_post_pipelines)
   for inbox in self.debug_lines do delete(inbox)
   for &slab in self.mesh_slabs do cont.slab_destroy(&slab)
   cont.slab_destroy(&self.bone_matrix_slab)

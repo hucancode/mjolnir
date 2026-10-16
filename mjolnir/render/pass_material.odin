@@ -2,7 +2,8 @@ package render
 
 import "rhi"
 
-// Each MaterialType's pipeline is built against the targets of its pass.
+// Each MaterialType's pipeline is built against the targets of its pass; .CUSTOM has a
+// pipeline per user shader (material_shader_create), drawn after the built-in forward types.
 @(private)
 MaterialPass :: enum {
   // writes the G-buffer and depth, lit by the lighting pass
@@ -20,11 +21,13 @@ MATERIAL_PASS_TARGETS := [MaterialPass][]AttachmentType {
 @(private = "file")
 MATERIAL_PASS_TYPES := [MaterialPass][2]MaterialType {
   .GBUFFER = {MaterialType(0), FIRST_FORWARD_TYPE},
-  .FORWARD = {FIRST_FORWARD_TYPE, MaterialType(len(MaterialType))},
+  .FORWARD = {FIRST_FORWARD_TYPE, .CUSTOM},
 }
 
+// the draw list keys (material_list) of the built-in types and then the custom shaders
 @(private = "file")
-MATERIAL_TYPES := [len(MaterialType)]MaterialType{.PBR, .TRANSPARENT, .WIREFRAME, .RANDOM_COLOR, .SPRITE}
+MATERIAL_LISTS := [DRAW_LISTS]u32{0, 1, 2, 3, 4, 5, 6, 7}
+#assert(DRAW_LISTS == 8)
 
 // The formats a material pass draws into, for the pipelines of anything drawn in it.
 @(private)
@@ -65,7 +68,7 @@ material_init :: proc(r: ^Renderer) -> bool {
   common := wgsl("shader/wgpu/common.wgsl")
   mesh := wgsl_join(common, wgsl("shader/wgpu/mesh.wgsl"))
   pulled := wgsl_join(common, wgsl("shader/wgpu/mesh_pulled.wgsl"))
-  sources := [MaterialType]rhi.ShaderSource {
+  sources := #partial [MaterialType]rhi.ShaderSource {
     .PBR = {
       spirv = {vert = spirv("shader/vulkan/gbuffer/vert.spv"), frag = spirv("shader/vulkan/gbuffer/frag.spv")},
       wgsl = wgsl_join(mesh, wgsl("shader/wgpu/gbuffer.wgsl")),
@@ -88,7 +91,7 @@ material_init :: proc(r: ^Renderer) -> bool {
       wgsl = wgsl_join(common, wgsl("shader/wgpu/sprite.wgsl")),
     },
   }
-  cull := [MaterialType]rhi.CullMode{.PBR = .BACK, .TRANSPARENT = .BACK, .WIREFRAME = .NONE, .RANDOM_COLOR = .BACK, .SPRITE = .NONE}
+  cull := #partial [MaterialType]rhi.CullMode{.PBR = .BACK, .TRANSPARENT = .BACK, .WIREFRAME = .NONE, .RANDOM_COLOR = .BACK, .SPRITE = .NONE}
   for pass in MaterialPass {
     types := MATERIAL_PASS_TYPES[pass]
     for type in types[0] ..< types[1] {
@@ -122,7 +125,17 @@ material_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32, pa
   dev.cmd_begin_pass(&r.gpu, cmd, {colors = colors, depth = depth})
   if pass == .FORWARD do particles_draw(r, cmd, f, cam)
   types := MATERIAL_PASS_TYPES[pass]
-  pipelines := r.material_pipelines[pass][int(types[0]):int(types[1])]
+  keys := make([dynamic]u32, context.temp_allocator)
+  pipelines := make([dynamic]rhi.Pipeline, context.temp_allocator)
+  append(&keys, ..MATERIAL_LISTS[types[0]:types[1]])
+  append(&pipelines, ..r.material_pipelines[pass][int(types[0]):int(types[1])])
+  if pass == .FORWARD {
+    for p, i in r.custom_material_pipelines {
+      if p == 0 do continue
+      append(&keys, MATERIAL_LISTS[int(MaterialType.CUSTOM) + i])
+      append(&pipelines, p)
+    }
+  }
   camera_index := cam
   pipeline_bind(r, cmd, pipelines[0], .MESH, f, &camera_index, .MATERIAL)
   when BINDLESS {
@@ -132,7 +145,7 @@ material_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32, pa
   }
   if ready {
     mesh_buffers_bind(r, cmd)
-    draw_list_draw(r, cmd, slot, 0, MATERIAL_TYPES[types[0]:types[1]], pipelines, f)
+    draw_list_draw(r, cmd, slot, 0, keys[:], pipelines[:], f)
   }
   dev.cmd_end_pass(&r.gpu, cmd)
 }

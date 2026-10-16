@@ -4,11 +4,17 @@
 
 // Culls every node against a range of views in one dispatch: x covers nodes,
 // y the views from params.first_view. A visible node is appended to list
-// type * view.list_stride of the bindless draw lists view.draw_list; list l
+// key * view.list_stride of the bindless draw lists view.draw_list, key its
+// material type or, for a custom material, CUSTOM + its shader - 1; list l
 // keeps its count at counts[l] and its commands from l * view.list_capacity.
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
+
+// MaterialType.CUSTOM, and the custom shaders the draw list header has room for
+// (render.MAX_MATERIAL_SHADERS)
+const uint MATERIAL_CUSTOM = 5u;
+const uint MAX_MATERIAL_SHADERS = 3u;
 
 struct NodeData {
     mat4 world_matrix;
@@ -39,7 +45,7 @@ struct MaterialData {
     float metallic_value;
     float roughness_value;
     float emissive_value;
-    uint _pad;
+    uint shader; // CUSTOM: the user shader, from 1
     vec4 base_color_factor;
     uint frame_columns;
     uint frame_rows;
@@ -205,8 +211,11 @@ void main() {
     // 0 is none
     if (node.mesh_id == 0u || node.material_id == 0u) return;
     if ((node.flags & view.require_flags) != view.require_flags) return;
-    uint type = materials[node.material_id].type;
+    MaterialData material = materials[node.material_id];
+    uint type = material.type;
     if (((view.type_mask >> type) & 1u) == 0u) return;
+    // a custom material without a valid shader draws nowhere
+    if (type == MATERIAL_CUSTOM && (material.shader == 0u || material.shader > MAX_MATERIAL_SHADERS)) return;
 
     MeshData mesh = meshes[node.mesh_id];
     mat4 world = node.world_matrix;
@@ -231,7 +240,8 @@ void main() {
     cmd.vertex_offset = mesh.vertex_offset;
     cmd.first_instance = node_id | view.instance_tag;
 
-    uint list = type * view.list_stride;
+    uint key = type == MATERIAL_CUSTOM ? MATERIAL_CUSTOM + material.shader - 1u : type;
+    uint list = key * view.list_stride;
     uint draw_index = atomicAdd(draw_lists[view.draw_list].counts[list], 1u);
     if (draw_index < view.list_capacity) {
         draw_lists[view.draw_list].commands[list * view.list_capacity + draw_index] = cmd;

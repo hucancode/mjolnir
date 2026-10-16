@@ -30,11 +30,12 @@ PostPush :: struct {
   effect:               PostprocessEffect,
 }
 #assert(offset_of(PostPush, effect) == 32)
+#assert(size_of(PostPush) <= PUSH_SIZE)
 
 @(private)
 post_init :: proc(r: ^Renderer) -> bool {
-  vertex := wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/postprocess.wgsl"))
-  frag_spirv := [POST_EFFECT_COUNT][]u8 {
+  // every tag but CustomEffect's, whose pipelines post_shader_create makes
+  frag_spirv := [POST_EFFECT_COUNT - 1][]u8 {
     spirv("shader/vulkan/postprocess/frag.spv"),
     spirv("shader/vulkan/grayscale/frag.spv"),
     spirv("shader/vulkan/tonemap/frag.spv"),
@@ -45,7 +46,7 @@ post_init :: proc(r: ^Renderer) -> bool {
     spirv("shader/vulkan/crosshatch/frag.spv"),
     spirv("shader/vulkan/dof/frag.spv"),
   }
-  frag_wgsl := [POST_EFFECT_COUNT]string {
+  frag_wgsl := [POST_EFFECT_COUNT - 1]string {
     wgsl("shader/wgpu/post_copy.wgsl"),
     wgsl("shader/wgpu/post_grayscale.wgsl"),
     wgsl("shader/wgpu/post_tonemap.wgsl"),
@@ -56,18 +57,70 @@ post_init :: proc(r: ^Renderer) -> bool {
     wgsl("shader/wgpu/post_crosshatch.wgsl"),
     wgsl("shader/wgpu/post_dof.wgsl"),
   }
-  formats := [2]TextureFormat{HDR_COLOR_FORMAT, .BACKBUFFER}
-  for &pipelines, is_last in r.post_pipelines {
-    for tag in 0 ..< POST_EFFECT_COUNT {
-      desc := rhi.GraphicsPipelineDesc {
-        shader = {spirv = {vert = spirv("shader/vulkan/postprocess/vert.spv"), frag = frag_spirv[tag]}, wgsl = wgsl_join(vertex, frag_wgsl[tag])},
-        layout = pipeline_layout(r, .NONE, .POST),
-        color_formats = formats[is_last:][:1],
-      }
-      pipelines[tag] = dev.graphics_pipeline_create(&r.gpu, desc) or_return
-    }
+  for tag in 0 ..< POST_EFFECT_COUNT - 1 {
+    pipelines := post_pipelines_create(r, frag_spirv[tag], frag_wgsl[tag]) or_return
+    for p, is_last in pipelines do r.post_pipelines[is_last][tag] = p
   }
   return true
+}
+
+// An effect's pipelines, [is_last]: every pass writes an HDR ring image but the last, which
+// writes the backbuffer. The fragment shader follows the shared vertex stage: on WebGPU its
+// source is appended to common.wgsl and postprocess.wgsl.
+@(private = "file")
+post_pipelines_create :: proc(r: ^Renderer, frag_spirv: []u8, frag_wgsl: string) -> (pipelines: [2]rhi.Pipeline, ok: bool) {
+  vertex := wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/postprocess.wgsl"))
+  formats := [2]TextureFormat{HDR_COLOR_FORMAT, .BACKBUFFER}
+  for &p, is_last in pipelines {
+    desc := rhi.GraphicsPipelineDesc {
+      shader = {spirv = {vert = spirv("shader/vulkan/postprocess/vert.spv"), frag = frag_spirv}, wgsl = wgsl_join(vertex, frag_wgsl)},
+      layout = pipeline_layout(r, .NONE, .POST),
+      color_formats = formats[is_last:][:1],
+    }
+    p = dev.graphics_pipeline_create(&r.gpu, desc) or_return
+  }
+  return pipelines, true
+}
+
+// post_shader_create makes a post-process shader from a user fragment shader, for
+// CustomEffect. A backend uses only its own source: `frag_spirv` on Vulkan, `frag_wgsl` on
+// WebGPU.
+//
+// Vulkan: compile against shader/vulkan/include/post.glsl (glslc -I), which declares the
+// fullscreen uv input, the color output, the textures and the push block, its params the
+// user's (POST_PARAMS).
+// WebGPU: the source follows common.wgsl and postprocess.wgsl, so it reads the bindings, the
+// uniforms `u` and helpers they declare; it declares `struct Effect` (its params) and
+// `fs_main(in: VertexOut) -> @location(0) vec4f`.
+post_shader_create :: proc(r: ^Renderer, frag_spirv: []u8, frag_wgsl: string) -> (PostShader, bool) {
+  pipelines, ok := post_pipelines_create(r, frag_spirv, frag_wgsl)
+  if !ok do return 0, false
+  for &slot, i in r.custom_post_pipelines {
+    if slot[0] != 0 do continue
+    slot = pipelines
+    return PostShader(i + 1), true
+  }
+  append(&r.custom_post_pipelines, pipelines)
+  return PostShader(len(r.custom_post_pipelines)), true
+}
+
+// post_shader_destroy frees a shader from post_shader_create; take its effects off the stack
+// first.
+post_shader_destroy :: proc(r: ^Renderer, shader: PostShader) {
+  if shader == 0 || int(shader) > len(r.custom_post_pipelines) do return
+  slot := &r.custom_post_pipelines[shader - 1]
+  for p in slot do if p != 0 do dev.pipeline_retire(&r.gpu, p)
+  slot^ = {}
+}
+
+// custom_effect packs `params` into a CustomEffect of `shader`, laid out as the shader's push
+// block reads them.
+custom_effect :: proc(shader: PostShader, params: $T, passes: u32 = 1) -> CustomEffect {
+  #assert(size_of(T) <= CUSTOM_EFFECT_PARAM_BYTES)
+  params := params
+  e := CustomEffect{shader = shader, passes = passes}
+  intrinsics.mem_copy_non_overlapping(&e.params, &params, size_of(T))
+  return e
 }
 
 // One fullscreen pass of the effect stack: pass `pass` of effect (blur and bloom take two)
@@ -93,9 +146,11 @@ post_passes :: proc(r: ^Renderer, f: u32, cam: u32) -> []PostPass {
   original := input
   for effect in effects {
     pass_count: u32 = 1
-    #partial switch _ in effect {
+    #partial switch e in effect {
     case BlurEffect, BloomEffect:
       pass_count = 2
+    case CustomEffect:
+      pass_count = max(e.passes, 1)
     }
     for pass in 0 ..< pass_count {
       output := r.post_process_ring[f][len(passes) % POST_PROCESS_RING]
@@ -136,8 +191,20 @@ post_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
       effect               = p.effect,
     }
     pipeline := r.post_pipelines[int(is_last)][reflect.get_union_variant_raw_tag(p.effect)]
+    if custom, is_custom := p.effect.(CustomEffect); is_custom {
+      pipeline = post_shader_pipeline(r, custom.shader, is_last)
+    }
     pipeline_bind(r, cmd, pipeline, .NONE, f, &push, .POST, p.input, p.original, normal, depth)
     dev.cmd_draw(&r.gpu, cmd, 3, 1, 0, 0)
     dev.cmd_end_pass(&r.gpu, cmd)
   }
+}
+
+// A CustomEffect's pipeline; the copy pipeline stands in for a shader that is gone.
+@(private = "file")
+post_shader_pipeline :: proc(r: ^Renderer, shader: PostShader, is_last: bool) -> rhi.Pipeline {
+  if shader > 0 && int(shader) <= len(r.custom_post_pipelines) {
+    if p := r.custom_post_pipelines[shader - 1][int(is_last)]; p != 0 do return p
+  }
+  return r.post_pipelines[int(is_last)][0]
 }

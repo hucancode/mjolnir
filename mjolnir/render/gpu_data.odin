@@ -78,6 +78,8 @@ MaterialType :: enum u32 {
   RANDOM_COLOR,
   // camera-facing billboard showing one cell of the albedo sprite sheet
   SPRITE,
+  // a user fragment shader (Material.shader, material_shader_create); one draw list per shader
+  CUSTOM,
 }
 
 FIRST_FORWARD_TYPE :: MaterialType.TRANSPARENT
@@ -223,6 +225,22 @@ DoFEffect :: struct {
   bokeh_intensity: f32, // Bokeh effect intensity
 }
 
+// PostShader is a user fragment shader made by post_shader_create; 0 is none.
+PostShader :: distinct u32
+
+// The bytes a CustomEffect pushes to its shader, at offset 32 of the push block.
+CUSTOM_EFFECT_PARAM_BYTES :: 80
+
+// CustomEffect runs a user fragment shader (post_shader_create) `passes` times (0 runs it
+// once), each pass reading the previous one's output; the shader tells them apart by the
+// push block's pass. params come first, so the shader sees them at offset 32 like a
+// built-in effect's fields; custom_effect packs a struct into them.
+CustomEffect :: struct {
+  params: [CUSTOM_EFFECT_PARAM_BYTES]u8,
+  shader: PostShader,
+  passes: u32,
+}
+
 // PostprocessEffect is one entry of the effect stack; nil copies the input to the output unchanged.
 PostprocessEffect :: union {
   GrayscaleEffect,
@@ -233,6 +251,7 @@ PostprocessEffect :: union {
   FogEffect,
   CrossHatchEffect,
   DoFEffect,
+  CustomEffect,
 }
 
 ParticleSystemParams :: struct {

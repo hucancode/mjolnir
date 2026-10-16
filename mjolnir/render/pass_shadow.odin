@@ -90,7 +90,7 @@ shadow_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
   textures := [1]TextureHandle{atlas}
   views := r.shadow_view_count
   draw_list := SHADOW_DRAW_SLOT_BASE + f
-  types := [1]MaterialType{.PBR}
+  types := [1]u32{u32(MaterialType.PBR)}
   pipelines := [1]rhi.Pipeline{r.shadow_pipeline}
   when LAYERED_RENDERING {
     // with the clear of the shadow lists, last frame's draws done with them

@@ -1,4 +1,4 @@
-// Bloom, DoF, fog, tonemap, outline, crosshatch.
+// Bloom, DoF, fog, tonemap, outline, crosshatch, and a user shader: vignette.
 package main
 
 import "../../mjolnir"
@@ -16,6 +16,15 @@ App :: struct {
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
+  vignette:         render.PostShader,
+}
+
+// The params of vignette.frag / vignette.wgsl, as their push block lays them out.
+VignetteParams :: struct {
+  color:    [3]f32,
+  radius:   f32,
+  softness: f32,
+  strength: f32,
 }
 
 bloom_on: bool = true
@@ -26,6 +35,7 @@ dof_on: bool
 grayscale_on: bool
 blur_on: bool
 crosshatch_on: bool
+vignette_on: bool
 
 bloom_threshold: mu.Real = 1.0
 bloom_intensity: mu.Real = 1.0
@@ -39,6 +49,9 @@ dof_range: mu.Real = 3.0
 dof_blur: mu.Real = 20.0
 blur_radius: mu.Real = 3.0
 grayscale_strength: mu.Real = 1.0
+vignette_radius: mu.Real = 0.75
+vignette_softness: mu.Real = 0.45
+vignette_strength: mu.Real = 0.8
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -76,6 +89,15 @@ setup :: proc(app: ^App) -> bool {
   render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.main_camera_look_at(&app.renderer, {6, 5, 10}, {0, 1.0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  // each backend embeds only its own source
+  when render.RENDER_BACKEND == "vulkan" {
+    vignette_spirv, vignette_wgsl := #load("vignette.frag.spv"), ""
+  } else {
+    vignette_spirv, vignette_wgsl := ([]u8)(nil), #load("vignette.wgsl", string)
+  }
+  ok: bool
+  app.vignette, ok = render.post_shader_create(&app.renderer, vignette_spirv, vignette_wgsl)
+  if !ok do log.error("Failed to create the vignette shader")
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 30.0)
@@ -135,6 +157,10 @@ update :: proc(app: ^App, dt: f32) {
   if crosshatch_on do append(&app.renderer.effect_stack, render.CrossHatchEffect{hatch_offset_y = 5.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
   if grayscale_on  do append(&app.renderer.effect_stack, render.GrayscaleEffect{strength = f32(grayscale_strength)})
   if tonemap_on    do append(&app.renderer.effect_stack, render.ToneMapEffect{exposure = f32(tonemap_exposure), gamma = f32(tonemap_gamma)})
+  if vignette_on && app.vignette != 0 {
+    params := VignetteParams{color = {0.02, 0.0, 0.05}, radius = f32(vignette_radius), softness = f32(vignette_softness), strength = f32(vignette_strength)}
+    append(&app.renderer.effect_stack, render.custom_effect(app.vignette, params))
+  }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
@@ -148,7 +174,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := render.debug_ui(&app.renderer)
-  if mu.window(ctx, "Post-process", {700, 20, 280, 380}, {.NO_CLOSE}) {
+  if mu.window(ctx, "Post-process", {700, 20, 280, 560}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Tonemap", &tonemap_on)
     if tonemap_on {
@@ -178,5 +204,11 @@ debug_ui :: proc(app: ^App) {
     mu.checkbox(ctx, "Gaussian Blur", &blur_on)
     if blur_on do mu.slider(ctx, &blur_radius, 0.5, 10.0)
     mu.checkbox(ctx, "Crosshatch", &crosshatch_on)
+    mu.checkbox(ctx, "Vignette (user shader)", &vignette_on)
+    if vignette_on {
+      mu.label(ctx, "Radius");   mu.slider(ctx, &vignette_radius, 0.2, 1.0)
+      mu.label(ctx, "Softness"); mu.slider(ctx, &vignette_softness, 0.05, 0.8)
+      mu.label(ctx, "Strength"); mu.slider(ctx, &vignette_strength, 0.0, 1.0)
+    }
   }
 }

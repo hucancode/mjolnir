@@ -50,13 +50,13 @@ CAMERA_LIST_CAPACITY :: MAX_NODES_IN_SCENE
 @(private)
 SHADOW_LIST_CAPACITY :: 4096 * MAX_SHADOW_VIEWS
 
-// What a draw-list slot holds. Compacted by multi-draw: a camera one list per material type
-// of CAMERA_LIST_CAPACITY draws, the shadow views one list. Batched: one list per view
+// What a draw-list slot holds. Compacted by multi-draw: a camera DRAW_LISTS lists, one per
+// material_list key, of CAMERA_LIST_CAPACITY draws, the shadow views one list. Batched: one list per view
 // (the shadow slot has a view per shadow map face), each of room for every node's instance.
 @(private)
 draw_list_shape :: proc(self: ^Renderer, shadow: bool) -> (lists, capacity: u32) {
   when BINDLESS {
-    return 1 if shadow else len(MaterialType), SHADOW_LIST_CAPACITY if shadow else CAMERA_LIST_CAPACITY
+    return 1 if shadow else DRAW_LISTS, SHADOW_LIST_CAPACITY if shadow else CAMERA_LIST_CAPACITY
   } else {
     return MAX_SHADOW_VIEWS if shadow else 1, MAX_NODES_IN_SCENE
   }

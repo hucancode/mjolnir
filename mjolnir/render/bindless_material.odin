@@ -30,7 +30,8 @@ Material :: struct {
   metallic_value:           f32,
   roughness_value:          f32,
   emissive_value:           f32,
-  _:                        u32,
+  // .CUSTOM: the user shader drawing it; for it the other fields are the shader's to read
+  shader:                   MaterialShader,
   base_color_factor:        [4]f32,
   // .SPRITE: sheet size in cells and the cell shown, row-major
   frame_columns:            u32,

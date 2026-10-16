@@ -22,7 +22,12 @@ MAX_DEPTH_MIPS :: 16
 // counts at the head of a compacted draw list buffer, one per list; commands follow
 @(private)
 DRAW_LIST_HEADER :: 8
-#assert(len(MaterialType) <= DRAW_LIST_HEADER)
+// A camera's draw lists, one per key (material_list): a list per built-in type, then one per
+// custom material shader in the room the header leaves.
+@(private)
+DRAW_LISTS :: DRAW_LIST_HEADER
+MAX_MATERIAL_SHADERS :: DRAW_LISTS - int(MaterialType.CUSTOM)
+#assert(MAX_MATERIAL_SHADERS >= 1)
 // Mip 0 texels a depth pyramid group reduces per side (depth_reduce.comp).
 @(private = "file")
 PYRAMID_TILE :: 32
@@ -324,25 +329,38 @@ cull_batched :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, first_view, views
   dev.cmd_dispatch(&r.gpu, cmd, (r.node_count + 63) / 64, views, 1)
 }
 
-// Draws each of `types`' draws from list `list` of slot's draw lists, `pipelines[i]` for
-// types[i]. Inside a pass with the mesh buffers, the scene set and the camera pushed.
-// `materials` binds each material's textures between batches (WebGPU).
+// The draw list a material's draws go to: its type's, or for .CUSTOM its shader's after
+// the built-in types' (cull.comp computes the same). A custom material without a valid
+// shader goes to NO_DRAW_LIST, drawn by no one.
 @(private)
-draw_list_draw :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, types: []MaterialType, pipelines: []rhi.Pipeline, f: u32, materials := true) {
+material_list :: proc(m: Material) -> u32 {
+  if m.type != .CUSTOM do return u32(m.type)
+  if m.shader == 0 || int(m.shader) > MAX_MATERIAL_SHADERS do return NO_DRAW_LIST
+  return u32(MaterialType.CUSTOM) + u32(m.shader) - 1
+}
+
+@(private)
+NO_DRAW_LIST :: max(u32)
+
+// Draws the draws of each draw list key in `keys` (material_list) from list `list` of slot's
+// draw lists, `pipelines[i]` for keys[i]. Inside a pass with the mesh buffers, the scene set
+// and the camera pushed. `materials` binds each material's textures between batches (WebGPU).
+@(private)
+draw_list_draw :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, keys: []u32, pipelines: []rhi.Pipeline, f: u32, materials := true) {
   when BINDLESS {
     dl := &r.draw_lists[slot]
     count := dev.caps(&r.gpu).multi_draw_indirect_count
-    for type, i in types {
+    for key, i in keys {
       dev.cmd_bind_pipeline(&r.gpu, cmd, pipelines[i])
-      offset := int(dl.draws_base + u32(type) * dl.draws_stride * DRAW_WORDS) * size_of(u32)
+      offset := int(dl.draws_base + key * dl.draws_stride * DRAW_WORDS) * size_of(u32)
       if count {
-        dev.cmd_draw_indexed_indirect_count(&r.gpu, cmd, dl.buffer, offset, dl.buffer, int(type) * size_of(u32), dl.capacity, DRAW_BYTES)
+        dev.cmd_draw_indexed_indirect_count(&r.gpu, cmd, dl.buffer, offset, dl.buffer, int(key) * size_of(u32), dl.capacity, DRAW_BYTES)
       } else {
         dev.cmd_draw_indexed_indirect(&r.gpu, cmd, dl.buffer, offset, dl.capacity, DRAW_BYTES)
       }
     }
   } else {
-    draw_batches(r, cmd, slot, list, types, pipelines, materials)
+    draw_batches(r, cmd, slot, list, keys, pipelines, materials)
   }
 }
 
@@ -351,7 +369,7 @@ draw_list_draw :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, type
 // the stream is bound once and a run of batches that draw alike, the empty ones among them
 // drawing nothing, is one multi-draw.
 @(private = "file")
-draw_batches :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, types: []MaterialType, pipelines: []rhi.Pipeline, materials: bool) {
+draw_batches :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, keys: []u32, pipelines: []rhi.Pipeline, materials: bool) {
   if r.batch_high == 0 do return
   batches := write_table(r, .BATCHES, Batch)[:r.batch_high]
   material_table := write_table(r, .MATERIALS, Material)
@@ -359,11 +377,11 @@ draw_batches :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, types:
   first_instance := dev.caps(&r.gpu).indirect_first_instance
   if first_instance do dev.cmd_bind_vertex(&r.gpu, cmd, 1, dl.buffer, 0)
   bound: u32
-  for type, t in types {
+  for key, t in keys {
     pipeline_set := false
     for id := 0; id < len(batches); {
       batch := batches[id]
-      if batch.capacity == 0 || material_table[batch.material_id].type != type {
+      if batch.capacity == 0 || material_list(material_table[batch.material_id]) != key {
         id += 1
         continue
       }
@@ -383,7 +401,7 @@ draw_batches :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, types:
         for next := id + 1; next < len(batches); next += 1 {
           b := batches[next]
           if b.capacity == 0 do continue
-          if material_table[b.material_id].type != type || (materials && b.material_id != bound) do break
+          if material_list(material_table[b.material_id]) != key || (materials && b.material_id != bound) do break
           run = next - id + 1
         }
       } else {
@@ -391,7 +409,7 @@ draw_batches :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, types:
         dev.cmd_bind_vertex(&r.gpu, cmd, 1, dl.buffer, instances)
       }
       draw := int(dl.draws_base + (list * dl.draws_stride + u32(id)) * DRAW_WORDS) * size_of(u32)
-      if type in PULLED_TYPES {
+      if material_table[batch.material_id].type in PULLED_TYPES {
         dev.cmd_draw_indirect(&r.gpu, cmd, dl.buffer, draw, u32(run), DRAW_BYTES)
       } else {
         dev.cmd_draw_indexed_indirect(&r.gpu, cmd, dl.buffer, draw, u32(run), DRAW_BYTES)
