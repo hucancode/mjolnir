@@ -342,3 +342,64 @@ test_animator_tail_layer_smoke :: proc(t: ^testing.T) {
   }
   testing.expect(t, abs(linalg.distance(model_pos(&a, 2), model_pos(&a, 1)) - 1) < 0.05, "rigid tail keeps length")
 }
+
+@(test)
+test_animator_ik_layer_validation :: proc(t: ^testing.T) {
+  rig: Rig
+  testing.expect(t, make_test_rig(&rig))
+  defer rig_destroy(&rig)
+  a: Animator
+  animator_init(&a, &rig)
+  defer animator_destroy(&a)
+  // root -> tip skips "mid": not a parent chain
+  _, skip := add_ik_layer(&a, &rig, []u32{0, 2}, {0, 2, 0}, {})
+  testing.expect(t, !skip, "non-parent chain rejected")
+  // constraint count must match the bone count
+  bad_cons := []IKBoneConstraint{{}, {}}
+  _, mismatch := add_ik_layer(&a, &rig, []u32{0, 1, 2}, {0, 2, 0}, {}, constraints = bad_cons)
+  testing.expect(t, !mismatch, "constraint length mismatch rejected")
+  idx, ok := add_ik_chain_layer(&a, &rig, "root", "tip", {1, 1, 0}, {1, 0, 0})
+  testing.expect(t, ok)
+  testing.expect_value(t, a.layers[idx].data.(IKTarget).pole_weight, 1)
+}
+
+@(test)
+test_animator_ik_layer_weight_blends :: proc(t: ^testing.T) {
+  rig: Rig
+  testing.expect(t, make_test_rig(&rig))
+  defer rig_destroy(&rig)
+  a: Animator
+  animator_init(&a, &rig)
+  defer animator_destroy(&a)
+  idx := add_ik_chain_layer(&a, &rig, "root", "tip", {1.5, 0.5, 0}, {})
+  animator_update(&a, &rig, 0.016)
+  full := a.positions[2]
+  set_layer_weight(&a, idx, 0.5)
+  animator_update(&a, &rig, 0.016)
+  half := a.positions[2]
+  testing.expectf(t, linalg.distance(half, full) > 0.05 && linalg.distance(half, [3]f32{0, 2, 0}) > 0.05, "half weight lands between FK and IK: half %v full %v", half, full)
+  testing.expectf(t, math.abs(linalg.distance(a.positions[2], a.positions[1]) - 1) < 1e-3, "bone length kept")
+  // "end" (child of tip) follows the blended tip
+  testing.expectf(t, math.abs(linalg.distance(a.positions[3], a.positions[2]) - 1) < 1e-3, "descendant re-propagated")
+}
+
+@(test)
+test_animator_tail_weight_zero_keeps_state :: proc(t: ^testing.T) {
+  rig: Rig
+  testing.expect(t, make_test_rig(&rig))
+  defer rig_destroy(&rig)
+  a: Animator
+  animator_init(&a, &rig)
+  defer animator_destroy(&a)
+  idx := add_tail_layer(&a, &rig, "root", 4)
+  world := linalg.MATRIX4F32_IDENTITY
+  for _ in 0 ..< 60 do animator_update(&a, &rig, 1.0 / 60, world)
+  // Hold the layer at weight 0 while the body moves away, then settle.
+  set_layer_weight(&a, idx, 0)
+  world = linalg.matrix4_translate_f32({20, 0, 0})
+  for _ in 0 ..< 120 do animator_update(&a, &rig, 1.0 / 60, world)
+  testing.expectf(t, almost_equal_vec3(a.positions[3], {0, 3, 0}), "weight 0 leaves FK pose, got %v", a.positions[3])
+  set_layer_weight(&a, idx, 1)
+  animator_update(&a, &rig, 1.0 / 60, world)
+  testing.expectf(t, linalg.distance(a.positions[3], [3]f32{0, 3, 0}) < 0.1, "no whip when re-enabled, tip %v", a.positions[3])
+}

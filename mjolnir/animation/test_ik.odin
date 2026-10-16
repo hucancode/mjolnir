@@ -279,3 +279,114 @@ bench_fabrik_solve :: proc(t: ^testing.T) {
 	log.infof("fabrik_solve N=6 max_iter=10, %d rounds in %v, %.0f rounds/sec",
 		opts.rounds, opts.duration, opts.rounds_per_second)
 }
+
+// Straight chain along +Y with identity rotations, so each bone's Y axis
+// points along its segment (what the constraint cones are measured against).
+@(private = "file")
+up_chain :: proc(n: int) -> (positions: [][3]f32, rotations: []quaternion128) {
+  positions = make([][3]f32, n, context.temp_allocator)
+  rotations = make([]quaternion128, n, context.temp_allocator)
+  for i in 0 ..< n {
+    positions[i] = {0, f32(i), 0}
+    rotations[i] = linalg.QUATERNIONF32_IDENTITY
+  }
+  return
+}
+
+@(private = "file")
+has_nan :: proc(v: [3]f32) -> bool {
+  return math.is_nan(v.x) || math.is_nan(v.y) || math.is_nan(v.z)
+}
+
+@(test)
+test_fabrik_weight_blends_fk_to_ik :: proc(t: ^testing.T) {
+  ik := IKTarget {
+    bone_indices    = []u32{0, 1, 2, 3},
+    bone_lengths    = []f32{1, 1, 1},
+    target_position = {1.5, 1.5, 0},
+    max_iterations  = 30,
+    tolerance       = 0.001,
+    weight          = 1,
+    enabled         = true,
+  }
+  full_pos, full_rot := up_chain(4)
+  fabrik_solve(full_pos, full_rot, ik)
+  testing.expectf(t, linalg.distance(full_pos[3], ik.target_position) < 0.01, "full IK reaches, got %v", full_pos[3])
+  fk_pos, _ := up_chain(4)
+  for w in ([]f32{0.25, 0.5, 0.75}) {
+    pos, rot := up_chain(4)
+    ik.weight = w
+    fabrik_solve(pos, rot, ik)
+    testing.expect(t, pos[0] == fk_pos[0], "root stays at FK")
+    for i in 1 ..< 4 {
+      l := linalg.distance(pos[i], pos[i - 1])
+      testing.expectf(t, math.abs(l - 1) < 1e-3, "w=%v bone %d length %f", w, i, l)
+    }
+    d_fk := linalg.distance(pos[3], fk_pos[3])
+    d_ik := linalg.distance(pos[3], full_pos[3])
+    testing.expectf(t, d_fk > 0.05 && d_ik > 0.05, "w=%v tip strictly between FK and IK (%f, %f)", w, d_fk, d_ik)
+    for i in 0 ..< 4 {
+      q := linalg.quaternion_slerp(linalg.QUATERNIONF32_IDENTITY, full_rot[i], w)
+      testing.expectf(t, almost_equal_quaternion(rot[i], q, 1e-4), "w=%v bone %d rotation slerped", w, i)
+    }
+  }
+}
+
+@(test)
+test_fabrik_target_on_root_no_nan :: proc(t: ^testing.T) {
+  pos, rot := up_chain(3)
+  fabrik_solve(pos, rot, IKTarget{bone_indices = []u32{0, 1, 2}, bone_lengths = []f32{1, 1}, target_position = {0, 0, 0}, pole_vector = {0, 0, 5}, pole_weight = 1, weight = 1, enabled = true})
+  for p in pos do testing.expectf(t, !has_nan(p), "no NaN, got %v", pos)
+  // coincident joints in the FK pose
+  pos2, rot2 := up_chain(3)
+  pos2[1] = pos2[0]
+  fabrik_solve(pos2, rot2, IKTarget{bone_indices = []u32{0, 1, 2}, bone_lengths = []f32{1, 1}, target_position = {1, 1, 0}, weight = 1, enabled = true})
+  for p in pos2 do testing.expectf(t, !has_nan(p), "no NaN with coincident joints, got %v", pos2)
+}
+
+@(test)
+test_fabrik_unreachable_constrained_aims_at_target :: proc(t: ^testing.T) {
+  pos, rot := up_chain(4)
+  deg30 := f32(math.PI / 6)
+  cons := []IKBoneConstraint{{max_angle = {deg30, -1, deg30}}, {max_angle = {-1, -1, -1}}, {max_angle = {-1, -1, -1}}, {max_angle = {-1, -1, -1}}}
+  target := [3]f32{10, 0, 0}
+  fabrik_solve(pos, rot, IKTarget{bone_indices = []u32{0, 1, 2, 3}, bone_lengths = []f32{1, 1, 1}, constraints = cons, target_position = target, weight = 1, enabled = true})
+  seg := linalg.normalize(pos[3] - pos[2])
+  to_target := linalg.normalize(target - pos[2])
+  testing.expectf(t, linalg.dot(seg, to_target) > 0.9999, "last segment points at target: seg %v want %v", seg, to_target)
+  root_dir := linalg.normalize(pos[1] - pos[0])
+  testing.expectf(t, linalg.dot(root_dir, [3]f32{0, 1, 0}) > math.cos(deg30) - 1e-4, "root still within its 30 deg cone, dir %v", root_dir)
+}
+
+@(test)
+test_fabrik_constraint_cone_follows_parent :: proc(t: ^testing.T) {
+  // Each joint bends 20 deg relative to its parent: reachable with 30 deg cones only
+  // if the child's cone turns with the parent (the tip segment is 60 deg off +Y).
+  deg30 := f32(math.PI / 6)
+  target: [3]f32
+  p: [3]f32
+  for k in 1 ..= 3 {
+    a := f32(k) * math.PI / 9
+    p += {math.sin(a), math.cos(a), 0}
+  }
+  target = p
+  pos, rot := up_chain(4)
+  cons := ik_constraints_uniform(4, {deg30, -1, deg30}, {deg30, -1, deg30}, context.temp_allocator)
+  fabrik_solve(pos, rot, IKTarget{bone_indices = []u32{0, 1, 2, 3}, bone_lengths = []f32{1, 1, 1}, constraints = cons, target_position = target, max_iterations = 100, tolerance = 0.001, weight = 1, enabled = true})
+  d := linalg.distance(pos[3], target)
+  testing.expectf(t, d < 0.02, "reaches a target needing 60 deg total bend, off by %f (tip %v target %v)", d, pos[3], target)
+}
+
+@(test)
+test_fabrik_constrained_folds_back :: proc(t: ^testing.T) {
+  // Target just above the root-side of a straight chain: the last bones must fold
+  // back past 90 deg of their FK direction in steps no bone's 100 deg cone forbids.
+  // Clamping only in the root-to-tip pass stalls here.
+  pos, rot := up_chain(5)
+  lim := f32(math.to_radians(f32(100)))
+  cons := ik_constraints_uniform(5, {lim, -1, lim}, {lim, -1, lim}, context.temp_allocator)
+  target := [3]f32{0.8, 2.2, 0}
+  fabrik_solve(pos, rot, IKTarget{bone_indices = []u32{0, 1, 2, 3, 4}, bone_lengths = []f32{1, 1, 1, 1}, constraints = cons, target_position = target, max_iterations = 30, tolerance = 0.001, weight = 1, enabled = true})
+  d := linalg.distance(pos[4], target)
+  testing.expectf(t, d < 0.01, "folded chain reaches target, off by %f (tip %v)", d, pos[4])
+}

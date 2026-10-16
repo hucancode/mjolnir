@@ -29,6 +29,11 @@ TailModifier :: struct {
 @(private)
 TAIL_MAX_STIFFNESS :: f32(200.0)
 
+// Largest step the tail spring integrates at once; longer frames are clamped
+// so the explicit integration stays stable after a hitch.
+@(private)
+TAIL_MAX_STEP :: f32(1.0 / 30.0)
+
 // PathModifier slides a bone chain along a spline.
 PathModifier :: struct {
   spline: Spline([3]f32),
@@ -112,6 +117,11 @@ spider_leg_update :: proc(self: ^SpiderLeg, delta_time: f32) {
   }
   prev_time := self.time
   self.time += delta_time
+  if self.lift_frequency <= 0 {
+    self.position = self.target
+    self.last_target = self.target
+    return
+  }
   phase_time := math.mod_f32(self.time + self.time_offset, self.lift_frequency)
   prev_phase_time := math.mod_f32(prev_time + self.time_offset, self.lift_frequency)
   is_lifting := phase_time < self.lift_duration
@@ -184,6 +194,7 @@ tail_modifier_update :: proc(
   if len(params.bones) != chain_length do return
   if bone_lengths == nil do return
   root_world_inv := linalg.matrix4_inverse(root_world)
+  delta_time := min(delta_time, TAIL_MAX_STEP)
   stiffness := TAIL_MAX_STIFFNESS * clamp(params.propagation_speed, 0.0, 1.0)
   damping_coeff := 2.0 * math.sqrt(stiffness) * params.damping
   // Pass 1: spring-damp each child bone's world position toward its parent's
@@ -217,9 +228,12 @@ tail_modifier_update :: proc(
         bone_state.position_velocity -= radial * linalg.dot(bone_state.position_velocity, radial)
       }
     }
+    if layer_weight <= 0 do continue
     lagged := transform_point(root_world_inv, bone_state.position_world)
     positions[bone_idx] = linalg.lerp(positions[bone_idx], lagged, layer_weight)
   }
+  // At weight 0 only the spring state advances; the pose is left as is.
+  if layer_weight <= 0 do return
   for i in 0 ..< chain_length - 1 {
     bone_idx := bone_indices[i]
     aim_bone(rotations, bone_idx, positions[bone_indices[i + 1]] - positions[bone_idx], layer_weight)
@@ -245,6 +259,7 @@ path_modifier_update :: proc(
   if chain_length < 2 || len(params.spline.points) < 2 do return
   if bone_lengths == nil do return
   spline_length := spline_arc_length(params.spline)
+  if spline_length <= 0 do return
   if params.speed != 0 {
     params.offset += params.speed * delta_time
     if params.loop {
@@ -257,7 +272,7 @@ path_modifier_update :: proc(
   for i in 1 ..< chain_length {
     total_chain_length += bone_lengths[bone_indices[i]]
   }
-  if total_chain_length <= 0 do return
+  if total_chain_length <= 0 || layer_weight <= 0 do return
   segment_length :=
     params.length if params.length > 0 else spline_length - params.offset
   cumulative_length: f32 = 0
@@ -305,20 +320,17 @@ spider_leg_modifier_update :: proc(
     root_skeleton := positions[chain[0]]
     // Stepping runs in world space so feet stay planted as the body moves
     spider_leg_update_with_root(&leg, delta_time, transform_point(root_world, root_skeleton))
+    if layer_weight <= 0 do continue
     foot := transform_point(root_world_inv, leg.position)
     chain_lengths := make([]f32, chain_len - 1, context.temp_allocator)
-    fk_positions := make([][3]f32, chain_len, context.temp_allocator)
-    fk_rotations := make([]quaternion128, chain_len, context.temp_allocator)
-    for b, i in chain {
-      if i > 0 do chain_lengths[i - 1] = bone_lengths[b]
-      fk_positions[i] = positions[b]
-      fk_rotations[i] = rotations[b]
-    }
+    for b, i in chain do if i > 0 do chain_lengths[i - 1] = bone_lengths[b]
     // Pole above the leg's midpoint, perpendicular to the leg, so the knee
     // bends upward/outward
     leg_dir := foot - root_skeleton
     up := [3]f32{0, 1, 0}
-    pole_offset := up - leg_dir * linalg.dot(up, leg_dir) / linalg.dot(leg_dir, leg_dir)
+    pole_offset := up
+    if d2 := linalg.dot(leg_dir, leg_dir); d2 > 1e-8 do pole_offset = up - leg_dir * linalg.dot(up, leg_dir) / d2
+    if linalg.length2(pole_offset) < 1e-8 do pole_offset = {1, 0, 0}
     pole := (root_skeleton + foot) * 0.5 + linalg.normalize(pole_offset) * 2.0
     fabrik_solve(
       positions,
@@ -332,13 +344,9 @@ spider_leg_modifier_update :: proc(
         pole_weight = 0.8,
         max_iterations = 10,
         tolerance = 0.01,
-        weight = 1.0,
+        weight = layer_weight,
         enabled = true,
       },
     )
-    for b, i in chain {
-      positions[b] = linalg.lerp(fk_positions[i], positions[b], layer_weight)
-      rotations[b] = linalg.quaternion_slerp(fk_rotations[i], rotations[b], layer_weight)
-    }
   }
 }

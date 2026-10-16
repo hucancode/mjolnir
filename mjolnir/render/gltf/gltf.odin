@@ -30,8 +30,9 @@ load_meshes :: proc(
   materials := make(map[^cgltf.material]render.MaterialHandle, context.temp_allocator)
   for &gltf_mesh, i in data.meshes do if used[i] {
     if len(gltf_mesh.primitives) == 0 do return looks, false
-    // One material per mesh: the first primitive's.
-    material: render.MaterialHandle
+    // One material per mesh: the first primitive's, or plain white when it has none
+    // (material 0 means "none" and is never drawn).
+    material := r.builtin_materials[.WHITE]
     if mat := gltf_mesh.primitives[0].material; mat != nil {
       material = load_material(r, mat, &textures, &materials) or_return
     }

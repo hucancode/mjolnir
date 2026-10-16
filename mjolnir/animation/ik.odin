@@ -40,8 +40,8 @@ IKTarget :: struct {
   bone_lengths:    []f32, // Cached bone lengths (len = bone_indices - 1)
   constraints:     []IKBoneConstraint, // Optional per-bone constraints (nil or len = chain length)
   target_position: [3]f32,
-  pole_vector:     [3]f32, // Controls the bending plane
-  pole_weight:     f32, // Pole influence strength (0-1), default 1.0
+  pole_vector:     [3]f32, // Point the chain's non-root bones twist their X axis toward; the bend plane comes from the FK pose
+  pole_weight:     f32, // Pole twist strength (0-1), add_ik_layer defaults to 1
   max_iterations:  int,
   tolerance:       f32, // Stop when end effector within this distance
   weight:          f32, // Blend weight (0-1), 1 = full IK, 0 = pure FK
@@ -120,17 +120,28 @@ apply_twist_constraint :: proc(
   return fk_rot * new_delta_local
 }
 
+// Unit vector along `v`, or `fallback` when `v` is (near) zero length.
+@(private = "file")
+safe_dir :: #force_inline proc(v, fallback: [3]f32) -> [3]f32 {
+  l2 := linalg.length2(v)
+  return v / math.sqrt(l2) if l2 > 1e-12 else fallback
+}
+
 // FABRIK solver for N-bone IK chains (minimum 2 bones)
 // Forward And Backward Reaching Inverse Kinematics
 //
 // Algorithm:
 // 1. Forward pass: Starting from end effector, drag each joint toward target
-// 2. Backward pass: Starting from root, restore root position. Each segment direction
-//    is optionally constrained relative to its FK rest before placing the next joint.
+// 2. Backward pass: Starting from root, restore root position.
 // 3. Repeat until convergence or max iterations
+// With constraints, the backward pass clamps each segment direction to the bone's
+// cone, measured against its FK orientation carried by the parent's solved swing.
+// When progress stalls the forward pass clamps too (using the latest backward
+// pass's frames), so the chain can fold instead of sitting at a fixed point.
 //
 // `positions`/`rotations` hold the skeleton-space FK pose of every bone,
-// indexed by bone. The chain's entries are overwritten with the solved pose.
+// indexed by bone. The chain's entries are overwritten with the solved pose,
+// blended with the FK pose by `target.weight`.
 @(private)
 fabrik_solve :: proc(positions: [][3]f32, rotations: []quaternion128, target: IKTarget) {
   if !target.enabled || target.weight <= 0.0 do return
@@ -144,11 +155,19 @@ fabrik_solve :: proc(positions: [][3]f32, rotations: []quaternion128, target: IK
   constraints := target.constraints
   has_constraints := constraints != nil && len(constraints) == chain_length
   joints := make([][3]f32, chain_length, context.temp_allocator)
+  fk_positions := make([][3]f32, chain_length, context.temp_allocator)
   fk_rotations := make([]quaternion128, chain_length, context.temp_allocator)
+  fk_dirs := make([][3]f32, chain_length - 1, context.temp_allocator)
   for i in 0 ..< chain_length {
     bone_idx := target.bone_indices[i]
     joints[i] = positions[bone_idx]
+    fk_positions[i] = positions[bone_idx]
     fk_rotations[i] = rotations[bone_idx]
+  }
+  frames := make([]quaternion128, chain_length, context.temp_allocator)
+  copy(frames, fk_rotations)
+  for i in 0 ..< chain_length - 1 {
+    fk_dirs[i] = safe_dir(fk_positions[i + 1] - fk_positions[i], geometry.qy(fk_rotations[i]))
   }
   root_position := joints[0]
   target_pos := target.target_position
@@ -156,78 +175,135 @@ fabrik_solve :: proc(positions: [][3]f32, rotations: []quaternion128, target: IK
   for length in bone_lengths do total_length += length
   dist_to_target := linalg.distance(root_position, target_pos)
   if dist_to_target > total_length * 0.999 {
-    direction := linalg.normalize(target_pos - root_position)
-    for i in 0 ..< chain_length - 1 {
-      dir := direction
-      if has_constraints {
-        c := constraints[i]
-        dir = apply_swing_constraint(dir, fk_rotations[i], c.max_angle.x, c.max_angle.z)
-      }
-      joints[i + 1] = joints[i] + dir * bone_lengths[i]
-    }
+    // Unreachable: re-aim every segment from its own joint so a constrained
+    // chain still curls toward the target.
+    place_from_root(joints, target_pos, fk_dirs, fk_rotations, bone_lengths, constraints if has_constraints else nil, frames, aim = true)
   } else {
     iterations := target.max_iterations > 0 ? target.max_iterations : 10
     tolerance := target.tolerance > 0 ? target.tolerance : 0.001
+    // Constraining the forward pass lets a chain fold where the plain pass stalls,
+    // but its frames lag one iteration; switch passes whenever progress stops
+    // and keep the closest result.
+    constrain_forward := false
+    best := make([][3]f32, chain_length, context.temp_allocator)
+    best_dist_sq, prev_dist_sq := max(f32), max(f32)
     for _ in 0 ..< iterations {
       joints[chain_length - 1] = target_pos
       for i := chain_length - 2; i >= 0; i -= 1 {
-        dir := linalg.normalize(joints[i] - joints[i + 1])
-        joints[i] = joints[i + 1] + dir * bone_lengths[i]
+        dir := safe_dir(joints[i + 1] - joints[i], fk_dirs[i])
+        if constrain_forward {
+          c := constraints[i]
+          dir = apply_swing_constraint(dir, frames[i], c.max_angle.x, c.max_angle.z)
+        }
+        joints[i] = joints[i + 1] - dir * bone_lengths[i]
       }
       joints[0] = root_position
-      for i in 0 ..< chain_length - 1 {
-        dir := linalg.normalize(joints[i + 1] - joints[i])
-        if has_constraints {
-          c := constraints[i]
-          dir = apply_swing_constraint(dir, fk_rotations[i], c.max_angle.x, c.max_angle.z)
-        }
-        joints[i + 1] = joints[i] + dir * bone_lengths[i]
-      }
+      place_from_root(joints, target_pos, fk_dirs, fk_rotations, bone_lengths, constraints if has_constraints else nil, frames, aim = false)
       end_dist_sq := linalg.length2(joints[chain_length - 1] - target_pos)
-      if end_dist_sq < tolerance * tolerance {
-        break
+      if end_dist_sq < best_dist_sq {
+        best_dist_sq = end_dist_sq
+        copy(best, joints)
       }
+      if end_dist_sq < tolerance * tolerance do break
+      if has_constraints && end_dist_sq > prev_dist_sq * 0.999 do constrain_forward = !constrain_forward
+      prev_dist_sq = end_dist_sq
     }
+    copy(joints, best)
   }
   update_transforms_from_positions(
     positions,
     rotations,
     target.bone_indices,
     joints,
+    fk_positions,
+    fk_dirs,
     fk_rotations,
     target.pole_vector,
     target.pole_weight,
     constraints if has_constraints else nil,
   )
+  if target.weight < 1 do blend_with_fk(positions, rotations, target.bone_indices, fk_positions, fk_rotations, target.weight)
+}
+
+// Backward FABRIK pass: walk from the root placing each joint one bone length
+// along its segment direction. With `aim`, the direction is toward the target
+// rather than toward the joint's current position. When `constraints` is
+// non-nil, each direction is clamped against the bone's FK orientation carried
+// by its parent's solved swing, so the limit cone follows the parent; that
+// frame is stored in `frames` for the next forward pass.
+@(private = "file")
+place_from_root :: proc(
+  joints: [][3]f32,
+  target_pos: [3]f32,
+  fk_dirs: [][3]f32,
+  fk_rotations: []quaternion128,
+  bone_lengths: []f32,
+  constraints: []IKBoneConstraint,
+  frames: []quaternion128,
+  aim: bool,
+) {
+  parent_swing := linalg.QUATERNIONF32_IDENTITY
+  for i in 0 ..< len(joints) - 1 {
+    to := target_pos if aim else joints[i + 1]
+    dir := safe_dir(to - joints[i], fk_dirs[i])
+    if constraints != nil {
+      c := constraints[i]
+      dir = apply_swing_constraint(dir, parent_swing * fk_rotations[i], c.max_angle.x, c.max_angle.z)
+    }
+    frames[i] = parent_swing * fk_rotations[i]
+    joints[i + 1] = joints[i] + dir * bone_lengths[i]
+    parent_swing = linalg.quaternion_between_two_vector3(fk_dirs[i], dir)
+  }
+}
+
+// Blend the solved chain toward its FK pose by `weight`: rotations slerp, and
+// positions are rebuilt from the root so bone lengths are kept.
+@(private = "file")
+blend_with_fk :: proc(
+  positions: [][3]f32,
+  rotations: []quaternion128,
+  bone_indices: []u32,
+  fk_positions: [][3]f32,
+  fk_rotations: []quaternion128,
+  weight: f32,
+) {
+  for b, i in bone_indices {
+    rotations[b] = linalg.quaternion_slerp(fk_rotations[i], rotations[b], weight)
+  }
+  positions[bone_indices[0]] = fk_positions[0]
+  for i in 1 ..< len(bone_indices) {
+    parent, b := bone_indices[i - 1], bone_indices[i]
+    delta := rotations[parent] * linalg.quaternion_inverse(fk_rotations[i - 1])
+    positions[b] = positions[parent] + geometry.qmv(delta, fk_positions[i] - fk_positions[i - 1])
+  }
 }
 
 // Write the chain's solved joint positions and the matching rotations back
 // into the pose. Uses swing-twist decomposition for pole-controlled twist.
-// When `constraints` is non-nil, applies twist limit (max_angle.y) per bone.
+// When `constraints` is non-nil, applies twist limit (max_angle.y) per bone,
+// measured against the FK orientation carried by the parent's swing.
 @(private = "file")
 update_transforms_from_positions :: proc(
   positions: [][3]f32,
   rotations: []quaternion128,
   bone_indices: []u32,
   joints: [][3]f32,
+  fk_positions: [][3]f32,
+  fk_dirs: [][3]f32,
   fk_rotations: []quaternion128,
   pole_vector: [3]f32,
   pole_weight: f32,
   constraints: []IKBoneConstraint,
 ) {
   chain_length := len(bone_indices)
-  fk_positions := make([][3]f32, chain_length, context.temp_allocator)
-  for i in 0 ..< chain_length {
-    fk_positions[i] = positions[bone_indices[i]]
-  }
   has_pole := linalg.length2(pole_vector) > math.F32_EPSILON && pole_weight > 0
   last_swing := linalg.QUATERNIONF32_IDENTITY
   // Bones 0..chain_length-2: swing from segment (i, i+1). Last bone inherits last_swing.
   for i in 0 ..< chain_length - 1 {
     bone_idx := bone_indices[i]
-    fk_dir := linalg.normalize(fk_positions[i + 1] - fk_positions[i])
-    ik_dir := linalg.normalize(joints[i + 1] - joints[i])
-    swing := linalg.quaternion_between_two_vector3(fk_dir, ik_dir)
+    ik_dir := safe_dir(joints[i + 1] - joints[i], fk_dirs[i])
+    swing := linalg.quaternion_between_two_vector3(fk_dirs[i], ik_dir)
+    parent_swing := last_swing
     last_swing = swing
     new_rot := swing * fk_rotations[i]
     if has_pole && i > 0 {
@@ -249,18 +325,15 @@ update_transforms_from_positions :: proc(
       }
     }
     if constraints != nil {
-      new_rot = apply_twist_constraint(new_rot, fk_rotations[i], constraints[i].max_angle.y)
+      new_rot = apply_twist_constraint(new_rot, parent_swing * fk_rotations[i], constraints[i].max_angle.y)
     }
     positions[bone_idx] = joints[i]
     rotations[bone_idx] = new_rot
   }
-  // Last bone: same swing as parent segment (no outgoing segment).
+  // Last bone: same swing as parent segment (no outgoing segment), so it has
+  // no twist relative to its parent and needs no twist limit.
   last := chain_length - 1
   bone_idx := bone_indices[last]
-  new_rot := last_swing * fk_rotations[last]
-  if constraints != nil {
-    new_rot = apply_twist_constraint(new_rot, fk_rotations[last], constraints[last].max_angle.y)
-  }
   positions[bone_idx] = joints[last]
-  rotations[bone_idx] = new_rot
+  rotations[bone_idx] = last_swing * fk_rotations[last]
 }

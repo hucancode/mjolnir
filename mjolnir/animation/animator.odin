@@ -158,40 +158,27 @@ animator_update :: proc(
     if fk.clip < 0 || fk.clip >= len(rig.clips) do continue
     playback_advance(fk, rig.clips[fk.clip].duration, delta_time)
   }
-  acc_pos := make([][3]f32, n, context.temp_allocator)
-  acc_rot := make([]quaternion128, n, context.temp_allocator)
-  acc_scl := make([][3]f32, n, context.temp_allocator)
+  copy(self.local, skel.rest)
   acc_w := make([]f32, n, context.temp_allocator)
-  slice.fill(acc_rot, linalg.QUATERNIONF32_IDENTITY)
   for &layer in self.layers {
     if layer.weight <= 0 do continue
     fk := layer.data.(FKLayer) or_continue
     if fk.clip < 0 || fk.clip >= len(rig.clips) do continue
     clip := &rig.clips[fk.clip]
     mask, has_mask := layer.bone_mask.?
-    w := layer.weight
     for i in 0 ..< n {
       if has_mask && (i >= len(mask) || !mask[i]) do continue
       s := skel.rest[i]
       clip_sample_trs(clip, i, fk.time, &s)
-      acc_pos[i] = blend_position(acc_pos[i], s.position, w, layer.blend_mode)
-      acc_rot[i] = blend_rotation(acc_rot[i], acc_w[i], s.rotation, w, layer.blend_mode)
-      acc_scl[i] = blend_scale(acc_scl[i], s.scale, w, layer.blend_mode)
-      acc_w[i] += w
-    }
-  }
-  for i in 0 ..< n {
-    if w := acc_w[i]; w > 0 {
-      self.local[i] = {acc_pos[i] / w, linalg.normalize(acc_rot[i]), acc_scl[i] / w}
-    } else {
-      self.local[i] = skel.rest[i]
+      blend_sample(&self.local[i], &acc_w[i], s, skel.rest[i], layer.weight, layer.blend_mode)
     }
   }
   pose_model(self, skel)
   moved := make([]bool, n, context.temp_allocator)
   any_moved := false
+  // Procedural layers run before IK regardless of layer order. They simulate
+  // at weight 0 too so spring and stepping state stay current.
   for &layer in self.layers {
-    if layer.weight <= 0 do continue
     pl := (&layer.data.(ProceduralLayer)) or_continue
     switch &m in pl.modifier {
     case TailModifier:
@@ -201,6 +188,7 @@ animator_update :: proc(
     case SpiderLegModifier:
       spider_leg_modifier_update(&m, pl.bone_indices, self.positions, self.rotations, skel.lengths, layer.weight, delta_time, root_world)
     }
+    if layer.weight <= 0 do continue
     for b in pl.bone_indices do moved[b] = true
     any_moved = true
   }
@@ -377,9 +365,10 @@ transition_to :: proc(
 
 // ---------- IK ----------
 
-// add_ik_layer adds an IK layer over `bones` (root first, ownership transfers to the layer).
+// add_ik_layer adds an IK layer over `bones` (root first, each bone the parent of the next;
+// ownership transfers to the layer). `constraints` is nil or one per bone.
 // LOCAL targets are in skeleton space; WORLD targets are in world space and
-// converted with `root_world` on every update.
+// converted with `root_world` on every update. The layer weight blends FK (0) to IK (1).
 add_ik_layer :: proc(
   self: ^Animator,
   rig: ^Rig,
@@ -391,13 +380,16 @@ add_ik_layer :: proc(
   layer_index: int = -1,
   constraints: []IKBoneConstraint = nil,
   space: IKTargetSpace = .LOCAL,
+  pole_weight: f32 = 1,
 ) -> (
   index: int,
   ok: bool,
 ) #optional_ok {
   skel := &rig.skeleton
   if len(bones) < 2 do return -1, false
+  if constraints != nil && len(constraints) != len(bones) do return -1, false
   for b in bones do if int(b) >= bone_count(skel) do return -1, false
+  for i in 1 ..< len(bones) do if skel.parents[bones[i]] != i32(bones[i - 1]) do return -1, false
   lengths := make([]f32, len(bones) - 1)
   for i in 0 ..< len(bones) - 1 do lengths[i] = skel.lengths[bones[i + 1]]
   layer := Layer {
@@ -408,6 +400,7 @@ add_ik_layer :: proc(
       constraints = constraints,
       target_position = target,
       pole_vector = pole,
+      pole_weight = clamp(pole_weight, 0, 1),
       max_iterations = max_iterations,
       tolerance = tolerance,
       weight = clamp(weight, 0, 1),
@@ -430,12 +423,13 @@ add_ik_chain_layer :: proc(
   layer_index: int = -1,
   constraints: []IKBoneConstraint = nil,
   space: IKTargetSpace = .LOCAL,
+  pole_weight: f32 = 1,
 ) -> (
   index: int,
   ok: bool,
 ) #optional_ok {
   bones := bone_chain(&rig.skeleton, root_name, tip_name) or_return
-  index, ok = add_ik_layer(self, rig, bones, target, pole, weight, max_iterations, tolerance, layer_index, constraints, space)
+  index, ok = add_ik_layer(self, rig, bones, target, pole, weight, max_iterations, tolerance, layer_index, constraints, space, pole_weight)
   if !ok do delete(bones)
   return
 }

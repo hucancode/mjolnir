@@ -32,6 +32,7 @@ walk_layer:   int = -1
 run_layer:    int = -1
 survey_layer: int = -1
 ik_layer:     int = -1
+survey_mask:  []bool
 
 walk_run_blend: mu.Real = 0.0
 auto_blend:     bool    = true
@@ -72,6 +73,7 @@ shutdown :: proc(app: ^App) {
   platform.shutdown(&app.window)
   free(app)
   mjolnir.gltf_scene_destroy(&fox_scene)
+  delete(survey_mask)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -96,6 +98,11 @@ setup :: proc(app: ^App) -> bool {
   walk_layer,   _ = anim.add_clip_layer(&animator, rig, "Walk", weight = 1.0)
   run_layer,    _ = anim.add_clip_layer(&animator, rig, "Run",  weight = 0.0)
   survey_layer, _ = anim.add_clip_layer(&animator, rig, "Survey", weight = 0.0, speed = 0.5)
+  // Survey drives only the spine and everything above it; legs keep walking.
+  if mask, ok := anim.bone_subtree_mask(&rig.skeleton, "b_Spine01_02"); ok {
+    survey_mask = mask
+    anim.set_layer_mask(&animator, survey_layer, survey_mask)
+  }
   if bones, ok := anim.find_bones(&rig.skeleton, {"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}); ok {
     ik_layer, _ = anim.add_ik_layer(&animator, rig, bones, {f32(target_x), f32(target_y), f32(target_z)}, {0, 5, 2.5}, weight = 0.0, space = .WORLD)
   }

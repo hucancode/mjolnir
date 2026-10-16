@@ -41,16 +41,24 @@ playback_advance :: proc(self: ^ClipPlayer, duration, delta_time: f32) {
       self.status = .STOPPED
     }
   case .PING_PONG:
-    if self.time >= duration || self.time < 0 do self.speed *= -1
+    // Reflect the overshoot back into the clip and turn around.
+    if self.time >= duration {
+      self.time = 2 * duration - self.time
+      self.speed = -abs(self.speed)
+    } else if self.time < 0 {
+      self.time = -self.time
+      self.speed = abs(self.speed)
+    }
+    self.time = clamp(self.time, 0, duration)
   }
 }
 
-// BlendMode selects how a layer combines with the layers accumulated before it.
+// BlendMode selects how a layer combines with the pose accumulated from the layers before it.
 BlendMode :: enum {
-  REPLACE,   // Default: weighted blend (current behavior)
-  ADD,       // Add transforms on top of accumulated (additive blending)
-  MULTIPLY,  // Multiply scales (position ignored, rotation composed)
-  OVERRIDE,  // Completely replace accumulated (weight acts as 0/1 gate)
+  REPLACE,  // Weighted average while total weight <= 1; beyond that the layer lerps over what is below it
+  ADD,      // Adds the layer's offset from the rest pose, scaled by weight
+  MULTIPLY, // Multiplies scale and composes rotation, scaled by weight (position ignored)
+  OVERRIDE, // Replaces the accumulated pose (weight acts as a 0/1 gate at 0.5)
 }
 
 // TransitionState is the phase of a cross-fade.
@@ -91,77 +99,37 @@ transition_update :: proc(self: ^Transition, layers: []Layer, delta_time: f32) {
   layers[self.to_layer].weight = t
 }
 
-// Blend position based on mode
+// Blend one bone's sample `s` (weight `w`) into the accumulated local pose `acc`, whose
+// REPLACE/OVERRIDE weight so far is `acc_w`. `rest` is the bone's rest pose, the
+// reference ADD offsets are measured from.
 @(private)
-blend_position :: proc(
-  accumulated: [3]f32,
-  new_value: [3]f32,
-  weight: f32,
-  mode: BlendMode,
-) -> [3]f32 {
+blend_sample :: proc(acc: ^TRS, acc_w: ^f32, s, rest: TRS, w: f32, mode: BlendMode) {
+  id := linalg.QUATERNIONF32_IDENTITY
+  w := min(w, 1)
   switch mode {
   case .REPLACE:
-    return accumulated + new_value * weight
+    // Earlier weight beyond what is left after this layer is given up, so weights
+    // summing to <= 1 average and heavier stacks let later layers win.
+    prior := min(acc_w^, 1 - w)
+    t := w / (prior + w)
+    acc.position = linalg.lerp(acc.position, s.position, t)
+    acc.rotation = linalg.quaternion_slerp(acc.rotation, s.rotation, t)
+    acc.scale = linalg.lerp(acc.scale, s.scale, t)
+    acc_w^ = prior + w
   case .ADD:
-    return accumulated + new_value * weight
+    acc.position += (s.position - rest.position) * w
+    delta := linalg.quaternion_inverse(rest.rotation) * s.rotation
+    acc.rotation = linalg.normalize(acc.rotation * linalg.quaternion_slerp(id, delta, w))
+    acc.scale *= 1 + (s.scale / rest.scale - 1) * w
   case .MULTIPLY:
-    // Position ignored for multiply mode
-    return accumulated
+    acc.rotation = linalg.normalize(acc.rotation * linalg.quaternion_slerp(id, s.rotation, w))
+    acc.scale *= 1 + (s.scale - 1) * w
   case .OVERRIDE:
-    return new_value if weight > 0.5 else accumulated
-  }
-  return accumulated
-}
-
-// Blend rotation based on mode
-@(private)
-blend_rotation :: proc(
-  accumulated: quaternion128,
-  accumulated_weight: f32,
-  new_value: quaternion128,
-  weight: f32,
-  mode: BlendMode,
-) -> quaternion128 {
-  switch mode {
-  case .REPLACE:
-    if accumulated_weight > 0 {
-      return linalg.quaternion_slerp(
-        accumulated,
-        new_value,
-        weight / (accumulated_weight + weight),
-      )
+    if w > 0.5 {
+      acc^ = s
+      acc_w^ = 1
     }
-    return new_value
-  case .ADD:
-    return linalg.quaternion_mul_quaternion(accumulated, new_value)
-  case .MULTIPLY:
-    // Same as ADD for rotations
-    return linalg.quaternion_mul_quaternion(accumulated, new_value)
-  case .OVERRIDE:
-    return new_value if weight > 0.5 else accumulated
   }
-  return accumulated
-}
-
-// Blend scale based on mode
-@(private)
-blend_scale :: proc(
-  accumulated: [3]f32,
-  new_value: [3]f32,
-  weight: f32,
-  mode: BlendMode,
-) -> [3]f32 {
-  switch mode {
-  case .REPLACE:
-    return accumulated + new_value * weight
-  case .ADD:
-    return accumulated + new_value * weight
-  case .MULTIPLY:
-    return accumulated * (1 + (new_value - 1) * weight)
-  case .OVERRIDE:
-    return new_value if weight > 0.5 else accumulated
-  }
-  return accumulated
 }
 
 // FKLayer plays one clip of the rig (index into Rig.clips).
