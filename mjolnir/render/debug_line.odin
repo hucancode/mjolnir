@@ -24,7 +24,10 @@ debug_line_add :: proc(self: ^Renderer, life: f32, bypass_depth: bool, segs: ..D
   defer sync.mutex_unlock(&self.debug_mutex)
   inbox := &self.debug_lines[1 if bypass_depth else 0]
   if len(inbox) + len(segs) > DEBUG_RING do return
-  expiry := self.debug_time + max(life, 0)
+  // one-frame segments (life <= 0) are stamped at flush, once the clock for the frame that
+  // draws them is known; update may advance it between this call and that frame
+  expiry: f32 = -1
+  if life > 0 do expiry = self.debug_time + life
   for seg in segs {
     s := seg
     s.expiry = expiry
@@ -41,6 +44,8 @@ flush_debug_lines :: proc(self: ^Renderer) {
   table := write_table(self, .DEBUG_LINES, DebugLineSegment)
   for &inbox, ring in self.debug_lines {
     for seg in inbox {
+      seg := seg
+      if seg.expiry < 0 do seg.expiry = self.debug_time
       i := ring * DEBUG_RING + int(self.debug_filled[ring] % DEBUG_RING)
       table[i] = seg
       mark_dirty(self, .DEBUG_LINES, i)
