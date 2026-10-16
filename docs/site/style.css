@@ -108,25 +108,7 @@ aside {
 }
 aside h3 { margin: 0.75rem 0 0.25rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-neutral); }
 aside > div { display: grid; gap: 0.15rem; margin: 0.4rem 0; font-size: 0.85rem; }
-aside > div:has(> [role=switch]) { grid-template-columns: 1fr auto; align-items: center; }
 aside input[type=range] { width: 100%; margin: 0; }
-aside [role=switch] {
-  appearance: none; margin: 0; width: 2.2rem; height: 1.1rem; position: relative; cursor: pointer;
-  background: var(--color-base-300); border: var(--border) solid var(--color-neutral);
-  border-radius: var(--radius-selector);
-}
-aside [role=switch]::after {
-  content: ""; position: absolute; top: 0.1rem; left: 0.1rem; width: 0.8rem; height: 0.8rem;
-  background: var(--color-neutral); border-radius: 50%; transition: transform 0.15s;
-}
-aside [role=switch]:checked { background: var(--color-primary); }
-aside [role=switch]:checked::after { transform: translateX(1.1rem); background: var(--color-primary-content); }
-aside [role=group] { display: flex; }
-aside [role=group] button {
-  flex: 1; padding: 0.2rem 0.4rem; cursor: pointer;
-  background: var(--color-base-100); border: var(--border) solid var(--color-neutral);
-}
-aside [role=group] button[aria-pressed=true] { background: var(--color-primary); color: var(--color-primary-content); }
 
 /* home: features */
 main > section > article {

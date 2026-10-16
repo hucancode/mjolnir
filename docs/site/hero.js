@@ -383,51 +383,23 @@
     i.oninput = () => { S[key] = +i.value; onChange && onChange(); };
     row(label, i);
   };
-  const toggleSwitch = (label, key, onChange) => {
-    const i = document.createElement("input");
-    i.type = "checkbox"; i.role = "switch"; i.id = "hc" + uid++; i.checked = S[key];
-    i.onchange = () => { S[key] = i.checked; onChange && onChange(); };
-    row(label, i);
-  };
-  const segmented = (label, key, options, onChange) => {
-    const g = document.createElement("div"); g.role = "group";
-    for (const [value, text] of options) {
-      const b = document.createElement("button");
-      b.type = "button"; b.textContent = text;
-      b.setAttribute("aria-pressed", String(S[key] === value));
-      b.onclick = () => {
-        S[key] = value;
-        for (const o of g.children) o.setAttribute("aria-pressed", String(o === b));
-        onChange && onChange();
-      };
-      g.append(b);
-    }
-    row(label, g);
-  };
   const rebuild = () => { upload(); updatePose(); };
 
   heading("Hammer");
   slider("Slant", "slant", 0, 90, 1, updatePose);
   slider("Head length", "headLength", 0.8, 2.2, 0.05, rebuild);
   slider("Handle length", "handleLength", 2, 7, 0.1, rebuild);
-  segmented("Finish", "finish", [["steel", "Steel"], ["bronze", "Bronze"], ["obsidian", "Obsidian"]], rebuild);
-  toggleSwitch("Wrist loop", "loop", rebuild);
-  toggleSwitch("Spin", "spin");
   heading("Camera");
-  toggleSwitch("Orbit", "orbit");
   slider("Orbit speed", "orbitSpeed", -0.6, 0.6, 0.01);
   slider("Distance", "distance", 7, 28, 0.5);
   slider("Height", "height", 0.5, 14, 0.1);
   heading("Light");
   slider("Sun direction", "sunAzimuth", 0, 360, 1);
   slider("Sun height", "sunElevation", 10, 85, 1);
-  segmented("Theme", "theme", [["auto", "Auto"], ["light", "Light"], ["dark", "Dark"]]);
   heading("Ground");
-  toggleSwitch("Grid", "grid");
   slider("Spacing", "gridSpacing", 0.5, 2.5, 0.05);
   slider("Opacity", "gridOpacity", 0.1, 1, 0.01);
   slider("Fade distance", "gridFade", 10, 50, 1);
-  toggleSwitch("Shadow", "shadow");
   stage.append(panel, toggle);
 
   new IntersectionObserver((e) => { visible = e[0].isIntersecting; }).observe(canvas);
