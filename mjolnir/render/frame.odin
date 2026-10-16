@@ -47,7 +47,7 @@ BARRIERS := [Barrier]rhi.Barrier {
   },
   .GBUFFER_TO_LIGHTING = {
     src_stage = {.COLOR_ATTACHMENT_OUTPUT, .LATE_FRAGMENT_TESTS},
-    dst_stage = {.FRAGMENT_SHADER, .EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
+    dst_stage = {.COMPUTE_SHADER, .EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
     src_access = {.COLOR_ATTACHMENT_WRITE, .DEPTH_ATTACHMENT_WRITE},
     dst_access = {.SHADER_READ, .DEPTH_ATTACHMENT_READ},
   },
@@ -62,7 +62,7 @@ BARRIERS := [Barrier]rhi.Barrier {
     src_access = {.DEPTH_ATTACHMENT_WRITE}, dst_access = {.SHADER_READ},
   },
   .SHADOW_TO_LIGHTING = {
-    src_stage = {.LATE_FRAGMENT_TESTS}, dst_stage = {.FRAGMENT_SHADER},
+    src_stage = {.LATE_FRAGMENT_TESTS}, dst_stage = {.COMPUTE_SHADER},
     src_access = {.DEPTH_ATTACHMENT_WRITE}, dst_access = {.SHADER_READ},
   },
   .CULL_TO_INDIRECT = {

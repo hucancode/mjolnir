@@ -14,7 +14,8 @@
 // SPIR-V, built by make shader) and shader/wgpu (WGSL), loaded by the pass that uses them.
 // Where the backends differ a pass branches on rhi.Caps (resources.odin: bindless or bind
 // groups; pass_cull.odin: compacted multi-draw or per-batch draws, batches.odin; pass_shadow.odin:
-// one layered draw or a pass per view) and shaders keep one push layout per pass.
+// one layered draw or one pass of per-view viewports into a tiled atlas) and shaders keep one
+// push layout per pass.
 // Its seams are rhi, the contract both sides share, and the backend, which it imports and which
 // never imports it: backend.odin (names in render's API) and backend_glue.odin (the rest) are
 // the only files naming a backend. It never touches the host: images, environment maps and

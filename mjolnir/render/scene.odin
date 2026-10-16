@@ -212,6 +212,7 @@ teardown :: proc(self: ^Renderer) {
   for i in self.texture_slots.mark ..< self.texture_slots.high_water do dev.texture_destroy(&self.gpu, TextureHandle(i))
   texture_groups_clear(self)
   cull_groups_clear(self)
+  lighting_groups_clear(self)
   cont.slots_rewind(&self.texture_slots)
   self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
   cont.slots_rewind(&self.camera_slots)
@@ -247,6 +248,7 @@ load_environment_map :: proc(self: ^Renderer, data: []u8) -> bool {
 // Destroy everything, whatever map is up.
 shutdown :: proc(self: ^Renderer) {
   cull_shutdown(self)
+  lighting_shutdown(self)
   delete(self.res.texture_groups)
   dev.shutdown(&self.gpu)
   tables_destroy(self)
@@ -356,6 +358,7 @@ tick_resource_pools :: proc(self: ^Renderer) {
   if destroyed {
     texture_groups_clear(self)
     cull_groups_clear(self)
+    lighting_groups_clear(self)
   }
   for r in cont.slots_tick(&self.mesh_slots) {
     free_mesh(self, write_table(self, .MESHES, MeshData)[r.index])
@@ -840,7 +843,7 @@ cascade_matrices :: proc(l: Light, cascade: int, camera: ^ViewGPU) -> (view, pro
   return view, geom.make_ortho_matrix(-r, r, -r, r, 0, 2 * r)
 }
 
-// Stable counting sort by type, so each type is one instance range of the lighting draw;
+// Stable counting sort by type, so each type is one range the lighting shader walks;
 // then the lights picked to cast (any nonzero shadow_map) get consecutive shadow views in
 // dst order (view i renders atlas layer i).
 @(private)
@@ -1019,6 +1022,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) -> (cameras: []FrameCam
       pyramid      = pyramid,
       slot         = slot,
       next_slot    = next_slot,
+      extent       = cam.extent,
       near         = cam.near,
       far          = cam.far,
       ready        = ready,
@@ -1071,10 +1075,7 @@ flush :: proc(self: ^Renderer, frame_index: u32, debug_ui: bool) {
   // cull dispatches cover the slots up to the last one holding anything
   nodes := write_table(self, .NODES, NodeData)
   for self.node_count > 0 && nodes[self.node_count - 1] == {} do self.node_count -= 1
-  meshes := write_table(self, .MESHES, MeshData)
   desc.camera_view_count = self.camera_slots.high_water - 1
-  desc.light_volumes[.POINT] = meshes[self.builtin_meshes[.SPHERE]]
-  desc.light_volumes[.SPOT] = meshes[self.builtin_meshes[.CONE]]
   desc.post_passes = flush_post_passes(self, frame_index)
   desc.debug_line_counts = {u32(min(self.debug_filled[0], DEBUG_RING)), u32(min(self.debug_filled[1], DEBUG_RING))}
   sync.mutex_lock(&self.debug_mutex)

@@ -55,6 +55,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   cmd_bind_bindless               = rhi_cmd_bind_bindless,
   cmd_push                        = rhi_cmd_push,
   cmd_set_scissor                 = rhi_cmd_set_scissor,
+  cmd_set_viewport                = rhi_cmd_set_viewport,
   cmd_bind_vertex                 = rhi_cmd_bind_vertex,
   cmd_bind_index                  = rhi_cmd_bind_index,
   cmd_draw                        = rhi_cmd_draw,
@@ -883,6 +884,11 @@ rhi_cmd_push :: proc(b: ^Backend, handle: rhi.CommandList, data: rawptr, size: u
 rhi_cmd_set_scissor :: proc(b: ^Backend, handle: rhi.CommandList, x, y, w, h: u32) {
   scissor := vk.Rect2D{offset = {i32(x), i32(y)}, extent = {w, h}}
   vk.CmdSetScissor((^RhiCmd)(handle).cb, 0, 1, &scissor)
+}
+
+rhi_cmd_set_viewport :: proc(b: ^Backend, handle: rhi.CommandList, x, y, w, h: u32) {
+  viewport := vk.Viewport{x = f32(x), y = f32(y), width = f32(w), height = f32(h), maxDepth = 1}
+  vk.CmdSetViewport((^RhiCmd)(handle).cb, 0, 1, &viewport)
 }
 
 rhi_cmd_bind_vertex :: proc(b: ^Backend, handle: rhi.CommandList, slot: u32, buffer: rhi.Buffer, offset: int) {

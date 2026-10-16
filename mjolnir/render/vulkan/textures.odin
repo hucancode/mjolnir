@@ -12,14 +12,15 @@ import vk "vendor:vulkan"
 
 // Depth pyramids and draw lists live in slots render assigns: a pyramid per camera and frame
 // in flight, a draw-list slot per camera and frame in flight plus one per frame for the shadow
-// views. Storage image slots follow: the pyramids' mips, then the IBL precompute targets.
+// views. Storage image slots follow: the pyramids' mips, then the IBL precompute targets, then
+// the cameras' lit images, one per pyramid slot.
 MAX_PYRAMID_SLOTS :: rhi.MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
 MAX_DRAW_LIST_SLOTS :: (rhi.MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
 // mips a depth pyramid may have
 @(private)
 MAX_DEPTH_MIPS_LEVEL :: 16
 @(private)
-MAX_STORAGE_IMAGES :: MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS_LEVEL + 2 + rhi.PREFILTER_MIPS
+MAX_STORAGE_IMAGES :: MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS_LEVEL + 2 + rhi.PREFILTER_MIPS + MAX_PYRAMID_SLOTS
 
 @(private)
 SCENE_STAGES :: vk.ShaderStageFlags{.VERTEX, .FRAGMENT, .COMPUTE}
@@ -31,7 +32,7 @@ BINDING_TEXTURES :: 0 // [MAX_TEXTURES] sampled images, 2D and cube
 @(private)
 BINDING_SAMPLERS :: 1 // one sampler per SamplerType
 @(private)
-BINDING_STORAGE_IMAGES :: 2 // [MAX_STORAGE_IMAGES] depth pyramid mips, IBL precompute targets
+BINDING_STORAGE_IMAGES :: 2 // [MAX_STORAGE_IMAGES] depth pyramid mips, IBL precompute targets, lit images
 @(private)
 BINDING_DRAW_LISTS :: 3 // [MAX_DRAW_LIST_SLOTS] indirect draw list buffers
 @(private)

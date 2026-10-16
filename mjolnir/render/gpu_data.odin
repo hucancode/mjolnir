@@ -56,7 +56,8 @@ AttachmentType :: enum {
 
 // Each camera attachment's texture; pipelines drawing into an attachment take its format.
 ATTACHMENTS :: [AttachmentType]TextureDesc {
-  .FINAL_IMAGE        = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED}},
+  // written whole by the lighting dispatch, then drawn over by the forward pass
+  .FINAL_IMAGE        = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED, .STORAGE}},
   .NORMAL             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
   .ALBEDO             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
   .METALLIC_ROUGHNESS = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
@@ -265,6 +266,7 @@ FrameCamera :: struct {
   // this frame's pyramid and draw-list slot; this frame's cull writes the lists of next_slot
   slot:         u32,
   next_slot:    u32,
+  extent:       [2]u32,
   near, far:    f32,
   // its draw lists and pyramid hold data: until then the camera draws nothing
   ready:       bool,
@@ -288,9 +290,8 @@ FrameDesc :: struct {
   skinned_vertex_count: u32,
   // batch ids in use are below this (Table.BATCHES)
   batch_count:          u32,
-  // lights are sorted by type; point and spot draw these volume meshes
+  // lights are sorted by type, each type one range of the light table
   light_count:          [LightType]u32,
-  light_volumes:        [LightType]MeshData,
   shadow_view_count:    u32,
   // draw-list slot the shadow views cull into and draw from
   shadow_draw_list:     u32,

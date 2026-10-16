@@ -17,9 +17,9 @@ IRRADIANCE_SAMPLE_DELTA :: f32(0.025)
 
 // dispatch i writes the cube level bound at PRECOMPUTE_STORAGE_BASE + i of the storage image
 // array (Vulkan), after the depth pyramids' slots
-@(private = "file")
+@(private)
 PRECOMPUTE_STORAGE_BASE :: MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS
-@(private = "file")
+@(private)
 PRECOMPUTE_DISPATCHES :: 2 + PREFILTER_MIPS
 
 // `src` is 2D for the equirect step, a cube otherwise; `value` is the irradiance sample delta

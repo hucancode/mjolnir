@@ -1,5 +1,5 @@
 // Shadow depth: the opaque batches through one shadow view (scene group SHADOW), skinned
-// like mesh.wgsl. One pass per view, into its atlas layer.
+// like mesh.wgsl. One pass renders every view, each into its atlas tile's viewport.
 
 @group(0) @binding(0) var<storage, read> views: array<View>;
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;

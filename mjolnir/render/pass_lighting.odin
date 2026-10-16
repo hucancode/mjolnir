@@ -2,9 +2,26 @@ package render
 
 import "rhi"
 
+// Deferred lighting: one compute dispatch per camera reads the G-buffer and writes the
+// camera's lit image (FINAL_IMAGE) whole, a group per LIGHTING_TILE square tile. Each group
+// lists the point and spot lights reaching its tile, so a pixel reads the G-buffer once
+// however many lights cover it (shader/vulkan/lighting/lighting.comp, shader/wgpu/lighting.wgsl).
+// The image is a storage image: bindless at LIT_STORAGE_BASE + the camera's pyramid slot
+// (pyramids_bind), or a group-3 bind group per image (WebGPU).
+
+@(private = "file")
+LIGHTING_TILE :: 16
+
+// Storage image slots of the lit images, one per pyramid slot, after the IBL's (Vulkan).
+@(private)
+LIT_STORAGE_BASE :: PRECOMPUTE_STORAGE_BASE + PRECOMPUTE_DISPATCHES
+
 @(private)
 LightingState :: struct {
-  pipelines: [LightType]rhi.Pipeline,
+  pipeline:      rhi.Pipeline,
+  // WebGPU: group 3, the image the dispatch writes, a group per image
+  output_layout: rhi.BindLayout,
+  output_groups: map[TextureHandle]rhi.BindGroup,
 }
 
 // Matches the push block of the lighting shaders (and, in WebGPU, their uniform struct).
@@ -17,58 +34,59 @@ LightingPush :: struct {
   environment:      u32,
   skybox_intensity: f32,
   skybox_blur:      f32,
+  output_index:     u32,
+  // lights are sorted by type: each type's range of the light table
+  light_count:      [LightType]u32,
 }
-
-// Point and spot draw the back faces of their volume mesh (FrameDesc.light_volumes);
-// directional and ambient cover the screen with a far-plane triangle, directional only where
-// the scene lies in front of it.
-@(private = "file")
-DRAW_STATE := [LightType]struct {
-  depth_compare: rhi.CompareOp,
-  cull:          rhi.CullMode,
-} {
-  .POINT       = {.GREATER_EQUAL, .FRONT},
-  .SPOT        = {.GREATER_EQUAL, .BACK},
-  .DIRECTIONAL = {.GREATER, .BACK},
-  .AMBIENT     = {.ALWAYS, .BACK},
-}
+// a uniform vec4u in WebGPU
+#assert(offset_of(LightingPush, light_count) % 16 == 0)
 
 @(private)
 lighting_init :: proc(r: ^Renderer) -> bool {
-  common := wgsl("shader/wgpu/common.wgsl")
-  vertex := wgsl_join(common, wgsl("shader/wgpu/lighting_vs.wgsl"))
-  position := [?]rhi.VertexAttribute{{location = 0, format = .F32X3, offset = u32(offset_of(Vertex, position))}}
-  streams := [?]rhi.VertexBuffer{{stride = size_of(Vertex), attributes = position[:]}}
-  formats := [?]TextureFormat{HDR_COLOR_FORMAT}
-  for type in LightType {
-    ambient := type == .AMBIENT
-    constants := [?]u32{u32(type)}
-    desc := rhi.GraphicsPipelineDesc {
-      shader = {
-        spirv = {
-          vert = spirv("shader/vulkan/lighting/vert.spv"),
-          frag = spirv("shader/vulkan/lighting_ambient/frag.spv") if ambient else spirv("shader/vulkan/lighting/frag.spv"),
-        },
-        wgsl = wgsl_join(vertex, wgsl("shader/wgpu/lighting_ambient.wgsl") if ambient else wgsl("shader/wgpu/lighting.wgsl")),
-      },
-      layout = pipeline_layout(r, .LIGHTING, .LIGHTING),
-      vertex = streams[:],
-      cull = DRAW_STATE[type].cull,
-      color_formats = formats[:],
-      blend = .ADDITIVE,
-      // read-only: volumes depth-test against the scene depth, shaders sample it
-      depth = rhi.DepthState{compare = DRAW_STATE[type].depth_compare},
-      constants = constants[:],
-    }
-    r.lighting.pipelines[type] = dev.graphics_pipeline_create(&r.gpu, desc) or_return
+  l := &r.lighting
+  if !r.res.caps.bindless {
+    entries := [1]rhi.BindEntry{{kind = .STORAGE_TEXTURE, stages = {.COMPUTE}, format = HDR_COLOR_FORMAT}}
+    l.output_layout = dev.bind_layout_create(&r.gpu, {entries = entries[:]}) or_return
   }
+  l.pipeline = dev.compute_pipeline_create(
+    &r.gpu,
+    {
+      {spirv = {comp = spirv("shader/vulkan/lighting/lighting.spv")}, wgsl = wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/lighting.wgsl"))},
+      pipeline_layout(r, .LIGHTING, .LIGHTING, l.output_layout),
+    },
+  ) or_return
   return true
 }
 
 @(private)
+lighting_shutdown :: proc(r: ^Renderer) {
+  delete(r.lighting.output_groups)
+}
+
+// Drops the output groups, made again on use: an image they name changed.
+@(private)
+lighting_groups_clear :: proc(r: ^Renderer) {
+  l := &r.lighting
+  for _, g in l.output_groups do dev.bind_group_retire(&r.gpu, g)
+  clear(&l.output_groups)
+}
+
+@(private)
 lighting_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: ^FrameCamera) {
-  colors := [1]rhi.ColorTarget{{texture = cam.attachments[.FINAL_IMAGE], load = .CLEAR, clear = {0, 0, 0, 1}}}
-  dev.cmd_begin_pass(&r.gpu, cmd, {colors = colors[:], depth = rhi.DepthTarget{texture = cam.attachments[.DEPTH], load = .LOAD, read_only = true}})
+  l := &r.lighting
+  output := cam.attachments[.FINAL_IMAGE]
+  group: rhi.BindGroup
+  if !r.res.caps.bindless {
+    cached: bool
+    group, cached = l.output_groups[output]
+    if !cached {
+      resources := [1]rhi.BindResource{rhi.TextureView{output, 0}}
+      ok: bool
+      group, ok = dev.bind_group_create(&r.gpu, {layout = l.output_layout, resources = resources[:]})
+      if !ok do return
+      l.output_groups[output] = group
+    }
+  }
   push := LightingPush {
     camera_index     = cam.index,
     irradiance       = u32(r.irradiance_cube),
@@ -77,11 +95,15 @@ lighting_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: ^FrameC
     environment      = u32(r.environment_map),
     skybox_intensity = r.skybox_intensity,
     skybox_blur      = r.skybox_blur,
+    output_index     = LIT_STORAGE_BASE + cam.slot,
+    light_count      = r.light_count,
   }
+  dev.cmd_begin_compute(&r.gpu, cmd)
+  defer dev.cmd_end_compute(&r.gpu, cmd)
   pipeline_bind(
     r,
     cmd,
-    r.lighting.pipelines[.POINT],
+    l.pipeline,
     .LIGHTING,
     f,
     &push,
@@ -97,18 +119,7 @@ lighting_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: ^FrameC
     r.brdf_lut,
     r.environment_map,
   )
-  mesh_buffers_bind(r, cmd)
-  first: u32
-  for type in LightType {
-    count := r.light_count[type]
-    defer first += count
-    if count == 0 do continue
-    dev.cmd_bind_pipeline(&r.gpu, cmd, r.lighting.pipelines[type])
-    if volume := &r.light_volumes[type]; volume.index_count > 0 {
-      dev.cmd_draw_indexed(&r.gpu, cmd, volume.index_count, count, volume.first_index, volume.vertex_offset, first)
-    } else {
-      dev.cmd_draw(&r.gpu, cmd, 3, count, 0, first)
-    }
-  }
-  dev.cmd_end_pass(&r.gpu, cmd)
+  if group != 0 do dev.cmd_bind_group(&r.gpu, cmd, 3, group)
+  groups := (cam.extent + LIGHTING_TILE - 1) / LIGHTING_TILE
+  dev.cmd_dispatch(&r.gpu, cmd, groups.x, groups.y, 1)
 }

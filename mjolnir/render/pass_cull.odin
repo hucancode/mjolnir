@@ -168,7 +168,8 @@ pyramid_destroy :: proc(r: ^Renderer, slot: u32) {
   cull_groups_clear(r)
 }
 
-// Registers the storage views of the live cameras' pyramids that are not yet.
+// Registers the storage views of the live cameras' pyramids that are not yet, and of the
+// lit image the lighting pass writes at the same slot (LIT_STORAGE_BASE).
 @(private)
 pyramids_bind :: proc(r: ^Renderer) {
   if !r.res.caps.bindless do return
@@ -178,6 +179,7 @@ pyramids_bind :: proc(r: ^Renderer) {
     for mip in 0 ..< r.cull.pyramid_mips[cam.slot] {
       dev.bindless_write(&r.gpu, .STORAGE_IMAGES, cam.slot * MAX_DEPTH_MIPS + mip, rhi.TextureView{cam.pyramid, i32(mip)})
     }
+    dev.bindless_write(&r.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + cam.slot, rhi.TextureView{cam.attachments[.FINAL_IMAGE], 0})
   }
 }
 

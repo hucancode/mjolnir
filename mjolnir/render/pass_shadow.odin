@@ -2,23 +2,36 @@ package render
 
 import "rhi"
 
-// Shadow maps are the layers of one depth atlas per frame in flight, a layer per shadow view,
-// grown by doubling up to MAX_SHADOW_VIEWS. Where the device renders layers together (Vulkan)
-// one cull dispatch tests every node against every shadow view into one draw list, and one
-// layered draw renders every view; the cull tags each draw first_instance = node | view << 16.
-// Elsewhere (WebGPU) each view renders its own pass from its own list. There is no depth
+// Shadow maps live in one depth atlas per frame in flight, a map per shadow view, grown by
+// doubling up to MAX_SHADOW_VIEWS. Where the device renders layers together (Vulkan) the atlas
+// is an array, a layer per view: one cull dispatch tests every node against every shadow view
+// into one draw list, and one layered draw renders every view; the cull tags each draw
+// first_instance = node | view << 16. Elsewhere (WebGPU) the atlas is one 2D texture of
+// SHADOW_MAP_SIZE tiles, ATLAS_COLUMNS to a row, a tile per view (shadow_tile): one pass
+// renders every view, each into its tile's viewport from its own list. There is no depth
 // clamp in core WebGPU: a caster behind a directional cascade's near plane is clipped.
 #assert(MAX_NODES_IN_SCENE <= 1 << 16)
 #assert(MAX_VIEWS < 1 << 16)
 
 @(private)
 MIN_ATLAS_LAYERS :: 2
+// tiles to a row of the 2D atlas: 16 * SHADOW_MAP_SIZE is WebGPU's least maxTextureDimension2D
+@(private)
+ATLAS_COLUMNS :: 16
+#assert(ATLAS_COLUMNS * SHADOW_MAP_SIZE <= 8192)
 @(private = "file")
 SHADOW_SLOPE_BIAS :: 1.5
 
 @(private)
 ShadowState :: struct {
   pipeline: rhi.Pipeline,
+}
+
+// The texel rectangle (x, y, width, height) of view `layer`'s map in a 2D atlas of `layers` tiles.
+@(private)
+shadow_tile :: proc(layer, layers: u32) -> [4]u32 {
+  cols := min(layers, ATLAS_COLUMNS)
+  return {layer % cols * SHADOW_MAP_SIZE, layer / cols * SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
 }
 
 @(private)
@@ -28,6 +41,11 @@ atlas_make :: proc(r: ^Renderer, f: int, layers: u32) -> bool {
     format = .D32F,
     usage  = {.DEPTH_TARGET, .SAMPLED},
     layers = layers,
+  }
+  if !r.res.caps.layered_rendering {
+    cols := min(layers, ATLAS_COLUMNS)
+    desc.extent = {cols * SHADOW_MAP_SIZE, (layers + cols - 1) / cols * SHADOW_MAP_SIZE}
+    desc.layers = 1
   }
   atlas := allocate_texture(r, desc, target = true) or_return
   if old := r.res.atlas[f]; old != 0 do destroy_texture(r, old)
@@ -95,14 +113,19 @@ shadow_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
     barrier(r, cmd, .SHADOW_TO_LIGHTING)
     return
   }
+  dev.cmd_begin_pass(&r.gpu, cmd, {depth = rhi.DepthTarget{texture = atlas, load = .CLEAR, clear = 1, store = true}})
+  view := u32(SHADOW_VIEW_BASE)
+  pipeline_bind(r, cmd, r.shadow.pipeline, .SHADOW, f, &view, .NONE)
+  mesh_buffers_bind(r, cmd)
   for v in 0 ..< views {
-    dev.cmd_begin_pass(&r.gpu, cmd, {depth = rhi.DepthTarget{texture = atlas, layer = v, load = .CLEAR, clear = 1, store = true}})
-    view := u32(SHADOW_VIEW_BASE) + v
-    pipeline_bind(r, cmd, r.shadow.pipeline, .SHADOW, f, &view, .NONE)
-    mesh_buffers_bind(r, cmd)
+    tile := shadow_tile(v, r.res.atlas_layers[f])
+    dev.cmd_set_viewport(&r.gpu, cmd, tile.x, tile.y, tile.z, tile.w)
+    dev.cmd_set_scissor(&r.gpu, cmd, tile.x, tile.y, tile.z, tile.w)
+    view = u32(SHADOW_VIEW_BASE) + v
+    dev.cmd_push(&r.gpu, cmd, &view, size_of(view))
     draw_list_draw(r, cmd, r.shadow_draw_list, v, types[:], pipelines[:], f, false)
-    dev.cmd_end_pass(&r.gpu, cmd)
   }
+  dev.cmd_end_pass(&r.gpu, cmd)
 }
 
 // The vertex and index streams every mesh draw reads.

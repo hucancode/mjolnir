@@ -410,6 +410,8 @@ Procs :: struct($Device: typeid, $Window: typeid) {
   cmd_bind_bindless:             proc(d: ^Device, cmd: CommandList),
   cmd_push:                      proc(d: ^Device, cmd: CommandList, data: rawptr, size: u32),
   cmd_set_scissor:               proc(d: ^Device, cmd: CommandList, x, y, w, h: u32),
+  // the viewport within the pass's targets, depth 0 to 1
+  cmd_set_viewport:              proc(d: ^Device, cmd: CommandList, x, y, w, h: u32),
   cmd_bind_vertex:               proc(d: ^Device, cmd: CommandList, slot: u32, buffer: Buffer, offset: int),
   cmd_bind_index:                proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset: int),
   cmd_draw:                      proc(d: ^Device, cmd: CommandList, vertex_count, instance_count, first_vertex, first_instance: u32),

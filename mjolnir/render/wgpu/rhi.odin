@@ -55,6 +55,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   cmd_bind_bindless               = rhi_cmd_bind_bindless,
   cmd_push                        = rhi_cmd_push,
   cmd_set_scissor                 = rhi_cmd_set_scissor,
+  cmd_set_viewport                = rhi_cmd_set_viewport,
   cmd_bind_vertex                 = rhi_cmd_bind_vertex,
   cmd_bind_index                  = rhi_cmd_bind_index,
   cmd_draw                        = rhi_cmd_draw,
@@ -701,6 +702,10 @@ rhi_cmd_push :: proc(b: ^Backend, cmd: rhi.CommandList, data: rawptr, size: u32)
 
 rhi_cmd_set_scissor :: proc(b: ^Backend, cmd: rhi.CommandList, x, y, w, h: u32) {
   wgpu.RenderPassEncoderSetScissorRect((^CmdState)(cmd).render, x, y, w, h)
+}
+
+rhi_cmd_set_viewport :: proc(b: ^Backend, cmd: rhi.CommandList, x, y, w, h: u32) {
+  wgpu.RenderPassEncoderSetViewport((^CmdState)(cmd).render, f32(x), f32(y), f32(w), f32(h), 0, 1)
 }
 
 rhi_cmd_bind_vertex :: proc(b: ^Backend, cmd: rhi.CommandList, slot: u32, buffer: rhi.Buffer, offset: int) {

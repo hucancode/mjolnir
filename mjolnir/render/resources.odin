@@ -15,6 +15,7 @@ ScenePass :: enum {
   NONE,
   // material vertex and fragment shaders
   MESH,
+  // the lighting compute shader
   LIGHTING,
   // the shadow depth vertex shader
   SHADOW,
@@ -85,7 +86,7 @@ SCENE_PASSES := [ScenePass]struct {
 } {
   .NONE              = {},
   .MESH              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .SKINNED_VERTICES, .VERTICES, .INDICES}, {.VERTEX, .FRAGMENT}, {}},
-  .LIGHTING          = {{.VIEWS, .LIGHTS}, {.VERTEX, .FRAGMENT}, {}},
+  .LIGHTING          = {{.VIEWS, .LIGHTS}, {.COMPUTE}, {}},
   .SHADOW            = {{.VIEWS, .NODES, .MESHES, .SKINNED_VERTICES}, {.VERTEX}, {}},
   .CULL              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .BATCHES, .NODE_BATCH}, {.COMPUTE}, {}},
   .PARTICLE_EMIT     = {{.NODES, .EMITTERS, .PARTICLES}, {.COMPUTE}, {.PARTICLES}},
@@ -242,7 +243,8 @@ TEXTURE_SLOT_KINDS := [TextureSlot]rhi.BindKind {
   .UNFILTERABLE = .TEXTURE_UNFILTERABLE,
   .DEPTH        = .TEXTURE_DEPTH,
   .CUBE         = .TEXTURE_CUBE,
-  .SHADOW_ATLAS = .TEXTURE_DEPTH_ARRAY,
+  // bind groups are WebGPU's, whose atlas is one 2D texture of tiles (pass_shadow.odin)
+  .SHADOW_ATLAS = .TEXTURE_DEPTH,
 }
 
 @(private = "file")
