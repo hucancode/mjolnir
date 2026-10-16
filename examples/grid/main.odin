@@ -72,7 +72,8 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-// Split despawn/respawn across FRAMES_IN_FLIGHT frames to let Remove ops drain.
+// Despawned slots stay reserved for a few updates (world RETIRE_GRACE = 3); respawning before
+// they are reusable finds no free slots near the node cap, so wait longer than the grace.
 request_rebuild :: proc(idx: int) {
   if idx == current_size_index do return
   pending_index = idx
@@ -95,7 +96,7 @@ update :: proc(app: ^App, dt: f32) {
   } else if pending_index >= 0 && pending_index != current_size_index {
     if grid_root.index != 0 do world.despawn(&app.scene, grid_root)
     grid_root = {}
-    despawn_cooldown = 2
+    despawn_cooldown = 5
   }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
@@ -112,7 +113,11 @@ spawn_grid :: proc(app: ^App, idx: int) {
   log.infof("spawning %dx%d cubes", n, n)
   grid_root = world.spawn(&app.scene, {0, 0, 0})
   for z in 0 ..< n do for x in 0 ..< n {
-    cube := world.spawn_child(&app.scene, grid_root, {(f32(x) - half) * 4, 0, (f32(z) - half) * 4})
+    cube, ok := world.spawn_child(&app.scene, grid_root, {(f32(x) - half) * 4, 0, (f32(z) - half) * 4})
+    if !ok {
+      log.warnf("out of node slots, grid truncated at row %d, column %d", z, x)
+      return
+    }
     render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, color))
   }
 }
