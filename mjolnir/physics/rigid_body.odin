@@ -4,8 +4,8 @@ import cont "../containers"
 import "../geometry"
 import "core:math/linalg"
 
-// Body is a rigid body. Mass decides the role: inv_mass > 0 is dynamic (fully simulated);
-// inv_mass == 0 is infinite mass. An infinite-mass body is static until it is
+// Body is a rigid body. Mass decides the role: mass > 0 is dynamic (fully simulated);
+// mass 0 is infinite mass. An infinite-mass body is static until it is
 // first moved with set_pose/set_velocity; from then on it is kinematic —
 // moved by its velocity, pushing dynamic bodies, never pushed back.
 // A sensor reports overlaps in `World.sensor_overlaps` and is never
@@ -19,18 +19,23 @@ Body :: struct {
   position:             [3]f32,
   rotation:             quaternion128,
   collider:             Collider,
-  cached_aabb:          geometry.Aabb,
-  cached_sphere_center: [3]f32,
-  cached_sphere_radius: f32,
   restitution:          f32,
   friction:             f32,
-  inv_mass:             f32,
-  inv_inertia:          [3]f32, // Diagonal inverse inertia in body space
-  inv_inertia_world:    matrix[3, 3]f32,
   velocity:             [3]f32,
   angular_velocity:     [3]f32,
   linear_damping:       f32,
   angular_damping:      f32,
+  using _: Body_State,
+}
+
+@(private)
+Body_State :: struct {
+  cached_aabb:          geometry.Aabb,
+  cached_sphere_center: [3]f32,
+  cached_sphere_radius: f32,
+  inv_mass:             f32,
+  inv_inertia:          [3]f32, // Diagonal inverse inertia in body space
+  inv_inertia_world:    matrix[3, 3]f32,
   force:                [3]f32,
   torque:               [3]f32,
   sleep_timer:          f32,

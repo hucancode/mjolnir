@@ -61,8 +61,8 @@ should_close :: proc(app: ^App) -> bool {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {0, 10, 0}, {0, 0, 0})
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 10, 0}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   CONTROL_POINTS :: 10
@@ -93,7 +93,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
   light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, light.index, render.point_light_attachment({1, 1, 1, 1}, 20.0, true))
+  render.attach(&app.renderer, light.index, render.make_point_light({1, 1, 1, 1}, 20.0, true))
   return true
 }
 
@@ -107,7 +107,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   total_length := animation.spline_arc_length(spline)
   for i in 0 ..< CUBE_COUNT {
     offset := f32(i) / f32(CUBE_COUNT) * total_length

@@ -2,6 +2,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -18,6 +19,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -50,12 +52,13 @@ main :: proc() {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   light := world.spawn(&app.scene, {10, 18, 10})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.97, 0.92, 3.0}, 60.0, false))
+  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.97, 0.92, 3.0}, 60.0, false))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-  render.main_camera_look_at(&app.renderer, {14, 14, 14}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {14, 14, 14}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   pending_index = 0
   return true
@@ -63,6 +66,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -81,7 +85,7 @@ request_rebuild :: proc(idx: int) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -89,7 +93,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if despawn_cooldown > 0 {
     despawn_cooldown -= 1
     if despawn_cooldown == 0 do spawn_grid(app, pending_index)
@@ -113,7 +117,7 @@ spawn_grid :: proc(app: ^App, idx: int) {
   log.infof("spawning %dx%d cubes", n, n)
   grid_root = world.spawn(&app.scene, {0, 0, 0})
   for z in 0 ..< n do for x in 0 ..< n {
-    cube, ok := world.spawn_child(&app.scene, grid_root, {(f32(x) - half) * 4, 0, (f32(z) - half) * 4})
+    cube, ok := world.spawn(&app.scene, {(f32(x) - half) * 4, 0, (f32(z) - half) * 4}, parent = grid_root)
     if !ok {
       log.warnf("out of node slots, grid truncated at row %d, column %d", z, x)
       return
@@ -124,7 +128,7 @@ spawn_grid :: proc(app: ^App, idx: int) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Grid", {540, 20, 240, 200}, {.NO_CLOSE}) {
     sizes := GRID_SIZES
     label_text: string = "<loading>"
@@ -136,5 +140,6 @@ frame :: proc(app: ^App) -> bool {
       if .SUBMIT in mu.button(ctx, fmt.tprintf("%dx%d", n, n)) do request_rebuild(i)
     }
   }
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

@@ -40,7 +40,7 @@ test_node_translate :: proc(t: ^testing.T) {
   defer shutdown(&w)
   parent_handle, parent_ok := spawn(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
-  child, ok := spawn_child(&w, parent_handle)
+  child, ok := spawn(&w, parent = parent_handle)
   child_ptr := node(&w, child)
   testing.expectf(t, ok, "failed to spawn child node")
   translate(&w, child, 4, 5, 6)
@@ -83,7 +83,7 @@ test_node_scale :: proc(t: ^testing.T) {
   defer shutdown(&w)
   parent_handle, parent_ok := spawn(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
-  child, child_ok := spawn_child(&w, parent_handle)
+  child, child_ok := spawn(&w, parent = parent_handle)
   child_ptr := node(&w, child)
   testing.expectf(t, child_ok, "failed to spawn child node")
   scale_xyz(&w, child, 5, 6, 7)
@@ -130,9 +130,9 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   // Create a 4-node chain
   node1_handle, node1_ok := spawn(&w)
   testing.expectf(t, node1_ok, "failed to spawn node1")
-  node2_handle, node2_ok := spawn_child(&w, node1_handle)
+  node2_handle, node2_ok := spawn(&w, parent = node1_handle)
   testing.expectf(t, node2_ok, "failed to spawn node2")
-  node3_handle, node3_ok := spawn_child(&w, node2_handle)
+  node3_handle, node3_ok := spawn(&w, parent = node2_handle)
   node3 := node(&w, node3_handle)
   testing.expectf(t, node3_ok, "failed to spawn node3")
   translate(&w, node1_handle, x = 1)
@@ -178,7 +178,7 @@ create_scene :: proc(scene: ^World, max_node: int, max_depth: int) {
   for len(queue) > 0 && count < target_nodes {
     current := pop_front(&queue)
     if current.depth < max_depth {
-      child_handle := spawn_child(scene, current.handle) or_continue
+      child_handle := spawn(scene, parent = current.handle) or_continue
       translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
       rotate(
         scene,
@@ -252,6 +252,7 @@ benchmark_deep_scene_traversal :: proc(t: ^testing.T) {
       scene := new(World)
       init(scene)
       create_scene(scene, N, N)
+      build_tree(scene)
       options.input = slice.bytes_from_ptr(scene, size_of(^World))
       return nil
     },
@@ -285,6 +286,7 @@ benchmark_flat_scene_traversal :: proc(t: ^testing.T) {
       scene := new(World)
       init(scene)
       create_scene(scene, N, 1)
+      build_tree(scene)
       options.input = slice.bytes_from_ptr(scene, size_of(^World))
       return nil
     },
@@ -318,6 +320,7 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
       scene := new(World)
       init(scene)
       create_scene(scene, N, MAX_DEPTH)
+      build_tree(scene)
       options.input = slice.bytes_from_ptr(scene, size_of(^World))
       return nil
     },

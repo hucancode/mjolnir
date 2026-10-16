@@ -1,5 +1,5 @@
-// Scene graph: an array of nodes with parent/child links, local transforms and
-// visibility. Entry points: init, spawn, update (recomputes world matrices),
-// then changes for consumers such as the renderer.
-// Handles live in handles.odin, node transform helpers in node.odin.
+// Scene graph: nodes with parent/child links, local transforms and visibility. spawn nodes,
+// move them with translate / rotate / scale, call update once per tick, then hand changes to
+// consumers such as the renderer (render.stage_transforms). init/shutdown own its memory
+// (application lifetime); teardown empties it between maps.
 package world

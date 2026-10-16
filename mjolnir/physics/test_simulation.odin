@@ -15,8 +15,8 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, -20, 0}, thread_count = 1) // 2x earth gravity
   defer shutdown(&physics_world)
-  create_body(&physics_world, {0, -0.5, 0}, collider = BoxCollider{half_extents = {GROUND_HALF, 0.5, GROUND_HALF}})
-  create_body(&physics_world, {2.5, SPHERE_RADIUS, 0}, collider = SphereCollider{radius = SPHERE_RADIUS})
+  body_create(&physics_world, {0, -0.5, 0}, collider = BoxCollider{half_extents = {GROUND_HALF, 0.5, GROUND_HALF}})
+  body_create(&physics_world, {2.5, SPHERE_RADIUS, 0}, collider = SphereCollider{radius = SPHERE_RADIUS})
   body_handles: [PIECE_COUNT]BodyHandle
   idx := 0
   for x in 0 ..< NX {
@@ -34,7 +34,7 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
           BoxCollider{half_extents = {1.0, 1.0, 1.0}},
           SphereCollider{radius = 1.0},
         }
-        body_handles[idx] = create_body(&physics_world, pos, collider = colliders[idx % 3], mass = 50.0)
+        body_handles[idx] = body_create(&physics_world, pos, collider = colliders[idx % 3], mass = 50.0)
         idx += 1
       }
     }
@@ -50,7 +50,7 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
   on_ground := 0
   for handle, i in body_handles {
     // Fell off the ground edge and was killed below KILL_Y
-    body := get_body(&physics_world, handle) or_continue
+    body := body(&physics_world, handle) or_continue
     // Outside ground bounds — no ground underneath, expected to fall
     if body.position.x < -GROUND_HALF ||
        body.position.x > GROUND_HALF ||
@@ -79,12 +79,12 @@ test_resting_body_falls_asleep :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, thread_count = 1)
   defer shutdown(&physics_world)
-  create_body(&physics_world, {0, -0.5, 0}, collider = BoxCollider{half_extents = {10, 0.5, 10}})
-  handle := create_body(&physics_world, {0, 0.5, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 1)
+  body_create(&physics_world, {0, -0.5, 0}, collider = BoxCollider{half_extents = {10, 0.5, 10}})
+  handle := body_create(&physics_world, {0, 0.5, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 1)
   for _ in 0 ..< 120 {
     step(&physics_world, 1.0 / 60.0)
   }
-  body := get_body(&physics_world, handle)
+  body := body(&physics_world, handle)
   testing.expect(t, body.is_sleeping, "box resting on the ground should be asleep after 2s")
 }
 
@@ -97,14 +97,14 @@ test_parallel_pile_settles :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, thread_count = 4)
   defer shutdown(&physics_world)
-  create_body(&physics_world, {0, -0.5, 0}, collider = BoxCollider{half_extents = {30, 0.5, 30}})
+  body_create(&physics_world, {0, -0.5, 0}, collider = BoxCollider{half_extents = {30, 0.5, 30}})
   handles: [N * N * N]BodyHandle
   i := 0
   for x in 0 ..< N {
     for y in 0 ..< N {
       for z in 0 ..< N {
         pos := [3]f32{f32(x) * 1.1, f32(y) * 1.1 + 2, f32(z) * 1.1}
-        handles[i] = create_body(&physics_world, pos, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 1)
+        handles[i] = body_create(&physics_world, pos, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 1)
         i += 1
       }
     }
@@ -117,7 +117,7 @@ test_parallel_pile_settles :: proc(t: ^testing.T) {
   testing.expect(t, max_contacts >= SOLVER_PARALLEL_THRESHOLD)
   max_speed: f32
   for handle in handles {
-    body := get_body(&physics_world, handle) or_continue
+    body := body(&physics_world, handle) or_continue
     max_speed = max(max_speed, linalg.length(body.velocity))
   }
   testing.expectf(t, max_speed < 2.0, "pile still churning: max speed %v m/s", max_speed)

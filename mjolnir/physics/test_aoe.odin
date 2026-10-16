@@ -8,7 +8,7 @@ import "core:testing"
 
 // Helper to spawn a dynamic test body at a position
 spawn_test_body :: proc(phys: ^World, position: [3]f32) -> BodyHandle {
-  return create_body(phys, position, collider = SphereCollider{radius = 0.5}, mass = 1.0)
+  return body_create(phys, position, collider = SphereCollider{radius = 0.5}, mass = 1.0)
 }
 
 @(private = "file")
@@ -54,7 +54,7 @@ test_physics_overlap_includes_static :: proc(t: ^testing.T) {
   phys: World
   init(&phys, thread_count = 1)
   defer shutdown(&phys)
-  s := create_body(&phys, {0, 0, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}})
+  s := body_create(&phys, {0, 0, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}})
   results := make([dynamic]BodyHandle)
   defer delete(results)
   // No step: queries rebuild the dirty broadphase themselves
@@ -125,7 +125,7 @@ test_physics_cylinder_overlap :: proc(t: ^testing.T) {
   phys: World
   init(&phys, thread_count = 1)
   defer shutdown(&phys)
-  body_handle := create_body(&phys, {}, collider = CylinderCollider{radius = 2.0, height = 4.0}, mass = 1.0)
+  body_handle := body_create(&phys, {}, collider = CylinderCollider{radius = 2.0, height = 4.0}, mass = 1.0)
   step(&phys, 0.0)
   results := make([dynamic]BodyHandle)
   defer delete(results)
@@ -142,7 +142,7 @@ test_physics_sensor_overlap :: proc(t: ^testing.T) {
   phys: World
   init(&phys, gravity = {}, thread_count = 1)
   defer shutdown(&phys)
-  sensor := create_body(&phys, {0, 0, 0}, collider = BoxCollider{half_extents = {1, 1, 1}}, is_sensor = true)
+  sensor := body_create(&phys, {0, 0, 0}, collider = BoxCollider{half_extents = {1, 1, 1}}, is_sensor = true)
   inside := spawn_test_body(&phys, {0.5, 0, 0})
   spawn_test_body(&phys, {5, 0, 0})
   step(&phys, 1.0 / 60.0)
@@ -160,8 +160,8 @@ test_physics_kill_y :: proc(t: ^testing.T) {
   init(&phys, thread_count = 1)
   defer shutdown(&phys)
   user := cont.Handle{index = 7, generation = 1}
-  falling := create_body(&phys, {0, KILL_Y + 1, 0}, collider = SphereCollider{radius = 0.5}, mass = 1.0, user = user)
-  floor := create_body(&phys, {0, KILL_Y - 10, 0}, collider = BoxCollider{half_extents = {1, 1, 1}})
+  falling := body_create(&phys, {0, KILL_Y + 1, 0}, collider = SphereCollider{radius = 0.5}, mass = 1.0, user = user)
+  floor := body_create(&phys, {0, KILL_Y - 10, 0}, collider = BoxCollider{half_extents = {1, 1, 1}})
   kills := 0
   for _ in 0 ..< 120 {
     step(&phys, 1.0 / 60.0)
@@ -171,8 +171,8 @@ test_physics_kill_y :: proc(t: ^testing.T) {
     }
   }
   testing.expectf(t, kills == 1, "kills = %d", kills)
-  _, alive := get_body(&phys, falling)
+  _, alive := body(&phys, falling)
   testing.expect(t, !alive, "Fallen body should be destroyed")
-  _, floor_alive := get_body(&phys, floor)
+  _, floor_alive := body(&phys, floor)
   testing.expect(t, floor_alive, "Static bodies below KILL_Y stay")
 }

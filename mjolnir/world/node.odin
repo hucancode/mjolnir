@@ -2,12 +2,17 @@ package world
 
 import "core:math/linalg"
 
-// Local TRS plus cached matrices. Setters mark `is_dirty`; `update`
-// recomputes `local_matrix` and `world_matrix` for dirty subtrees.
+// Transform is a node's local position, rotation and scale; update derives its matrices
+// (world_matrix reads them).
 Transform :: struct {
   position:     [3]f32,
   rotation:     quaternion128,
   scale:        [3]f32,
+  using _: Transform_Cache,
+}
+
+@(private)
+Transform_Cache :: struct {
   is_dirty:     bool,
   local_matrix: matrix[4, 4]f32,
   world_matrix: matrix[4, 4]f32,

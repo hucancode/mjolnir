@@ -1,7 +1,6 @@
-// Package navigation is the runtime navmesh: load or init a NavMesh, then
-// find_path, raycast and nearest_point against it. It never imports the baker,
-// so shipped games can load pre-baked data without recast. save and load trade
-// bytes, never files (platform.read_file / write_file store them). Baking lives in
-// navigation/bake, crowd steering in navigation/crowd, and the low-level
-// Detour/Recast ports in navigation/detour and navigation/recast.
+// The runtime navigation mesh: load a NavMesh from bytes (baked by navigation/bake, now or
+// offline), then find_path, raycast and nearest_point against it; destroy frees it. save
+// encodes it back into bytes. It never imports the baker, so a game that loads pre-baked data
+// ships without recast. Sub-packages: bake (baking), crowd (agent steering), and the
+// low-level Detour and Recast ports, detour and recast.
 package navigation

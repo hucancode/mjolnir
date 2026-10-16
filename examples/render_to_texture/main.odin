@@ -64,8 +64,8 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {5, 3, 6}, {0, 1, 0})
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {5, 3, 6}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   spawn_primitive(app, .QUAD_XZ, .GRAY, {0, 0, 0}, 6.0, cast_shadow = false)
@@ -76,10 +76,10 @@ setup :: proc(app: ^App) -> bool {
   spinner_handle = spawn_primitive(app, .CUBE, .YELLOW, {0, 1.8, 0}, 0.4)
 
   light := world.spawn(&app.scene, {0, 3, 1.5})
-  render.attach(&app.renderer, light.index, render.point_light_attachment({1.0, 0.6, 0.3, 1.0}, 12.0, false))
+  render.attach(&app.renderer, light.index, render.make_point_light({1.0, 0.6, 0.3, 1.0}, 12.0, false))
 
-  rtt_camera_handle = render.create_camera(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
-  rtt_material_handle = render.create_material(&app.renderer)
+  rtt_camera_handle = render.camera_create(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
+  rtt_material_handle = render.material_create(&app.renderer)
 
   display_mesh := app.renderer.builtin_meshes[.QUAD_XY]
   display_handle := world.spawn(&app.scene, {0, 2.5, -3.5})
@@ -98,7 +98,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   world.rotate(&app.scene, spinner_handle, app.time, linalg.VECTOR3F32_Y_AXIS)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
@@ -111,8 +111,7 @@ frame :: proc(app: ^App) -> bool {
   if mat, found := render.material(&app.renderer, rtt_material_handle); found {
     // the image the frame just submitted rendered: the next frame samples it
     // while it draws into the other one
-    just_rendered := u32((render.frame_serial(&app.renderer) + render.FRAMES_IN_FLIGHT - 1) % render.FRAMES_IN_FLIGHT)
-    mat.albedo_index = render.camera_attachment(&app.renderer, rtt_camera_handle, .FINAL_IMAGE, just_rendered)
+    mat.albedo_texture = render.camera_attachment(&app.renderer, rtt_camera_handle, .FINAL_IMAGE, previous_frame = true)
   }
   return ok
 }

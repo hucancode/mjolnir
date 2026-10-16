@@ -6,6 +6,7 @@ import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/animation"
 import "mjolnir/geometry"
+import "mjolnir/gltf"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
@@ -30,7 +31,7 @@ warrior_time: f32
 
 // A loaded glTF and one animator per skinned node in it.
 Character :: struct {
-  scene:     mjolnir.GltfScene,
+  scene:     gltf.Scene,
   animators: [dynamic]animation.Animator,
 }
 
@@ -50,7 +51,7 @@ NodeClip :: struct {
 characters: [dynamic]Character
 node_clips: [dynamic]NodeClip
 
-add_character :: proc(scene: mjolnir.GltfScene, clip: string) -> int {
+add_character :: proc(scene: gltf.Scene, clip: string) -> int {
   c := Character{scene = scene}
   for s in scene.skinned {
     rig := &c.scene.rigs[s.rig]
@@ -153,7 +154,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  for &c in characters do mjolnir.gltf_scene_destroy(&c.scene)
+  for &c in characters do gltf.scene_destroy(&c.scene)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
@@ -181,7 +182,7 @@ spawn :: proc(
   handle: world.NodeHandle,
   ok: bool,
 ) #optional_ok {
-  handle = world.spawn_child(&app.scene, parent if parent != {} else app.scene.root, position) or_return
+  handle = world.spawn(&app.scene, position, parent = parent if parent != {} else app.scene.root) or_return
   if attachment != nil do render.attach(&app.renderer, handle.index, attachment)
   return handle, true
 }
@@ -189,7 +190,7 @@ spawn :: proc(
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("assets/Cannon_Exterior.hdr"))
+  render.environment_map_load(&app.renderer, #load("assets/Cannon_Exterior.hdr"))
   app.renderer.ibl_intensity = 0.3
   plain_material_handle := app.renderer.builtin_materials[render.Color.WHITE]
   cube_mesh_handle := app.renderer.builtin_meshes[render.Primitive.CUBE]
@@ -253,12 +254,12 @@ setup :: proc(app: ^App) -> bool {
   when true {
     brick_wall_mat_handle: render.MaterialHandle
     brick_wall_mat_ok := false
-    brick_albedo_handle, brick_albedo_ok := render.create_texture_from_data(&app.renderer, #load("assets/t_brick_floor_002_diffuse_1k.jpg"),
+    brick_albedo_handle, brick_albedo_ok := render.texture_load(&app.renderer, #load("assets/t_brick_floor_002_diffuse_1k.jpg"),
     )
     if brick_albedo_ok {
-      brick_wall_mat_handle, brick_wall_mat_ok = render.create_material(
+      brick_wall_mat_handle, brick_wall_mat_ok = render.material_create(
         &app.renderer,
-        albedo_handle = brick_albedo_handle,
+        albedo_texture = brick_albedo_handle,
       )
     }
     ground_mesh_handle := app.renderer.builtin_meshes[render.Primitive.QUAD_XZ]
@@ -342,8 +343,8 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading Hammer GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/Mjolnir.glb")); ok {
-      defer mjolnir.gltf_scene_destroy(&gltf_nodes)
+    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/Mjolnir.glb")); ok {
+      defer gltf.scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 3, 1, -2)
@@ -353,7 +354,7 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading Warrior GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/Warrior.glb")); ok {
+    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/Warrior.glb")); ok {
       for armature in gltf_nodes.roots do world.translate(&app.scene, armature, 0, 0, 1)
       character := add_character(gltf_nodes, "idle")
       // Attach a spinning cube to the hand.L bone of the first skinned mesh
@@ -380,9 +381,9 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading Damaged Helmet GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/DamagedHelmet.glb"));
+    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/DamagedHelmet.glb"));
        ok {
-      defer mjolnir.gltf_scene_destroy(&gltf_nodes)
+      defer gltf.scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 0, 1, 3)
@@ -392,8 +393,8 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading Suzanne GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/Suzanne.glb")); ok {
-      defer mjolnir.gltf_scene_destroy(&gltf_nodes)
+    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/Suzanne.glb")); ok {
+      defer gltf.scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, -3, 1, 0)
@@ -402,9 +403,9 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading SciFiHelmet GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/SciFiHelmet.glb"));
+    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/SciFiHelmet.glb"));
        ok {
-      defer mjolnir.gltf_scene_destroy(&gltf_nodes)
+      defer gltf.scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 3, 0, 3)
@@ -414,7 +415,7 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading Fox GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("assets/Fox2.glb")); ok {
+    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/Fox2.glb")); ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 6, 0, 0)
@@ -505,7 +506,7 @@ setup :: proc(app: ^App) -> bool {
       }
     }
     when ENABLE_DIRECTIONAL_LIGHT {
-      dir_light_handle, _ := spawn(app, attachment = render.directional_light_attachment(color = {0.2, 0.5, 0.9, 3.0}, shadow_radius = 20, cast_shadow = true))
+      dir_light_handle, _ := spawn(app, attachment = render.make_directional_light(color = {0.2, 0.5, 0.9, 3.0}, shadow_radius = 20, cast_shadow = true))
       world.rotate(&app.scene, dir_light_handle, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
     }
   }
@@ -513,12 +514,12 @@ setup :: proc(app: ^App) -> bool {
     log.info("Setting up bloom...")
     append(&app.renderer.effect_stack, render.BloomEffect{threshold = 0.8, intensity = 0.5, blur_radius = 16.0})
     // A bright white ball to test the bloom effect
-    if emissive_handle, emissive_ok := render.create_material(&app.renderer, emissive_value = 30.0); emissive_ok {
+    if emissive_texture, emissive_ok := render.material_create(&app.renderer, emissive_value = 30.0); emissive_ok {
       bright_ball := spawn(
         app,
         attachment = render.MeshAttachment {
           handle = sphere_mesh_handle,
-          material = emissive_handle,
+          material = emissive_texture,
           cast_shadow = false,
         },
       )
@@ -528,17 +529,17 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("Setting up particles...")
-    black_circle_texture_handle, black_circle_ok := render.create_texture_from_data(&app.renderer, #load("assets/particles/circle_05.png"),
+    black_circle_texture_handle, black_circle_ok := render.texture_load(&app.renderer, #load("assets/particles/circle_05.png"),
     )
-    goldstar_texture_handle, goldstar_texture_ok := render.create_texture_from_data(&app.renderer, #load("assets/particles/star_07.png"),
+    goldstar_texture_handle, goldstar_texture_ok := render.texture_load(&app.renderer, #load("assets/particles/star_07.png"),
     )
     goldstar_material_handle: render.MaterialHandle
     goldstar_material_ok := false
     if goldstar_texture_ok {
-      goldstar_material_handle, goldstar_material_ok = render.create_material(
+      goldstar_material_handle, goldstar_material_ok = render.material_create(
         &app.renderer,
         type = .TRANSPARENT,
-        albedo_handle = goldstar_texture_handle,
+        albedo_texture = goldstar_texture_handle,
       )
     }
     psys_handle1 := world.spawn(&app.scene, {-2.0, 1.9, 0.3})
@@ -546,7 +547,7 @@ setup :: proc(app: ^App) -> bool {
       spawn(
         app,
         parent = psys_handle1,
-        attachment = render.emitter_attachment(
+        attachment = render.make_emitter(
           texture_handle = goldstar_texture_handle,
           emission_rate = 70,
           particle_lifetime = 2.0,
@@ -567,7 +568,7 @@ setup :: proc(app: ^App) -> bool {
       spawn(
         app,
         parent = psys_handle2,
-        attachment = render.emitter_attachment(
+        attachment = render.make_emitter(
           texture_handle = black_circle_texture_handle,
           emission_rate = 70,
           particle_lifetime = 3.0,
@@ -585,12 +586,9 @@ setup :: proc(app: ^App) -> bool {
     }
     forcefield_root_handle := world.spawn(&app.scene, {0, 4, 0})
     add_node_clip(app, forcefield_root_handle, spin_clip("forcefield_rotation", 8, {0, math.PI * 0.5, math.PI, math.PI * 1.5, math.PI * 2}, .LINEAR))
-    forcefield_handle := world.spawn_child(
-      &app.scene,
-      forcefield_root_handle,
-    )
+    forcefield_handle := world.spawn(&app.scene, parent = forcefield_root_handle)
     world.translate(&app.scene, forcefield_handle, 3.0, 0.0, 0.0)
-    render.attach(&app.renderer, forcefield_handle.index, render.forcefield_attachment(
+    render.attach(&app.renderer, forcefield_handle.index, render.make_forcefield(
       tangent_strength = 2.0,
       strength = 20.0,
       area_of_effect = 5.0,
@@ -621,7 +619,7 @@ setup :: proc(app: ^App) -> bool {
   // append(&app.renderer.effect_stack, render.GrayscaleEffect{strength = 0.9})
   append(&app.renderer.effect_stack, render.OutlineEffect{thickness = 0.8, color = {0.0, 0.0, 0.01}})
   when true {
-    portal_camera_handle = render.create_camera(
+    portal_camera_handle = render.camera_create(
       &app.renderer,
       512, // width
       512, // height
@@ -632,7 +630,7 @@ setup :: proc(app: ^App) -> bool {
       100.0, // far plane
     )
     portal_material_ok: bool
-    portal_material_handle, portal_material_ok = render.create_material(
+    portal_material_handle, portal_material_ok = render.material_create(
       &app.renderer,
     )
     portal_quad_handle := app.renderer.builtin_meshes[render.Primitive.QUAD_XY]
@@ -655,16 +653,11 @@ setup :: proc(app: ^App) -> bool {
     log.info(
       "spawning Warrior effect sprite with animation (99 frames @ 24fps)...",
     )
-    warrior_sprite_texture, warrior_sprite_ok := render.create_texture_from_data(&app.renderer, #load("assets/Warrior_Sheet-Effect.png"),
+    warrior_sprite_texture, warrior_sprite_ok := render.texture_load(&app.renderer, #load("assets/Warrior_Sheet-Effect.png"),
     )
     if warrior_sprite_ok {
       // 6x17 sprite sheet using frames 0-98, animated in update
-      sprite_material, sprite_ok := render.material_sprite(
-        &app.renderer,
-        warrior_sprite_texture,
-        frame_columns = 6,
-        frame_rows = 17,
-      )
+      sprite_material, sprite_ok := render.material_create(&app.renderer, .SPRITE, albedo_texture = warrior_sprite_texture, frame_columns = 6, frame_rows = 17)
       warrior_sprite = sprite_material
       if sprite_ok {
         sprite_attachment := render.MeshAttachment {
@@ -693,6 +686,6 @@ on_key :: proc(app: ^App, key: input.Key, pressed: bool) {
 on_post_render :: proc(app: ^App) {
   if material, ok := render.material(&app.renderer, portal_material_handle);
      ok {
-    material.albedo_index = render.camera_attachment(&app.renderer, portal_camera_handle, .FINAL_IMAGE)
+    material.albedo_texture = render.camera_attachment(&app.renderer, portal_camera_handle, .FINAL_IMAGE)
   }
 }

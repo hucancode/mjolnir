@@ -56,7 +56,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
@@ -70,8 +70,8 @@ frame :: proc(app: ^App) -> bool {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {6, 3, 6}, {0, 1, 0})
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {6, 3, 6}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   ground := world.spawn(&app.scene)
@@ -79,7 +79,7 @@ setup :: proc(app: ^App) -> bool {
   world.scale(&app.scene, ground, 6.0)
 
   // Solid red sphere behind the glass slabs
-  red_mat := render.material_pbr(&app.renderer, {0.95, 0.15, 0.15, 1}, roughness = 0.4)
+  red_mat := render.material_create(&app.renderer, base_color_factor = {0.95, 0.15, 0.15, 1}, roughness_value = 0.4)
   sphere := world.spawn(&app.scene, {0, 1, -2})
   render.attach(&app.renderer, sphere.index, render.MeshAttachment{handle = app.renderer.builtin_meshes[.SPHERE], material = red_mat, cast_shadow = true})
 
@@ -92,14 +92,14 @@ setup :: proc(app: ^App) -> bool {
     {1.0, 0.2, 0.7, 0.85},
   }
   for c, i in colors {
-    mat := render.material_transparent(&app.renderer, c)
+    mat := render.material_create(&app.renderer, .TRANSPARENT, base_color_factor = c)
     h := world.spawn(&app.scene, {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4})
     render.attach(&app.renderer, h.index, render.MeshAttachment{handle = cube, material = mat, cast_shadow = false})
     world.scale(&app.scene, h, 0.8)
   }
 
   light := world.spawn(&app.scene, {3, 6, 3})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment(
+  render.attach(&app.renderer, light.index, render.make_directional_light(
     color         = {1, 0.97, 0.9, 1},
     shadow_radius = 10,
     cast_shadow   = true,

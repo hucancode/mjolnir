@@ -70,36 +70,46 @@ PerfFrame :: struct {
   rebuilt_static_bvh:     bool,
 }
 
-// ContactPoint is one solver point of a contact manifold.
-// base_separation: signed separation from narrowphase (negative =
-// penetrating); current separation is recovered per substep from body
-// position deltas.
-// relative_velocity: normal approach speed captured at prepare, used by the
-// post-substep restitution pass.
+// ContactPoint is one point of a contact manifold: where it touches, the signed separation
+// found by narrowphase (negative = penetrating) and the normal impulse the solver applied.
 ContactPoint :: struct {
-  point:              [3]f32,
+  point:           [3]f32,
+  base_separation: f32,
+  normal_impulse:  f32,
+  using _:         ContactPoint_Solver,
+}
+
+// relative_velocity: normal approach speed captured at prepare, used by the
+// post-substep restitution pass. The current separation is recovered per substep
+// from body position deltas.
+@(private)
+ContactPoint_Solver :: struct {
   feature_id:         u32,
-  normal_impulse:     f32,
   max_normal_impulse: f32,
   normal_mass:        f32,
-  base_separation:    f32,
   relative_velocity:  f32,
   r_a:                [3]f32,
   r_b:                [3]f32,
 }
 
-// Contact is up to 4 normal points plus one manifold-level friction constraint (coupled
-// 2D tangent at the centroid + twist about the normal). Body A is always
-// dynamic; b_dynamic tells whether body B is too.
+// Contact is a touching pair of bodies: up to 4 points sharing one normal. Body A is
+// always dynamic; b_dynamic tells whether body B is too.
 Contact :: struct {
-  body_a:          BodyHandle,
-  body_b:          BodyHandle,
-  b_dynamic:       bool,
-  normal:          [3]f32, // from A to B
-  restitution:     f32,
-  friction:        f32,
-  count:           int,
-  points:          [MAX_MANIFOLD_POINTS]ContactPoint,
+  body_a:      BodyHandle,
+  body_b:      BodyHandle,
+  b_dynamic:   bool,
+  normal:      [3]f32, // from A to B
+  restitution: f32,
+  friction:    f32,
+  count:       int,
+  points:      [MAX_MANIFOLD_POINTS]ContactPoint,
+  using _:     Contact_Solver,
+}
+
+// One manifold-level friction constraint: coupled 2D tangent at the centroid + twist
+// about the normal.
+@(private)
+Contact_Solver :: struct {
   tangent1:        [3]f32,
   tangent2:        [3]f32,
   r_a_c:           [3]f32, // centroid offset from body A center
@@ -126,15 +136,20 @@ KilledBody :: struct {
 // World owns the bodies, broad-phase BVHs and per-step contact state. init/shutdown own its
 // memory and thread pool (application lifetime); teardown empties it between maps.
 World :: struct {
-  // indexed by BodyHandle.index; body_slots says which are live
-  bodies:               []Body,
-  body_slots:           cont.Slots,
   gravity:              [3]f32,
   // Read-only after each step
   contacts:             [dynamic]Contact,
   sensor_overlaps:      [dynamic]SensorOverlap,
   killed:               [dynamic]KilledBody,
   last_perf:            PerfFrame,
+  using _: World_State,
+}
+
+@(private)
+World_State :: struct {
+  // indexed by BodyHandle.index; body_slots says which are live
+  bodies:               []Body,
+  body_slots:           cont.Slots,
   prev_warmstart:       map[u64]ContactWarmstart,
   // Moving bodies (dynamic + kinematic) and static bodies
   dynamic_bvh:          geometry.BVH(BroadPhaseEntry),
@@ -225,9 +240,9 @@ teardown :: proc(self: ^World) {
   self.static_bvh_dirty = true
 }
 
-// create_body adds a body: mass > 0 makes it dynamic, mass = 0 an infinite-mass one (static
+// body_create adds a body: mass > 0 makes it dynamic, mass = 0 an infinite-mass one (static
 // until moved, see Body). A sensor ignores mass.
-create_body :: proc(
+body_create :: proc(
   self: ^World,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
@@ -246,9 +261,9 @@ create_body :: proc(
   return body_handle(self, index), true
 }
 
-// destroy_body frees the body behind handle; a stale handle is ignored.
-destroy_body :: proc(self: ^World, handle: BodyHandle) {
-  body := get_body(self, handle) or_else nil
+// body_destroy frees the body behind handle; a stale handle is ignored.
+body_destroy :: proc(self: ^World, handle: BodyHandle) {
+  body := body(self, handle) or_else nil
   if body == nil do return
   if body.moving && !body.is_sensor {
     self.dynamic_bvh_stale += 1
@@ -257,8 +272,8 @@ destroy_body :: proc(self: ^World, handle: BodyHandle) {
   cont.slots_free(&self.body_slots, handle.index)
 }
 
-// get_body returns the body behind handle, or false if the handle is stale.
-get_body :: #force_inline proc(self: ^World, handle: BodyHandle) -> (ret: ^Body, ok: bool) #optional_ok {
+// body returns the body behind handle, or false if the handle is stale.
+body :: #force_inline proc(self: ^World, handle: BodyHandle) -> (ret: ^Body, ok: bool) #optional_ok {
   if !cont.slots_valid(&self.body_slots, handle) do return nil, false
   return &self.bodies[handle.index], true
 }
@@ -295,7 +310,7 @@ start_moving :: proc(self: ^World, body: ^Body) {
 
 // set_pose teleports the body and wakes it. A static body becomes kinematic.
 set_pose :: proc(self: ^World, handle: BodyHandle, position: [3]f32, rotation: quaternion128) {
-  body, ok := get_body(self, handle)
+  body, ok := body(self, handle)
   if !ok do return
   start_moving(self, body)
   body.position = position
@@ -307,7 +322,7 @@ set_pose :: proc(self: ^World, handle: BodyHandle, position: [3]f32, rotation: q
 
 // set_collider replaces the body's collider and resets the inertia to the new shape at the current mass.
 set_collider :: proc(self: ^World, handle: BodyHandle, collider: Collider) {
-  body, ok := get_body(self, handle)
+  body, ok := body(self, handle)
   if !ok do return
   body.collider = collider
   update_inertia(body)
@@ -319,7 +334,7 @@ set_collider :: proc(self: ^World, handle: BodyHandle, collider: Collider) {
 // set_mass makes the body dynamic for mass > 0, or kinematic for mass = 0.
 // Recomputes the inertia from the collider. Ignored for sensors.
 set_mass :: proc(self: ^World, handle: BodyHandle, mass: f32) {
-  body, ok := get_body(self, handle)
+  body, ok := body(self, handle)
   if !ok do return
   if body.is_sensor do return
   start_moving(self, body)
@@ -333,7 +348,7 @@ set_mass :: proc(self: ^World, handle: BodyHandle, mass: f32) {
 
 // set_velocity sets the body's velocity and wakes it. A static body becomes kinematic.
 set_velocity :: proc(self: ^World, handle: BodyHandle, velocity: [3]f32) {
-  body, ok := get_body(self, handle)
+  body, ok := body(self, handle)
   if !ok do return
   start_moving(self, body)
   body.velocity = velocity
@@ -342,7 +357,7 @@ set_velocity :: proc(self: ^World, handle: BodyHandle, velocity: [3]f32) {
 
 // set_angular_velocity sets the body's angular velocity and wakes it, like set_velocity.
 set_angular_velocity :: proc(self: ^World, handle: BodyHandle, angular_velocity: [3]f32) {
-  body, ok := get_body(self, handle)
+  body, ok := body(self, handle)
   if !ok do return
   start_moving(self, body)
   body.angular_velocity = angular_velocity
@@ -352,7 +367,7 @@ set_angular_velocity :: proc(self: ^World, handle: BodyHandle, angular_velocity:
 // apply_force holds the force for the next `step`, cleared after it. Only dynamic
 // bodies respond.
 apply_force :: proc(self: ^World, handle: BodyHandle, force: [3]f32) {
-  body, ok := get_body(self, handle)
+  body, ok := body(self, handle)
   if !ok do return
   if !is_dynamic(body) do return
   body.force += force
@@ -361,7 +376,7 @@ apply_force :: proc(self: ^World, handle: BodyHandle, force: [3]f32) {
 
 // apply_impulse changes a dynamic body's velocity by impulse / mass and wakes it.
 apply_impulse :: proc(self: ^World, handle: BodyHandle, impulse: [3]f32) {
-  body, ok := get_body(self, handle)
+  body, ok := body(self, handle)
   if !ok do return
   if !is_dynamic(body) do return
   body.velocity += impulse * body.inv_mass
@@ -505,7 +520,7 @@ step_kill :: proc(self: ^World) {
     body, handle := &self.bodies[i], body_handle(self, i)
     if !is_dynamic(body) || body.position.y >= KILL_Y do continue
     append(&self.killed, KilledBody{handle, body.user})
-    destroy_body(self, handle)
+    body_destroy(self, handle)
   }
 }
 
@@ -521,7 +536,7 @@ step_sensors :: proc(self: ^World) {
       clear(&candidates)
       geometry.bvh_query_aabb(bvh, sensor.cached_aabb, &candidates)
       for candidate in candidates {
-        body := get_body(self, candidate.handle) or_continue
+        body := body(self, candidate.handle) or_continue
         _, hit := collide_bodies(sensor, body)
         if hit do append(&self.sensor_overlaps, SensorOverlap{sensor_handle, candidate.handle})
       }

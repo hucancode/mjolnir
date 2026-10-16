@@ -1,17 +1,19 @@
 // Procedural tail follow-through.
 package main
 
-import "../../mjolnir"
-import "../../mjolnir/input"
-import anim "../../mjolnir/animation"
-import "../../mjolnir/platform"
-import "../../mjolnir/render"
-import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import mu "vendor:microui"
+import "../../mjolnir"
+import anim "../../mjolnir/animation"
+import "../../mjolnir/debugui"
+import "../../mjolnir/gltf"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
+import "../../mjolnir/render"
+import "../../mjolnir/world"
 
-scene: mjolnir.GltfScene
+scene: gltf.Scene
 rig: ^anim.Rig
 animator: anim.Animator
 snake_child_node: world.NodeHandle
@@ -41,6 +43,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -67,10 +70,11 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
-  mjolnir.gltf_scene_destroy(&scene)
+  gltf.scene_destroy(&scene)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -80,13 +84,14 @@ should_close :: proc(app: ^App) -> bool {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {0, 4, -4}, {0, 1, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 4, -4}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   ground := world.spawn(&app.scene, {0, GROUND_Y, 0})
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
-  scene = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
+  scene = gltf.load(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
   if len(scene.skinned) == 0 do return true
   snake_child_node = scene.skinned[0].node
   rig = &scene.rigs[scene.skinned[0].rig]
@@ -101,13 +106,13 @@ setup :: proc(app: ^App) -> bool {
   }
   head_bone, head_found = anim.find_bone(&rig.skeleton, HEAD_BONE)
   light := world.spawn(&app.scene, {-4, 10, 6})
-  render.attach(&app.renderer, light.index, render.point_light_attachment({0.6, 0.7, 1.0, 1.5}, 15.0, false))
+  render.attach(&app.renderer, light.index, render.make_point_light({0.6, 0.7, 1.0, 1.5}, 15.0, false))
   return true
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -115,7 +120,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if animate_enabled {
     animation_time += dt
     y := f32(drive_amplitude) * math.sin(animation_time * f32(drive_frequency) * 2 * math.PI)
@@ -140,8 +145,9 @@ update :: proc(app: ^App, dt: f32) {
 
 // Raycast the cursor onto the ground plane (y = GROUND_Y).
 cursor_ground_hit :: proc(app: ^App) -> (hit: [3]f32, ok: bool) {
-  origin, dir, ray_ok := render.cursor_ray(&app.renderer, app.input.cursor)
+  ray, ray_ok := render.cursor_ray(&app.renderer, app.input.cursor)
   if !ray_ok do return {}, false
+  origin, dir := ray.origin, ray.direction
   if abs(dir.y) < 1e-6 do return {}, false // ray parallel to ground
   t := (GROUND_Y - origin.y) / dir.y
   if t <= 0 do return {}, false // ground behind the camera
@@ -149,7 +155,7 @@ cursor_ground_hit :: proc(app: ^App) -> (hit: [3]f32, ok: bool) {
 }
 
 handle_drag :: proc(app: ^App) {
-  if !world.valid(&app.scene, snake_child_node) do return
+  if _, ok := world.node(&app.scene, snake_child_node); !ok do return
 
   // Begin drag on press (ignore when the UI owns the click). Capture the
   // head's offset from the node origin so we can land the head on the cursor.
@@ -178,7 +184,7 @@ handle_drag :: proc(app: ^App) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Tail Modifier", {20, 300, 320, 320}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Auto animate", &animate_enabled)
@@ -192,5 +198,6 @@ frame :: proc(app: ^App) -> bool {
     mu.label(ctx, "Damping"); mu.slider(ctx, &damping, 0.0, 1.0)
     mu.checkbox(ctx, "Stretch", &stretch_enabled)
   }
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

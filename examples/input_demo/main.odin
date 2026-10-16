@@ -2,6 +2,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -14,6 +15,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -63,12 +65,13 @@ should_close :: proc(app: ^App) -> bool {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {0, 8, 12}, {0, 0.5, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 8, 12}, {0, 0.5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   light_handle = world.spawn(&app.scene, {4, 8, 4})
-  render.attach(&app.renderer, light_handle.index, render.directional_light_attachment({1, 0.97, 0.92, f32(light_intensity)}, 15.0, true))
+  render.attach(&app.renderer, light_handle.index, render.make_directional_light({1, 0.97, 0.92, f32(light_intensity)}, 15.0, true))
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
@@ -83,6 +86,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -101,7 +105,7 @@ read_input :: proc(app: ^App) {
       last_text_len = copy(last_text[:], t)
     }
   }
-  last_mouse = input.cursor(inp)
+  last_mouse = inp.cursor
   if !app.input.mouse_captured {
     for b in input.MouseButton {
       if input.mouse_pressed(inp, b) {
@@ -112,18 +116,18 @@ read_input :: proc(app: ^App) {
         last_button = b; last_button_pressed = false
       }
     }
-    if s := input.scroll(inp); s != {} {
+    if s := inp.scroll; s != {} {
       last_scroll = s
       light_intensity = clamp(light_intensity + mu.Real(s.y) * 0.5, 0.0, 20.0)
     }
   }
   if !input.mouse_down(inp, .LEFT) do lmb_down = false
-  last_drag = input.mouse_delta(inp) if lmb_down else {}
+  last_drag = inp.mouse_delta if lmb_down else {}
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -131,7 +135,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   read_input(app)
   move := [3]f32{0, 0, 0}
   if !app.input.keyboard_captured {
@@ -158,11 +162,12 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   debug_ui(app)
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Input", {700, 20, 200, 300}, {.NO_CLOSE}) {
     mu.label(ctx, "WASD move, Q/E yaw")
     mu.label(ctx, fmt.tprintf("Last key: %v %v", last_key, "PRESS" if last_key_pressed else "RELEASE"))

@@ -70,7 +70,7 @@ shutdown :: proc(app: ^App) {
 }
 
 spawn_mesh :: proc(app: ^App, m: render.MeshHandle, mat: render.MaterialHandle, parent: world.NodeHandle) -> world.NodeHandle {
-  n := world.spawn_child(&app.scene, parent)
+  n := world.spawn(&app.scene, parent = parent)
   render.attach(&app.renderer, n.index, render.MeshAttachment{handle = m, material = mat, cast_shadow = true})
   return n
 }
@@ -84,7 +84,7 @@ shape_def :: proc(density: f32) -> b3.ShapeDef {
   return def
 }
 
-create_body :: proc(app: ^App, type: b3.BodyType, position: [3]f32) -> b3.BodyId {
+body_create :: proc(app: ^App, type: b3.BodyType, position: [3]f32) -> b3.BodyId {
   def := b3.DefaultBodyDef()
   def.type = type
   def.position = position
@@ -94,7 +94,7 @@ create_body :: proc(app: ^App, type: b3.BodyType, position: [3]f32) -> b3.BodyId
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   ground_mesh := app.renderer.builtin_meshes[.CUBE]
   ground_mat := app.renderer.builtin_materials[.GRAY]
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
@@ -105,18 +105,18 @@ setup :: proc(app: ^App) -> bool {
   rand_cylinder := render.make_cylinder()
   for &v in rand_sphere.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   for &v in rand_cylinder.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
-  rand_sphere_mesh := render.create_mesh(&app.renderer, rand_sphere)
-  rand_cylinder_mesh := render.create_mesh(&app.renderer, rand_cylinder)
+  rand_sphere_mesh := render.mesh_create(&app.renderer, rand_sphere)
+  rand_cylinder_mesh := render.mesh_create(&app.renderer, rand_cylinder)
   rand_mat := app.renderer.builtin_materials[.WHITE]
 
   ground := world.spawn(&app.scene, {0, -0.5, 0})
-  ground_body := create_body(app, .staticBody, {0, -0.5, 0})
+  ground_body := body_create(app, .staticBody, {0, -0.5, 0})
   ground_hull := b3.MakeBoxHull(PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   _ = b3.CreateHullShape(ground_body, shape_def(0), &ground_hull.base)
   ground_visual := spawn_mesh(app, ground_mesh, ground_mat, ground)
   world.scale_xyz(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   ball := world.spawn(&app.scene, {2.5, SPHERE_RADIUS, 0})
-  ball_body := create_body(app, .staticBody, {2.5, SPHERE_RADIUS, 0})
+  ball_body := body_create(app, .staticBody, {2.5, SPHERE_RADIUS, 0})
   _ = b3.CreateSphereShape(ball_body, shape_def(0), &b3.Sphere{radius = SPHERE_RADIUS})
   ball_visual := spawn_mesh(app, sphere_mesh, sphere_mat, ball)
   world.scale(&app.scene, ball_visual, SPHERE_RADIUS)
@@ -130,7 +130,7 @@ setup :: proc(app: ^App) -> bool {
   for x in 0 ..< NX do for y in 0 ..< NY do for z in 0 ..< NZ {
     pos := [3]f32{f32(x - NX/2) * 3.0, f32(y) * 3.0 + 10.0, f32(z - NZ/2) * 3.0}
     i := (x * NY + y) * NZ + z
-    body := create_body(app, .dynamicBody, pos)
+    body := body_create(app, .dynamicBody, pos)
     // Unit-sized shapes match the unit builtin meshes, so visuals need no scale.
     piece_mesh, piece_mat := rand_cylinder_mesh, rand_mat
     switch i % 3 {
@@ -148,10 +148,10 @@ setup :: proc(app: ^App) -> bool {
     append(&app.pieces, Piece{body, node})
   }
   log.infof("Created %d Box3D bodies", PIECE_COUNT)
-  render.main_camera_look_at(&app.renderer, {30, 25, 30}, {0, 5, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {30, 25, 30}, {0, 5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {0, 20, 0})
-  render.attach(&app.renderer, light.index, render.spot_light_attachment({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25))
+  render.attach(&app.renderer, light.index, render.make_spot_light({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   return true
 }
@@ -169,7 +169,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   b3.World_Step(app.phys, dt, 4)
   for i := len(app.pieces) - 1; i >= 0; i -= 1 {
     p := app.pieces[i]

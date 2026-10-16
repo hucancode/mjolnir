@@ -8,7 +8,6 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "core:sync"
-import mu "vendor:microui"
 
 // direct_light packs camera indices into 16 bits
 #assert(MAX_ACTIVE_CAMERAS < 0xFFFF)
@@ -34,12 +33,25 @@ MaterialHandle :: distinct u32
 // CameraHandle identifies a camera.
 CameraHandle :: distinct u32
 
-// Renderer is the whole renderer. Public fields: builtin_meshes, builtin_materials,
-// main_camera, ibl_intensity, skybox_intensity, skybox_blur and effect_stack; the rest is
-// internal state. init/shutdown own the GPU backend and what init makes (builtin meshes and
-// materials, the main camera): application lifetime. Everything made after init lives for
-// the map: teardown frees it in one go, back to the marks init leaves.
+// Renderer is the whole renderer; its fields are the settings an application edits.
+// init/shutdown own the GPU backend and what init makes (builtin meshes and
+// materials, the main camera): application lifetime. Everything made after the last setup
+// (or init) lives for the map: teardown frees it in one go.
 Renderer :: struct {
+  skybox_intensity:       f32,
+  skybox_blur:            f32,
+  // scales image-based lighting
+  ibl_intensity:          f32,
+  builtin_materials:      [Color]MaterialHandle,
+  builtin_meshes:         [Primitive]MeshHandle,
+  main_camera:            CameraHandle,
+  // every camera runs the stack in order
+  effect_stack:           [dynamic]PostprocessEffect,
+  using _:               Renderer_State,
+}
+
+@(private)
+Renderer_State :: struct {
   gpu:                    Backend,
   // render's tables, the one copy; bit r of dirty[t] is region r of tables[t] (TABLE_REGIONS),
   // written since the last submitted frame. tables_sync brings the GPU copies up to date.
@@ -56,10 +68,6 @@ Renderer :: struct {
   brdf_lut:               TextureHandle,
   irradiance_cube:        TextureHandle,
   prefilter_cube:         TextureHandle,
-  skybox_intensity:       f32,
-  skybox_blur:            f32,
-  // scales image-based lighting
-  ibl_intensity:          f32,
   particle_params:        ParticleSystemParams,
   mesh_slots:             cont.Slots,
   material_slots:         cont.Slots,
@@ -71,13 +79,8 @@ Renderer :: struct {
     light:      Light,
   },
   light_slots:            cont.Slots,
-  builtin_materials:      [Color]MaterialHandle,
-  builtin_meshes:         [Primitive]MeshHandle,
   cameras:                []Camera,
   camera_slots:           cont.Slots,
-  main_camera:            CameraHandle,
-  // every camera runs the stack in order
-  effect_stack:           [dynamic]PostprocessEffect,
   // pass i writes slot i % POST_PROCESS_RING; its input and original are the two slots before
   post_process_ring:      [FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
   // render targets below MAX_RENDER_TARGETS, every other texture above (bindless_textures.odin)
@@ -173,11 +176,6 @@ Renderer :: struct {
   // sampled by text commands
   ui_font_atlas:          TextureHandle,
   ui_font_atlas_size:     [2]f32,
-  ui_debug_ctx:           mu.Context,
-  // mu.begin ran this frame; frame closes it
-  ui_debug_open:          bool,
-  // microui's builtin atlas
-  ui_debug_atlas:         TextureHandle,
   dpi_scale:              f32,
   mutex:                  sync.Recursive_Mutex,
   // ready ran init_resources
@@ -251,40 +249,51 @@ init_resources :: proc(self: ^Renderer) -> bool {
   for &inbox in self.debug_lines do inbox = make([dynamic]DebugLineSegment, 0, 1024)
   overlay_init(self) or_return
   extent := dev.extent(&self.gpu)
-  cam, created := create_camera(self, extent.x, extent.y, position = {3, 4, 3}, far_plane = 1000.0)
+  cam, created := camera_create(self, extent.x, extent.y, position = {3, 4, 3}, far_plane = 1000.0)
   if !created do return false
   self.main_camera = cam
   // what init made outlives teardown
+  mark_resources(self)
+  return true
+}
+
+// setup starts a map: no particle is alive, and what was made before it (since init or the
+// previous setup) outlives the map's teardown, as what init makes does.
+setup :: proc(self: ^Renderer) -> bool {
+  guard(self)
+  mark_resources(self)
+  return particles_reset(self)
+}
+
+// teardown frees from the marks on
+@(private)
+mark_resources :: proc(self: ^Renderer) {
   cont.slots_mark(&self.mesh_slots)
   for &slab in self.mesh_slabs do cont.slab_mark(&slab)
   cont.slots_mark(&self.material_slots)
   cont.slots_mark(&self.texture_slots)
   cont.slots_mark(&self.camera_slots)
-  return true
-}
-
-// setup starts a map: no particle is alive.
-setup :: proc(self: ^Renderer) -> bool {
-  guard(self)
-  return particles_reset(self)
 }
 
 // teardown ends a map in one go, waiting for the GPU: every slot forgets its attachment
-// and bone palette, and every camera, mesh, material and texture made since init is freed,
-// the environment map too. What init made stays: builtin meshes and materials, the main
-// camera, render targets, pipelines. Handles to freed resources are stale.
+// and bone palette, and every camera, mesh, material and texture made since the last setup
+// (or init) is freed, the environment map too if it is one of them. What came before stays:
+// what init made (builtin meshes and materials, the main camera, render targets, pipelines)
+// and what the application made before setup. Handles to freed resources are stale.
 teardown :: proc(self: ^Renderer) {
   guard(self)
   // their render targets and draw lists retire, and go with the flushes below
   c := self.camera_slots.mark
-  for i in cont.slots_next(&self.camera_slots, &c) do destroy_camera(self, CameraHandle(i))
+  for i in cont.slots_next(&self.camera_slots, &c) do camera_destroy(self, CameraHandle(i))
   // queued uploads may be init's: they land before anything is freed
   dev.wait_idle(&self.gpu)
   for r in cont.slots_flush(&self.target_slots) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
   for i in self.texture_slots.mark ..< self.texture_slots.high_water do dev.texture_destroy(&self.gpu, TextureHandle(i))
   groups_clear(self)
   cont.slots_rewind(&self.texture_slots)
-  self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
+  if u32(self.environment_map) >= self.texture_slots.mark {
+    self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
+  }
   cont.slots_rewind(&self.camera_slots)
   clear_entry(self, .MESHES, self.mesh_slots.mark, self.mesh_slots.high_water - self.mesh_slots.mark)
   cont.slots_rewind(&self.mesh_slots)
@@ -309,7 +318,7 @@ teardown :: proc(self: ^Renderer) {
 
 // Replace the environment map with the equirectangular HDR image encoded in `data` and
 // precompute image-based lighting from it. Without one, IBL and the skybox are black.
-load_environment_map :: proc(self: ^Renderer, data: []u8) -> bool {
+environment_map_load :: proc(self: ^Renderer, data: []u8) -> bool {
   ok := ambient_load_environment(self, data)
   if !ok do log.warnf("Failed to load environment map")
   return ok
@@ -355,7 +364,7 @@ recreate_swapchain :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale:
   c: u32
   for i in cont.slots_next(&self.camera_slots, &c) {
     if self.cameras[i].extent != old do continue
-    resize_camera(self, CameraHandle(i), extent.x, extent.y) or_return
+    camera_resize(self, CameraHandle(i), extent.x, extent.y) or_return
   }
   post_process_release_images(self)
   post_process_create_images(self) or_return
@@ -386,15 +395,10 @@ post_process_create_images :: proc(r: ^Renderer) -> bool {
 post_process_release_images :: proc(r: ^Renderer) {
   for &frame in r.post_process_ring {
     for &handle in frame {
-      destroy_texture(r, handle)
+      texture_destroy(r, handle)
       handle = 0
     }
   }
-}
-
-// frame_serial is the number of frames submitted so far; frame records frame_serial % FRAMES_IN_FLIGHT next.
-frame_serial :: proc(self: ^Renderer) -> u64 {
-  return dev.frame_serial(&self.gpu)
 }
 
 // lock holds off frame while another thread edits through the pointers material,
@@ -723,8 +727,8 @@ Light :: struct {
 }
 #assert(size_of(Light) == 64)
 
-// point_light_attachment returns an omnidirectional Light for attach.
-point_light_attachment :: proc(
+// make_point_light returns an omnidirectional Light for attach.
+make_point_light :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   cast_shadow: bool = true,
@@ -732,8 +736,8 @@ point_light_attachment :: proc(
   return {type = .POINT, color = color, radius = radius, should_cast_shadow = b16(cast_shadow)}
 }
 
-// directional_light_attachment returns a sun-like Light for attach; shadow_radius is its shadow distance.
-directional_light_attachment :: proc(
+// make_directional_light returns a sun-like Light for attach; shadow_radius is its shadow distance.
+make_directional_light :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   shadow_radius: f32 = 10.0,
   cast_shadow: bool = false,
@@ -741,8 +745,8 @@ directional_light_attachment :: proc(
   return {type = .DIRECTIONAL, color = color, radius = shadow_radius, should_cast_shadow = b16(cast_shadow)}
 }
 
-// spot_light_attachment returns a cone Light of the given half angle for attach.
-spot_light_attachment :: proc(
+// make_spot_light returns a cone Light of the given half angle for attach.
+make_spot_light :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   angle: f32 = math.PI * 0.2,
@@ -1079,7 +1083,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
 
 // Writes the render-generated tables. Once per frame under the render mutex.
 @(private)
-flush :: proc(self: ^Renderer, frame_index: u32, debug_ui: bool) {
+flush :: proc(self: ^Renderer, frame_index: u32) {
   // before the lights: shadow casters are ranked by the camera views
   flush_cameras(self, frame_index)
   flush_particles(self)
@@ -1089,24 +1093,16 @@ flush :: proc(self: ^Renderer, frame_index: u32, debug_ui: bool) {
   // cull dispatches cover the slots up to the last one holding anything
   nodes := write_table(self, .NODES, NodeData)
   for self.node_count > 0 && nodes[self.node_count - 1] == {} do self.node_count -= 1
-  overlay_flush(self, debug_ui)
+  overlay_flush(self)
 }
 
-// frame renders and presents one frame, closing the debug UI opened by debug_ui
-// (plus a stats panel when show_stats). An out-of-date swapchain is rebuilt at
+// frame renders and presents one frame. An out-of-date swapchain is rebuilt at
 // framebuffer_size. It returns false on a GPU error.
-frame :: proc(
-  self: ^Renderer,
-  framebuffer_size: [2]u32,
-  dpi_scale: f32,
-  show_stats := false,
-) -> bool {
+frame :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool {
   frame_index := current_frame(self)
-  if show_stats do stats_panel(self)
-  debug_ui_drawn := debug_ui_close(self)
   guard(self)
   tick_resource_pools(self)
-  flush(self, frame_index, debug_ui_drawn)
+  flush(self, frame_index)
   submitted, status := frame_run(self, framebuffer_size)
   // the staged overlay is this frame's only
   overlay_clear(self)

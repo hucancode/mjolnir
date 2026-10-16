@@ -1,7 +1,6 @@
 package bake
 
 import "core:log"
-import ".."
 import "../detour"
 import "../recast"
 
@@ -36,17 +35,20 @@ builder_destroy :: proc(b: ^NavGeometryBuilder) {
   b^ = {}
 }
 
-// build bakes nav and its query from the builder's triangles, replacing any
-// previous build.
+// build bakes the builder's triangles into a navigation mesh, encoded as navigation.save
+// encodes one, in memory the caller frees: navigation.load it, or store it
+// (platform.write_file) and load it in the shipped game.
 build :: proc(
-  nav: ^navigation.NavMesh,
   geom: ^NavGeometryBuilder,
   config: NavMeshConfig = DEFAULT_NAVMESH_CONFIG,
-  max_query_nodes: i32 = 2048,
-) -> bool {
+  allocator := context.allocator,
+) -> (
+  data: []u8,
+  ok: bool,
+) {
   if len(geom.vertices) == 0 || len(geom.indices) == 0 {
     log.error("Cannot build navigation mesh from empty geometry")
-    return false
+    return nil, false
   }
   cfg := config_to_recast(config)
   pmesh, dmesh := recast.build_navmesh(geom.vertices[:], geom.indices[:], geom.area_types[:], cfg) or_return
@@ -64,7 +66,7 @@ build :: proc(
   nav_data, create_status := create_nav_mesh_data(&nav_params)
   if !detour.status_succeeded(create_status) {
     log.errorf("Failed to create navigation mesh data: %v", create_status)
-    return false
+    return nil, false
   }
   mesh_params := detour.Nav_Mesh_Params {
     orig        = pmesh.bmin,
@@ -73,5 +75,17 @@ build :: proc(
     max_tiles   = 1,
     max_polys   = 1024,
   }
-  return navigation.init(nav, nav_data, mesh_params, max_query_nodes)
+  mesh: detour.Nav_Mesh
+  defer detour.nav_mesh_destroy(&mesh)
+  if status := detour.nav_mesh_init(&mesh, &mesh_params); !detour.status_succeeded(status) {
+    log.errorf("Failed to initialize navigation mesh: %v", status)
+    delete(nav_data)
+    return nil, false
+  }
+  if _, status := detour.nav_mesh_add_tile(&mesh, nav_data, detour.DT_TILE_FREE_DATA); !detour.status_succeeded(status) {
+    log.errorf("Failed to add tile to navigation mesh: %v", status)
+    delete(nav_data)
+    return nil, false
+  }
+  return detour.save_navmesh(&mesh, allocator), true
 }

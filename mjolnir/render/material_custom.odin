@@ -20,8 +20,8 @@ material_shader_create :: proc(
   r: ^Renderer,
   frag_spirv: []u8,
   frag_wgsl: string,
-  blend: rhi.BlendMode = .ALPHA,
-  cull: rhi.CullMode = .BACK,
+  blend: BlendMode = .ALPHA,
+  cull: CullMode = .BACK,
 ) -> (
   shader: MaterialShader,
   ok: bool,
@@ -58,39 +58,3 @@ material_shader_destroy :: proc(r: ^Renderer, shader: MaterialShader) {
   p^ = 0
 }
 
-// material_custom creates a .CUSTOM material drawn by `shader`. The fields are the shader's to
-// read as it likes; the names say what the built-in materials use them for.
-material_custom :: proc(
-  self: ^Renderer,
-  shader: MaterialShader,
-  albedo_handle: TextureHandle = 0,
-  metallic_roughness_handle: TextureHandle = 0,
-  normal_handle: TextureHandle = 0,
-  emissive_handle: TextureHandle = 0,
-  metallic_value: f32 = 0.0,
-  roughness_value: f32 = 1.0,
-  emissive_value: f32 = 0.0,
-  base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-  frame_columns: u32 = 1,
-  frame_rows: u32 = 1,
-) -> (
-  handle: MaterialHandle,
-  ok: bool,
-) #optional_ok {
-  handle = create_material(
-    self,
-    .CUSTOM,
-    albedo_handle,
-    metallic_roughness_handle,
-    normal_handle,
-    emissive_handle,
-    metallic_value,
-    roughness_value,
-    emissive_value,
-    base_color_factor,
-    frame_columns,
-    frame_rows,
-  ) or_return
-  material(self, handle).shader = shader
-  return handle, true
-}

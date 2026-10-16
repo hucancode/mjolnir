@@ -1,28 +1,31 @@
 // Bone-mask layer blending across multiple clips.
 package main
 
-import "../../mjolnir"
-import anim "../../mjolnir/animation"
-import "../../mjolnir/input"
-import "../../mjolnir/platform"
-import "../../mjolnir/render"
-import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import mu "vendor:microui"
+import "../../mjolnir"
+import anim "../../mjolnir/animation"
+import "../../mjolnir/debugui"
+import "../../mjolnir/gltf"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
+import "../../mjolnir/render"
+import "../../mjolnir/world"
 
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   time:     f32,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
 }
 
-fox_scene: mjolnir.GltfScene
+fox_scene: gltf.Scene
 fox_handle: world.NodeHandle
 rig: ^anim.Rig
 animator: anim.Animator
@@ -69,10 +72,11 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
-  mjolnir.gltf_scene_destroy(&fox_scene)
+  gltf.scene_destroy(&fox_scene)
   delete(survey_mask)
 }
 
@@ -83,11 +87,12 @@ should_close :: proc(app: ^App) -> bool {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {3, 2, 3}, {0, 1, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
-  fox_scene = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/Fox2.glb"))
+  fox_scene = gltf.load(&app.scene, &app.renderer, #load("../../assets/Fox2.glb"))
   if len(fox_scene.skinned) == 0 {
     log.error("Fox2.glb has no skinned mesh")
     return true
@@ -112,14 +117,14 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, target_cube.index, render.primitive(&app.renderer, .CUBE, .RED, cast_shadow = false))
   world.scale(&app.scene, target_cube, 0.25)
   light := world.spawn(&app.scene)
-  render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 1, 1, 1}, 10.0, true))
+  render.attach(&app.renderer, light.index, render.make_directional_light({1, 1, 1, 1}, 10.0, true))
   return true
 }
 
 update :: proc(app: ^App, dt: f32) {
   app.time += dt
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -127,7 +132,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if rig != nil do animate(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
@@ -138,6 +143,7 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   debug_ui(app)
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
@@ -164,13 +170,13 @@ animate :: proc(app: ^App, dt: f32) {
     }
     pos := [3]f32{f32(target_x), f32(target_y), f32(target_z)}
     anim.set_ik_target(&animator, ik_layer, pos, {0, 5, 0})
-    if world.valid(&app.scene, target_cube) do world.translate(&app.scene, target_cube, pos)
+    if _, ok := world.node(&app.scene, target_cube); ok do world.translate(&app.scene, target_cube, pos)
   }
   anim.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, fox_handle))
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Animation Layering", {480, 20, 320, 490}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Base layer (Walk <-> Run)")

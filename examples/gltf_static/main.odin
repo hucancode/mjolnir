@@ -1,20 +1,21 @@
 // glTF asset import.
 package main
 
+import "core:log"
+import "core:math"
 import "../../mjolnir"
+import "../../mjolnir/gltf"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
-import "core:log"
-import "core:math"
 
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
-  gltf:     mjolnir.GltfScene,
+  gltf:     gltf.Scene,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
 }
@@ -41,18 +42,18 @@ main :: proc() {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {5, 6, 5}, {0, 5, 0})
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {5, 6, 5}, {0, 5, 0})
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  app.gltf = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/Duck.glb"))
+  app.gltf = gltf.load(&app.scene, &app.renderer, #load("../../assets/Duck.glb"))
   light := world.spawn(&app.scene)
-  render.attach(&app.renderer, light.index, render.directional_light_attachment())
+  render.attach(&app.renderer, light.index, render.make_directional_light())
   return true
 }
 
 shutdown :: proc(app: ^App) {
-  mjolnir.gltf_scene_destroy(&app.gltf)
+  gltf.scene_destroy(&app.gltf)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
@@ -72,7 +73,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   rot := dt * math.PI * 0.5
   for h in app.gltf.roots do world.rotate_by(&app.scene, h, rot)
   world.update(&app.scene)

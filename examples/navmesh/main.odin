@@ -78,10 +78,10 @@ spawn_mesh :: proc(app: ^App, mesh_handle: render.MeshHandle, material: render.M
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   log.info("Navigation mesh demo setup with world integration")
   bake.builder_destroy(&nav_builder)
-  render.main_camera_look_at(&app.renderer, {35, 25, 35}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {35, 25, 35}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   create_demo_scene(app)
@@ -108,8 +108,8 @@ create_demo_scene :: proc(app: ^App) {
   ground_geom := render.make_quad({0.2, 0.6, 0.2, 1.0})
   for &v in ground_geom.vertices { v.position.x *= 50; v.position.z *= 50 }
   bake.append_triangles(&nav_builder, render.positions(ground_geom, context.temp_allocator), ground_geom.indices)
-  ground_mesh := render.create_mesh(&app.renderer, ground_geom)
-  ground_mat := render.material_pbr(&app.renderer, metallic = 0.1, roughness = 0.8, emissive = 0.02)
+  ground_mesh := render.mesh_create(&app.renderer, ground_geom)
+  ground_mat := render.material_create(&app.renderer, metallic_value = 0.1, roughness_value = 0.8, emissive_value = 0.02)
   ground_handle = spawn_mesh(app, ground_mesh, ground_mat)
   world.tag(&app.scene, ground_handle, TAG_ENVIRONMENT)
 
@@ -120,8 +120,8 @@ create_demo_scene :: proc(app: ^App) {
     g := render.make_cube({0.8, 0.2, 0.2, 1.0})
     for &v in g.vertices { v.position.x *= size.x; v.position.y *= size.y; v.position.z *= size.z }
     bake.append_triangles(&nav_builder, render.positions(g, context.temp_allocator), g.indices, pos, true)
-    mh := render.create_mesh(&app.renderer, g)
-    mat := render.material_pbr(&app.renderer, metallic = 0.3, roughness = 0.7, emissive = 0.1)
+    mh := render.mesh_create(&app.renderer, g)
+    mat := render.material_create(&app.renderer, metallic_value = 0.3, roughness_value = 0.7, emissive_value = 0.1)
     h := spawn_mesh(app, mh, mat, pos)
     world.tag(&app.scene, h, TAG_OBSTACLE)
     append(&obstacle_handles, h)
@@ -131,8 +131,8 @@ create_demo_scene :: proc(app: ^App) {
 
 create_agent :: proc(app: ^App) {
   agent_geom := render.make_cylinder(16, 2, 0.5, {0.2, 0.5, 1.0, 1.0})
-  mh := render.create_mesh(&app.renderer, agent_geom)
-  mat := render.material_pbr(&app.renderer, metallic = 0.3, roughness = 0.6, emissive = 0.3)
+  mh := render.mesh_create(&app.renderer, agent_geom)
+  mat := render.material_create(&app.renderer, metallic_value = 0.3, roughness_value = 0.6, emissive_value = 0.3)
   agent_handle = spawn_mesh(app, mh, mat, agent_pos + {0, 1, 0})
   world.node(&app.scene, agent_handle).name = "agent"
 }
@@ -141,7 +141,8 @@ setup_navigation_mesh :: proc(app: ^App) {
   if len(nav_builder.vertices) == 0 || len(nav_builder.indices) == 0 {
     log.error("No source geometry available for navmesh generation"); return
   }
-  if !bake.build(&navmesh, &nav_builder) {
+  data, ok := bake.build(&nav_builder, allocator = context.temp_allocator)
+  if !ok || !nav.load(&navmesh, data) {
     log.error("Failed to build navmesh"); return
   }
   visualize_navmesh(app)
@@ -152,10 +153,10 @@ visualize_navmesh :: proc(app: ^App) {
   positions, indices := nav.debug_triangles(&navmesh, context.temp_allocator)
   navmesh_geom := render.from_triangles(positions, indices)
   log.infof("Built navmesh visualization geometry: %d vertices, %d indices", len(navmesh_geom.vertices), len(navmesh_geom.indices))
-  m, m_ok := render.create_mesh(&app.renderer, navmesh_geom)
-  if !m_ok { log.error("Failed to create navmesh visualization mesh"); return }
-  mat, mat_ok := render.create_material(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {1.0, 0.8, 0.3, 0.3})
-  if !mat_ok { log.error("Failed to create navmesh material"); return }
+  m, m_ok := render.mesh_create(&app.renderer, navmesh_geom)
+  if !m_ok { log.error("Failed to node_create navmesh visualization mesh"); return }
+  mat, mat_ok := render.material_create(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {1.0, 0.8, 0.3, 0.3})
+  if !mat_ok { log.error("Failed to node_create navmesh material"); return }
   navmesh_node_handle = spawn_mesh(app, m, mat)
 }
 
@@ -176,8 +177,8 @@ start_find_path :: proc(app: ^App) {
 update_position_marker :: proc(app: ^App, handle: ^world.NodeHandle, pos: [3]f32, color: [4]f32) {
   world.despawn(&app.scene, handle^)
   g := render.make_sphere(12, 6, 0.3, color)
-  m := render.create_mesh(&app.renderer, g)
-  mat := render.material_pbr(&app.renderer, metallic = 0.2, roughness = 0.8, emissive = 0.5)
+  m := render.mesh_create(&app.renderer, g)
+  mat := render.material_create(&app.renderer, metallic_value = 0.2, roughness_value = 0.8, emissive_value = 0.5)
   handle^ = spawn_mesh(app, m, mat, pos + {0, 0.2, 0})
 }
 
@@ -190,9 +191,9 @@ draw_path_debug :: proc(app: ^App) {
 }
 
 find_navmesh_point_from_mouse :: proc(app: ^App) -> ([3]f32, bool) {
-  ray_origin, ray_dir, ok := render.cursor_ray(&app.renderer, app.input.cursor)
+  ray, ok := render.cursor_ray(&app.renderer, app.input.cursor)
   if !ok do return {}, false
-  return nav.raycast(&navmesh, ray_origin, ray_dir)
+  return nav.raycast(&navmesh, ray)
 }
 
 demo_mouse_pressed :: proc(app: ^App) {
@@ -214,7 +215,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   demo_mouse_pressed(app)
   if path_active {
     path_spawn_time += dt

@@ -2,6 +2,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -29,6 +30,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -56,17 +58,18 @@ main :: proc() {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   half := f32(GRID - 1) * 0.5 * SPACING
-  render.main_camera_look_at(&app.renderer, {half + 2, half + 4, half * 2.4}, {0, half - 1, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {half + 2, half + 4, half * 2.4}, {0, half - 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
   plane_mesh := app.renderer.builtin_meshes[.QUAD_XZ]
-  ground_albedo, _ := render.create_texture_from_data(&app.renderer, #load("statue-1275469_1280.jpg"), generate_mips = true)
-  plane_material := render.create_material(&app.renderer, .PBR,
-    albedo_handle = ground_albedo, roughness_value = 0.7, metallic_value = 0.0,
+  ground_albedo, _ := render.texture_load(&app.renderer, #load("statue-1275469_1280.jpg"), generate_mips = true)
+  plane_material := render.material_create(&app.renderer, .PBR,
+    albedo_texture = ground_albedo, roughness_value = 0.7, metallic_value = 0.0,
   )
 
   plane := world.spawn(&app.scene, {0, -1, 0})
@@ -76,7 +79,7 @@ setup :: proc(app: ^App) -> bool {
   base_color: [4]f32 = {0.85, 0.85, 0.9, 1}
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
-    mat := render.create_material(&app.renderer, type = .PBR, base_color_factor = base_color,
+    mat := render.material_create(&app.renderer, type = .PBR, base_color_factor = base_color,
       metallic_value = m, roughness_value = r,
     )
     grid_materials[row][col] = mat
@@ -89,13 +92,14 @@ setup :: proc(app: ^App) -> bool {
   q1 := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
   q2 := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
   sun_light = world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, sun_light.index, render.directional_light_attachment({1, 0.97, 0.92, f32(sun_intensity)}, 12.0))
+  render.attach(&app.renderer, sun_light.index, render.make_directional_light({1, 0.97, 0.92, f32(sun_intensity)}, 12.0))
   world.rotate(&app.scene, sun_light, q2 * q1)
   return true
 }
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -117,7 +121,7 @@ axis_values :: proc(row, col: int) -> (metallic, roughness: f32) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -125,7 +129,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if l, ok := render.attachment(&app.renderer, sun_light.index, render.Light); ok {
     l.color[3] = f32(sun_intensity)
     render.attach(&app.renderer, sun_light.index, l)
@@ -145,7 +149,7 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Environment", {700, 20, 280, 180}, {.NO_CLOSE}) {
     mu.label(ctx, fmt.tprintf("Sun intensity: %.2f", sun_intensity))
     mu.slider(ctx, &sun_intensity, 0.0, 5.0)
@@ -163,5 +167,6 @@ frame :: proc(app: ^App) -> bool {
     mu.label(ctx, fmt.tprintf("Roughness max: %.2f (cols right)", roughness_max))
     mu.slider(ctx, &roughness_max, 0.0, 1.0)
   }
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

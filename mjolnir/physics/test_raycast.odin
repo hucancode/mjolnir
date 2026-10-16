@@ -34,7 +34,7 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
         world_x := (f32(x) - f32(grid_size) * 0.5) * spacing
         world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
         pos := [3]f32{world_x, 0.5, world_z}
-        create_body(&state.physics, position = pos, collider = SphereCollider{radius = 0.5})
+        body_create(&state.physics, position = pos, collider = SphereCollider{radius = 0.5})
       }
     }
     step(&state.physics, 0.0)
@@ -170,7 +170,7 @@ test_set_pose_updates_broadphase :: proc(t: ^testing.T) {
   w: World
   init(&w, thread_count = 1)
   defer shutdown(&w)
-  h := create_body(&w, position = {0, 0, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}})
+  h := body_create(&w, position = {0, 0, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}})
   step(&w, 1.0 / 60.0)
   ray := geometry.Ray{origin = {10, 5, 0}, direction = {0, -1, 0}}
   testing.expect(t, !raycast(&w, ray).hit)

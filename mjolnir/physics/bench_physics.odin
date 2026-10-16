@@ -15,14 +15,14 @@ build_serial_world :: proc() -> ^World {
 	w := new(World)
 	init(w, {0, -9.81, 0}, thread_count = 1)
 	GROUND :: f32(20)
-	create_body(w, {0, -0.5, 0}, collider = BoxCollider{half_extents = {GROUND, 0.5, GROUND}})
+	body_create(w, {0, -0.5, 0}, collider = BoxCollider{half_extents = {GROUND, 0.5, GROUND}})
 
 	N :: 6
 	for x in 0 ..< N {
 		for y in 0 ..< 4 {
 			for z in 0 ..< N {
 				pos := [3]f32{f32(x - N / 2) * 1.6, 1.2 + f32(y) * 1.6, f32(z - N / 2) * 1.6}
-				create_body(w, pos, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 1.0)
+				body_create(w, pos, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 1.0)
 			}
 		}
 	}

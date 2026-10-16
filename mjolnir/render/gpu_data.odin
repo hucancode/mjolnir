@@ -7,41 +7,53 @@ package render
 MAX_NODES_IN_SCENE :: 65536
 
 // The views table holds every camera at CAMERA_VIEW_BASE + camera, then the shadow views.
+@(private)
 CAMERA_VIEW_BASE :: 0
 
+@(private)
 SHADOW_VIEW_BASE :: MAX_ACTIVE_CAMERAS
 
+@(private)
 MAX_VIEWS :: MAX_ACTIVE_CAMERAS + MAX_SHADOW_VIEWS
 
 MAX_SHADOW_MAPS :: 16
 
+@(private)
 SHADOW_MAP_SIZE :: 512
 
 // a cube map renders six views
+@(private)
 MAX_SHADOW_VIEWS :: MAX_SHADOW_MAPS * 6
 
 MAX_PARTICLES :: 65536
 
 // Debug line segments live in two rings of DEBUG_RING in the debug line table:
 // [0] depth-tested, [1] drawn over the scene.
+@(private)
 MAX_SEGMENTS :: 65536
 
+@(private)
 DEBUG_RING :: MAX_SEGMENTS / 2
 
 // UI_MAX_VERTICES and UI_MAX_INDICES are the overlay's capacity per frame.
+@(private)
 UI_MAX_VERTICES :: 65536
 
+@(private)
 UI_MAX_INDICES :: 98304
 
 // Batches (Table.BATCHES): runs of nodes sharing a mesh and material, drawn by one indirect
 // draw. Id 0 is none.
+@(private)
 MAX_BATCHES :: 4096
 
 // TABLE_REGIONS is the granularity of Renderer.dirty: region r of a table of n bytes is
 // bytes [r * size, (r + 1) * size), size = ceil(n / TABLE_REGIONS).
+@(private)
 TABLE_REGIONS :: 64
 
 // HDR_COLOR_FORMAT is the format of the scene color target.
+@(private)
 HDR_COLOR_FORMAT :: TextureFormat.RGBA16F
 
 // AttachmentType names the images a camera renders into.
@@ -55,6 +67,7 @@ AttachmentType :: enum {
 }
 
 // Each camera attachment's texture; pipelines drawing into an attachment take its format.
+@(private)
 ATTACHMENTS :: [AttachmentType]TextureDesc {
   // written whole by the lighting dispatch, then drawn over by the forward pass
   .FINAL_IMAGE        = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED, .STORAGE}},
@@ -67,10 +80,8 @@ ATTACHMENTS :: [AttachmentType]TextureDesc {
   .DEPTH              = {format = .D32F, usage = {.DEPTH_TARGET, .SAMPLED}, shared = true},
 }
 
-// How a material is drawn: one pipeline and, per camera, one indirect draw list per type,
-// drawn in this order. The types before FIRST_FORWARD_TYPE are opaque: drawn into the
-// G-buffer, lit by the lighting pass, tested against the depth pyramid and drawn into
-// shadow maps. The rest are drawn forward, alpha-blended over the lit image.
+// How a material is drawn, in this order. PBR is opaque: lit, occlusion-culled and casting
+// shadows. The rest are drawn forward, alpha-blended over the lit image.
 MaterialType :: enum u32 {
   PBR,
   TRANSPARENT,
@@ -82,6 +93,7 @@ MaterialType :: enum u32 {
   CUSTOM,
 }
 
+@(private)
 FIRST_FORWARD_TYPE :: MaterialType.TRANSPARENT
 
 // LightType selects the light branch of the lighting shaders.
@@ -110,6 +122,7 @@ Vertex2D :: struct {
 }
 
 // UIBatch is a run of overlay indices drawn with one texture inside one scissor (x, y, w, h).
+@(private)
 UIBatch :: struct {
   first_index: u32,
   index_count: u32,
@@ -119,6 +132,7 @@ UIBatch :: struct {
 
 // The tables render writes, one copy per frame in flight (table); their sizes are given at
 // init. The entries' layouts are render's, mirrored by the shaders.
+@(private)
 Table :: enum {
   VIEWS,
   NODES,
@@ -147,6 +161,7 @@ SkinnedVertex :: struct {
 }
 
 // One buffer per stream, sub-allocated by render; skinning is read through the scene set.
+@(private)
 MeshStream :: enum {
   VERTEX,
   INDEX,
@@ -154,6 +169,7 @@ MeshStream :: enum {
 }
 
 // MeshData is a mesh as the cull shader reads it from the mesh table.
+@(private)
 MeshData :: struct {
   aabb_min:        [3]f32,
   index_count:     u32,
@@ -165,10 +181,12 @@ MeshData :: struct {
   vertex_count:    u32,
 }
 
+@(private)
 MeshFlag :: enum u32 {
   SKINNED,
 }
 
+@(private)
 MeshFlagSet :: bit_set[MeshFlag;u32]
 
 // GrayscaleEffect desaturates the image. Effect structs are pushed verbatim, so their layout
@@ -234,7 +252,7 @@ CUSTOM_EFFECT_PARAM_BYTES :: 80
 // CustomEffect runs a user fragment shader (post_shader_create) `passes` times (0 runs it
 // once), each pass reading the previous one's output; the shader tells them apart by the
 // push block's pass. params come first, so the shader sees them at offset 32 like a
-// built-in effect's fields; custom_effect packs a struct into them.
+// built-in effect's fields; make_custom_effect packs a struct into them.
 CustomEffect :: struct {
   params: [CUSTOM_EFFECT_PARAM_BYTES]u8,
   shader: PostShader,
@@ -254,6 +272,7 @@ PostprocessEffect :: union {
   CustomEffect,
 }
 
+@(private)
 ParticleSystemParams :: struct {
   emitter_count:    u32,
   forcefield_count: u32,

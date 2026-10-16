@@ -1,21 +1,24 @@
 // Procedural bone modifier following a spline.
 package main
 
-import "../../mjolnir"
-import "../../mjolnir/input"
-import "../../mjolnir/platform"
-import "../../mjolnir/render"
-import "../../mjolnir/animation"
-import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import mu "vendor:microui"
+import "../../mjolnir"
+import "../../mjolnir/debugui"
+import "../../mjolnir/animation"
+import "../../mjolnir/gltf"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
+import "../../mjolnir/render"
+import "../../mjolnir/world"
 
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -24,7 +27,7 @@ App :: struct {
 CONTROL_POINTS :: 32
 PATH_DEBUG_SAMPLES :: 96
 
-snake:         mjolnir.GltfScene
+snake:         gltf.Scene
 // one animator (and its path layer) per snake.skinned entry
 animators:     [dynamic]animation.Animator
 layer_indices: [dynamic]int
@@ -62,8 +65,9 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  mjolnir.gltf_scene_destroy(&snake)
+  gltf.scene_destroy(&snake)
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -110,10 +114,11 @@ draw_path_debug :: proc(app: ^App) {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {5, 3, 5}, {0, 0, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {5, 3, 5}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  snake = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
+  snake = gltf.load(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
   regenerate_points()
   spline = animation.spline_build_closed(path_buf[:])
 
@@ -132,13 +137,13 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 30.0)
   light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, light.index, render.point_light_attachment({1, 0.9, 0.8, 1}, 15.0, true))
+  render.attach(&app.renderer, light.index, render.make_point_light({1, 0.9, 0.8, 1}, 15.0, true))
   return true
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -146,7 +151,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if radius != prev_radius || height != prev_height || lobes != prev_lobes {
     rebuild_path(app)
     prev_radius = radius; prev_height = height; prev_lobes = lobes
@@ -168,11 +173,12 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   debug_ui(app)
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Path Modifier", {20, 20, 200, 380}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Auto play", &auto_play)

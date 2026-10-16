@@ -2,6 +2,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -15,6 +16,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   time:     f32,
   // orbit controller state, owned by the app
@@ -57,6 +59,7 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -75,8 +78,8 @@ spawn_field :: proc(
 ) -> FFState {
   s: FFState
   s.parent = world.spawn(&app.scene, {0, 2, 0})
-  s.ff_node = world.spawn_child(&app.scene, s.parent, {offset_x, 0, 0})
-  render.attach(&app.renderer, s.ff_node.index, render.forcefield_attachment(area_of_effect = area, strength = strength, tangent_strength = tangent))
+  s.ff_node = world.spawn(&app.scene, {offset_x, 0, 0}, parent = s.parent)
+  render.attach(&app.renderer, s.ff_node.index, render.make_forcefield(area_of_effect = area, strength = strength, tangent_strength = tangent))
   s.color = color
   s.enabled = true
   s.strength = mu.Real(strength)
@@ -90,14 +93,15 @@ spawn_field :: proc(
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {0, 12, 3}, {0, 2, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 12, 3}, {0, 2, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   app.renderer.skybox_intensity = 0
 
   // Particle source at center, large position spread
-  if tex, ok := render.create_texture_from_data(&app.renderer, #load("../../assets/particles/star_09.png")); ok {
-    em := render.emitter_attachment(
+  if tex, ok := render.texture_load(&app.renderer, #load("../../assets/particles/star_09.png")); ok {
+    em := render.make_emitter(
       texture_handle    = tex,
       emission_rate     = 100,
       initial_velocity  = {0, 0, 0},
@@ -121,7 +125,7 @@ setup :: proc(app: ^App) -> bool {
   attract = spawn_field(app, 3.5, 12.0, -5.0, 4.0, {0.2, 1.0, 0.4, 1}, 0.7, -1.0)
 
   light := world.spawn(&app.scene, {3, 6, 3})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 1, 1, 1}, shadow_radius = 10))
+  render.attach(&app.renderer, light.index, render.make_directional_light(color = {1, 1, 1, 1}, shadow_radius = 10))
   return true
 }
 
@@ -136,7 +140,7 @@ apply_ff :: proc(app: ^App, s: ^FFState) {
 }
 
 draw_ff_marker :: proc(app: ^App, s: ^FFState) {
-  if !world.valid(&app.scene, s.ff_node) do return
+  if _, ok := world.node(&app.scene, s.ff_node); !ok do return
   pos := world.world_matrix(&app.scene, s.ff_node)[3].xyz
   c := s.color
   if !s.enabled do c = {c.r * 0.3, c.g * 0.3, c.b * 0.3, 1}
@@ -149,7 +153,7 @@ draw_ff_marker :: proc(app: ^App, s: ^FFState) {
 update :: proc(app: ^App, dt: f32) {
   app.time += dt
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -157,7 +161,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   t := app.time
   world.rotate(&app.scene, repel.parent,   t * f32(repel.spin_speed)   * repel.spin_dir,   linalg.VECTOR3F32_Y_AXIS)
   world.rotate(&app.scene, attract.parent, t * f32(attract.spin_speed) * attract.spin_dir, linalg.VECTOR3F32_Y_AXIS)
@@ -173,6 +177,7 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   debug_ui(app)
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
@@ -191,7 +196,7 @@ ff_panel :: proc(ctx: ^mu.Context, name: string, s: ^FFState) {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Forcefields", {780, 20, 300, 520}, {.NO_CLOSE}) {
     ff_panel(ctx, "Repel (blue)",   &repel)
     ff_panel(ctx, "Attract (green)", &attract)

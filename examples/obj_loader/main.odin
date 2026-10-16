@@ -2,6 +2,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -25,6 +26,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -52,13 +54,14 @@ main :: proc() {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   light := world.spawn(&app.scene, {10, 18, 10})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.97, 0.92, 3.0}, 10.0, false))
+  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.97, 0.92, 3.0}, 10.0, false))
   world.rotate(&app.scene, light, 1.5707963, [3]f32{1, 0, 0})
 
-  display_material = render.create_material(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1})
+  display_material = render.material_create(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1})
 
   scales := OBJ_SCALES
   labels := OBJ_LABELS
@@ -73,7 +76,7 @@ setup :: proc(app: ^App) -> bool {
     aabb := render.aabb_from_vertices(geom.vertices)
     log.infof("%s: %d verts, %d tris, aabb %v..%v", labels[i], len(geom.vertices), len(geom.indices) / 3, aabb.min, aabb.max)
     loaded_aabb[i] = {aabb.min, aabb.max}
-    loaded_meshes[i] = render.create_mesh(&app.renderer, geom)
+    loaded_meshes[i] = render.mesh_create(&app.renderer, geom)
   }
 
   display_node = world.spawn(&app.scene)
@@ -84,6 +87,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -95,7 +99,7 @@ should_close :: proc(app: ^App) -> bool {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -103,7 +107,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
@@ -134,7 +138,7 @@ swap_model :: proc(app: ^App, index: int) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "OBJ Loader", {720, 20, 260, 200}, {.NO_CLOSE}) {
     labels := OBJ_LABELS
     mu.label(ctx, fmt.tprintf("Current: %s", labels[current_index] if current_index >= 0 else "<none>"))
@@ -144,5 +148,6 @@ frame :: proc(app: ^App) -> bool {
       if .SUBMIT in mu.button(ctx, label) do swap_model(app, i)
     }
   }
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

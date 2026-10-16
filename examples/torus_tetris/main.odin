@@ -124,20 +124,20 @@ cell_world_pos :: proc(col: i32, row: i32) -> [3]f32 {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   ground := app.renderer.builtin_meshes[.QUAD_XZ]
-  dark_mat := render.create_material(&app.renderer, type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0})
+  dark_mat := render.material_create(&app.renderer, type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0})
   floor := world.spawn(&app.scene)
   render.attach(&app.renderer, floor.index, render.MeshAttachment{handle = ground, material = dark_mat, cast_shadow = false})
   world.scale(&app.scene, floor, RADIUS * 6.0)
   spot := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, spot.index, render.spot_light_attachment({1, 1, 1, 1}, 12.0, math.PI * 0.35, true))
+  render.attach(&app.renderer, spot.index, render.make_spot_light({1, 1, 1, 1}, 12.0, math.PI * 0.35, true))
   world.rotate(&app.scene, spot, math.PI * 0.55, {1, 0, 0})
-  render.main_camera_look_at(&app.renderer, {0, 14, 14}, {0, 8, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 14, 14}, {0, 8, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   for c, i in COLOR_RGB {
-    state.transparent_material[i] = render.create_material(&app.renderer, type = .TRANSPARENT, base_color_factor = {c.x, c.y, c.z, PIECE_ALPHA})
-    state.opaque_material[i] = render.create_material(&app.renderer, type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0})
+    state.transparent_material[i] = render.material_create(&app.renderer, type = .TRANSPARENT, base_color_factor = {c.x, c.y, c.z, PIECE_ALPHA})
+    state.opaque_material[i] = render.material_create(&app.renderer, type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0})
   }
   state.fall_period = FALL_PERIOD
   reset_game(app)
@@ -268,7 +268,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   step_game(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

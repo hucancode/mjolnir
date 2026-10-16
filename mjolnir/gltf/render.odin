@@ -1,6 +1,6 @@
-package gltf_render
+package gltf
 
-import render ".."
+import "../render"
 import "core:log"
 import "core:mem"
 import "core:slice"
@@ -38,7 +38,7 @@ load_meshes :: proc(
     }
     geometry := load_geometry(&gltf_mesh, skinned[i])
     log.infof("Processed mesh with %d vertices, %d indices", len(geometry.vertices), len(geometry.indices))
-    handle := render.create_mesh(r, geometry) or_continue
+    handle := render.mesh_create(r, geometry) or_continue
     looks[i] = render.MeshAttachment{handle = handle, material = material, cast_shadow = true}
   }
   log.infof("glTF looks: %d textures, %d materials", len(textures), len(materials))
@@ -62,7 +62,7 @@ load_texture :: proc(
   }
   view := texture.image_.buffer_view
   pixel_data := slice.from_ptr(mem.ptr_offset(cast(^u8)view.buffer.data, view.offset), int(view.size))
-  handle = render.create_texture_from_data(r, pixel_data, format) or_return
+  handle = render.texture_load(r, pixel_data, format) or_return
   cache[texture] = handle
   log.infof("Created texture %v", handle)
   return handle, true
@@ -103,7 +103,7 @@ load_material :: proc(
   // render keeps one emissive scale; take the brightest factor channel
   emissive_value := max(mat.emissive_factor[0], mat.emissive_factor[1], mat.emissive_factor[2])
   if mat.has_emissive_strength do emissive_value *= mat.emissive_strength.emissive_strength
-  handle = render.create_material(
+  handle = render.material_create(
     r,
     .PBR,
     tex[0],

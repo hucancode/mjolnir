@@ -64,7 +64,7 @@ bvh_refit :: proc(world: ^World) {
   parallel_for(world, len(world.dynamic_bvh.primitives), nil, proc(world: ^World, _: rawptr, _, start, end: int) {
     #no_bounds_check for i in start ..< end {
       entry := &world.dynamic_bvh.primitives[i]
-      body := get_body(world, entry.handle) or_continue
+      body := body(world, entry.handle) or_continue
       if body.is_sleeping do continue
       entry.bounds = fat_aabb(body)
     }

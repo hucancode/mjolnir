@@ -1,21 +1,22 @@
 // Skinned glTF playback.
 package main
 
+import "core:log"
+import "core:math"
 import "../../mjolnir"
 import anim "../../mjolnir/animation"
+import "../../mjolnir/gltf"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
-import "core:log"
-import "core:math"
 
 App :: struct {
   window:    platform.Platform,
   scene:     world.World,
   renderer:  render.Renderer,
   input:     input.State,
-  gltf:      mjolnir.GltfScene,
+  gltf:      gltf.Scene,
   // one animator per skinned node of the scene
   animators: [dynamic]anim.Animator,
   // orbit controller state, owned by the app
@@ -42,7 +43,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  mjolnir.gltf_scene_destroy(&app.gltf)
+  gltf.scene_destroy(&app.gltf)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
@@ -56,10 +57,10 @@ should_close :: proc(app: ^App) -> bool {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {1.5, 1.5, 1.5}, {0, 1, 0})
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {1.5, 1.5, 1.5}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  app.gltf = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb"))
+  app.gltf = gltf.load(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb"))
   for s in app.gltf.skinned {
     rig := &app.gltf.rigs[s.rig]
     a: anim.Animator
@@ -68,7 +69,7 @@ setup :: proc(app: ^App) -> bool {
     append(&app.animators, a)
   }
   light := world.spawn(&app.scene)
-  render.attach(&app.renderer, light.index, render.directional_light_attachment())
+  render.attach(&app.renderer, light.index, render.make_directional_light())
   return true
 }
 
@@ -81,7 +82,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   rot := dt * math.PI * 0.05
   for h in app.gltf.roots do world.rotate_by(&app.scene, h, rot)
   for s, i in app.gltf.skinned do anim.animator_update(&app.animators[i], &app.gltf.rigs[s.rig], dt)

@@ -2,6 +2,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -16,6 +17,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -61,6 +63,7 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -74,17 +77,18 @@ should_close :: proc(app: ^App) -> bool {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   phys.gravity = {0, 0, 0}
-  render.main_camera_look_at(&app.renderer, {-14, 8, 14}, {0, 1, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {-14, 8, 14}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-5, 12, 5})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.95, 0.9, 1}, 6.0, true))
+  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.95, 0.9, 1}, 6.0, true))
 
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
   ground := world.spawn(&app.scene, {0, -0.5, 0})
-  physics.create_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {30.0, 0.5, 12.0}}, user = world.Handle(ground))
-  ground_visual := world.spawn_child(&app.scene, ground)
+  physics.body_create(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {30.0, 0.5, 12.0}}, user = world.Handle(ground))
+  ground_visual := world.spawn(&app.scene, parent = ground)
   render.attach(&app.renderer, ground_visual.index, render.MeshAttachment{handle = cube_mesh, material = app.renderer.builtin_materials[.GRAY], cast_shadow = true})
   world.scale_xyz(&app.scene, ground_visual, 30.0, 0.5, 12.0)
 
@@ -94,18 +98,18 @@ setup :: proc(app: ^App) -> bool {
     wall_z := (f32(i) - f32(WALL_COUNT - 1) * 0.5) * WALL_SPACING
     wall_pos := [3]f32{WALL_X, 1.5, wall_z}
     wall_nodes[i] = world.spawn(&app.scene, wall_pos)
-    physics.create_body(&phys, wall_pos, collider = physics.BoxCollider{half_extents = {half_thick, 1.5, 2.0}}, user = world.Handle(wall_nodes[i]))
-    wall_visual := world.spawn_child(&app.scene, wall_nodes[i])
+    physics.body_create(&phys, wall_pos, collider = physics.BoxCollider{half_extents = {half_thick, 1.5, 2.0}}, user = world.Handle(wall_nodes[i]))
+    wall_visual := world.spawn(&app.scene, parent = wall_nodes[i])
     render.attach(&app.renderer, wall_visual.index, render.MeshAttachment{handle = cube_mesh, material = app.renderer.builtin_materials[wall_colors[i]], cast_shadow = true})
     world.scale_xyz(&app.scene, wall_visual, half_thick, 1.5, 2.0)
   }
 
   bullet_node = world.spawn(&app.scene, START_POS)
-  bullet_body = physics.create_body(&phys, START_POS, mass = BULLET_MASS, collider = physics.SphereCollider{radius = BULLET_RADIUS}, user = world.Handle(bullet_node))
-  bullet_visual := world.spawn_child(&app.scene, bullet_node)
+  bullet_body = physics.body_create(&phys, START_POS, mass = BULLET_MASS, collider = physics.SphereCollider{radius = BULLET_RADIUS}, user = world.Handle(bullet_node))
+  bullet_visual := world.spawn(&app.scene, parent = bullet_node)
   render.attach(&app.renderer, bullet_visual.index, render.primitive(&app.renderer, .SPHERE, .CYAN))
   world.scale_xyz(&app.scene, bullet_visual, BULLET_RADIUS, BULLET_RADIUS, BULLET_RADIUS)
-  body := physics.get_body(&phys, bullet_body)
+  body := physics.body(&phys, bullet_body)
   body.linear_damping = 0
   body.angular_damping = 0
   body.restitution = 0.1
@@ -125,7 +129,7 @@ fire_bullet :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -133,12 +137,12 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if auto_fire {
     auto_fire_timer += dt
     if auto_fire_timer >= 2.0 { auto_fire_timer = 0; fire_bullet(app) }
   }
-  if body, ok := physics.get_body(&phys, bullet_body); ok && (body.position.x > 20.0 || body.position.x < -25.0) {
+  if body, ok := physics.body(&phys, bullet_body); ok && (body.position.x > 20.0 || body.position.x < -25.0) {
     physics.set_velocity(&phys, bullet_body, {})
     physics.set_pose(&phys, bullet_body, {START_POS.x, START_POS.y, target_z()}, body.rotation)
   }
@@ -152,11 +156,12 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   debug_ui(app)
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Bullet CCD", {700, 20, 280, 380}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Target wall:")
@@ -181,7 +186,7 @@ debug_ui :: proc(app: ^App) {
     mu.label(ctx, fmt.tprintf("CCD swept candidates: %d", perf.ccd_total_candidates))
     mu.label(ctx, fmt.tprintf("CCD time: %.3f ms", perf.ccd_ms))
     mu.label(ctx, fmt.tprintf("Contacts: %d", perf.contact_count))
-    if body, ok := physics.get_body(&phys, bullet_body); ok {
+    if body, ok := physics.body(&phys, bullet_body); ok {
       mu.label(ctx, fmt.tprintf("Bullet x: %.2f  vel: %.1f", body.position.x, linalg.length(body.velocity)))
     }
   }

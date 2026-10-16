@@ -43,7 +43,7 @@ atlas_make :: proc(r: ^Renderer, f: int, layers: u32) -> bool {
     desc.layers = 1
   }
   atlas := allocate_texture(r, desc, target = true) or_return
-  if old := r.atlas[f]; old != 0 do destroy_texture(r, old)
+  if old := r.atlas[f]; old != 0 do texture_destroy(r, old)
   r.atlas[f], r.atlas_layers[f] = atlas, layers
   return true
 }

@@ -10,10 +10,12 @@ RENDER_BACKEND :: #config(RENDER_BACKEND, "vulkan")
 
 // The backend is chosen at build time, and render calls its procs directly (backend_glue.odin).
 when RENDER_BACKEND == "vulkan" {
+  @(private)
   FRAMES_IN_FLIGHT :: vulkan.FRAMES_IN_FLIGHT
   // WindowHandle is the window render draws into (platform.Platform.window).
   WindowHandle :: vulkan.WindowHandle
 } else when RENDER_BACKEND == "wgpu" {
+  @(private)
   FRAMES_IN_FLIGHT :: wgpu.FRAMES_IN_FLIGHT
   // WindowHandle is the window render draws into (platform.Platform.window).
   WindowHandle :: wgpu.WindowHandle
@@ -23,3 +25,8 @@ when RENDER_BACKEND == "vulkan" {
 // NO_TEXTURE is none.
 TextureHandle :: rhi.TextureHandle
 TextureFormat :: rhi.TextureFormat
+// BlendMode and CullMode configure a material shader (material_shader_create).
+BlendMode :: rhi.BlendMode
+CullMode :: rhi.CullMode
+// Timing is one pass's GPU time (gpu_timings).
+Timing :: rhi.Timing

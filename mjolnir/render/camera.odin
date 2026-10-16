@@ -62,8 +62,8 @@ draw_list_shape :: proc(self: ^Renderer, shadow: bool) -> (lists, capacity: u32)
   }
 }
 
-// Camera is a view into the scene: pose and projection, plus the images it renders into.
-// Its depth pyramids live in Renderer.pyramids at its slot (camera_slot).
+// Camera is a view into the scene: pose and projection, plus the images it renders into
+// (camera_attachment).
 Camera :: struct {
   position:                     [3]f32,
   rotation:                     quaternion128,
@@ -221,14 +221,14 @@ camera_set_orthographic :: proc(
 
 // cursor_ray returns the world-space ray from the main camera through cursor, given in
 // window coordinates as input.State reports them (the DPI scale is applied here).
-cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (origin, dir: [3]f32, ok: bool) {
+cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (ray: geom.Ray, ok: bool) {
   cam := main_camera(self) or_return
   p := cursor * self.dpi_scale
   ndc := 2 * p / [2]f32{f32(cam.extent[0]), f32(cam.extent[1])} - 1
   ray_eye := linalg.matrix4_inverse(camera_projection_matrix(cam)) * [4]f32{ndc.x, ndc.y, -1, 1}
   ray_eye = {ray_eye.x, ray_eye.y, -1, 0}
-  dir = linalg.normalize((linalg.matrix4_inverse(camera_view_matrix(cam)) * ray_eye).xyz)
-  return cam.position, dir, true
+  dir := linalg.normalize((linalg.matrix4_inverse(camera_view_matrix(cam)) * ray_eye).xyz)
+  return {origin = cam.position, direction = dir}, true
 }
 
 // camera returns the camera of handle, or false if it is not live.
@@ -242,10 +242,10 @@ main_camera :: proc(self: ^Renderer) -> (^Camera, bool) #optional_ok {
   return camera(self, self.main_camera)
 }
 
-// create_camera creates a perspective camera with its own render targets; it lives until
-// destroy_camera or teardown.
+// camera_create creates a perspective camera with its own render targets; it lives until
+// camera_destroy or teardown.
 // Every camera is drawn each frame; the main camera is presented to the swapchain.
-create_camera :: proc(
+camera_create :: proc(
   self: ^Renderer,
   width, height: u32,
   position: [3]f32 = {0, 0, 3},
@@ -268,19 +268,19 @@ create_camera :: proc(
   lists, capacity := draw_list_shape(self, shadow = false)
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     if !draw_list_create(self, camera_slot(u32(handle)) + frame, lists, capacity) {
-      destroy_camera(self, handle)
+      camera_destroy(self, handle)
       return 0, false
     }
   }
   if !create_targets(self, u32(handle)) {
-    destroy_camera(self, handle)
+    camera_destroy(self, handle)
     return 0, false
   }
   return handle, true
 }
 
-// destroy_camera frees the camera; its slot is reused once no frame in flight reads it.
-destroy_camera :: proc(self: ^Renderer, handle: CameraHandle) {
+// camera_destroy frees the camera; its slot is reused once no frame in flight reads it.
+camera_destroy :: proc(self: ^Renderer, handle: CameraHandle) {
   cam := camera(self, handle)
   if cam == nil do return
   destroy_targets(self, u32(handle))
@@ -289,22 +289,26 @@ destroy_camera :: proc(self: ^Renderer, handle: CameraHandle) {
   if handle == self.main_camera do self.main_camera = 0
 }
 
-// camera_attachment returns a camera's attachment texture for frame_index (default: the frame recorded next).
+// camera_attachment returns a camera's attachment texture as the next frame renders it.
+// previous_frame returns the one the last submitted frame rendered instead: sampling it
+// while the next frame draws the other copy does not depend on the order cameras draw in.
 camera_attachment :: proc(
   self: ^Renderer,
   handle: CameraHandle,
   attachment_type: AttachmentType,
-  frame_index: Maybe(u32) = nil,
+  previous_frame := false,
 ) -> (
   texture: TextureHandle,
   ok: bool,
 ) #optional_ok {
   cam := camera(self, handle) or_return
-  return cam.attachments[attachment_type][frame_index.? or_else current_frame(self)], true
+  f := current_frame(self)
+  if previous_frame do f = (f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
+  return cam.attachments[attachment_type][f], true
 }
 
-// resize_camera resizes a camera's render targets; a perspective projection follows the new aspect ratio.
-resize_camera :: proc(
+// camera_resize resizes a camera's render targets; a perspective projection follows the new aspect ratio.
+camera_resize :: proc(
   self: ^Renderer,
   handle: CameraHandle,
   width, height: u32,
@@ -386,28 +390,14 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
 @(private)
 destroy_targets :: proc(self: ^Renderer, index: u32) {
   camera := &self.cameras[index]
-  for frames in camera.attachments do for handle in frames do destroy_texture(self, handle)
+  for frames in camera.attachments do for handle in frames do texture_destroy(self, handle)
   camera.attachments = {}
   cull_groups_clear(self)
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     slot := camera_slot(index) + frame
     self.pyramid_bound[slot] = false
-    destroy_texture(self, self.pyramids[slot])
+    texture_destroy(self, self.pyramids[slot])
     self.pyramids[slot] = 0
   }
 }
 
-// main_camera_orbit is camera_orbit on the main camera. The controller owns yaw, pitch and
-// distance and sets them each tick; camera_orbit_state adopts an existing pose.
-main_camera_orbit :: proc(self: ^Renderer, yaw, pitch, distance: f32, target: [3]f32 = {0, 0, 0}) {
-  cam := main_camera(self)
-  if cam == nil do return
-  camera_orbit(cam, yaw, pitch, distance, target)
-}
-
-// main_camera_look_at aims the main camera at to from from.
-main_camera_look_at :: proc(self: ^Renderer, from, to: [3]f32) {
-  cam := main_camera(self)
-  if cam == nil do return
-  camera_look_at(cam, from, to)
-}

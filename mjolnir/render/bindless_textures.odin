@@ -38,9 +38,9 @@ allocate_texture :: proc(r: ^Renderer, desc: TextureDesc, data: []u8 = nil, targ
   return TextureHandle(h), true
 }
 
-// destroy_texture invalidates handle at once; its slot and image are released once no
+// texture_destroy invalidates handle at once; its slot and image are released once no
 // frame in flight samples them. teardown frees every texture made since init.
-destroy_texture :: proc(r: ^Renderer, handle: TextureHandle) {
+texture_destroy :: proc(r: ^Renderer, handle: TextureHandle) {
   guard(r)
   cont.slots_free(texture_pool(r, handle), u32(handle))
 }
@@ -48,9 +48,23 @@ destroy_texture :: proc(r: ^Renderer, handle: TextureHandle) {
 // NO_TEXTURE is the TextureHandle of none, as materials, emitters and draw2d commands hold it.
 NO_TEXTURE :: 0
 
-// create_texture_from_data decodes an encoded image (png, jpg, hdr, ...) held in memory
+// texture_create makes a 2D texture of raw pixels, size.x by size.y texels of format (A8
+// samples as white with alpha = the pixel). It lives until texture_destroy or teardown.
+texture_create :: proc(
+  self: ^Renderer,
+  pixels: []u8,
+  size: [2]u32,
+  format: TextureFormat = .RGBA8_SRGB,
+) -> (
+  handle: TextureHandle,
+  ok: bool,
+) #optional_ok {
+  return allocate_texture(self, {extent = size, format = format, usage = {.SAMPLED}}, pixels)
+}
+
+// texture_load decodes an encoded image (png, jpg, hdr, ...) held in memory
 // into a bindless 2D texture. RGBA32F decodes it as linear HDR.
-create_texture_from_data :: proc(
+texture_load :: proc(
   r: ^Renderer,
   data: []u8,
   format: TextureFormat = .RGBA8_SRGB,

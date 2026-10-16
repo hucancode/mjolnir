@@ -147,7 +147,7 @@ ccd_step_body :: proc(
   geometry.bvh_query_aabb(&world.static_bvh, swept_aabb, static_candidates)
   candidate_count = len(static_candidates)
   for candidate in static_candidates {
-    body_b := get_body(world, candidate.handle) or_continue
+    body_b := body(world, candidate.handle) or_continue
     toi, hit := swept_test(collider_a, &body_b.collider, body_a.position, body_b.position, body_a.rotation, body_b.rotation, motion)
     if hit do earliest_toi = min(earliest_toi, toi)
   }

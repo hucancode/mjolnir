@@ -23,10 +23,10 @@ Color :: enum {
 // A material, stored as the shaders read it. A texture of 0 (NO_TEXTURE)
 // leaves that texture out.
 Material :: struct {
-  albedo_index:             TextureHandle,
-  metallic_roughness_index: TextureHandle,
-  normal_index:             TextureHandle,
-  emissive_index:           TextureHandle,
+  albedo_texture:             TextureHandle,
+  metallic_roughness_texture: TextureHandle,
+  normal_texture:             TextureHandle,
+  emissive_texture:           TextureHandle,
   metallic_value:           f32,
   roughness_value:          f32,
   emissive_value:           f32,
@@ -50,20 +50,24 @@ material :: proc(r: ^Renderer, h: MaterialHandle) -> (^Material, bool) #optional
   return &write_table(r, .MATERIALS, Material)[h], true
 }
 
-// create_material creates a material; it lives until destroy_material or teardown.
-create_material :: proc(
+// material_create creates a material; it lives until material_destroy or teardown. type
+// picks how it draws: .SPRITE shows a frame_columns x frame_rows sheet cell of albedo_texture
+// on a camera-facing QUAD_XY; .CUSTOM is drawn by shader (material_shader_create), which reads
+// the other fields as it likes.
+material_create :: proc(
   self: ^Renderer,
   type: MaterialType = .PBR,
-  albedo_handle: TextureHandle = 0,
-  metallic_roughness_handle: TextureHandle = 0,
-  normal_handle: TextureHandle = 0,
-  emissive_handle: TextureHandle = 0,
+  albedo_texture: TextureHandle = 0,
+  metallic_roughness_texture: TextureHandle = 0,
+  normal_texture: TextureHandle = 0,
+  emissive_texture: TextureHandle = 0,
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
   base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
+  shader: MaterialShader = 0,
 ) -> (
   handle: MaterialHandle,
   ok: bool,
@@ -72,71 +76,19 @@ create_material :: proc(
   handle = MaterialHandle(cont.slots_alloc(&self.material_slots) or_return)
   material(self, handle)^ = {
     type                     = type,
-    albedo_index             = albedo_handle,
-    metallic_roughness_index = metallic_roughness_handle,
-    normal_index             = normal_handle,
-    emissive_index           = emissive_handle,
+    albedo_texture             = albedo_texture,
+    metallic_roughness_texture = metallic_roughness_texture,
+    normal_texture             = normal_texture,
+    emissive_texture           = emissive_texture,
     metallic_value           = metallic_value,
     roughness_value          = roughness_value,
     emissive_value           = emissive_value,
     base_color_factor        = base_color_factor,
     frame_columns            = max(frame_columns, 1),
     frame_rows               = max(frame_rows, 1),
+    shader                   = shader,
   }
   return handle, true
-}
-
-// Solid-color PBR material from metallic/roughness/emissive scalars.
-material_pbr :: proc(
-  self: ^Renderer,
-  base_color: [4]f32 = {1, 1, 1, 1},
-  metallic: f32 = 0.0,
-  roughness: f32 = 1.0,
-  emissive: f32 = 0.0,
-) -> (MaterialHandle, bool) #optional_ok {
-  return create_material(
-    self,
-    type              = .PBR,
-    base_color_factor = base_color,
-    metallic_value    = metallic,
-    roughness_value   = roughness,
-    emissive_value    = emissive,
-  )
-}
-
-// material_wireframe creates a wireframe material of the given color.
-material_wireframe :: proc(
-  self: ^Renderer,
-  base_color: [4]f32 = {1, 1, 1, 1},
-) -> (MaterialHandle, bool) #optional_ok {
-  return create_material(self, type = .WIREFRAME, base_color_factor = base_color)
-}
-
-// material_transparent creates an alpha-blended material of the given color.
-material_transparent :: proc(
-  self: ^Renderer,
-  base_color: [4]f32 = {1, 1, 1, 0.5},
-) -> (MaterialHandle, bool) #optional_ok {
-  return create_material(self, type = .TRANSPARENT, base_color_factor = base_color)
-}
-
-// Sprite-sheet material of `frame_columns` x `frame_rows` cells, tinted by
-// `tint`. Attach it with the builtin QUAD_XY mesh; it always faces the camera.
-material_sprite :: proc(
-  self: ^Renderer,
-  texture: TextureHandle,
-  frame_columns: u32 = 1,
-  frame_rows: u32 = 1,
-  tint: [4]f32 = {1, 1, 1, 1},
-) -> (MaterialHandle, bool) #optional_ok {
-  return create_material(
-    self,
-    type = .SPRITE,
-    albedo_handle = texture,
-    base_color_factor = tint,
-    frame_columns = frame_columns,
-    frame_rows = frame_rows,
-  )
 }
 
 // Show cell `frame` (row-major, wrapped to the sheet size) of a sprite
@@ -148,8 +100,8 @@ set_sprite_frame :: proc(self: ^Renderer, handle: MaterialHandle, frame: u32) ->
   return true
 }
 
-// destroy_material frees the material slot; false if handle is not live.
-destroy_material :: proc(self: ^Renderer, handle: MaterialHandle) -> bool {
+// material_destroy frees the material slot; false if handle is not live.
+material_destroy :: proc(self: ^Renderer, handle: MaterialHandle) -> bool {
   guard(self)
   cont.slots_free(&self.material_slots, u32(handle)) or_return
   clear_entry(self, .MATERIALS, u32(handle))
@@ -184,6 +136,6 @@ init_builtin_materials :: proc(self: ^Renderer) {
     .MAGENTA = {1.0, 0.0, 1.0, 1.0},
   }
   for color, i in colors {
-    self.builtin_materials[i] = material_pbr(self, base_color = color) or_continue
+    self.builtin_materials[i] = material_create(self, base_color_factor = color) or_continue
   }
 }

@@ -2,7 +2,7 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/geometry"
+import "../../mjolnir/debugui"
 import "../../mjolnir/physics"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
@@ -61,6 +61,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -104,6 +105,7 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -117,17 +119,19 @@ should_close :: proc(app: ^App) -> bool {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   panel(app)
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {16, 14, 16}, {0, 1.5, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {16, 14, 16}, {0, 1.5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-6, 14, 6})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.96, 0.9, 1}, 6.0, true))
+  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.96, 0.9, 1}, 6.0, true))
   spawn_scene(app)
   return true
 }
@@ -142,8 +146,8 @@ spawn_scene :: proc(app: ^App) {
   scenery[4] = {center = {0, wy, -GROUND_HALF.z}, half = {GROUND_HALF.x, WALL_HEIGHT, WALL_THICK}}
   for &s in scenery {
     s.node, _ = world.spawn(&app.scene, s.center)
-    physics.create_body(&phys, s.center, collider = physics.BoxCollider{half_extents = s.half}, user = world.Handle(s.node))
-    visual := world.spawn_child(&app.scene, s.node)
+    physics.body_create(&phys, s.center, collider = physics.BoxCollider{half_extents = s.half}, user = world.Handle(s.node))
+    visual := world.spawn(&app.scene, parent = s.node)
     render.attach(&app.renderer, visual.index, render.primitive(&app.renderer, .CUBE, .GRAY))
     world.scale_xyz(&app.scene, visual, s.half.x, s.half.y, s.half.z)
   }
@@ -153,7 +157,7 @@ spawn_scene :: proc(app: ^App) {
     q := obj_rotation(&b)
     b.node, _ = world.spawn(&app.scene, b.position)
     world.rotate(&app.scene, b.node, q)
-    b.visual, _ = world.spawn_child(&app.scene, b.node)
+    b.visual, _ = world.spawn(&app.scene, parent = b.node)
     render.attach(&app.renderer, b.visual.index, render.primitive(&app.renderer, obj_mesh(b.shape), obj_color(b.kind)))
     s := obj_visual_scale(&b)
     world.scale_xyz(&app.scene, b.visual, s.x, s.y, s.z)
@@ -216,9 +220,9 @@ obj_rotation :: proc(b: ^Body) -> quaternion128 {
 // The static body has no user link: the example poses its node directly.
 create_body_physics :: proc(app: ^App, b: ^Body) {
   if b.kind == .Static {
-    b.handle = physics.create_body(&phys, b.position, obj_rotation(b), obj_collider(b))
+    b.handle = physics.body_create(&phys, b.position, obj_rotation(b), obj_collider(b))
   } else {
-    b.handle = physics.create_body(&phys, b.position, obj_rotation(b), obj_collider(b), f32(b.mass), user = world.Handle(b.node))
+    b.handle = physics.body_create(&phys, b.position, obj_rotation(b), obj_collider(b), f32(b.mass), user = world.Handle(b.node))
   }
 }
 
@@ -245,7 +249,7 @@ drive_circle :: proc(b: ^Body) {
   target := center + [3]f32{math.cos(a), 0, math.sin(a)} * CIRCLE_RADIUS
   tangent :=
     [3]f32{-math.sin(a), 0, math.cos(a)} * (CIRCLE_RADIUS * CIRCLE_OMEGA)
-  body, ok := physics.get_body(&phys, b.handle)
+  body, ok := physics.body(&phys, b.handle)
   if !ok do return
   desired := tangent + (target - body.position) * 3.0
   physics.apply_impulse(&phys, b.handle, (desired - body.velocity) * f32(b.mass))
@@ -253,7 +257,7 @@ drive_circle :: proc(b: ^Body) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -261,7 +265,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if reset_requested {
     reset_requested = false
     physics.teardown(&phys)
@@ -323,12 +327,9 @@ update :: proc(app: ^App, dt: f32) {
 handle_picking :: proc(app: ^App) {
   if app.input.mouse_captured do return
   if !input.mouse_pressed(&app.input, .LEFT) do return
-  origin, dir, has_ray := render.cursor_ray(&app.renderer, app.input.cursor)
+  ray, has_ray := render.cursor_ray(&app.renderer, app.input.cursor)
   if !has_ray do return
-  hit := physics.raycast(
-    &phys,
-    geometry.Ray{origin = origin, direction = dir},
-  )
+  hit := physics.raycast(&phys, ray)
   if !hit.hit {
     selected = -1
     return
@@ -384,7 +385,7 @@ body_transform :: proc(
   if b.kind == .Static {
     return b.position, obj_rotation(b)
   }
-  if body, ok := physics.get_body(&phys, b.handle); ok {
+  if body, ok := physics.body(&phys, b.handle); ok {
     return body.position, body.rotation
   }
   return b.position, obj_rotation(b)
@@ -410,7 +411,7 @@ draw_selection :: proc(app: ^App) {
 }
 
 panel :: proc(app: ^App) {
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Inspector", {20, 220, 320, 500}, {.NO_CLOSE}) {
     if selected <= 0 {
       mu.label(ctx, "Left-click an object to select it.")

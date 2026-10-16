@@ -393,7 +393,7 @@ draw_batches :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, keys: 
       if materials && batch.material_id != bound {
         bound = batch.material_id
         m := &material_table[bound]
-        texture_bind(r, cmd, .MATERIAL, m.albedo_index, m.metallic_roughness_index, m.normal_index, m.emissive_index)
+        texture_bind(r, cmd, .MATERIAL, m.albedo_texture, m.metallic_roughness_texture, m.normal_texture, m.emissive_texture)
       }
       run := 1
       if first_instance {
@@ -425,11 +425,11 @@ draw_count_record :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, f: u32) {
   dev.cmd_copy_buffer(&r.gpu, cmd, r.draw_lists[slot].buffer, 0, r.draw_count_readback[f], 0, size_of(u32))
 }
 
-// draw_count is the opaque draws the main camera's cull wrote, a few frames back (WebGPU) or
-// of the last finished frame (Vulkan).
-@(private)
-draw_count :: proc(r: ^Renderer, f: u32) -> u32 {
+// draw_count is how many opaque draws the main camera's culling kept, a few frames back
+// (WebGPU) or in the last finished frame (Vulkan): a statistic to show.
+draw_count :: proc(self: ^Renderer) -> u32 {
+  if _, ok := main_camera(self); !ok do return 0
   value: [size_of(u32)]u8
-  dev.buffer_read(&r.gpu, r.draw_count_readback[f], 0, value[:])
+  dev.buffer_read(&self.gpu, self.draw_count_readback[current_frame(self)], 0, value[:])
   return (^u32)(&value)^
 }

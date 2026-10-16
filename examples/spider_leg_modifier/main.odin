@@ -1,19 +1,21 @@
 // Procedural spider legs — IK + parabolic foot lift.
 package main
 
-import "../../mjolnir"
-import "../../mjolnir/input"
-import "../../mjolnir/platform"
-import "../../mjolnir/render"
-import "../../mjolnir/animation"
-import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import mu "vendor:microui"
+import "../../mjolnir"
+import "../../mjolnir/debugui"
+import "../../mjolnir/animation"
+import "../../mjolnir/gltf"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
+import "../../mjolnir/render"
+import "../../mjolnir/world"
 
-scene: mjolnir.GltfScene
+scene: gltf.Scene
 rig: ^animation.Rig
 animator: animation.Animator
 animation_time: f32 = 0
@@ -46,6 +48,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -72,10 +75,11 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
-  mjolnir.gltf_scene_destroy(&scene)
+  gltf.scene_destroy(&scene)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -85,10 +89,11 @@ should_close :: proc(app: ^App) -> bool {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {0, 30, 15}, {0, 0, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 30, 15}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  scene = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
+  scene = gltf.load(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
   if len(scene.roots) == 0 || len(scene.skinned) == 0 do return true
   spider_root_node = scene.roots[0]
   world.translate(&app.scene, spider_root_node, y = 5)
@@ -132,7 +137,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, ground_plane.index, render.primitive(&app.renderer, .CUBE, .GRAY))
   world.scale(&app.scene, ground_plane, [3]f32{20, 0.2, 20})
   light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, light.index, render.point_light_attachment(radius=15))
+  render.attach(&app.renderer, light.index, render.make_point_light(radius=15))
   return true
 }
 
@@ -147,7 +152,7 @@ apply_group :: proc(app: ^App, group: []int, lift_height, lift_duration, lift_fr
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -155,7 +160,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if body_anim_enabled {
     animation_time += dt
     body_x := f32(body_amplitude) * math.sin(animation_time * f32(body_speed) * 2 * math.PI)
@@ -195,7 +200,7 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Spider Legs", {500, 20, 340, 480}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Body motion")
@@ -216,5 +221,6 @@ frame :: proc(app: ^App) -> bool {
     mu.label(ctx, "Lift height"); mu.slider(ctx, &lift_height_b, 0.0, 5.0)
     mu.label(ctx, "Lift duration (s)"); mu.slider(ctx, &lift_duration_b, 0.05, 2.0)
   }
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

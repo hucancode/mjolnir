@@ -39,10 +39,10 @@ main :: proc() {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   cube := world.spawn(&app.scene)
   render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, .RED))
-  render.main_camera_look_at(&app.renderer, {3, 2, 3}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   return true
 }
@@ -67,7 +67,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)

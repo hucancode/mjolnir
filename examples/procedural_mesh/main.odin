@@ -75,22 +75,22 @@ spawn_mesh :: proc(app: ^App, mesh_handle: render.MeshHandle, material: render.M
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {0, 6, 14}, {0, 1, 0})
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 6, 14}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {6, 12, 6})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 0.97, 0.93, 5.0}, shadow_radius = 20.0))
+  render.attach(&app.renderer, light.index, render.make_directional_light(color = {1, 0.97, 0.93, 5.0}, shadow_radius = 20.0))
   ground := world.spawn(&app.scene, {0, -1, 0})
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 12.0)
 
-  wave_mat   := render.material_pbr(&app.renderer, {0.3, 0.55, 0.85, 1}, metallic = 0.2, roughness = 0.5)
-  knot_mat   := render.material_pbr(&app.renderer, {0.9, 0.5,  0.2,  1}, metallic = 0.8, roughness = 0.3)
-  spiral_mat := render.material_pbr(&app.renderer, {0.4, 0.85, 0.4,  1}, metallic = 0.0, roughness = 0.7)
+  wave_mat   := render.material_create(&app.renderer, base_color_factor = {0.3, 0.55, 0.85, 1}, metallic_value = 0.2, roughness_value = 0.5)
+  knot_mat   := render.material_create(&app.renderer, base_color_factor = {0.9, 0.5,  0.2,  1}, metallic_value = 0.8, roughness_value = 0.3)
+  spiral_mat := render.material_create(&app.renderer, base_color_factor = {0.4, 0.85, 0.4,  1}, metallic_value = 0.0, roughness_value = 0.7)
 
-  wave_node   = spawn_mesh(app, render.create_mesh(&app.renderer, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0})
-  knot_node   = spawn_mesh(app, render.create_mesh(&app.renderer, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0})
-  spiral_node = spawn_mesh(app, render.create_mesh(&app.renderer, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0})
+  wave_node   = spawn_mesh(app, render.mesh_create(&app.renderer, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0})
+  knot_node   = spawn_mesh(app, render.mesh_create(&app.renderer, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0})
+  spiral_node = spawn_mesh(app, render.mesh_create(&app.renderer, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0})
   return true
 }
 
@@ -197,7 +197,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   spin += dt * f32(rotate_speed)
   set_spin(app, wave_node,   wave_visible,   spin, {-6, 0, 0})
   set_spin(app, knot_node,   knot_visible,   spin, {0, 1.5, 0})

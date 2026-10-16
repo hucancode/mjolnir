@@ -52,8 +52,8 @@ ForceField :: struct {
 }
 #assert(size_of(ForceField) == 20)
 
-// emitter_attachment returns an enabled Emitter for attach.
-emitter_attachment :: proc(
+// make_emitter returns an enabled Emitter for attach.
+make_emitter :: proc(
   texture_handle: TextureHandle = 0,
   emission_rate: f32 = 50.0,
   initial_velocity: [3]f32 = {0, 1, 0},
@@ -84,8 +84,8 @@ emitter_attachment :: proc(
   }
 }
 
-// forcefield_attachment returns an enabled ForceField for attach.
-forcefield_attachment :: proc(
+// make_forcefield returns an enabled ForceField for attach.
+make_forcefield :: proc(
   area_of_effect: f32 = 5.0,
   strength: f32 = 1.0,
   tangent_strength: f32 = 0.0,

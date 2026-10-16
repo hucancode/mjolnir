@@ -1,6 +1,5 @@
-// Index allocation containers used across the engine.
-// Slots (slots.odin) hands out indices and generational Handles into caller-owned
-// storage, optionally deferring index reuse by a grace period. SlabAllocator
-// (slab_allocator.odin) allocates blocks of several size classes from one shared
-// index range.
+// Index allocation over storage the caller owns. Slots hands out indices and generational
+// Handles, optionally holding a freed index back for a grace period so a lagging consumer
+// never sees it reused. SlabAllocator hands out blocks of several size classes from one
+// shared index range.
 package containers

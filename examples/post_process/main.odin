@@ -2,6 +2,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -13,6 +14,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -74,6 +76,7 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -86,8 +89,9 @@ should_close :: proc(app: ^App) -> bool {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {6, 5, 10}, {0, 1.0, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {6, 5, 10}, {0, 1.0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   // each backend embeds only its own source
   when render.RENDER_BACKEND == "vulkan" {
@@ -97,7 +101,7 @@ setup :: proc(app: ^App) -> bool {
   }
   ok: bool
   app.vignette, ok = render.post_shader_create(&app.renderer, vignette_spirv, vignette_wgsl)
-  if !ok do log.error("Failed to create the vignette shader")
+  if !ok do log.error("Failed to node_create the vignette shader")
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 30.0)
@@ -105,29 +109,29 @@ setup :: proc(app: ^App) -> bool {
   cube_mesh   := app.renderer.builtin_meshes[.CUBE]
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
 
-  magenta_emit := render.material_pbr(&app.renderer, {1.0, 0.1, 0.8, 1}, emissive = 4.0)
+  magenta_emit := render.material_create(&app.renderer, base_color_factor = {1.0, 0.1, 0.8, 1}, emissive_value = 4.0)
   spawn_mesh(app, sphere_mesh, magenta_emit, {-3.0, 1.2, 1.5})
-  cyan_emit := render.material_pbr(&app.renderer, {0.1, 0.9, 1.0, 1}, emissive = 4.0)
+  cyan_emit := render.material_create(&app.renderer, base_color_factor = {0.1, 0.9, 1.0, 1}, emissive_value = 4.0)
   spawn_mesh(app, sphere_mesh, cyan_emit, {0.0, 1.2, 1.5})
-  yellow_emit := render.material_pbr(&app.renderer, {1.0, 0.9, 0.2, 1}, emissive = 4.0)
+  yellow_emit := render.material_create(&app.renderer, base_color_factor = {1.0, 0.9, 0.2, 1}, emissive_value = 4.0)
   spawn_mesh(app, sphere_mesh, yellow_emit, {3.0, 1.2, 1.5})
 
-  metal := render.material_pbr(&app.renderer, {0.9, 0.9, 0.95, 1}, metallic = 1.0, roughness = 0.15)
+  metal := render.material_create(&app.renderer, base_color_factor = {0.9, 0.9, 0.95, 1}, metallic_value = 1.0, roughness_value = 0.15)
   spawn_mesh(app, sphere_mesh, metal, {0.5, 1.0, -1.5})
-  rough := render.material_pbr(&app.renderer, {0.2, 0.6, 0.8, 1}, metallic = 0.0, roughness = 0.8)
+  rough := render.material_create(&app.renderer, base_color_factor = {0.2, 0.6, 0.8, 1}, metallic_value = 0.0, roughness_value = 0.8)
   spawn_mesh(app, cube_mesh, rough, {3.0, 1.0, -1.5})
-  orange := render.material_pbr(&app.renderer, {1.0, 0.4, 0.1, 1}, emissive = 4.0)
+  orange := render.material_create(&app.renderer, base_color_factor = {1.0, 0.4, 0.1, 1}, emissive_value = 4.0)
   spawn_mesh(app, cube_mesh, orange, {-3.0, 1.0, -1.5})
-  glass := render.material_transparent(&app.renderer, {0.2, 0.9, 0.4, 0.4})
+  glass := render.material_create(&app.renderer, .TRANSPARENT, base_color_factor = {0.2, 0.9, 0.4, 0.4})
   spawn_mesh(app, sphere_mesh, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
 
   white_mat := app.renderer.builtin_materials[.WHITE]
   for i in 0 ..< 5 do spawn_mesh(app, cube_mesh, white_mat, {f32(i) * 4.0 - 8.0, 0.5, -7.0})
 
   sun := world.spawn(&app.scene, {-3, 8, 6})
-  render.attach(&app.renderer, sun.index, render.directional_light_attachment(color = {1.0, 0.95, 0.9, 1}, shadow_radius = 5.0, cast_shadow = true))
+  render.attach(&app.renderer, sun.index, render.make_directional_light(color = {1.0, 0.95, 0.9, 1}, shadow_radius = 5.0, cast_shadow = true))
   lamp := world.spawn(&app.scene, {0, 3, 0})
-  render.attach(&app.renderer, lamp.index, render.point_light_attachment(color = {1.0, 0.5, 0.2, 1}, radius = 8.0, cast_shadow = false))
+  render.attach(&app.renderer, lamp.index, render.make_point_light(color = {1.0, 0.5, 0.2, 1}, radius = 8.0, cast_shadow = false))
   log.info("Post-process stack panel — toggle effects via debug UI")
   return true
 }
@@ -139,7 +143,7 @@ spawn_mesh :: proc(app: ^App, mesh: render.MeshHandle, material: render.Material
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -147,7 +151,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   clear(&app.renderer.effect_stack)
   if outline_on    do append(&app.renderer.effect_stack, render.OutlineEffect{thickness = f32(outline_thickness)})
   if fog_on        do append(&app.renderer.effect_stack, render.FogEffect{color = {0.55, 0.6, 0.7}, start = f32(fog_start), end = f32(fog_end)})
@@ -159,7 +163,7 @@ update :: proc(app: ^App, dt: f32) {
   if tonemap_on    do append(&app.renderer.effect_stack, render.ToneMapEffect{exposure = f32(tonemap_exposure), gamma = f32(tonemap_gamma)})
   if vignette_on && app.vignette != 0 {
     params := VignetteParams{color = {0.02, 0.0, 0.05}, radius = f32(vignette_radius), softness = f32(vignette_softness), strength = f32(vignette_strength)}
-    append(&app.renderer.effect_stack, render.custom_effect(app.vignette, params))
+    append(&app.renderer.effect_stack, render.make_custom_effect(app.vignette, params))
   }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
@@ -169,11 +173,12 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   debug_ui(app)
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Post-process", {700, 20, 280, 560}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Tonemap", &tonemap_on)

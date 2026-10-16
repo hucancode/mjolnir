@@ -12,7 +12,13 @@ SlabConfig :: [MAX_SLAB_CLASSES]struct {
 // It maintains multiple "slabs" of different block sizes for efficient allocation.
 // All classes share one contiguous index range.
 SlabAllocator :: struct {
-  classes:  [MAX_SLAB_CLASSES]struct {
+  capacity: u32, // Total capacity across all classes
+  using _:  Slab_State,
+}
+
+@(private)
+Slab_State :: struct {
+  classes: [MAX_SLAB_CLASSES]struct {
     block_size:  u32, // Size of each block in this class
     block_count: u32, // Total blocks available in this class
     free_list:   [dynamic]u32, // Recycled indices
@@ -20,7 +26,6 @@ SlabAllocator :: struct {
     base:        u32, // Base index for this class
     mark:        u32, // slab_rewind frees every block from here on
   },
-  capacity: u32, // Total capacity across all classes
 }
 
 // slab_init initializes the slab allocator with the given size class configuration.

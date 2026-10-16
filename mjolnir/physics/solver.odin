@@ -182,8 +182,8 @@ prepare_contacts :: proc(world: ^World) {
   parallel_for(world, len(world.contacts), nil, proc(world: ^World, _: rawptr, _, start, end: int) {
     #no_bounds_check for i in start ..< end {
       c := &world.contacts[i]
-      a := get_body(world, c.body_a) or_continue
-      b := get_body(world, c.body_b) or_continue
+      a := body(world, c.body_a) or_continue
+      b := body(world, c.body_b) or_continue
       prepare_contact(c, a, b)
     }
   }, min_items = 200)
@@ -312,8 +312,8 @@ solve_contact :: #force_inline proc(
   soft: [2]Softness,
   inv_h: f32,
 ) {
-  a, a_ok := get_body(world, c.body_a)
-  b, b_ok := get_body(world, c.body_b)
+  a, a_ok := body(world, c.body_a)
+  b, b_ok := body(world, c.body_b)
   if !a_ok || !b_ok do return
   switch pass {
   case .Warmstart:

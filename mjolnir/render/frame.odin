@@ -125,9 +125,8 @@ scope_end :: proc(r: ^Renderer, cmd: rhi.CommandList, name: string) {
 }
 
 // gpu_timings is the GPU time of each pass of a frame a few frames back, in the order they
-// began; empty where the device cannot time them (rhi.Caps.timestamps). Valid until the next
-// frame.
-gpu_timings :: proc(r: ^Renderer) -> []rhi.Timing {
+// began; empty where the device cannot time them. Valid until the next frame.
+gpu_timings :: proc(r: ^Renderer) -> []Timing {
   if !dev.ready(&r.gpu) do return nil
   return dev.frame_timings(&r.gpu)
 }

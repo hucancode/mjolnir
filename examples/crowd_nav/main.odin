@@ -2,6 +2,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -42,6 +43,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -69,12 +71,13 @@ main :: proc() {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {32, 28, 32}, {0, 0, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {32, 28, 32}, {0, 0, 0})
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {15, 25, 15})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.97, 0.92, 1}, 10.0, true))
+  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.97, 0.92, 1}, 10.0, true))
   build_scene(app)
   build_navmesh(app)
   visualize_navmesh(app)
@@ -85,10 +88,12 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
-  crowd.destroy(agent_crowd)
+  if agent_crowd != nil do crowd.destroy(agent_crowd)
+  free(agent_crowd)
   nav.destroy(&navmesh)
   bake.builder_destroy(&nav_builder)
 }
@@ -101,8 +106,8 @@ build_scene :: proc(app: ^App) {
   ground_geom := render.make_quad({0.25, 0.55, 0.25, 1})
   for &v in ground_geom.vertices { v.position.x *= WORLD_HALF * 2; v.position.z *= WORLD_HALF * 2 }
   bake.append_triangles(&nav_builder, render.positions(ground_geom, context.temp_allocator), ground_geom.indices)
-  gm := render.create_mesh(&app.renderer, ground_geom)
-  gmat := render.create_material(&app.renderer, type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8)
+  gm := render.mesh_create(&app.renderer, ground_geom)
+  gmat := render.material_create(&app.renderer, type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8)
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, ground.index, render.MeshAttachment{handle = gm, material = gmat, cast_shadow = false})
 
@@ -116,15 +121,16 @@ build_scene :: proc(app: ^App) {
     g := render.make_cube({0.7, 0.2, 0.2, 1})
     for &v in g.vertices { v.position.x *= o.size.x; v.position.y *= o.size.y; v.position.z *= o.size.z }
     bake.append_triangles(&nav_builder, render.positions(g, context.temp_allocator), g.indices, o.pos, true)
-    mh := render.create_mesh(&app.renderer, g)
-    mat := render.create_material(&app.renderer, type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6)
+    mh := render.mesh_create(&app.renderer, g)
+    mat := render.material_create(&app.renderer, type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6)
     n := world.spawn(&app.scene, o.pos)
     render.attach(&app.renderer, n.index, render.MeshAttachment{handle = mh, material = mat, cast_shadow = true})
   }
 }
 
 build_navmesh :: proc(app: ^App) {
-  if !bake.build(&navmesh, &nav_builder) do log.error("navmesh build failed")
+  data, ok := bake.build(&nav_builder, allocator = context.temp_allocator)
+  if !ok || !nav.load(&navmesh, data) do log.error("navmesh build failed")
 }
 
 visualize_navmesh :: proc(app: ^App) {
@@ -132,9 +138,9 @@ visualize_navmesh :: proc(app: ^App) {
   positions, indices := nav.debug_triangles(&navmesh, context.temp_allocator)
   for &p in positions do p.y += 0.2 // lift above the ground to avoid z-fighting
   nm_geom := render.from_triangles(positions, indices)
-  nm_mesh, mesh_ok := render.create_mesh(&app.renderer, nm_geom)
+  nm_mesh, mesh_ok := render.mesh_create(&app.renderer, nm_geom)
   if !mesh_ok do return
-  nm_mat, mat_ok := render.create_material(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7})
+  nm_mat, mat_ok := render.material_create(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7})
   if !mat_ok do return
   navmesh_node_handle = world.spawn(&app.scene)
   render.attach(&app.renderer, navmesh_node_handle.index, render.MeshAttachment{handle = nm_mesh, material = nm_mat, cast_shadow = true})
@@ -157,9 +163,13 @@ random_goal :: proc(app: ^App, away_from: [3]f32) -> [3]f32 {
 palette := [6][4]f32{{1, 0.25, 0.25, 1}, {0.25, 1, 0.25, 1}, {0.4, 0.4, 1, 1}, {1, 0.95, 0.2, 1}, {0.25, 0.95, 0.95, 1}, {1, 0.3, 0.95, 1}}
 
 spawn_agents :: proc(app: ^App) {
-  ok: bool
-  agent_crowd, ok = crowd.create(AGENT_COUNT, AGENT_RADIUS, &navmesh)
-  if !ok { log.error("crowd creation failed"); return }
+  agent_crowd = new(crowd.Crowd)
+  if !crowd.init(agent_crowd, AGENT_COUNT, AGENT_RADIUS, &navmesh.detour_mesh) {
+    log.error("crowd creation failed")
+    free(agent_crowd)
+    agent_crowd = nil
+    return
+  }
   params := crowd.DEFAULT_AGENT_PARAMS
   params.radius = AGENT_RADIUS
   params.height = AGENT_HEIGHT
@@ -168,11 +178,12 @@ spawn_agents :: proc(app: ^App) {
     angle := f32(i) / f32(AGENT_COUNT) * math.PI * 2
     r := SPAWN_RADIUS - 4.0
     pos := [3]f32{math.cos(angle) * r, 0, math.sin(angle) * r}
-    agents[i].id = crowd.add_agent(agent_crowd, pos, params)
+    // -1 when off the mesh: the agent is skipped
+    agents[i].id, _ = crowd.agent_add(agent_crowd, pos, params)
     agents[i].color = palette[i % len(palette)]
     cap_geom := render.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS)
-    mh := render.create_mesh(&app.renderer, cap_geom)
-    mat := render.create_material(&app.renderer, type = .PBR, base_color_factor = agents[i].color, emissive_value = 0.4)
+    mh := render.mesh_create(&app.renderer, cap_geom)
+    mat := render.material_create(&app.renderer, type = .PBR, base_color_factor = agents[i].color, emissive_value = 0.4)
     agents[i].node = world.spawn(&app.scene, pos + {0, AGENT_HEIGHT * 0.5, 0})
     render.attach(&app.renderer, agents[i].node.index, render.MeshAttachment{handle = mh, material = mat, cast_shadow = true})
   }
@@ -182,7 +193,7 @@ assign_swap_targets :: proc(app: ^App) {
   if agent_crowd == nil do return
   for a in agents {
     if a.id < 0 do continue
-    crowd.move_to(agent_crowd, a.id, random_goal(app, crowd.get_agent(agent_crowd, a.id).npos))
+    crowd.move_to(agent_crowd, a.id, random_goal(app, crowd.agent(agent_crowd, a.id).npos))
   }
 }
 
@@ -194,9 +205,9 @@ assign_all_to :: proc(app: ^App, goal: [3]f32) {
 }
 
 pick_navmesh_point :: proc(app: ^App) -> ([3]f32, bool) {
-  ro, rd, ok := render.cursor_ray(&app.renderer, app.input.cursor)
+  ray, ok := render.cursor_ray(&app.renderer, app.input.cursor)
   if !ok do return {}, false
-  return nav.raycast(&navmesh, ro, rd)
+  return nav.raycast(&navmesh, ray)
 }
 
 on_mouse_press :: proc(app: ^App) {
@@ -209,7 +220,7 @@ on_mouse_press :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -217,13 +228,13 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   on_mouse_press(app)
   if agent_crowd != nil {
     crowd.update(agent_crowd, dt)
     for a in agents {
       if a.id < 0 do continue
-      ag := crowd.get_agent(agent_crowd, a.id)
+      ag := crowd.agent(agent_crowd, a.id)
       world.translate(&app.scene, a.node, ag.npos + {0, AGENT_HEIGHT * 0.5, 0})
       if linalg.length2(ag.vel.xz) > 0.01 {
         world.rotate(&app.scene, a.node, math.atan2(ag.vel.x, ag.vel.z), linalg.VECTOR3F32_Y_AXIS)
@@ -248,7 +259,7 @@ draw_agent_corners :: proc(app: ^App, ag: ^crowd.Agent, color: [4]f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Crowd", {720, 20, 260, 200}, {.NO_CLOSE}) {
     mu.label(ctx, fmt.tprintf("Agents: %d", AGENT_COUNT))
     mu.label(ctx, "Right-click: set all goals")
@@ -257,5 +268,6 @@ frame :: proc(app: ^App) -> bool {
       assign_swap_targets(app)
     }
   }
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

@@ -64,11 +64,11 @@ main :: proc() {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   build_ui(app)
   cube := world.spawn(&app.scene)
   render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, .BLUE))
-  render.main_camera_look_at(&app.renderer, {3, 2, 3}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   return true
 }
@@ -86,17 +86,17 @@ shutdown :: proc(app: ^App) {
 text :: proc(app: ^App, parent: ui.NodeHandle, s: string, size: f32 = 18, n: ui.Node = {}) -> ui.NodeHandle {
   n := n
   n.parent, n.text, n.font_size = parent, s, size
-  return ui.create(&app.gui, n)
+  return ui.node_create(&app.gui, n)
 }
 
 build_ui :: proc(app: ^App) {
   // a column panel: title, a row with a button and a counter, wrapped text
   // and a clipped list that scrolls with the wheel
-  panel := ui.create(&app.gui, {direction = .COLUMN, padding = {16, 16, 16, 16}, gap = 12, offset = {32, 32}})
+  panel := ui.node_create(&app.gui, {direction = .COLUMN, padding = {16, 16, 16, 16}, gap = 12, offset = {32, 32}})
   app.looks[panel] = {{30, 30, 46, 220}, render.NO_TEXTURE}
   text(app, panel, "Mjolnir UI", 28)
-  row := ui.create(&app.gui, {parent = panel, gap = 16, align = {.START, .CENTER}})
-  app.button = ui.create(&app.gui, {parent = row, size = {{.FIXED, 160}, {.FIXED, 44}}, interactive = true, align = {.CENTER, .CENTER}})
+  row := ui.node_create(&app.gui, {parent = panel, gap = 16, align = {.START, .CENTER}})
+  app.button = ui.node_create(&app.gui, {parent = row, size = {{.FIXED, 160}, {.FIXED, 44}}, interactive = true, align = {.CENTER, .CENTER}})
   app.looks[app.button] = {BUTTON_COLOR, render.NO_TEXTURE}
   // the label sits in the button: hovering or clicking it counts for the button
   text(app, app.button, "Click me!", 20)
@@ -108,23 +108,23 @@ build_ui :: proc(app: ^App) {
     16,
     {size = {{.FIXED, 360}, {}}, wrap = true},
   )
-  app.list = ui.create(&app.gui, {parent = panel, direction = .COLUMN, size = {{.FIXED, 360}, {.FIXED, 120}}, gap = 4, clip = true, interactive = true})
+  app.list = ui.node_create(&app.gui, {parent = panel, direction = .COLUMN, size = {{.FIXED, 360}, {.FIXED, 120}}, gap = 4, clip = true, interactive = true})
   app.looks[app.list] = {{18, 18, 26, 255}, render.NO_TEXTURE}
   for i in 0 ..< 12 {
-    item := ui.create(&app.gui, {parent = app.list, size = {{.GROW, 0}, {.FIXED, 28}}, padding = {8, 0, 8, 0}, align = {.START, .CENTER}})
+    item := ui.node_create(&app.gui, {parent = app.list, size = {{.GROW, 0}, {.FIXED, 28}}, padding = {8, 0, 8, 0}, align = {.START, .CENTER}})
     app.looks[item] = {{50, 60, 90, 255} if i % 2 == 0 else {40, 48, 72, 255}, render.NO_TEXTURE}
     text(app, item, fmt.tprintf("Item %d", i + 1))
   }
   // HUD corner: anchored to the window's top-right
-  hint := ui.create(&app.gui, {position = .ABSOLUTE, anchor = {1, 0}, offset = {-16, 16}, padding = {10, 6, 10, 6}})
+  hint := ui.node_create(&app.gui, {position = .ABSOLUTE, anchor = {1, 0}, offset = {-16, 16}, padding = {10, 6, 10, 6}})
   app.looks[hint] = {{0, 0, 0, 160}, render.NO_TEXTURE}
   text(app, hint, "drag: orbit   wheel over list: scroll", 14)
   // an image anchored bottom-right, and a star mesh bottom-left
-  if star_texture, ok := render.create_texture_from_data(&app.renderer, #load("../../assets/gold-star.png")); ok {
-    image := ui.create(&app.gui, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, size = {{.FIXED, 128}, {.FIXED, 128}}})
+  if star_texture, ok := render.texture_load(&app.renderer, #load("../../assets/gold-star.png")); ok {
+    image := ui.node_create(&app.gui, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, size = {{.FIXED, 128}, {.FIXED, 128}}})
     app.looks[image] = {{255, 255, 255, 255}, u32(star_texture)}
   }
-  app.star = ui.create(&app.gui, {position = .ABSOLUTE, anchor = {0, 1}, offset = {16, -16}, size = {{.FIXED, 140}, {.FIXED, 140}}})
+  app.star = ui.node_create(&app.gui, {position = .ABSOLUTE, anchor = {0, 1}, offset = {16, -16}, size = {{.FIXED, 140}, {.FIXED, 140}}})
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -155,7 +155,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)

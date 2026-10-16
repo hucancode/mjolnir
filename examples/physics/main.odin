@@ -60,7 +60,7 @@ shutdown :: proc(app: ^App) {
 }
 
 spawn_mesh :: proc(app: ^App, m: render.MeshHandle, mat: render.MaterialHandle, parent: world.NodeHandle) -> world.NodeHandle {
-  n := world.spawn_child(&app.scene, parent)
+  n := world.spawn(&app.scene, parent = parent)
   render.attach(&app.renderer, n.index, render.MeshAttachment{handle = m, material = mat, cast_shadow = true})
   return n
 }
@@ -68,7 +68,7 @@ spawn_mesh :: proc(app: ^App, m: render.MeshHandle, mat: render.MaterialHandle, 
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   ground_mesh := app.renderer.builtin_meshes[.CUBE]
   ground_mat := app.renderer.builtin_materials[.GRAY]
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
@@ -79,16 +79,16 @@ setup :: proc(app: ^App) -> bool {
   rand_cylinder := render.make_cylinder()
   for &v in rand_sphere.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   for &v in rand_cylinder.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
-  rand_sphere_mesh := render.create_mesh(&app.renderer, rand_sphere)
-  rand_cylinder_mesh := render.create_mesh(&app.renderer, rand_cylinder)
+  rand_sphere_mesh := render.mesh_create(&app.renderer, rand_sphere)
+  rand_cylinder_mesh := render.mesh_create(&app.renderer, rand_cylinder)
   rand_mat := app.renderer.builtin_materials[.WHITE]
 
   ground := world.spawn(&app.scene, {0, -0.5, 0})
-  physics.create_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {PLANE_WIDTH, 0.5, PLANE_HEIGHT}}, user = world.Handle(ground))
+  physics.body_create(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {PLANE_WIDTH, 0.5, PLANE_HEIGHT}}, user = world.Handle(ground))
   ground_visual := spawn_mesh(app, ground_mesh, ground_mat, ground)
   world.scale_xyz(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   ball := world.spawn(&app.scene, {2.5, SPHERE_RADIUS, 0})
-  physics.create_body(&phys, {2.5, SPHERE_RADIUS, 0}, collider = physics.SphereCollider{radius = SPHERE_RADIUS}, user = world.Handle(ball))
+  physics.body_create(&phys, {2.5, SPHERE_RADIUS, 0}, collider = physics.SphereCollider{radius = SPHERE_RADIUS}, user = world.Handle(ball))
   ball_visual := spawn_mesh(app, sphere_mesh, sphere_mat, ball)
   world.scale(&app.scene, ball_visual, SPHERE_RADIUS)
 
@@ -104,14 +104,14 @@ setup :: proc(app: ^App) -> bool {
     case 2: collider = physics.SphereCollider{radius = 1.0}; piece_mesh = rand_sphere_mesh
     }
     node := world.spawn(&app.scene, pos)
-    physics.create_body(&phys, pos, mass = 50.0, collider = collider, user = world.Handle(node))
+    physics.body_create(&phys, pos, mass = 50.0, collider = collider, user = world.Handle(node))
     spawn_mesh(app, piece_mesh, piece_mat, node)
   }
   log.infof("Created %d physics objects", PIECE_COUNT)
-  render.main_camera_look_at(&app.renderer, {30, 25, 30}, {0, 5, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {30, 25, 30}, {0, 5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {0, 20, 0})
-  render.attach(&app.renderer, light.index, render.spot_light_attachment({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25))
+  render.attach(&app.renderer, light.index, render.make_spot_light({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   return true
 }
@@ -129,7 +129,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   physics.step(&phys, dt)
   for k in phys.killed do world.despawn(&app.scene, world.NodeHandle(k.user))
   world.set_world_poses(&app.scene, physics.body_poses(&phys))

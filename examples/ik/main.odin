@@ -1,18 +1,20 @@
 // FABRIK with bend-cone constraints.
 package main
 
-import "../../mjolnir"
-import "../../mjolnir/input"
-import "../../mjolnir/platform"
-import "../../mjolnir/render"
-import "../../mjolnir/animation"
-import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import mu "vendor:microui"
+import "../../mjolnir"
+import "../../mjolnir/debugui"
+import "../../mjolnir/animation"
+import "../../mjolnir/gltf"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
+import "../../mjolnir/render"
+import "../../mjolnir/world"
 
-scene: mjolnir.GltfScene
+scene: gltf.Scene
 rig: ^animation.Rig
 animator: animation.Animator
 animation_time: f32 = 0
@@ -38,6 +40,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -69,11 +72,12 @@ should_close :: proc(app: ^App) -> bool {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {0, 20, 20}, {0, 0, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 20, 20}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
-  scene = mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
+  scene = gltf.load(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
   if len(scene.roots) == 0 || len(scene.skinned) == 0 do return true
   spider_root_node = scene.roots[0]
   world.translate(&app.scene, spider_root_node, [3]f32{0, 5, 0})
@@ -111,11 +115,13 @@ setup :: proc(app: ^App) -> bool {
 
     constraints := animation.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90})
 
-    idx, ok := animation.add_ik_chain_layer(&animator, rig, leg_configs[i].root_name, leg_configs[i].tip_name,
+    bones, _ := animation.bone_chain(skel, leg_configs[i].root_name, leg_configs[i].tip_name)
+    idx, ok := animation.add_ik_layer(&animator, rig, bones,
       leg_targets[i], pole_pos, weight = 1.0, constraints = constraints, space = .WORLD,
     )
     if !ok {
       log.errorf("IK layer add failed leg %d", i)
+      delete(bones)
       delete(constraints)
     } else {
       leg_layers[i] = idx
@@ -126,13 +132,14 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, ground_plane.index, render.primitive(&app.renderer, .CUBE, .GRAY))
   world.scale(&app.scene, ground_plane, [3]f32{40, 0.2, 40})
   light := world.spawn(&app.scene)
-  render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 1, 1, 1}, 10.0))
+  render.attach(&app.renderer, light.index, render.make_directional_light({1, 1, 1, 1}, 10.0))
   return true
 }
 
 shutdown :: proc(app: ^App) {
-  mjolnir.gltf_scene_destroy(&scene)
+  gltf.scene_destroy(&scene)
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -140,7 +147,7 @@ shutdown :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -148,7 +155,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if !paused do animation_time += dt
   amp := f32(body_amplitude)
   spd := f32(body_speed)
@@ -184,7 +191,7 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "IK", {480, 20, 300, 560}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Pause", &paused)
@@ -206,5 +213,6 @@ frame :: proc(app: ^App) -> bool {
       mu.slider(ctx, &leg_lift, 0.0, 6.0)
     }
   }
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

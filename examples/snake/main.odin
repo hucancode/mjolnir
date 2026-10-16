@@ -102,7 +102,7 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   half := f32(GRID) * CELL * 0.5
   wall_t :: 0.2
   wall_h :: 0.5
@@ -115,12 +115,12 @@ setup :: proc(app: ^App) -> bool {
   spawn_wall(app, {half + wall_t, wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
   spawn_wall(app, {-(half + wall_t), wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
 
-  render.main_camera_look_at(&app.renderer, {0, 18, 13}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 18, 13}, {0, 0, 0})
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   spot := world.spawn(&app.scene, {0, 10, 4})
-  render.attach(&app.renderer, spot.index, render.spot_light_attachment({0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true))
+  render.attach(&app.renderer, spot.index, render.make_spot_light({0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true))
   world.rotate(&app.scene, spot, math.PI * 0.55, linalg.VECTOR3F32_X_AXIS)
 
 
@@ -197,7 +197,7 @@ on_key :: proc(key: input.Key) {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured do app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   step_game(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

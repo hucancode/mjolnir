@@ -11,6 +11,9 @@ import "core:strings"
 
 SECTIONS := [?]string{"constants", "variables", "procedures", "types", "procedure groups"}
 
+// render's GPU layer: no application imports these, so the reference leaves them out
+INTERNAL := [?]string{"mjolnir/render/rhi", "mjolnir/render/vulkan", "mjolnir/render/wgpu"}
+
 Sym :: struct {
 	sig: string,
 	doc: string,
@@ -154,7 +157,7 @@ package_dirs :: proc() -> []string {
 		if !strings.has_suffix(f, ".odin") {continue}
 		d, _ := filepath.split(f)
 		d = strings.trim_right(d, "/")
-		if d not_in seen {
+		if d not_in seen && !slice.contains(INTERNAL[:], d) {
 			seen[d] = {}
 			append(&dirs, d)
 		}

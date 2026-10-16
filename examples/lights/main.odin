@@ -2,6 +2,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -17,6 +18,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -86,8 +88,9 @@ should_close :: proc(app: ^App) -> bool {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {9, 8, 9}, {0, 1, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {9, 8, 9}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   app.renderer.ibl_intensity = 0.3
 
@@ -112,10 +115,10 @@ setup :: proc(app: ^App) -> bool {
 
   dir_light = world.spawn(&app.scene, {6, 10, 6})
   world.rotate(&app.scene, dir_light, linalg.quaternion_between_two_vector3_f32({0, 0, 1}, linalg.normalize([3]f32{-6, -10, -6})))
-  render.attach(&app.renderer, dir_light.index, render.directional_light_attachment(color = {1, 1, 1, f32(dir_intensity)}, shadow_radius = 12.0, cast_shadow = true))
+  render.attach(&app.renderer, dir_light.index, render.make_directional_light(color = {1, 1, 1, f32(dir_intensity)}, shadow_radius = 12.0, cast_shadow = true))
 
   // Glowing marker so each light's position is visible.
-  marker_material = render.create_material(&app.renderer, emissive_value = 4.0)
+  marker_material = render.material_create(&app.renderer, emissive_value = 4.0)
 
   for i in 0 ..< STARTUP_LIGHTS do spawn_light(app, .SPOT if i == STARTUP_LIGHTS - 1 else .POINT)
   log.info("Lights: P spawns a point light, O a spot light, DELETE removes a random one")
@@ -124,6 +127,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   delete(lights)
@@ -150,12 +154,12 @@ spawn_light :: proc(app: ^App, kind: LightKind) {
   l.node = node
   switch kind {
   case .POINT:
-    render.attach(&app.renderer, node.index, render.point_light_attachment(radius = f32(point_radius)))
+    render.attach(&app.renderer, node.index, render.make_point_light(radius = f32(point_radius)))
   case .SPOT:
-    render.attach(&app.renderer, node.index, render.spot_light_attachment(radius = f32(spot_radius), angle = math.to_radians(f32(spot_outer_deg))))
+    render.attach(&app.renderer, node.index, render.make_spot_light(radius = f32(spot_radius), angle = math.to_radians(f32(spot_outer_deg))))
   }
   // A slot holds one attachment, so the marker mesh lives on a child node.
-  marker := world.spawn_child(&app.scene, node)
+  marker := world.spawn(&app.scene, parent = node)
   render.attach(&app.renderer, marker.index, render.MeshAttachment{handle = app.renderer.builtin_meshes[.CUBE], material = marker_material, cast_shadow = false})
   world.scale(&app.scene, marker, MARKER_SCALE)
   append(&lights, l)
@@ -217,7 +221,7 @@ apply_light_settings :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -225,7 +229,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if input.key_pressed(&app.input, .P) do spawn_light(app, .POINT)
   if input.key_pressed(&app.input, .O) do spawn_light(app, .SPOT)
   if input.key_pressed(&app.input, .DELETE) do remove_random_light(app)
@@ -248,11 +252,12 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   debug_ui(app)
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Lights", {700, 20, 280, 620}, {.NO_CLOSE}) {
     point_count, spot_count: int
     for l in lights {

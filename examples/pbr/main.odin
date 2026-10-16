@@ -1,15 +1,17 @@
 // IBL + physically based rendering showcase.
 package main
 
-import "../../mjolnir"
-import "../../mjolnir/input"
-import "../../mjolnir/platform"
-import "../../mjolnir/render"
-import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
+import "../../mjolnir"
+import "../../mjolnir/debugui"
+import "../../mjolnir/gltf"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
+import "../../mjolnir/render"
+import "../../mjolnir/world"
 
 Model :: struct {
   label:  string,
@@ -27,7 +29,7 @@ MODELS := [?]Model{
   {"SciFi Helmet",   #load("../../assets/SciFiHelmet.glb"),    1.0,   {0, -1, 0},    0},
 }
 
-model: mjolnir.GltfScene
+model: gltf.Scene
 current_model: int = -1
 dir_light: world.NodeHandle
 
@@ -43,6 +45,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -70,20 +73,22 @@ main :: proc() {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
-  render.main_camera_look_at(&app.renderer, {0, 0.2, 3.5}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 0.2, 3.5}, {0, 0, 0})
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   dir_light = world.spawn(&app.scene, {4, 6, 4})
-  render.attach(&app.renderer, dir_light.index, render.directional_light_attachment({1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false))
+  render.attach(&app.renderer, dir_light.index, render.make_directional_light({1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false))
   swap_model(app, 0)
   return true
 }
 
 shutdown :: proc(app: ^App) {
-  mjolnir.gltf_scene_destroy(&model)
+  gltf.scene_destroy(&model)
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -96,16 +101,16 @@ should_close :: proc(app: ^App) -> bool {
 swap_model :: proc(app: ^App, index: int) {
   if index == current_model do return
   for h in model.roots do world.despawn(&app.scene, h)
-  mjolnir.gltf_scene_destroy(&model)
+  gltf.scene_destroy(&model)
   current_model = index
   m := MODELS[index]
-  model = mjolnir.load_gltf(&app.scene, &app.renderer, m.data)
+  model = gltf.load(&app.scene, &app.renderer, m.data)
   rotation_phase = 0
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -113,7 +118,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if l, ok := render.attachment(&app.renderer, dir_light.index, render.Light); ok {
     l.color[3] = f32(dir_intensity)
     render.attach(&app.renderer, dir_light.index, l)
@@ -138,7 +143,7 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "PBR Lighting", {550, 20, 220, 400}, {.NO_CLOSE}) {
     mu.label(ctx, "Sun intensity")
     mu.slider(ctx, &dir_intensity, 0.0, 5.0)
@@ -154,5 +159,6 @@ frame :: proc(app: ^App) -> bool {
       if .SUBMIT in mu.button(ctx, m.label) do swap_model(app, i)
     }
   }
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

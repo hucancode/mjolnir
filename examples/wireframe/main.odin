@@ -54,13 +54,13 @@ handles: [9]world.NodeHandle
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {0, 4, 9}, {0, 0, 0})
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 4, 9}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   app.renderer.skybox_intensity = 0
 
   cube := app.renderer.builtin_meshes[.CUBE]
-  mat := render.material_wireframe(&app.renderer)
+  mat := render.material_create(&app.renderer, .WIREFRAME)
 
   for i in 0 ..< 9 {
     row := i / 3
@@ -85,7 +85,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   t := app.time
   axis := linalg.normalize([3]f32{1, 1, 0.4})
   for h, i in handles {

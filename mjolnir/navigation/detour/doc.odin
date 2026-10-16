@@ -3,6 +3,5 @@
 // find_straight_path) and tile serialization to and from bytes (save_navmesh,
 // load_navmesh). Start with nav_mesh_init,
 // nav_mesh_add_tile and nav_mesh_query_init. Most users go through the
-// navigation package instead. Query code is in pathfinding.odin,
-// spatial_queries.odin and funnel.odin.
+// navigation package instead.
 package detour

@@ -58,15 +58,15 @@ shutdown :: proc(app: ^App) {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {0, 1.5, 6}, {0, 1.5, 0})
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 1.5, 6}, {0, 1.5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 6.0)
 
-  tex, tex_ok := render.create_texture_from_data(&app.renderer, #load("../../assets/Warrior_Sheet-Effect.png"))
+  tex, tex_ok := render.texture_load(&app.renderer, #load("../../assets/Warrior_Sheet-Effect.png"))
   if !tex_ok {
     log.error("failed to load warrior sheet")
     return true
@@ -74,7 +74,7 @@ setup :: proc(app: ^App) -> bool {
 
   xs := [Mode]f32{.LOOP = -3.0, .PINGPONG = 0.0, .ONCE = 3.0}
   for x, mode in xs {
-    sprite := render.material_sprite(&app.renderer, tex, 6, 17) or_continue
+    sprite := render.material_create(&app.renderer, .SPRITE, albedo_texture = tex, frame_columns = 6, frame_rows = 17) or_continue
     node := world.spawn(&app.scene, {x, 1.5, 0}) or_continue
     render.attach(&app.renderer, node.index, render.MeshAttachment {
       handle   = app.renderer.builtin_meshes[.QUAD_XY],
@@ -85,7 +85,7 @@ setup :: proc(app: ^App) -> bool {
   }
 
   light := world.spawn(&app.scene, {2, 6, 4})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 1, 1, 1}, shadow_radius = 8))
+  render.attach(&app.renderer, light.index, render.make_directional_light(color = {1, 1, 1, 1}, shadow_radius = 8))
   return true
 }
 
@@ -97,7 +97,7 @@ should_close :: proc(app: ^App) -> bool {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured do app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   elapsed += dt
   step := u32(elapsed * FPS)
   cycle := u32(2 * (FRAME_COUNT - 1))

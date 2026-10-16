@@ -113,9 +113,9 @@ post_shader_destroy :: proc(r: ^Renderer, shader: PostShader) {
   slot^ = {}
 }
 
-// custom_effect packs `params` into a CustomEffect of `shader`, laid out as the shader's push
+// make_custom_effect packs `params` into a CustomEffect of `shader`, laid out as the shader's push
 // block reads them.
-custom_effect :: proc(shader: PostShader, params: $T, passes: u32 = 1) -> CustomEffect {
+make_custom_effect :: proc(shader: PostShader, params: $T, passes: u32 = 1) -> CustomEffect {
   #assert(size_of(T) <= CUSTOM_EFFECT_PARAM_BYTES)
   params := params
   e := CustomEffect{shader = shader, passes = passes}

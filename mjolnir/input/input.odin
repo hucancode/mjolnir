@@ -26,8 +26,21 @@ Accumulator :: struct {
   text_len:         int,
 }
 
-// State is one tick of input.
+// State is one tick of input: the key_* and mouse_* queries read it, and its fields hold the
+// cursor, its movement and the scroll in window pixels, plus which devices a consumer captured.
 State :: struct {
+  cursor:           [2]f32, // window pixels, origin top-left
+  mouse_delta:      [2]f32,
+  scroll:           [2]f32,
+  // Set by the first consumer that claims the device this tick (debug UI,
+  // then game UI). Later consumers skip a captured device.
+  mouse_captured:    bool,
+  keyboard_captured: bool,
+  using _: State_Private,
+}
+
+@(private)
+State_Private :: struct {
   keys:             KeySet,
   keys_pressed:     KeySet,
   keys_released:    KeySet,
@@ -35,18 +48,9 @@ State :: struct {
   buttons:          ButtonSet,
   buttons_pressed:  ButtonSet,
   buttons_released: ButtonSet,
-  cursor:           [2]f32, // window pixels, origin top-left
-  mouse_delta:      [2]f32,
-  scroll:           [2]f32,
   text_buf:         [TEXT_CAPACITY]u8,
   text_len:         int,
   primed:           bool, // cursor seen once; the first tick has no delta
-  // Set by the first consumer that claims the device this tick (debug UI,
-  // then game UI). Later consumers skip a captured device.
-  mouse_captured:    bool,
-  keyboard_captured: bool,
-  // Buttons pressed over an overlay (feed_microui), owned by it through release.
-  overlay_buttons:   ButtonSet,
 }
 
 // new_frame drains the accumulator into this tick's snapshot. Call once per tick, before
@@ -156,21 +160,6 @@ mouse_pressed :: proc(self: ^State, button: MouseButton) -> bool {
 // mouse_released reports whether `button` went up this tick.
 mouse_released :: proc(self: ^State, button: MouseButton) -> bool {
   return button in self.buttons_released
-}
-
-// cursor returns the cursor position in window pixels.
-cursor :: proc(self: ^State) -> [2]f32 {
-  return self.cursor
-}
-
-// mouse_delta returns the cursor movement since the previous tick.
-mouse_delta :: proc(self: ^State) -> [2]f32 {
-  return self.mouse_delta
-}
-
-// scroll returns the scroll offset summed this tick.
-scroll :: proc(self: ^State) -> [2]f32 {
-  return self.scroll
 }
 
 // text returns the UTF-8 text typed this tick.

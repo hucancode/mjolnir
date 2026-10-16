@@ -1,16 +1,18 @@
 // Destroying resources and reloading a level.
 package main
 
-import "../../mjolnir"
-import anim "../../mjolnir/animation"
-import "../../mjolnir/input"
-import "../../mjolnir/platform"
-import "../../mjolnir/render"
-import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import mu "vendor:microui"
+import "../../mjolnir"
+import anim "../../mjolnir/animation"
+import "../../mjolnir/debugui"
+import "../../mjolnir/gltf"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
+import "../../mjolnir/render"
+import "../../mjolnir/world"
 
 AUTOMATED_TEST :: #config(AUTOMATED_TEST, false)
 
@@ -21,6 +23,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
   // orbit controller state, owned by the app
   yaw, pitch, dist: f32,
@@ -30,7 +33,7 @@ example_materials: [dynamic]render.MaterialHandle
 example_meshes: [dynamic]render.MeshHandle
 example_nodes: [dynamic]world.NodeHandle // mesh-bearing nodes we may reassign
 gltf_roots: [dynamic]world.NodeHandle // duck + animated char roots, spun in update
-character: mjolnir.GltfScene
+character: gltf.Scene
 animators: [dynamic]anim.Animator // one per character.skinned entry
 
 reset_count: int
@@ -63,26 +66,34 @@ should_close :: proc(app: ^App) -> bool {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   panel(app)
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
+// What is made before render.setup lives for the application: the debug UI's atlas and the
+// environment map survive every level's teardown.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  return render.setup(&app.renderer) && build_level(app)
+}
+
+build_level :: proc(app: ^App) -> bool {
   clear(&example_materials)
   clear(&example_meshes)
   clear(&example_nodes)
   clear(&gltf_roots)
   for &a in animators do anim.animator_destroy(&a)
   clear(&animators)
-  mjolnir.gltf_scene_destroy(&character)
+  gltf.scene_destroy(&character)
 
   half := f32(GRID - 1) * 0.5 * SPACING
-  render.main_camera_look_at(&app.renderer, {half + 4, half + 6, half * 2.4}, {0, half - 1, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {half + 4, half + 6, half * 2.4}, {0, half - 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-6, 14, 6})
-  render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.96, 0.9, 1}, 8.0))
+  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.96, 0.9, 1}, 8.0))
 
   // Ground uses BUILTIN mesh + material: stays put through every destroy button.
   ground := world.spawn(&app.scene, {0, -1, 0})
@@ -100,7 +111,7 @@ setup :: proc(app: ^App) -> bool {
   }
   col_meshes: [GRID]render.MeshHandle
   for geom, col in primitives {
-    m, ok := render.create_mesh(&app.renderer, geom)
+    m, ok := render.mesh_create(&app.renderer, geom)
     if !ok do continue
     col_meshes[col] = m
     append(&example_meshes, m)
@@ -111,7 +122,7 @@ setup :: proc(app: ^App) -> bool {
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     t := f32(row) / f32(GRID - 1)
     color := [4]f32{0.2 + 0.8 * f32(col) / f32(GRID - 1), 0.3, 1.0 - 0.8 * t, 1.0}
-    mat, ok := render.create_material(
+    mat, ok := render.material_create(
       &app.renderer,
       type = .PBR,
       base_color_factor = color,
@@ -131,8 +142,8 @@ setup :: proc(app: ^App) -> bool {
   // glTF models join the mix. Their loader-created meshes/materials land in the
   // same render pools, so fold them into the tracked lists — the destroy buttons
   // then free them exactly like the grid resources, and reset rebuilds them.
-  if duck, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/Duck.glb")); ok {
-    defer mjolnir.gltf_scene_destroy(&duck)
+  if duck, ok := gltf.load(&app.scene, &app.renderer, #load("../../assets/Duck.glb")); ok {
+    defer gltf.scene_destroy(&duck)
     for h in duck.roots {
       world.scale(&app.scene, h, 1.3)
       world.translate(&app.scene, h, -3.5, 0, 4.5)
@@ -140,7 +151,7 @@ setup :: proc(app: ^App) -> bool {
     }
     collect_gltf_resources(app, duck.roots[:])
   }
-  if scene, ok := mjolnir.load_gltf(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb")); ok {
+  if scene, ok := gltf.load(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb")); ok {
     character = scene
     for h in character.roots {
       world.scale(&app.scene, h, 6.0)
@@ -168,8 +179,9 @@ setup :: proc(app: ^App) -> bool {
 }
 
 shutdown :: proc(app: ^App) {
-  mjolnir.gltf_scene_destroy(&character)
+  gltf.scene_destroy(&character)
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -182,8 +194,7 @@ collect_gltf_resources :: proc(app: ^App, roots: []world.NodeHandle) {
   append(&stack, ..roots)
   for len(stack) > 0 {
     h := pop(&stack)
-    n := world.node(&app.scene, h) or_continue
-    append(&stack, ..n.children[:])
+    append(&stack, ..world.children(&app.scene, h))
     att := render.attachment(&app.renderer, h.index, render.MeshAttachment) or_continue
     append(&example_nodes, h)
     if att.handle not_in seen_mesh {
@@ -208,7 +219,7 @@ act_destroy_materials :: proc(app: ^App) {
   }
   freed := len(example_materials)
   for m in example_materials {
-    render.destroy_material(&app.renderer, m)
+    render.material_destroy(&app.renderer, m)
   }
   clear(&example_materials)
   log.infof("destroyed %d materials -> builtin GRAY", freed)
@@ -225,7 +236,7 @@ act_destroy_meshes :: proc(app: ^App) {
   }
   freed := len(example_meshes)
   for m in example_meshes {
-    render.destroy_mesh(&app.renderer, m)
+    render.mesh_destroy(&app.renderer, m)
   }
   clear(&example_meshes)
   log.infof("destroyed %d meshes -> builtin CUBE", freed)
@@ -244,7 +255,7 @@ act_reset_level :: proc(app: ^App) {
 
 update :: proc(app: ^App, delta_time: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
     if input.mouse_down(&app.input, .LEFT) {
       app.yaw += app.input.mouse_delta.x * 0.02
@@ -252,12 +263,12 @@ update :: proc(app: ^App, delta_time: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   if reset_requested {
     reset_requested = false
     world.teardown(&app.scene)
     render.teardown(&app.renderer)
-    if render.setup(&app.renderer) do setup(app)
+    if render.setup(&app.renderer) do build_level(app)
     render.update(&app.renderer, delta_time)
     return
   }
@@ -289,7 +300,7 @@ update :: proc(app: ^App, delta_time: f32) {
 }
 
 panel :: proc(app: ^App) {
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Level Management", {20, 20, 320, 260}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, fmt.tprintf("Example materials: %d", len(example_materials)))

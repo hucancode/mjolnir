@@ -1,29 +1,27 @@
-package mjolnir
+package gltf
 
-import anim "animation"
-import gltf_animation "animation/gltf"
+import anim "../animation"
+import "../render"
+import "../world"
 import "core:log"
-import "render"
-import gltf_render "render/gltf"
 import "vendor:cgltf"
-import "world"
 
-// GltfSkinnedNode is a skinned node and the rig (index into GltfScene.rigs) that deforms it.
-GltfSkinnedNode :: struct {
+// SkinnedNode is a skinned node and the rig (index into Scene.rigs) that deforms it.
+SkinnedNode :: struct {
   node: world.NodeHandle,
   rig:  int,
 }
 
-// GltfScene is the result of load_gltf. World nodes and render resources belong
+// Scene is the result of load. World nodes and render resources belong
 // to the world and renderer; the scene owns `roots`, `skinned` and the rigs.
-GltfScene :: struct {
+Scene :: struct {
   roots:   [dynamic]world.NodeHandle,
   rigs:    [dynamic]anim.Rig, // one per skin a mesh node uses, with every animation as a clip
-  skinned: [dynamic]GltfSkinnedNode,
+  skinned: [dynamic]SkinnedNode,
 }
 
-// gltf_scene_destroy frees the rigs and lists a GltfScene owns.
-gltf_scene_destroy :: proc(self: ^GltfScene) {
+// scene_destroy frees the rigs and lists a Scene owns.
+scene_destroy :: proc(self: ^Scene) {
   for &r in self.rigs do anim.rig_destroy(&r)
   delete(self.rigs)
   delete(self.roots)
@@ -31,31 +29,31 @@ gltf_scene_destroy :: proc(self: ^GltfScene) {
   self^ = {}
 }
 
-// load_gltf instantiates a glTF held in memory, a .glb or a glTF whose buffers and images are
-// all embedded (the engine reads no files: #load it or platform.read_file it): render looks (see gltf_render.load_meshes),
-// one rig per skin (see gltf_animation.load_rig) and one world node per glTF
+// load instantiates a glTF held in memory, a .glb or a glTF whose buffers and images are
+// all embedded (the engine reads no files: #load it or platform.read_file it): render looks (see load_meshes),
+// one rig per skin (see load_rig) and one world node per glTF
 // node, spawned under `parent` (the world root by default).
-load_gltf :: proc(
+load :: proc(
   w: ^world.World,
   r: ^render.Renderer,
   data: []u8,
   parent: world.NodeHandle = {},
 ) -> (
-  scene: GltfScene,
+  scene: Scene,
   ok: bool,
 ) #optional_ok {
-  result := load_gltf_data(w, r, data, parent if parent != {} else w.root, &scene)
+  result := load_data(w, r, data, parent if parent != {} else w.root, &scene)
   if result != .success do log.errorf("Failed to load glTF: %v", result)
   return scene, result == .success
 }
 
 @(private = "file")
-load_gltf_data :: proc(
+load_data :: proc(
   w: ^world.World,
   r: ^render.Renderer,
   bytes: []u8,
   parent: world.NodeHandle,
-  scene: ^GltfScene,
+  scene: ^Scene,
 ) -> cgltf.result {
   options: cgltf.options
   data := cgltf.parse(options, raw_data(bytes), uint(len(bytes))) or_return
@@ -63,7 +61,7 @@ load_gltf_data :: proc(
   // no gltf path: a .glb's BIN chunk and data: URIs load, a buffer in another file fails
   if len(data.buffers) > 0 do cgltf.load_buffers(options, data, nil) or_return
   if len(data.nodes) == 0 do return .success
-  looks, looks_ok := gltf_render.load_meshes(r, data, context.temp_allocator)
+  looks, looks_ok := load_meshes(r, data, context.temp_allocator)
   if !looks_ok do return .invalid_gltf
   // rig index per skin; -1 when no mesh node uses the skin or it failed to load
   skin_rigs := make([]int, len(data.skins), context.temp_allocator)
@@ -74,7 +72,7 @@ load_gltf_data :: proc(
   for &skin, i in data.skins {
     skin_rigs[i] = -1
     if !skin_used[i] do continue
-    rig := gltf_animation.load_rig(data, &skin) or_continue
+    rig := load_rig(data, &skin) or_continue
     skin_rigs[i] = len(scene.rigs)
     append(&scene.rigs, rig)
   }
@@ -90,7 +88,7 @@ construct_scene :: proc(
   looks: []Maybe(render.MeshAttachment),
   skin_rigs: []int,
   parent: world.NodeHandle,
-  scene: ^GltfScene,
+  scene: ^Scene,
 ) {
   TraverseEntry :: struct {
     idx:    u32,
@@ -103,11 +101,7 @@ construct_scene :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     gltf_node := &gltf_data.nodes[entry.idx]
-    node_handle := world.spawn_child(
-      w,
-      entry.parent,
-      name = string(gltf_node.name),
-    ) or_continue
+    node_handle := world.spawn(w, name = string(gltf_node.name), parent = entry.parent) or_continue
     if gltf_node.has_matrix {
       world.set_local_matrix(
         w,
@@ -129,7 +123,7 @@ construct_scene :: proc(
         render.attach(r, node_handle.index, look)
         if gltf_node.skin != nil {
           if rig := skin_rigs[cgltf.skin_index(gltf_data, gltf_node.skin)]; rig >= 0 {
-            append(&scene.skinned, GltfSkinnedNode{node = node_handle, rig = rig})
+            append(&scene.skinned, SkinnedNode{node = node_handle, rig = rig})
           }
         }
       }

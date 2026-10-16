@@ -3,46 +3,15 @@ package navigation
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "../geometry"
 import "detour"
 
-// NavMesh is a navigation mesh plus the query used for path and point lookups. This
-// package is the runtime and never imports the baker (navigation/bake), so a
-// game that loads pre-baked data ships without recast. The detour fields are
-// exposed for advanced use (e.g. navigation/crowd).
+// NavMesh is a navigation mesh plus the query used for path and point lookups. The detour
+// fields are exposed for advanced use: navigation/crowd steers on detour_mesh.
 NavMesh :: struct {
   detour_mesh: detour.Nav_Mesh,
   query:       detour.Nav_Mesh_Query,
   filter:      detour.Query_Filter,
-}
-
-// init loads baked single-tile navmesh data (see navigation/bake). Takes
-// ownership of `data`, replacing any previous mesh.
-init :: proc(
-  nav: ^NavMesh,
-  data: []u8,
-  params: detour.Nav_Mesh_Params,
-  max_query_nodes: i32 = 2048,
-) -> bool {
-  destroy(nav)
-  params := params
-  if status := detour.nav_mesh_init(&nav.detour_mesh, &params); !detour.status_succeeded(status) {
-    log.errorf("Failed to initialize navigation mesh: %v", status)
-    delete(data)
-    return false
-  }
-  if _, status := detour.nav_mesh_add_tile(&nav.detour_mesh, data, detour.DT_TILE_FREE_DATA); !detour.status_succeeded(status) {
-    log.errorf("Failed to add tile to navigation mesh: %v", status)
-    delete(data)
-    destroy(nav)
-    return false
-  }
-  if status := detour.nav_mesh_query_init(&nav.query, &nav.detour_mesh, max_query_nodes); !detour.status_succeeded(status) {
-    log.errorf("Failed to initialize navigation mesh query: %v", status)
-    destroy(nav)
-    return false
-  }
-  detour.query_filter_init(&nav.filter)
-  return true
 }
 
 // destroy frees the mesh, its query and the tile data.
@@ -58,7 +27,7 @@ save :: proc(nav: ^NavMesh, allocator := context.allocator) -> []u8 {
   return detour.save_navmesh(&nav.detour_mesh, allocator)
 }
 
-// load decodes a mesh encoded by save, replacing any previous mesh.
+// load decodes a mesh encoded by save or baked by navigation/bake, replacing any previous mesh.
 load :: proc(nav: ^NavMesh, data: []u8, max_query_nodes: i32 = 2048) -> bool {
   mesh := detour.load_navmesh(data) or_return
   destroy(nav)
@@ -87,16 +56,17 @@ nearest_point :: proc(
   return pos, true
 }
 
-// raycast returns the nearest point where the ray origin + t*dir (0 < t < max_t) hits the
-// mesh surface. Tests the detail triangles of every polygon.
+// raycast returns the nearest point where ray.origin + t * ray.direction (0 < t < max_t) hits
+// the mesh surface. Tests the detail triangles of every polygon.
 raycast :: proc(
   nav: ^NavMesh,
-  origin, dir: [3]f32,
+  ray: geometry.Ray,
   max_t: f32 = math.F32_MAX,
 ) -> (
   point: [3]f32,
   ok: bool,
 ) {
+  origin, dir := ray.origin, ray.direction
   best := max_t
   for i in 0 ..< nav.detour_mesh.max_tiles {
     tile := &nav.detour_mesh.tiles[i]

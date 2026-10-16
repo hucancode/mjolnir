@@ -2,13 +2,12 @@ package crowd
 
 import "core:math"
 import "core:math/linalg"
-import ".."
 import "../detour"
 
 @(private = "file")
 DT_CROWDAGENT_MAX_NEIGHBOURS :: 6
-// DT_CROWDAGENT_MAX_CORNERS is the number of steering corners cached per agent.
-DT_CROWDAGENT_MAX_CORNERS :: 4
+// MAX_CORNERS is the number of steering corners cached per agent.
+MAX_CORNERS :: 4
 @(private = "file")
 DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS :: 8
 @(private = "file")
@@ -25,15 +24,15 @@ Neighbour :: struct {
 	dist: f32,
 }
 
-// Agent_State is the agent's navmesh traversal state.
-Agent_State :: enum u8 {
-	Invalid,
-	Walking,
-	Offmesh,
+// AgentState is the agent's navmesh traversal state.
+AgentState :: enum u8 {
+	INVALID,
+	WALKING,
+	OFFMESH,
 }
 
-// Agent_Params holds an agent's size, speed limits, query ranges and behavior flags.
-Agent_Params :: struct {
+// AgentParams holds an agent's size, speed limits, query ranges and behavior flags.
+AgentParams :: struct {
 	radius:                   f32,
 	height:                   f32,
 	max_acceleration:         f32,
@@ -41,14 +40,14 @@ Agent_Params :: struct {
 	collision_query_range:    f32,
 	path_optimization_range:  f32,
 	separation_weight:        f32,
-	update_flags:             Update_Flag_Set,
+	update_flags:             UpdateFlagSet,
 	obstacle_avoidance_type:  u8,
 	query_filter_type:        u8,
 	user_data:                rawptr,
 }
 
-// DEFAULT_AGENT_PARAMS is the humanoid-scale default used by add_agent.
-DEFAULT_AGENT_PARAMS :: Agent_Params {
+// DEFAULT_AGENT_PARAMS is the humanoid-scale default used by agent_add.
+DEFAULT_AGENT_PARAMS :: AgentParams {
 	radius                  = 0.6,
 	height                  = 2.0,
 	max_acceleration        = 8.0,
@@ -56,20 +55,20 @@ DEFAULT_AGENT_PARAMS :: Agent_Params {
 	collision_query_range   = 0.6 * 12,
 	path_optimization_range = 0.6 * 30,
 	separation_weight       = 2.0,
-	update_flags            = {.Anticipate_Turns, .Obstacle_Avoidance, .Separation, .Optimize_Vis},
+	update_flags            = {.ANTICIPATE_TURNS, .OBSTACLE_AVOIDANCE, .SEPARATION, .OPTIMIZE_VIS},
 }
 
-// Update_Flags selects optional per-agent steering behaviors.
-Update_Flags :: enum u8 {
-	Anticipate_Turns    = 0,
-	Obstacle_Avoidance  = 1,
-	Separation          = 2,
-	Optimize_Vis        = 3,
-	Optimize_Topo       = 4,
+// UpdateFlags selects optional per-agent steering behaviors.
+UpdateFlags :: enum u8 {
+	ANTICIPATE_TURNS    = 0,
+	OBSTACLE_AVOIDANCE  = 1,
+	SEPARATION          = 2,
+	OPTIMIZE_VIS        = 3,
+	OPTIMIZE_TOPO       = 4,
 }
 
-// Update_Flag_Set is the set of Update_Flags stored in Agent_Params.
-Update_Flag_Set :: bit_set[Update_Flags; u8]
+// UpdateFlagSet is the set of UpdateFlags stored in AgentParams.
+UpdateFlagSet :: bit_set[UpdateFlags; u8]
 
 @(private = "file")
 Move_Request_State :: enum u8 {
@@ -82,10 +81,22 @@ Move_Request_State :: enum u8 {
 	Velocity,
 }
 
-// Agent is the runtime state of one crowd member (position npos, velocity vel, path and steering).
+// Agent is one crowd member: its position npos, velocity vel, the next corners of its path
+// (corner_verts[:ncorners]) and its goal target_pos.
 Agent :: struct {
 	active:             bool,
-	state:              Agent_State,
+	state:              AgentState,
+	npos:               [3]f32,
+	vel:                [3]f32,
+	params:             AgentParams,
+	corner_verts:       [MAX_CORNERS][3]f32,
+	ncorners:           int,
+	target_pos:         [3]f32,
+	using _: Agent_Internal,
+}
+
+@(private)
+Agent_Internal :: struct {
 	partial:            bool,
 	corridor:           ^Path_Corridor,
 	boundary:           ^Local_Boundary,
@@ -93,19 +104,13 @@ Agent :: struct {
 	neis:               [DT_CROWDAGENT_MAX_NEIGHBOURS]Neighbour,
 	nneis:              int,
 	desired_speed:      f32,
-	npos:               [3]f32,
 	disp:               [3]f32,
 	dvel:               [3]f32,
 	nvel:               [3]f32,
-	vel:                [3]f32,
-	params:             Agent_Params,
-	corner_verts:       [DT_CROWDAGENT_MAX_CORNERS][3]f32,
-	corner_flags:       [DT_CROWDAGENT_MAX_CORNERS]u8,
-	corner_polys:       [DT_CROWDAGENT_MAX_CORNERS]detour.Poly_Ref,
-	ncorners:           int,
+	corner_flags:       [MAX_CORNERS]u8,
+	corner_polys:       [MAX_CORNERS]detour.Poly_Ref,
 	target_state:       Move_Request_State,
 	target_ref:         detour.Poly_Ref,
-	target_pos:         [3]f32,
 	target_pathq_ref:   Path_Queue_Ref,
 	target_replan:      bool,
 	target_replan_time: f32,
@@ -115,6 +120,11 @@ Agent :: struct {
 Crowd :: struct {
 	max_agents:                int,
 	agents:                    []Agent,
+	using _: Crowd_State,
+}
+
+@(private)
+Crowd_State :: struct {
 	active_agents:             []^Agent,
 	path_queue:                ^Path_Queue,
 	obstacle_query_params:     [DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS]Obstacle_Avoidance_Params,
@@ -129,11 +139,12 @@ Crowd :: struct {
 	nav_query:                 ^detour.Nav_Mesh_Query,
 }
 
-// create makes a crowd of up to max_agents agents on nav, which must outlive the crowd.
-create :: proc(max_agents: int, max_agent_radius: f32, nav: ^navigation.NavMesh,
-               allocator := context.allocator) -> (crowd: ^Crowd, ok: bool) {
+// init prepares crowd for up to max_agents agents on nav (a navigation.NavMesh's
+// detour_mesh), which must outlive the crowd. Paired with destroy.
+init :: proc(crowd: ^Crowd, max_agents: int, max_agent_radius: f32, nav: ^detour.Nav_Mesh,
+             allocator := context.allocator) -> bool {
 	context.allocator = allocator
-	crowd = new(Crowd)
+	crowd^ = {}
 
 	crowd.max_agents = max_agents
 	crowd.max_agent_radius = max_agent_radius
@@ -141,19 +152,18 @@ create :: proc(max_agents: int, max_agent_radius: f32, nav: ^navigation.NavMesh,
 
 	grid, grid_ok := create_proximity_grid(max_agents*4, max_agent_radius*3)
 	if !grid_ok {
-		free(crowd)
-		return nil, false
+		return false
 	}
 	crowd.grid = grid
 
 	crowd.obstacle_query = create_obstacle_avoidance_query(6, 8)
 
-	crowd.path_queue, ok = create_path_queue(detour.DEFAULT_MAX_PATH, MAX_PATHQUEUE_NODES, &nav.detour_mesh)
+	ok: bool
+	crowd.path_queue, ok = create_path_queue(detour.DEFAULT_MAX_PATH, MAX_PATHQUEUE_NODES, nav)
 	if !ok {
 		destroy_proximity_grid(grid)
 		destroy_obstacle_avoidance_query(crowd.obstacle_query)
-		free(crowd)
-		return nil, false
+		return false
 	}
 
 	crowd.agents = make([]Agent, max_agents)
@@ -190,19 +200,17 @@ create :: proc(max_agents: int, max_agent_radius: f32, nav: ^navigation.NavMesh,
 	}
 
 	crowd.nav_query = new(detour.Nav_Mesh_Query)
-	status := detour.nav_mesh_query_init(crowd.nav_query, &nav.detour_mesh, MAX_PATHQUEUE_NODES)
+	status := detour.nav_mesh_query_init(crowd.nav_query, nav, MAX_PATHQUEUE_NODES)
 	if detour.status_failed(status) {
 		destroy(crowd)
-		return nil, false
+		return false
 	}
 
-	return crowd, true
+	return true
 }
 
-// destroy frees the crowd and all agent state.
+// destroy frees all agent state.
 destroy :: proc(crowd: ^Crowd) {
-	if crowd == nil do return
-
 	for i in 0..<crowd.max_agents {
 		ag := &crowd.agents[i]
 		destroy_path_corridor(ag.corridor)
@@ -218,12 +226,12 @@ destroy :: proc(crowd: ^Crowd) {
 	destroy_path_queue(crowd.path_queue)
 	detour.nav_mesh_query_destroy(crowd.nav_query)
 	free(crowd.nav_query)
-
-	free(crowd)
+	crowd^ = {}
 }
 
-// add_agent places a new agent at the mesh point nearest pos and returns its index, or -1 if full or off-mesh.
-add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS) -> int {
+// agent_add places a new agent at the mesh point nearest pos and returns its index; false when
+// the crowd is full or pos is off the mesh.
+agent_add :: proc(crowd: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS) -> (index: int, ok: bool) {
 	idx := -1
 	for i in 0..<crowd.max_agents {
 		if !crowd.agents[i].active {
@@ -232,11 +240,11 @@ add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS) ->
 		}
 	}
 
-	if idx == -1 do return -1
+	if idx == -1 do return -1, false
 
 	ag := &crowd.agents[idx]
 	ag.active = true
-	ag.state = .Walking
+	ag.state = .WALKING
 	ag.params = params
 
 	nearest_status, nearest_ref, nearest_pt := detour.find_nearest_poly(crowd.nav_query, pos,
@@ -244,7 +252,7 @@ add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS) ->
 	                                                                      &crowd.filters[ag.params.query_filter_type])
 	if detour.status_failed(nearest_status) || nearest_ref == detour.INVALID_POLY_REF {
 		ag.active = false
-		return -1
+		return -1, false
 	}
 
 	path_corridor_reset(ag.corridor, nearest_ref, nearest_pt)
@@ -259,11 +267,11 @@ add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS) ->
 	ag.nvel = {0, 0, 0}
 	ag.vel = {0, 0, 0}
 
-	return idx
+	return idx, true
 }
 
-// remove_agent deactivates agent idx, freeing its slot.
-remove_agent :: proc(crowd: ^Crowd, idx: int) {
+// agent_remove deactivates agent idx, freeing its slot.
+agent_remove :: proc(crowd: ^Crowd, idx: int) {
 	if idx < 0 || idx >= crowd.max_agents do return
 	crowd.agents[idx].active = false
 }
@@ -320,13 +328,13 @@ update :: proc(crowd: ^Crowd, dt: f32) {
 	for i in 0..<nactive {
 		ag := crowd.active_agents[i]
 
-		if ag.state != .Walking do continue
+		if ag.state != .WALKING do continue
 
 		ag.disp = {0, 0, 0}
 		ag.dvel = {0, 0, 0}
 
 		ag.ncorners = path_corridor_find_corners(ag.corridor, ag.corner_verts[:], ag.corner_flags[:],
-		                                          ag.corner_polys[:], DT_CROWDAGENT_MAX_CORNERS,
+		                                          ag.corner_polys[:], MAX_CORNERS,
 		                                          crowd.nav_query,
 		                                          &crowd.filters[ag.params.query_filter_type])
 
@@ -334,7 +342,7 @@ update :: proc(crowd: ^Crowd, dt: f32) {
 		                          ag, ag.neis[:], DT_CROWDAGENT_MAX_NEIGHBOURS,
 		                          crowd.active_agents[:nactive], crowd.grid)
 
-		if .Anticipate_Turns in ag.params.update_flags {
+		if .ANTICIPATE_TURNS in ag.params.update_flags {
 			calc_smooth_steer_direction(ag, &ag.dvel)
 		} else {
 			calc_straight_steer_direction(ag, &ag.dvel)
@@ -355,9 +363,9 @@ update :: proc(crowd: ^Crowd, dt: f32) {
 	for i in 0..<nactive {
 		ag := crowd.active_agents[i]
 
-		if ag.state != .Walking do continue
+		if ag.state != .WALKING do continue
 
-		if .Separation in ag.params.update_flags {
+		if .SEPARATION in ag.params.update_flags {
 			separation_distance := ag.params.collision_query_range
 			inv_separation_distance := 1.0 / separation_distance
 
@@ -389,11 +397,11 @@ update :: proc(crowd: ^Crowd, dt: f32) {
 	for i in 0..<nactive {
 		ag := crowd.active_agents[i]
 
-		if ag.state != .Walking do continue
+		if ag.state != .WALKING do continue
 
 		ag.nvel = ag.dvel
 
-		if .Obstacle_Avoidance in ag.params.update_flags {
+		if .OBSTACLE_AVOIDANCE in ag.params.update_flags {
 			obstacle_avoidance_query_reset(crowd.obstacle_query)
 
 			for j in 0..<ag.nneis {
@@ -422,7 +430,7 @@ update :: proc(crowd: ^Crowd, dt: f32) {
 	for i in 0..<nactive {
 		ag := crowd.active_agents[i]
 
-		if ag.state != .Walking do continue
+		if ag.state != .WALKING do continue
 
 		integrate(ag, dt)
 
@@ -430,10 +438,10 @@ update :: proc(crowd: ^Crowd, dt: f32) {
 		path_corridor_move_position(ag.corridor, ag.npos, crowd.nav_query, filter)
 
 		ag.ncorners = path_corridor_find_corners(ag.corridor, ag.corner_verts[:], ag.corner_flags[:],
-		                                          ag.corner_polys[:], DT_CROWDAGENT_MAX_CORNERS,
+		                                          ag.corner_polys[:], MAX_CORNERS,
 		                                          crowd.nav_query, filter)
 
-		if .Optimize_Vis in ag.params.update_flags && ag.ncorners > 0 {
+		if .OPTIMIZE_VIS in ag.params.update_flags && ag.ncorners > 0 {
 			target := ag.corner_verts[min(1, ag.ncorners-1)]
 			path_corridor_optimize_path_visibility(ag.corridor, target,
 			                                        ag.params.path_optimization_range,
@@ -510,9 +518,9 @@ update_topology_optimization :: proc(crowd: ^Crowd, agents: []^Agent, dt: f32) {
 
 	for i in 0..<len(agents) {
 		ag := agents[i]
-		if ag.state != .Walking do continue
+		if ag.state != .WALKING do continue
 		if ag.target_state != .Valid do continue
-		if .Optimize_Topo not_in ag.params.update_flags do continue
+		if .OPTIMIZE_TOPO not_in ag.params.update_flags do continue
 
 		ag.topology_opt_time += dt
 		if ag.topology_opt_time >= 0.5 && nqueue < MAX_NEIS {
@@ -664,14 +672,14 @@ add_neighbour :: proc(idx: int, dist: f32, neis: []Neighbour, nneis: int, max_ne
 	return min(nneis + 1, max_neis)
 }
 
-// get_agent returns agent slot idx, or nil if idx is out of range.
-get_agent :: proc(crowd: ^Crowd, idx: int) -> ^Agent {
-	if idx < 0 || idx >= crowd.max_agents do return nil
-	return &crowd.agents[idx]
+// agent returns agent slot idx; false if idx is out of range.
+agent :: proc(crowd: ^Crowd, idx: int) -> (^Agent, bool) #optional_ok {
+	if idx < 0 || idx >= crowd.max_agents do return nil, false
+	return &crowd.agents[idx], true
 }
 
-// get_filter returns the query filter agents use for query_filter_type i, or nil if out of range.
-get_filter :: proc(crowd: ^Crowd, i: int) -> ^detour.Query_Filter {
-	if i < 0 || i >= DT_CROWD_MAX_QUERY_FILTER_TYPE do return nil
-	return &crowd.filters[i]
+// filter returns the query filter agents use for query_filter_type i; false if out of range.
+filter :: proc(crowd: ^Crowd, i: int) -> (^detour.Query_Filter, bool) #optional_ok {
+	if i < 0 || i >= DT_CROWD_MAX_QUERY_FILTER_TYPE do return nil, false
+	return &crowd.filters[i], true
 }

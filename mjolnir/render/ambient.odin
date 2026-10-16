@@ -10,7 +10,7 @@ IRRADIANCE_SIZE :: 32
 PREFILTER_SIZE :: 128
 
 ambient_init :: proc(r: ^Renderer) -> bool {
-  r.brdf_lut = create_texture_from_data(r, TEXTURE_LUT_GGX) or_return
+  r.brdf_lut = texture_load(r, TEXTURE_LUT_GGX) or_return
   r.ibl_intensity = 1.0
   r.skybox_intensity = 1.0
   r.skybox_blur = 0.25
@@ -22,12 +22,12 @@ ambient_init :: proc(r: ^Renderer) -> bool {
 ambient_load_environment :: proc(r: ^Renderer, data: []u8) -> (ok: bool) {
   ambient_free_environment(r)
   defer if !ok do ambient_free_environment(r)
-  r.environment_map = create_texture_from_data(r, data, .RGBA32F, true) or_return
+  r.environment_map = texture_load(r, data, .RGBA32F, true) or_return
   cube :: proc(size, mips: u32) -> TextureDesc {
     return {extent = {size, size}, format = .RGBA16F, usage = {.SAMPLED, .STORAGE}, mip_levels = mips, cube = true}
   }
   env_cube := allocate_texture(r, cube(ENV_CUBE_SIZE, 1)) or_return
-  defer destroy_texture(r, env_cube)
+  defer texture_destroy(r, env_cube)
   r.irradiance_cube = allocate_texture(r, cube(IRRADIANCE_SIZE, 1)) or_return
   r.prefilter_cube = allocate_texture(r, cube(PREFILTER_SIZE, PREFILTER_MIPS)) or_return
   return precompute_ibl(r, r.environment_map, env_cube, r.irradiance_cube, r.prefilter_cube)
@@ -35,8 +35,8 @@ ambient_load_environment :: proc(r: ^Renderer, data: []u8) -> (ok: bool) {
 
 @(private = "file")
 ambient_free_environment :: proc(r: ^Renderer) {
-  destroy_texture(r, r.environment_map)
-  destroy_texture(r, r.irradiance_cube)
-  destroy_texture(r, r.prefilter_cube)
+  texture_destroy(r, r.environment_map)
+  texture_destroy(r, r.irradiance_cube)
+  texture_destroy(r, r.prefilter_cube)
   r.environment_map, r.irradiance_cube, r.prefilter_cube = 0, 0, 0
 }

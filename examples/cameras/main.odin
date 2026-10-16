@@ -3,6 +3,7 @@ package main
 
 import "../../mjolnir"
 import geom "../../mjolnir/geometry"
+import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -35,6 +36,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   orbit:    orbit_state,
   input:    input.State,
 }
@@ -61,13 +63,14 @@ main :: proc() {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.main_camera_look_at(&app.renderer, {0, 6, 12}, {0, 0, 0})
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 6, 12}, {0, 0, 0})
   if cam, ok := render.main_camera(&app.renderer); ok {
     app.orbit.yaw, app.orbit.pitch, app.orbit.distance = render.camera_orbit_state(cam)
   }
   sun := world.spawn(&app.scene, {6, 12, 6})
-  render.attach(&app.renderer, sun.index, render.directional_light_attachment(color = {1, 0.97, 0.92, 1}, shadow_radius = 6.0, cast_shadow = true))
+  render.attach(&app.renderer, sun.index, render.make_directional_light(color = {1, 0.97, 0.92, 1}, shadow_radius = 6.0, cast_shadow = true))
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
@@ -89,6 +92,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -105,7 +109,7 @@ spawn_landmark :: proc(app: ^App, pos: [3]f32, color: render.Color) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   runner_phase += dt * 0.6
   follow_target = {7.0 * math.sin(runner_phase), 0.6, 4.0 * math.sin(runner_phase * 2.0)}
   world.translate(&app.scene, runner_handle, follow_target)
@@ -127,7 +131,7 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Cameras", {700, 20, 280, 360}, {.NO_CLOSE}) {
     mu.label(ctx, "Controller:")
     mu.layout_row(ctx, {90, 90, 90}, 0)
@@ -149,6 +153,7 @@ frame :: proc(app: ^App) -> bool {
     }
     mu.label(ctx, fmt.tprintf("Runner: %.1f %.1f %.1f", follow_target.x, follow_target.y, follow_target.z))
   }
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 

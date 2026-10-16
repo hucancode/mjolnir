@@ -1,6 +1,6 @@
-package gltf_animation
+package gltf
 
-import anim ".."
+import anim "../animation"
 import "core:fmt"
 import "core:log"
 import "core:math/linalg"

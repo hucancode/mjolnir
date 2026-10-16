@@ -2,6 +2,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
@@ -15,6 +16,7 @@ App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
+  debug:    debugui.Context,
   input:    input.State,
 }
 
@@ -59,7 +61,8 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  if !debugui.init(&app.debug, &app.renderer) do return false
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   spawn_primitive(app, .CUBE,     .RED,    {-2.5, 0.5, 0})
   spawn_primitive(app, .SPHERE,   .GREEN,  {2.5, 0.5, 0},  0.7)
   spawn_primitive(app, .CYLINDER, .BLUE,   {0, 1.0, 2.5},  0.5)
@@ -69,9 +72,9 @@ setup :: proc(app: ^App) -> bool {
   spawn_primitive(app, .QUAD_XZ, .GRAY, {0, 0, 0}, 6.0, cast_shadow = false)
 
   point := world.spawn(&app.scene, {3, 8, 3})
-  render.attach(&app.renderer, point.index, render.point_light_attachment({1.0, 0.95, 0.8, 1.0}, 25.0, false))
+  render.attach(&app.renderer, point.index, render.make_point_light({1.0, 0.95, 0.8, 1.0}, 25.0, false))
   sun := world.spawn(&app.scene, {-6, 10, -4})
-  render.attach(&app.renderer, sun.index, render.directional_light_attachment({1.0, 0.95, 0.9, 4.0}, 15.0, true))
+  render.attach(&app.renderer, sun.index, render.make_directional_light({1.0, 0.95, 0.9, 4.0}, 15.0, true))
 
   cam := render.main_camera(&app.renderer)
   render.camera_set_orthographic(cam, f32(ortho_width), f32(ortho_height))
@@ -82,6 +85,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
+  debugui.destroy(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -89,7 +93,7 @@ shutdown :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  input.feed_microui(&app.input, render.debug_ctx(&app.renderer))
+  debugui.feed(&app.debug, &app.input)
   phase += dt
   world.rotate(&app.scene, spinner, phase)
   yaw := f32(cam_yaw)
@@ -104,12 +108,13 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  ctx := render.debug_ui(&app.renderer)
+  ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Ortho Main", {700, 20, 280, 280}, {.NO_CLOSE}) {
     mu.label(ctx, fmt.tprintf("Ortho width: %.1f", ortho_width));   mu.slider(ctx, &ortho_width, 2.0, 30.0)
     mu.label(ctx, fmt.tprintf("Ortho height: %.1f", ortho_height)); mu.slider(ctx, &ortho_height, 2.0, 30.0)
     mu.label(ctx, fmt.tprintf("Cam height: %.1f", cam_height));     mu.slider(ctx, &cam_height, 2.0, 30.0)
     mu.label(ctx, fmt.tprintf("Cam yaw: %.2f rad", cam_yaw));       mu.slider(ctx, &cam_yaw, -math.PI, math.PI)
   }
+  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

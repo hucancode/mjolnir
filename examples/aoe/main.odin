@@ -5,7 +5,6 @@ import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
-import "../../mjolnir/geometry"
 import "../../mjolnir/world"
 import "../../mjolnir/physics"
 import "core:log"
@@ -55,12 +54,12 @@ main :: proc() {
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
-  render.load_environment_map(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   cube_body_to_mesh = make(map[physics.BodyHandle]world.NodeHandle)
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
   cube_mat := app.renderer.builtin_materials[.CYAN]
-  effector_mat := render.material_pbr(&app.renderer, emissive = 5.0)
+  effector_mat := render.material_create(&app.renderer, emissive_value = 5.0)
   grid_size := 50
   spacing: f32 = 1.0
   log.infof("Spawning %dx%d grid of cubes...", grid_size, grid_size)
@@ -70,13 +69,13 @@ setup :: proc(app: ^App) -> bool {
     pos := [3]f32{world_x, 0.5, world_z}
     half := 0.5 * cube_scale
     parent := world.spawn(&app.scene, pos) or_continue
-    body_handle := physics.create_body(
+    body_handle := physics.body_create(
       &phys,
       pos,
       collider = physics.BoxCollider{half_extents = {half, half, half}},
       user = world.Handle(parent),
     ) or_continue
-    mh := world.spawn_child(&app.scene, parent) or_continue
+    mh := world.spawn(&app.scene, parent = parent) or_continue
     render.attach(&app.renderer, mh.index, render.MeshAttachment{handle = cube_mesh, material = cube_mat, cast_shadow = false})
     world.scale_xyz(&app.scene, mh, half, half, half)
     append(&cube_mesh_handles, mh)
@@ -87,7 +86,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, effector_sphere.index, render.MeshAttachment{handle = sphere_mesh, material = effector_mat, cast_shadow = false})
   world.translate(&app.scene, effector_sphere, effector_position)
   world.scale(&app.scene, effector_sphere, 0.5)
-  render.main_camera_look_at(&app.renderer, {10, 30, 10}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {10, 30, 10}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   log.infof("AOE test setup complete: %d cubes", len(cube_mesh_handles))
   return true
@@ -114,12 +113,12 @@ update :: proc(app: ^App, dt: f32) {
     }
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
-  render.main_camera_orbit(&app.renderer, app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   mouse_click: if input.mouse_pressed(&app.input, .LEFT) && !app.input.mouse_captured {
-    ray_origin, ray_dir, ok := render.cursor_ray(&app.renderer, app.input.cursor)
+    ray, ok := render.cursor_ray(&app.renderer, app.input.cursor)
     if !ok do break mouse_click
-    log.infof("Ray: origin=%v, direction=%v", ray_origin, ray_dir)
-    hit := physics.raycast(&phys, geometry.Ray{origin = ray_origin, direction = ray_dir})
+    log.infof("Ray: origin=%v, direction=%v", ray.origin, ray.direction)
+    hit := physics.raycast(&phys, ray)
     clicked_cube = {}
     if !hit.hit do break mouse_click
     if mh, ok := cube_body_to_mesh[hit.body]; ok do clicked_cube = mh

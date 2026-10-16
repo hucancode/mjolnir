@@ -2,7 +2,7 @@ package geometry
 
 import "core:math"
 
-// make_perspective_matrix builds a Vulkan right-handed perspective matrix
+// make_perspective_matrix builds a right-handed perspective matrix
 // (clip-y down, clip-z in [0, 1], view looks along -z).
 make_perspective_matrix :: proc "contextless" (
   fovy, aspect, near, far: f32,
@@ -16,7 +16,7 @@ make_perspective_matrix :: proc "contextless" (
   }
 }
 
-// make_ortho_matrix builds a Vulkan orthographic matrix (clip-y down, clip-z in [0, 1]).
+// make_ortho_matrix builds an orthographic matrix (clip-y down, clip-z in [0, 1]).
 make_ortho_matrix :: proc "contextless" (
   left, right, bottom, top, near, far: f32,
 ) -> matrix[4, 4]f32 {

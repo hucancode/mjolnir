@@ -86,9 +86,9 @@ upload_mesh :: proc(render: ^Renderer, index: u32, g: Geometry) -> (ok: bool) {
   return true
 }
 
-// create_mesh uploads geometry_data into the mesh arena; it lives until destroy_mesh or teardown.
+// mesh_create uploads geometry_data into the mesh arena; it lives until mesh_destroy or teardown.
 // Ownership of the geometry transfers: it is deleted.
-create_mesh :: proc(
+mesh_create :: proc(
   self: ^Renderer,
   geometry_data: Geometry,
 ) -> (
@@ -106,18 +106,18 @@ create_mesh :: proc(
   return handle, true
 }
 
-// destroy_mesh invalidates handle at once; the arena ranges are freed once no frame in flight draws it.
-destroy_mesh :: proc(self: ^Renderer, handle: MeshHandle) {
+// mesh_destroy invalidates handle at once; the arena ranges are freed once no frame in flight draws it.
+mesh_destroy :: proc(self: ^Renderer, handle: MeshHandle) {
   guard(self)
   cont.slots_free(&self.mesh_slots, u32(handle))
 }
 
 @(private)
 init_builtin_meshes :: proc(self: ^Renderer) {
-  self.builtin_meshes[.CUBE] = create_mesh(self, make_cube())
-  self.builtin_meshes[.SPHERE] = create_mesh(self, make_sphere())
-  self.builtin_meshes[.QUAD_XZ] = create_mesh(self, make_quad())
-  self.builtin_meshes[.QUAD_XY] = create_mesh(self, make_billboard_quad())
-  self.builtin_meshes[.CONE] = create_mesh(self, make_cone())
-  self.builtin_meshes[.CYLINDER] = create_mesh(self, make_cylinder())
+  self.builtin_meshes[.CUBE] = mesh_create(self, make_cube())
+  self.builtin_meshes[.SPHERE] = mesh_create(self, make_sphere())
+  self.builtin_meshes[.QUAD_XZ] = mesh_create(self, make_quad())
+  self.builtin_meshes[.QUAD_XY] = mesh_create(self, make_billboard_quad())
+  self.builtin_meshes[.CONE] = mesh_create(self, make_cone())
+  self.builtin_meshes[.CYLINDER] = mesh_create(self, make_cylinder())
 }

@@ -25,7 +25,7 @@ raycast_candidates :: proc(
   first_hit: bool,
 ) -> (found: bool) {
   for candidate in candidates {
-    body := get_body(self, candidate.handle) or_continue
+    body := body(self, candidate.handle) or_continue
     t, normal, hit := raycast_collider(ray, &body.collider, body.position, body.rotation, closest.t)
     if hit && t < closest.t {
       closest^ = {
@@ -79,7 +79,7 @@ overlap :: proc(
     clear(&candidates)
     geometry.bvh_query_aabb(bvh, bounds, &candidates)
     for candidate in candidates {
-      body := get_body(self, candidate.handle) or_continue
+      body := body(self, candidate.handle) or_continue
       if _, hit := collide(&shape, position, rotation, &body.collider, body.position, body.rotation); hit {
         append(results, candidate.handle)
       }

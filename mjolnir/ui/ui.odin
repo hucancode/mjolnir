@@ -3,7 +3,7 @@ package ui
 import cont "../containers"
 import "core:strings"
 
-// NodeHandle identifies a UI node; stale after destroy_node.
+// NodeHandle identifies a UI node; stale after node_destroy.
 NodeHandle :: distinct cont.Handle
 
 // Direction is the axis a node's flow children are placed along.
@@ -63,7 +63,7 @@ Node :: struct {
   hidden:      bool, // hides the subtree
   // added to the parent's z; higher draws and picks on top
   z:           i32,
-  // sibling flow order, ascending; create gives each node the next value
+  // sibling flow order, ascending; node_create gives each node the next value
   order:       i32,
   // hovered, pressed and clicked with its subtree (see update_input)
   interactive: bool,
@@ -90,6 +90,13 @@ Line :: struct {
 
 // UI is a node tree with its layout output and input state. Set up with init, free with destroy.
 UI :: struct {
+  // shown nodes, back to front: what to draw, in order
+  draw_order:   [dynamic]NodeHandle,
+  using _: UI_State,
+}
+
+@(private)
+UI_State :: struct {
   // indexed by NodeHandle.index; slots says which are live
   nodes:        []Node,
   slots:        cont.Slots,
@@ -98,8 +105,6 @@ UI :: struct {
   clips:        [dynamic]Rect, // where the node is visible
   line_ranges:  [dynamic][2]int, // the node's lines in `lines`
   lines:        [dynamic]Line,
-  // shown nodes, back to front: what to draw, in order
-  draw_order:   [dynamic]NodeHandle,
   hovered:      NodeHandle, // interactive-or-within node under the cursor
   pressed:      NodeHandle, // node pressed on, until every button releases
   clicked:      NodeHandle, // node released on this tick, the one pressed
@@ -140,9 +145,9 @@ destroy :: proc(self: ^UI) {
   self^ = {}
 }
 
-// create adds `n`; its text is copied and its order is the next one. Laid out by the
+// node_create adds `n`; its text is copied and its order is the next one. Laid out by the
 // next layout.
-create :: proc(self: ^UI, n: Node) -> (handle: NodeHandle, ok: bool) #optional_ok {
+node_create :: proc(self: ^UI, n: Node) -> (handle: NodeHandle, ok: bool) #optional_ok {
   index := cont.slots_alloc(&self.slots) or_return
   handle = NodeHandle(cont.slots_handle(&self.slots, index))
   slot := &self.nodes[index]
@@ -153,15 +158,15 @@ create :: proc(self: ^UI, n: Node) -> (handle: NodeHandle, ok: bool) #optional_o
   return handle, true
 }
 
-// destroy_node removes a node and its subtree.
-destroy_node :: proc(self: ^UI, handle: NodeHandle) {
+// node_destroy removes a node and its subtree.
+node_destroy :: proc(self: ^UI, handle: NodeHandle) {
   n, ok := lookup(self, handle)
   if !ok do return
   delete(n.text)
   cont.slots_free(&self.slots, handle.index)
   c: u32
   for i in cont.slots_next(&self.slots, &c) {
-    if self.nodes[i].parent == handle do destroy_node(self, NodeHandle(cont.slots_handle(&self.slots, i)))
+    if self.nodes[i].parent == handle do node_destroy(self, NodeHandle(cont.slots_handle(&self.slots, i)))
   }
 }
 

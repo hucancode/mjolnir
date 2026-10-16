@@ -23,7 +23,12 @@ BVH :: struct($T: typeid) {
   nodes:       [dynamic]BVHNode,
   primitives:  [dynamic]T,
   bounds_func: proc(t: T) -> Aabb,
-  // Level-order traversal data for parallel refit
+  using _:     BVH_Levels,
+}
+
+// Level-order traversal data for parallel refit
+@(private)
+BVH_Levels :: struct {
   node_levels: [dynamic][dynamic]i32,
   max_depth:   i32,
 }

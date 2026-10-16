@@ -2,7 +2,6 @@ package render
 
 import "../font"
 import "core:slice"
-import mu "vendor:microui"
 
 // Positions are framebuffer pixels; `clip` is (x, y, w, h), zero = whole framebuffer.
 
@@ -50,18 +49,13 @@ DrawList :: struct {
 }
 
 // The overlay batches 2D output drawn into the swapchain image after post-processing, one
-// vertex stream: draw2d commands staged by the app (sorted by z_order, clipped per command)
-// and the microui debug context (clipped per microui clip rect, scaled by the window DPI). A
-// batch is one scissor and one texture.
+// vertex stream: draw2d commands staged by the app (sorted by z_order, clipped per command).
+// A batch is one scissor and one texture.
 @(private)
 overlay_init :: proc(r: ^Renderer) -> bool {
   r.ui_batches = make([dynamic]UIBatch, 0, 64)
   r.ui_vertices = make([]Vertex2D, UI_MAX_VERTICES)
   r.ui_indices = make([]u32, UI_MAX_INDICES)
-  mu.init(&r.ui_debug_ctx)
-  r.ui_debug_ctx.text_width = mu.default_atlas_text_width
-  r.ui_debug_ctx.text_height = mu.default_atlas_text_height
-  r.ui_debug_atlas = allocate_alpha_texture(r, mu.default_atlas_alpha[:], mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT) or_return
   return true
 }
 
@@ -78,15 +72,10 @@ overlay_clear :: proc(r: ^Renderer) {
   clear(&r.ui_batches)
 }
 
-// Adds the debug UI over the staged draw2d commands, which draw only with a main camera.
+// The staged draw2d commands draw only with a main camera.
 @(private)
-overlay_flush :: proc(r: ^Renderer, draw_debug: bool) {
+overlay_flush :: proc(r: ^Renderer) {
   if _, ok := main_camera(r); !ok do overlay_clear(r)
-  if draw_debug {
-    extent := dev.extent(&r.gpu)
-    begin_batch(r, {0, 0, i32(extent.x), i32(extent.y)})
-    batch_debug_ui(r, extent)
-  }
   end_batch(r)
 }
 
@@ -207,44 +196,3 @@ push_mesh :: proc(self: ^Renderer, mesh: DrawMeshCommand, texture: TextureHandle
     self.ui_index_count += 1
   }
 }
-
-// microui works in window coordinates; scaled by dpi_scale
-@(private)
-batch_debug_ui :: proc(self: ^Renderer, extent: [2]u32) {
-  atlas_size := [2]f32{mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT}
-  scale := self.dpi_scale
-  quad :: proc(self: ^Renderer, dst, src: mu.Rect, color: mu.Color, atlas_size: [2]f32, scale: f32) {
-    p0 := [2]f32{f32(dst.x), f32(dst.y)} * scale
-    p1 := [2]f32{f32(dst.x + dst.w), f32(dst.y + dst.h)} * scale
-    uv0 := [2]f32{f32(src.x), f32(src.y)} / atlas_size
-    uv1 := [2]f32{f32(src.x + src.w), f32(src.y + src.h)} / atlas_size
-    push_quad(self, p0, p1, uv0, uv1, {color.r, color.g, color.b, color.a}, self.ui_debug_atlas)
-  }
-  iter: ^mu.Command
-  for variant in mu.next_command_iterator(&self.ui_debug_ctx, &iter) {
-    switch c in variant {
-    case ^mu.Command_Rect:
-      quad(self, c.rect, mu.default_atlas[mu.DEFAULT_ATLAS_WHITE], c.color, atlas_size, scale)
-    case ^mu.Command_Text:
-      dst := mu.Rect{c.pos.x, c.pos.y, 0, 0}
-      for ch in c.str {
-        if ch & 0xc0 == 0x80 do continue
-        src := mu.default_atlas[mu.DEFAULT_ATLAS_FONT + min(int(ch), 127)]
-        dst.w, dst.h = src.w, src.h
-        quad(self, dst, src, c.color, atlas_size, scale)
-        dst.x += dst.w
-      }
-    case ^mu.Command_Icon:
-      src := mu.default_atlas[c.id]
-      x := c.rect.x + (c.rect.w - src.w) / 2
-      y := c.rect.y + (c.rect.h - src.h) / 2
-      quad(self, {x, y, src.w, src.h}, src, c.color, atlas_size, scale)
-    case ^mu.Command_Clip:
-      begin_batch(self, clip_scissor([4]f32{f32(c.rect.x), f32(c.rect.y), f32(c.rect.w), f32(c.rect.h)} * scale, extent))
-    case ^mu.Command_Jump:
-      unreachable()
-    }
-  }
-}
-
-

@@ -245,7 +245,7 @@ bone_segments :: proc(
 
 // ---------- layer stack ----------
 
-// Store `layer` at `index`, or append it when `index` is out of range.
+// Store `layer` at `index`; out of range, in the first empty slot or appended.
 @(private)
 put_layer :: proc(self: ^Animator, layer: Layer, index: int) -> int {
   if index >= 0 && index < len(self.layers) {
@@ -253,13 +253,17 @@ put_layer :: proc(self: ^Animator, layer: Layer, index: int) -> int {
     self.layers[index] = layer
     return index
   }
+  for &l, i in self.layers do if l.data == nil {
+    l = layer
+    return i
+  }
   append(&self.layers, layer)
   return len(self.layers) - 1
 }
 
 @(private)
 valid_layer :: #force_inline proc(self: ^Animator, index: int) -> bool {
-  return index >= 0 && index < len(self.layers)
+  return index >= 0 && index < len(self.layers) && self.layers[index].data != nil
 }
 
 // play plays clip `name` on layer 0, replacing whatever was there.
@@ -268,7 +272,8 @@ play :: proc(self: ^Animator, rig: ^Rig, name: string, mode: PlayMode = .LOOP, s
   return ok
 }
 
-// add_clip_layer adds (or replaces at `layer_index`) a layer playing clip `name`.
+// add_clip_layer adds (or replaces at `layer_index`) a layer playing clip `name`. A layer
+// index stays valid until remove_layer or clear_layers; a removed index may be handed out again.
 add_clip_layer :: proc(
   self: ^Animator,
   rig: ^Rig,
@@ -283,11 +288,11 @@ add_clip_layer :: proc(
   ok: bool,
 ) #optional_ok {
   clip := find_clip(rig, name) or_return
-  return add_clip_layer_index(self, clip, weight, mode, speed, layer_index, blend_mode), true
+  return put_clip_layer(self, clip, weight, mode, speed, layer_index, blend_mode), true
 }
 
-// add_clip_layer_index is add_clip_layer by clip index (see find_clip); it skips the name lookup.
-add_clip_layer_index :: proc(
+@(private)
+put_clip_layer :: proc(
   self: ^Animator,
   clip: int,
   weight: f32 = 1,
@@ -307,11 +312,11 @@ add_clip_layer_index :: proc(
   )
 }
 
-// remove_layer destroys the layer at index and shifts later layers down; false if index is invalid.
+// remove_layer destroys the layer at index, leaving the other indices as they are; false if
+// index is invalid.
 remove_layer :: proc(self: ^Animator, index: int) -> bool {
   if !valid_layer(self, index) do return false
   layer_destroy(&self.layers[index])
-  ordered_remove(&self.layers, index)
   return true
 }
 
@@ -352,7 +357,7 @@ transition_to :: proc(
 ) -> bool {
   clip := find_clip(rig, name) or_return
   for len(self.layers) <= max(from, to) do append(&self.layers, Layer{})
-  add_clip_layer_index(self, clip, 0, mode, speed, to, blend_mode)
+  put_clip_layer(self, clip, 0, mode, speed, to, blend_mode)
   self.transition = {
     from_layer = from,
     to_layer   = to,
@@ -365,8 +370,8 @@ transition_to :: proc(
 
 // ---------- IK ----------
 
-// add_ik_layer adds an IK layer over `bones` (root first, each bone the parent of the next;
-// ownership transfers to the layer). `constraints` is nil or one per bone.
+// add_ik_layer adds an IK layer over `bones` (root first, each bone the parent of the next, as
+// bone_chain returns; ownership transfers to the layer, or stays with the caller on failure). `constraints` is nil or one per bone.
 // LOCAL targets are in skeleton space; WORLD targets are in world space and
 // converted with `root_world` on every update. The layer weight blends FK (0) to IK (1).
 add_ik_layer :: proc(
@@ -409,29 +414,6 @@ add_ik_layer :: proc(
     },
   }
   return put_layer(self, layer, layer_index), true
-}
-
-// add_ik_chain_layer adds an IK layer over the chain from `root_name` down to `tip_name`.
-add_ik_chain_layer :: proc(
-  self: ^Animator,
-  rig: ^Rig,
-  root_name, tip_name: string,
-  target, pole: [3]f32,
-  weight: f32 = 1,
-  max_iterations: int = 10,
-  tolerance: f32 = 0.001,
-  layer_index: int = -1,
-  constraints: []IKBoneConstraint = nil,
-  space: IKTargetSpace = .LOCAL,
-  pole_weight: f32 = 1,
-) -> (
-  index: int,
-  ok: bool,
-) #optional_ok {
-  bones := bone_chain(&rig.skeleton, root_name, tip_name) or_return
-  index, ok = add_ik_layer(self, rig, bones, target, pole, weight, max_iterations, tolerance, layer_index, constraints, space, pole_weight)
-  if !ok do delete(bones)
-  return
 }
 
 // set_ik_target sets target and pole in the space the layer was created with.

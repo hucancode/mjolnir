@@ -2,8 +2,6 @@
 package crowd
 
 import "../detour"
-import ".."
-import "../bake"
 import "base:runtime"
 import "core:log"
 import "core:math"
@@ -234,25 +232,20 @@ test_obstacle_avoidance_query_capacity :: proc(t: ^testing.T) {
 // Crowd lifecycle + update with real navmesh ---------------------
 // ---------------------------------------------------------------
 
-build_test_navmesh :: proc(t: ^testing.T) -> (^navigation.NavMesh, bool) {
-	b: bake.NavGeometryBuilder
-	defer bake.builder_destroy(&b)
-	bake.append_triangles(&b, {{-10, 0, -10}, {10, 0, -10}, {10, 0, 10}, {-10, 0, 10}}, {0, 2, 1, 0, 3, 2})
-	nav := new(navigation.NavMesh)
-	if !bake.build(nav, &b) {
-		free(nav)
-		testing.fail_now(t, "navigation.build failed")
-	}
+// test_plane.navmesh is a 20x20 walkable plane centered at the origin, baked by navigation/bake
+build_test_navmesh :: proc(t: ^testing.T) -> (^detour.Nav_Mesh, bool) {
+	nav, ok := detour.load_navmesh(#load("test_plane.navmesh"))
+	if !ok do testing.fail_now(t, "loading the plane fixture failed")
 	return nav, true
 }
 
-destroy_test_navmesh :: proc(nav: ^navigation.NavMesh) {
-	navigation.destroy(nav)
+destroy_test_navmesh :: proc(nav: ^detour.Nav_Mesh) {
+	detour.nav_mesh_destroy(nav)
 	free(nav)
 }
 
-default_agent_params :: proc() -> Agent_Params {
-	return Agent_Params {
+default_agent_params :: proc() -> AgentParams {
+	return AgentParams {
 		radius = 0.4,
 		height = 1.8,
 		max_acceleration = 8.0,
@@ -269,23 +262,24 @@ test_crowd_lifecycle_add_remove :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_test_navmesh(nav)
 
-	c, cok := create(8, 0.6, nav)
-	testing.expect(t, cok, "create")
+	cv: Crowd
+	c := &cv
+	testing.expect(t, init(c, 8, 0.6, nav), "init")
 	defer destroy(c)
 
 	params := default_agent_params()
-	a0 := add_agent(c, {0, 0, 0}, params)
-	a1 := add_agent(c, {1, 0, 0}, params)
+	a0, _ := agent_add(c, {0, 0, 0}, params)
+	a1, _ := agent_add(c, {1, 0, 0}, params)
 	testing.expectf(t, a0 == 0 && a1 == 1, "expected sequential slots, got %d %d", a0, a1)
 
-	ag := get_agent(c, a0)
+	ag := agent(c, a0)
 	testing.expect(t, ag != nil && ag.active, "agent must be active after add")
 
-	remove_agent(c, a0)
+	agent_remove(c, a0)
 	testing.expect(t, !c.agents[a0].active, "agent must be inactive after remove")
 
 	// reuse slot
-	a2 := add_agent(c, {0, 0, 0}, params)
+	a2, _ := agent_add(c, {0, 0, 0}, params)
 	testing.expectf(t, a2 == a0, "slot should be recycled, got %d", a2)
 }
 
@@ -294,12 +288,14 @@ test_crowd_add_agent_off_navmesh_fails :: proc(t: ^testing.T) {
 	nav, ok := build_test_navmesh(t)
 	if !ok do return
 	defer destroy_test_navmesh(nav)
-	c, _ := create(4, 0.6, nav)
+	cv: Crowd
+	c := &cv
+	init(c, 4, 0.6, nav)
 	defer destroy(c)
 
 	params := default_agent_params()
-	idx := add_agent(c, {1000, 0, 1000}, params)
-	testing.expect(t, idx == -1, "off-navmesh add should fail")
+	_, added := agent_add(c, {1000, 0, 1000}, params)
+	testing.expect(t, !added, "off-navmesh add should fail")
 }
 
 @(test)
@@ -307,10 +303,12 @@ test_crowd_request_move_target_state :: proc(t: ^testing.T) {
 	nav, ok := build_test_navmesh(t)
 	if !ok do return
 	defer destroy_test_navmesh(nav)
-	c, _ := create(4, 0.6, nav)
+	cv: Crowd
+	c := &cv
+	init(c, 4, 0.6, nav)
 	defer destroy(c)
 	params := default_agent_params()
-	idx := add_agent(c, {0, 0, 0}, params)
+	idx, _ := agent_add(c, {0, 0, 0}, params)
 	testing.expect(t, idx >= 0, "agent add")
 
 	// invalid index
@@ -334,11 +332,13 @@ test_crowd_update_advances_agent :: proc(t: ^testing.T) {
 	nav, ok := build_test_navmesh(t)
 	if !ok do return
 	defer destroy_test_navmesh(nav)
-	c, _ := create(4, 0.6, nav)
+	cv: Crowd
+	c := &cv
+	init(c, 4, 0.6, nav)
 	defer destroy(c)
 
 	params := default_agent_params()
-	idx := add_agent(c, {-5, 0, -5}, params)
+	idx, _ := agent_add(c, {-5, 0, -5}, params)
 	testing.expect(t, idx >= 0, "agent add")
 
 	filter: detour.Query_Filter
@@ -408,7 +408,7 @@ bench_proximity_grid_query :: proc(t: ^testing.T) {
 
 bench_crowd_state :: struct {
 	t:    ^testing.T,
-	nav:  ^navigation.NavMesh,
+	nav:  ^detour.Nav_Mesh,
 	crowd: ^Crowd,
 }
 
@@ -423,14 +423,15 @@ bench_crowd_update :: proc(t: ^testing.T) {
 			if !ok do return .Allocation_Error
 			s.nav = nav
 			N :: 32
-			c, _ := create(N, 0.6, nav)
+			c := new(Crowd)
+			init(c, N, 0.6, nav)
 			s.crowd = c
 			params := default_agent_params()
 			for i in 0 ..< N {
 				fi := f32(i)
 				x := -8.0 + (fi * 0.5)
 				z := -8.0 + (f32(i / 8) * 0.5)
-				add_agent(c, {x, 0, z}, params)
+				agent_add(c, {x, 0, z}, params)
 			}
 			filter: detour.Query_Filter
 			detour.query_filter_init(&filter)
@@ -454,6 +455,7 @@ bench_crowd_update :: proc(t: ^testing.T) {
 		teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_crowd_state)opts.user_data
 			destroy(s.crowd)
+			free(s.crowd)
 			destroy_test_navmesh(s.nav)
 			return .Okay
 		},
@@ -470,10 +472,12 @@ test_crowd_move_to_reaches_goal :: proc(t: ^testing.T) {
 	nav, ok := build_test_navmesh(t)
 	if !ok do return
 	defer destroy_test_navmesh(nav)
-	c, _ := create(4, 0.6, nav)
+	cv: Crowd
+	c := &cv
+	init(c, 4, 0.6, nav)
 	defer destroy(c)
 	params := default_agent_params()
-	idx := add_agent(c, {0, 0, 0}, params)
+	idx, _ := agent_add(c, {0, 0, 0}, params)
 	testing.expect(t, move_to(c, idx, {5, 0, 5}), "move_to on the mesh must succeed")
 	for _ in 0 ..< 100 do update(c, 0.1)
 	d := c.agents[idx].npos - {5, 0, 5}
