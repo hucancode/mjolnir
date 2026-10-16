@@ -386,7 +386,6 @@
   const rebuild = () => { upload(); updatePose(); };
 
   heading("Hammer");
-  slider("Slant", "slant", 0, 90, 1, updatePose);
   slider("Head length", "headLength", 0.8, 2.2, 0.05, rebuild);
   slider("Handle length", "handleLength", 2, 7, 0.1, rebuild);
   heading("Camera");
@@ -395,7 +394,6 @@
   slider("Height", "height", 0.5, 14, 0.1);
   heading("Light");
   slider("Sun direction", "sunAzimuth", 0, 360, 1);
-  slider("Sun height", "sunElevation", 10, 85, 1);
   heading("Ground");
   slider("Spacing", "gridSpacing", 0.5, 2.5, 0.05);
   slider("Opacity", "gridOpacity", 0.1, 1, 0.01);
