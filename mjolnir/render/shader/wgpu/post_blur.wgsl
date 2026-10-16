@@ -8,10 +8,6 @@ struct Effect {
 
 const MAX_RADIUS: f32 = 16.0;
 
-fn gaussian_weight(distance: f32, sigma: f32) -> f32 {
-    return exp(-0.5 * distance * distance / (sigma * sigma));
-}
-
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let texel_size = 1.0 / vec2f(textureDimensions(input_texture));

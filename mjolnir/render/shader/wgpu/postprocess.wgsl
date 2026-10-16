@@ -24,6 +24,15 @@ struct PostUniforms {
 }
 @group(2) @binding(0) var<uniform> u: PostUniforms;
 
+// View depth from the depth image, between the camera's clip planes.
+fn linearize_depth(depth: f32) -> f32 {
+    return u.camera_near * u.camera_far / (u.camera_far - depth * (u.camera_far - u.camera_near));
+}
+
+fn gaussian_weight(distance: f32, sigma: f32) -> f32 {
+    return exp(-0.5 * distance * distance / (sigma * sigma));
+}
+
 struct VertexOut {
     @builtin(position) clip: vec4f,
     @location(0) uv: vec2f,

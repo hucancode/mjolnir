@@ -35,7 +35,6 @@ allocate_texture :: proc(r: ^Renderer, desc: TextureDesc, data: []u8 = nil, targ
     cont.slots_free(pool, h)
     return 0, false
   }
-  r.texture_descs[h] = desc
   return TextureHandle(h), true
 }
 

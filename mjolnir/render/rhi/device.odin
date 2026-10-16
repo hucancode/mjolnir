@@ -12,8 +12,8 @@ Pipeline :: distinct u32
 BindLayout :: distinct u32
 BindGroup :: distinct u32
 
-// CommandList is a command buffer (Vulkan) or encoder (WebGPU) being recorded.
-CommandList :: distinct rawptr
+// CommandList names a command buffer (Vulkan) or encoder (WebGPU) being recorded.
+CommandList :: distinct u32
 
 // BACKBUFFER stands for the image frame_begin acquired wherever a TextureHandle names a pass
 // target. One command list per frame renders into it, and that list leaves it ready to present.
@@ -32,16 +32,10 @@ SyncPoint :: struct {
   stages: bit_set[Stage],
 }
 
-// What the device can do. render branches on these.
+// What the device can do, known once it is up; what a backend always can or cannot do is its
+// compile-time constants (BINDLESS, LAYERED_RENDERING). render branches on these.
 Caps :: struct {
-  // textures and storage images reach shaders through global arrays indexed by handle
-  bindless:                  bool,
   multi_draw_indirect_count: bool,
-  // one pass renders into several layers of a texture (PassDesc.layer_count)
-  layered_rendering:         bool,
-  // cmd_barrier does something: the caller owns hazards. When false the queue order is the
-  // only sync and it is a no-op.
-  explicit_barriers:         bool,
   // the COMPUTE queue runs beside the GRAPHICS one, ordered only by the SyncPoints a submission
   // waits on. When false a COMPUTE list is recorded into the graphics list instead.
   async_compute:             bool,
@@ -50,9 +44,6 @@ Caps :: struct {
   indirect_first_instance:   bool,
   // label scopes are timed on the GPU (frame_timings)
   timestamps:                bool,
-  // command lists of different `thread`s (cmd_begin) may be recorded at once, each on its own
-  // thread; resource creation, buffer_write, cmd_flush_uploads and submission stay on one
-  parallel_recording:        bool,
 }
 
 // Threads that may record command lists at once: cmd_begin's `thread` is below it.
@@ -260,7 +251,7 @@ DepthState :: struct {
 // without push constants (WebGPU); without it the group follows the last layout.
 PUSH_GROUP :: BindLayout(max(u32))
 
-// A pipeline's resource interface: `layouts` are sets 0 .. n - 1. With `bindless` (Caps.bindless)
+// A pipeline's resource interface: `layouts` are sets 0 .. n - 1. With `bindless` (the backend's BINDLESS)
 // the global texture arrays follow as set n. cmd_push writes `push_size` bytes of constants, or on a backend without push constants (WebGPU) to a push group that
 // every pipeline has, whether or not it pushes (PUSH_GROUP).
 PipelineLayoutDesc :: struct {
@@ -316,7 +307,7 @@ DepthTarget :: struct {
 PassDesc :: struct {
   colors:      []ColorTarget,
   depth:       Maybe(DepthTarget),
-  // layers drawn into together (Caps.layered_rendering) when above 1; 0 is 1
+  // layers drawn into together (the backend's LAYERED_RENDERING) when above 1; 0 is 1
   layer_count: u32,
 }
 
@@ -366,7 +357,7 @@ Procs :: struct($Device: typeid, $Window: typeid) {
   // UPLOAD buffers are written at once; GPU buffers are staged and land where the caller next
   // records cmd_flush_uploads
   buffer_write:                  proc(d: ^Device, buffer: Buffer, offset: int, data: []u8) -> bool,
-  // Caps.bindless: the textures of texture_create are in their own array already
+  // BINDLESS: the textures of texture_create are in their own array already
   bindless_write:                proc(d: ^Device, array: BindlessArray, index: u32, resource: BindResource),
   // the last copy a READBACK buffer received from cmd_copy_buffer and a frame completed
   buffer_read:                   proc(d: ^Device, buffer: Buffer, offset: int, dst: []u8) -> bool,
@@ -405,7 +396,7 @@ Procs :: struct($Device: typeid, $Window: typeid) {
   cmd_label_end:                 proc(d: ^Device, cmd: CommandList),
   cmd_bind_pipeline:             proc(d: ^Device, cmd: CommandList, pipeline: Pipeline),
   cmd_bind_group:                proc(d: ^Device, cmd: CommandList, set: u32, group: BindGroup),
-  // the global bindless arrays (Caps.bindless), at the set after the layouts of the pipeline
+  // the global bindless arrays (the backend's BINDLESS), at the set after the layouts of the pipeline
   // just bound (PipelineLayoutDesc.bindless)
   cmd_bind_bindless:             proc(d: ^Device, cmd: CommandList),
   cmd_push:                      proc(d: ^Device, cmd: CommandList, data: rawptr, size: u32),

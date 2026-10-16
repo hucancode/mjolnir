@@ -34,10 +34,6 @@ struct VertexOut {
     @location(5) @interpolate(flat) node_index: u32,
 }
 
-fn mat3_of(m: mat4x4f) -> mat3x3f {
-    return mat3x3f(m[0].xyz, m[1].xyz, m[2].xyz);
-}
-
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
     let camera = views[u.camera_index];

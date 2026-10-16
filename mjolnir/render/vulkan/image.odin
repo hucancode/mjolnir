@@ -81,7 +81,7 @@ image_create :: proc(
   mem_reqs: vk.MemoryRequirements
   vk.GetImageMemoryRequirements(gctx.device, img.image, &mem_reqs)
   img.memory = memory_alloc(gctx, mem_reqs, {.DEVICE_LOCAL}, linear = false) or_return
-  vk.BindImageMemory(gctx.device, img.image, img.memory.memory, img.memory.offset) or_return
+  vk.BindImageMemory(gctx.device, img.image, allocation_memory(gctx, img.memory), img.memory.offset) or_return
   img.view = image_create_view(
     gctx.device,
     &img,

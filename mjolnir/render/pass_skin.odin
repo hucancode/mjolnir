@@ -11,13 +11,8 @@ import "rhi"
 SKIN_GROUP_SIZE :: 64
 
 @(private)
-SkinState :: struct {
-  pipeline: rhi.Pipeline,
-}
-
-@(private)
 skin_init :: proc(r: ^Renderer) -> bool {
-  r.skin.pipeline = dev.compute_pipeline_create(
+  r.skin_pipeline = dev.compute_pipeline_create(
     &r.gpu,
     {{spirv = {comp = spirv("shader/vulkan/skinning/skin.spv")}, wgsl = wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/skin.wgsl"))}, pipeline_layout(r, .SKIN)},
   ) or_return
@@ -31,7 +26,7 @@ skin_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
   if count == 0 do return
   barrier(r, cmd, .DRAW_TO_SKIN)
   dev.cmd_begin_compute(&r.gpu, cmd)
-  pipeline_bind(r, cmd, r.skin.pipeline, .SKIN, f, &count, .NONE)
+  pipeline_bind(r, cmd, r.skin_pipeline, .SKIN, f, &count, .NONE)
   dev.cmd_dispatch(&r.gpu, cmd, (count + SKIN_GROUP_SIZE - 1) / SKIN_GROUP_SIZE, 1, 1)
   dev.cmd_end_compute(&r.gpu, cmd)
   barrier(r, cmd, .SKIN_TO_DRAW)

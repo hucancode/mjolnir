@@ -18,10 +18,6 @@ struct SkinUniforms {
 }
 @group(2) @binding(0) var<uniform> u: SkinUniforms;
 
-fn mat3_of(m: mat4x4f) -> mat3x3f {
-    return mat3x3f(m[0].xyz, m[1].xyz, m[2].xyz);
-}
-
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
     let v = gid.x;

@@ -141,10 +141,9 @@ timelines_init :: proc(self: ^GPUContext) -> vk.Result {
   return .SUCCESS
 }
 
-// shutdown_context destroys every object the context owns, including the device, surface and instance.
+// shutdown_context destroys every object the context owns, including the device, surface and
+// instance. After vkDeviceWaitIdle and deferred_flush (shutdown).
 shutdown_context :: proc(self: ^GPUContext) {
-  vk.DeviceWaitIdle(self.device)
-  deferred_flush(self)
   delete(self.trash)
   uploads_destroy(self)
   allocator_destroy(self)
@@ -627,17 +626,17 @@ end_single_time_command :: proc(
   return .SUCCESS
 }
 
+// The first memory type of type_filter with `properties`, from the properties allocator_init read.
 @(private)
 find_memory_type_index :: proc(
-  physical_device: vk.PhysicalDevice,
+  gctx: ^GPUContext,
   type_filter: u32,
   properties: vk.MemoryPropertyFlags,
 ) -> (
   index: u32,
   ok: bool,
 ) #optional_ok {
-  mem_properties: vk.PhysicalDeviceMemoryProperties
-  vk.GetPhysicalDeviceMemoryProperties(physical_device, &mem_properties)
+  mem_properties := &gctx.allocator.properties
   for i in 0 ..< mem_properties.memoryTypeCount {
     if type_filter & (1 << i) == 0 do continue
     if mem_properties.memoryTypes[i].propertyFlags & properties != properties do continue

@@ -13,16 +13,14 @@ import vk "vendor:vulkan"
 @(private = "file")
 BLOCK_SIZE :: vk.DeviceSize(64 * 1024 * 1024)
 
-// Allocation is a range of a block.
+// Allocation is a range of a block: its index in Allocator.blocks + 1, 0 for none.
 Allocation :: struct {
-  memory: vk.DeviceMemory,
+  block:  u32,
   offset: vk.DeviceSize,
   size:   vk.DeviceSize,
-  // the range's mapping, nil unless host visible
-  mapped: [^]u8,
-  block:  ^MemoryBlock,
 }
 
+// A block whose memory is 0 is a freed dedicated one, its entry free for the next block.
 @(private)
 MemoryBlock :: struct {
   memory:     vk.DeviceMemory,
@@ -44,7 +42,7 @@ MemoryRange :: struct {
 
 @(private)
 Allocator :: struct {
-  blocks:     [dynamic]^MemoryBlock,
+  blocks:     [dynamic]MemoryBlock,
   properties: vk.PhysicalDeviceMemoryProperties,
 }
 
@@ -56,7 +54,7 @@ allocator_init :: proc(gctx: ^GPUContext) {
 // Frees every block; every allocation is gone by then.
 @(private)
 allocator_destroy :: proc(gctx: ^GPUContext) {
-  for block in gctx.allocator.blocks do block_free(gctx, block)
+  for &block in gctx.allocator.blocks do if block.memory != 0 do block_free(gctx, &block)
   delete(gctx.allocator.blocks)
 }
 
@@ -71,41 +69,51 @@ memory_alloc :: proc(
   a: Allocation,
   ret: vk.Result,
 ) {
-  type_index, found := find_memory_type_index(gctx.physical_device, reqs.memoryTypeBits, properties)
+  type_index, found := find_memory_type_index(gctx, reqs.memoryTypeBits, properties)
   if !found do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   s := &gctx.allocator
   heap := s.properties.memoryHeaps[s.properties.memoryTypes[type_index].heapIndex].size
   block_size := min(BLOCK_SIZE, heap / 8)
   if reqs.size >= block_size / 2 {
-    block := block_make(gctx, reqs.size, type_index, linear, dedicated = true) or_return
-    return range_alloc(block, reqs.size, reqs.alignment).?, .SUCCESS
+    index := block_make(gctx, reqs.size, type_index, linear, dedicated = true) or_return
+    return range_alloc(s, index, reqs.size, reqs.alignment).?, .SUCCESS
   }
-  for block in s.blocks {
-    if block.dedicated || block.type_index != type_index || block.linear != linear do continue
-    if taken, ok := range_alloc(block, reqs.size, reqs.alignment).?; ok do return taken, .SUCCESS
+  for &block, i in s.blocks {
+    if block.memory == 0 || block.dedicated || block.type_index != type_index || block.linear != linear do continue
+    if taken, ok := range_alloc(s, u32(i), reqs.size, reqs.alignment).?; ok do return taken, .SUCCESS
   }
-  block := block_make(gctx, block_size, type_index, linear, dedicated = false) or_return
-  return range_alloc(block, reqs.size, reqs.alignment).?, .SUCCESS
+  index := block_make(gctx, block_size, type_index, linear, dedicated = false) or_return
+  return range_alloc(s, index, reqs.size, reqs.alignment).?, .SUCCESS
 }
 
 // memory_free returns `a` to its block at once: the caller has waited out its last use.
 memory_free :: proc(gctx: ^GPUContext, a: ^Allocation) {
-  block := a.block
-  if block == nil do return
+  if a.block == 0 do return
+  block := &gctx.allocator.blocks[a.block - 1]
+  r := MemoryRange{a.offset, a.size}
   a^ = {}
   if block.dedicated {
-    for b, i in gctx.allocator.blocks do if b == block {
-      ordered_remove(&gctx.allocator.blocks, i)
-      break
-    }
     block_free(gctx, block)
     return
   }
-  range_free(block, {a.offset, a.size})
+  range_free(block, r)
 }
 
+// The memory of `a`'s block.
+allocation_memory :: proc(gctx: ^GPUContext, a: Allocation) -> vk.DeviceMemory {
+  return gctx.allocator.blocks[a.block - 1].memory
+}
+
+// The mapping of `a`, nil unless host visible.
+allocation_mapped :: proc(gctx: ^GPUContext, a: Allocation) -> [^]u8 {
+  if a.block == 0 do return nil
+  mapped := gctx.allocator.blocks[a.block - 1].mapped
+  return nil if mapped == nil else mapped[a.offset:]
+}
+
+// Takes the entry of a freed dedicated block, or a new one.
 @(private = "file")
-block_make :: proc(gctx: ^GPUContext, size: vk.DeviceSize, type_index: u32, linear, dedicated: bool) -> (block: ^MemoryBlock, ret: vk.Result) {
+block_make :: proc(gctx: ^GPUContext, size: vk.DeviceSize, type_index: u32, linear, dedicated: bool) -> (index: u32, ret: vk.Result) {
   info := vk.MemoryAllocateInfo {
     sType           = .MEMORY_ALLOCATE_INFO,
     allocationSize  = size,
@@ -113,31 +121,39 @@ block_make :: proc(gctx: ^GPUContext, size: vk.DeviceSize, type_index: u32, line
   }
   memory: vk.DeviceMemory
   vk.AllocateMemory(gctx.device, &info, nil, &memory) or_return
-  block = new(MemoryBlock)
-  block^ = {memory = memory, size = size, type_index = type_index, linear = linear, dedicated = dedicated}
+  block := MemoryBlock{memory = memory, size = size, type_index = type_index, linear = linear, dedicated = dedicated}
   append(&block.free, MemoryRange{0, size})
   if .HOST_VISIBLE in gctx.allocator.properties.memoryTypes[type_index].propertyFlags {
     if res := vk.MapMemory(gctx.device, memory, 0, size, {}, auto_cast &block.mapped); res != .SUCCESS {
-      block_free(gctx, block)
-      return nil, res
+      block_free(gctx, &block)
+      return 0, res
     }
   }
-  append(&gctx.allocator.blocks, block)
+  blocks := &gctx.allocator.blocks
+  index = u32(len(blocks))
+  for b, i in blocks do if b.memory == 0 {
+    index = u32(i)
+    break
+  }
+  if int(index) == len(blocks) do append(blocks, block)
+  else do blocks[index] = block
   if !dedicated do log.debugf("Memory block of %d MiB, type %d", size >> 20, type_index)
-  return block, .SUCCESS
+  return index, .SUCCESS
 }
 
+// Frees the block's memory; its entry stays, free for the next block.
 @(private = "file")
 block_free :: proc(gctx: ^GPUContext, block: ^MemoryBlock) {
   if block.mapped != nil do vk.UnmapMemory(gctx.device, block.memory)
   vk.FreeMemory(gctx.device, block.memory, nil)
   delete(block.free)
-  free(block)
+  block^ = {}
 }
 
 // First fit; what alignment skips stays free.
 @(private = "file")
-range_alloc :: proc(block: ^MemoryBlock, size, alignment: vk.DeviceSize) -> Maybe(Allocation) {
+range_alloc :: proc(allocator: ^Allocator, index: u32, size, alignment: vk.DeviceSize) -> Maybe(Allocation) {
+  block := &allocator.blocks[index]
   align := max(alignment, 1)
   for r, i in block.free {
     start := (r.offset + align - 1) / align * align
@@ -147,8 +163,7 @@ range_alloc :: proc(block: ^MemoryBlock, size, alignment: vk.DeviceSize) -> Mayb
     ordered_remove(&block.free, i)
     if after.size > 0 do inject_at(&block.free, i, after)
     if before.size > 0 do inject_at(&block.free, i, before)
-    mapped: [^]u8 = nil if block.mapped == nil else block.mapped[start:]
-    return Allocation{memory = block.memory, offset = start, size = size, mapped = mapped, block = block}
+    return Allocation{block = index + 1, offset = start, size = size}
   }
   return nil
 }

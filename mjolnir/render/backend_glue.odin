@@ -11,12 +11,16 @@ import wgpu "wgpu"
 when RENDER_BACKEND == "vulkan" {
   Backend :: vulkan.Backend
   RETIRE_GRACE :: vulkan.RETIRE_GRACE
+  BINDLESS :: vulkan.BINDLESS
+  LAYERED_RENDERING :: vulkan.LAYERED_RENDERING
   MAX_PYRAMID_SLOTS :: vulkan.MAX_PYRAMID_SLOTS
   MAX_DRAW_LIST_SLOTS :: vulkan.MAX_DRAW_LIST_SLOTS
   dev :: vulkan.PROCS
 } else when RENDER_BACKEND == "wgpu" {
   Backend :: wgpu.Backend
   RETIRE_GRACE :: wgpu.RETIRE_GRACE
+  BINDLESS :: wgpu.BINDLESS
+  LAYERED_RENDERING :: wgpu.LAYERED_RENDERING
   MAX_PYRAMID_SLOTS :: wgpu.MAX_PYRAMID_SLOTS
   MAX_DRAW_LIST_SLOTS :: wgpu.MAX_DRAW_LIST_SLOTS
   dev :: wgpu.PROCS

@@ -159,3 +159,20 @@ fn clip_output(p: vec4f) -> vec4f {
 
 // A clip-space position outside the clip volume: a vertex that draws nothing.
 const CLIP_DISCARD: vec4f = vec4f(2.0, 2.0, 2.0, 1.0);
+
+// The rotation and scale of a transform.
+fn mat3_of(m: mat4x4f) -> mat3x3f {
+    return mat3x3f(m[0].xyz, m[1].xyz, m[2].xyz);
+}
+
+// Where a direction lands on an equirectangular image.
+fn dir_to_equirect_uv(dir: vec3f) -> vec2f {
+    let u = atan2(dir.z, dir.x) / (2.0 * PI) + 0.5;
+    let v = acos(clamp(dir.y, -1.0, 1.0)) / PI;
+    return vec2f(u, v);
+}
+
+// Schlick's Fresnel, damped by roughness for the image-based light.
+fn fresnel_schlick_roughness(cos_theta: f32, f0: vec3f, roughness: f32) -> vec3f {
+    return f0 + (max(vec3f(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
+}

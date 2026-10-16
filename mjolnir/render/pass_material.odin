@@ -26,11 +26,6 @@ MATERIAL_PASS_TYPES := [MaterialPass][2]MaterialType {
 @(private = "file")
 MATERIAL_TYPES := [len(MaterialType)]MaterialType{.PBR, .TRANSPARENT, .WIREFRAME, .RANDOM_COLOR, .SPRITE}
 
-@(private)
-MaterialState :: struct {
-  pipelines: [MaterialPass][len(MaterialType)]rhi.Pipeline,
-}
-
 // The formats a material pass draws into, for the pipelines of anything drawn in it.
 @(private)
 material_pass_formats :: proc(pass: MaterialPass) -> []TextureFormat {
@@ -61,13 +56,12 @@ mesh_vertex_streams :: proc(r: ^Renderer, position_only := false) -> []rhi.Verte
   @(static) node := [?]rhi.VertexAttribute{{location = 5, format = .U32, offset = 0}}
   streams := make([dynamic]rhi.VertexBuffer, context.temp_allocator)
   append(&streams, rhi.VertexBuffer{stride = size_of(Vertex), attributes = all[:1] if position_only else all[:]})
-  if !r.res.caps.bindless do append(&streams, rhi.VertexBuffer{stride = size_of(u32), step = .INSTANCE, attributes = node[:]})
+  when !BINDLESS do append(&streams, rhi.VertexBuffer{stride = size_of(u32), step = .INSTANCE, attributes = node[:]})
   return streams[:]
 }
 
 @(private)
 material_init :: proc(r: ^Renderer) -> bool {
-  bindless := r.res.caps.bindless
   common := wgsl("shader/wgpu/common.wgsl")
   mesh := wgsl_join(common, wgsl("shader/wgpu/mesh.wgsl"))
   pulled := wgsl_join(common, wgsl("shader/wgpu/mesh_pulled.wgsl"))
@@ -102,14 +96,14 @@ material_init :: proc(r: ^Renderer) -> bool {
         shader        = sources[type],
         layout        = pipeline_layout(r, .MESH, .MATERIAL),
         vertex        = mesh_vertex_streams(r),
-        topology      = .LINE_LIST if type == .WIREFRAME && !bindless else .TRIANGLE_LIST,
+        topology      = .LINE_LIST if type == .WIREFRAME && !BINDLESS else .TRIANGLE_LIST,
         cull          = cull[type],
         color_formats = material_pass_formats(pass),
         blend         = .ALPHA if pass == .FORWARD else .NONE,
         depth         = material_pass_depth(pass),
         wireframe     = type == .WIREFRAME,
       }
-      r.material.pipelines[pass][int(type)] = dev.graphics_pipeline_create(&r.gpu, desc) or_return
+      r.material_pipelines[pass][int(type)] = dev.graphics_pipeline_create(&r.gpu, desc) or_return
     }
   }
   return true
@@ -118,21 +112,27 @@ material_init :: proc(r: ^Renderer) -> bool {
 // The forward pass draws particles first. A camera draws nothing until a cull has written its
 // lists (Vulkan; WebGPU culls the frame it draws).
 @(private)
-material_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: ^FrameCamera, pass: MaterialPass) {
+material_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32, pass: MaterialPass) {
+  attachments := &r.cameras[cam].attachments
   targets := MATERIAL_PASS_TARGETS[pass]
   colors := make([]rhi.ColorTarget, len(targets), context.temp_allocator)
   load: rhi.LoadOp = .CLEAR if pass == .GBUFFER else .LOAD
-  for a, i in targets do colors[i] = {texture = cam.attachments[a], load = load, clear = {0, 0, 0, 1}}
-  depth := rhi.DepthTarget{texture = cam.attachments[.DEPTH], load = load, clear = 1, store = true, read_only = pass == .FORWARD}
+  for a, i in targets do colors[i] = {texture = attachments[a][f], load = load, clear = {0, 0, 0, 1}}
+  depth := rhi.DepthTarget{texture = attachments[.DEPTH][f], load = load, clear = 1, store = true, read_only = pass == .FORWARD}
   dev.cmd_begin_pass(&r.gpu, cmd, {colors = colors, depth = depth})
-  if pass == .FORWARD do particles_draw(r, cmd, f, cam.index)
+  if pass == .FORWARD do particles_draw(r, cmd, f, cam)
   types := MATERIAL_PASS_TYPES[pass]
-  pipelines := r.material.pipelines[pass][int(types[0]):int(types[1])]
-  camera_index := cam.index
+  pipelines := r.material_pipelines[pass][int(types[0]):int(types[1])]
+  camera_index := cam
   pipeline_bind(r, cmd, pipelines[0], .MESH, f, &camera_index, .MATERIAL)
-  if cam.ready || !r.res.caps.bindless {
+  when BINDLESS {
+    ready, slot := camera_ready(r, cam), camera_slot(cam) + f
+  } else {
+    ready, slot := true, camera_next_slot(cam, f)
+  }
+  if ready {
     mesh_buffers_bind(r, cmd)
-    draw_list_draw(r, cmd, cam.slot if r.res.caps.bindless else cam.next_slot, 0, MATERIAL_TYPES[types[0]:types[1]], pipelines, f)
+    draw_list_draw(r, cmd, slot, 0, MATERIAL_TYPES[types[0]:types[1]], pipelines, f)
   }
   dev.cmd_end_pass(&r.gpu, cmd)
 }

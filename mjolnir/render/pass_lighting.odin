@@ -16,14 +16,6 @@ LIGHTING_TILE :: 16
 @(private)
 LIT_STORAGE_BASE :: PRECOMPUTE_STORAGE_BASE + PRECOMPUTE_DISPATCHES
 
-@(private)
-LightingState :: struct {
-  pipeline:      rhi.Pipeline,
-  // WebGPU: group 3, the image the dispatch writes, a group per image
-  output_layout: rhi.BindLayout,
-  output_groups: map[TextureHandle]rhi.BindGroup,
-}
-
 // Matches the push block of the lighting shaders (and, in WebGPU, their uniform struct).
 @(private = "file")
 LightingPush :: struct {
@@ -43,59 +35,45 @@ LightingPush :: struct {
 
 @(private)
 lighting_init :: proc(r: ^Renderer) -> bool {
-  l := &r.lighting
-  if !r.res.caps.bindless {
+  when !BINDLESS {
     entries := [1]rhi.BindEntry{{kind = .STORAGE_TEXTURE, stages = {.COMPUTE}, format = HDR_COLOR_FORMAT}}
-    l.output_layout = dev.bind_layout_create(&r.gpu, {entries = entries[:]}) or_return
+    r.lighting_output_layout = dev.bind_layout_create(&r.gpu, {entries = entries[:]}) or_return
   }
-  l.pipeline = dev.compute_pipeline_create(
+  r.lighting_pipeline = dev.compute_pipeline_create(
     &r.gpu,
     {
       {spirv = {comp = spirv("shader/vulkan/lighting/lighting.spv")}, wgsl = wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/lighting.wgsl"))},
-      pipeline_layout(r, .LIGHTING, .LIGHTING, l.output_layout),
+      pipeline_layout(r, .LIGHTING, .LIGHTING, r.lighting_output_layout),
     },
   ) or_return
   return true
 }
 
 @(private)
-lighting_shutdown :: proc(r: ^Renderer) {
-  delete(r.lighting.output_groups)
-}
-
-// Drops the output groups, made again on use: an image they name changed.
-@(private)
-lighting_groups_clear :: proc(r: ^Renderer) {
-  l := &r.lighting
-  for _, g in l.output_groups do dev.bind_group_retire(&r.gpu, g)
-  clear(&l.output_groups)
-}
-
-@(private)
-lighting_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: ^FrameCamera) {
-  l := &r.lighting
-  output := cam.attachments[.FINAL_IMAGE]
+lighting_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
+  attachments := &r.cameras[cam].attachments
   group: rhi.BindGroup
-  if !r.res.caps.bindless {
+  when !BINDLESS {
+    output := attachments[.FINAL_IMAGE][f]
     cached: bool
-    group, cached = l.output_groups[output]
+    group, cached = r.lighting_output_groups[output]
     if !cached {
       resources := [1]rhi.BindResource{rhi.TextureView{output, 0}}
       ok: bool
-      group, ok = dev.bind_group_create(&r.gpu, {layout = l.output_layout, resources = resources[:]})
+      group, ok = dev.bind_group_create(&r.gpu, {layout = r.lighting_output_layout, resources = resources[:]})
       if !ok do return
-      l.output_groups[output] = group
+      r.lighting_output_groups[output] = group
     }
   }
   push := LightingPush {
-    camera_index     = cam.index,
+    camera_index     = cam,
     irradiance       = u32(r.irradiance_cube),
     prefilter        = u32(r.prefilter_cube),
     brdf_lut         = u32(r.brdf_lut),
     environment      = u32(r.environment_map),
     skybox_intensity = r.skybox_intensity,
     skybox_blur      = r.skybox_blur,
-    output_index     = LIT_STORAGE_BASE + cam.slot,
+    output_index     = LIT_STORAGE_BASE + camera_slot(cam) + f,
     light_count      = r.light_count,
   }
   dev.cmd_begin_compute(&r.gpu, cmd)
@@ -103,16 +81,16 @@ lighting_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: ^FrameC
   pipeline_bind(
     r,
     cmd,
-    l.pipeline,
+    r.lighting_pipeline,
     .LIGHTING,
     f,
     &push,
     .LIGHTING,
-    cam.attachments[.NORMAL],
-    cam.attachments[.ALBEDO],
-    cam.attachments[.METALLIC_ROUGHNESS],
-    cam.attachments[.EMISSIVE],
-    cam.attachments[.DEPTH],
+    attachments[.NORMAL][f],
+    attachments[.ALBEDO][f],
+    attachments[.METALLIC_ROUGHNESS][f],
+    attachments[.EMISSIVE][f],
+    attachments[.DEPTH][f],
     0,
     r.irradiance_cube,
     r.prefilter_cube,
@@ -120,6 +98,6 @@ lighting_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: ^FrameC
     r.environment_map,
   )
   if group != 0 do dev.cmd_bind_group(&r.gpu, cmd, 3, group)
-  groups := (cam.extent + LIGHTING_TILE - 1) / LIGHTING_TILE
+  groups := (r.cameras[cam].extent + LIGHTING_TILE - 1) / LIGHTING_TILE
   dev.cmd_dispatch(&r.gpu, cmd, groups.x, groups.y, 1)
 }

@@ -1,5 +1,6 @@
 package render
 
+import cont "../containers"
 import "rhi"
 
 // The frame: every pass in order, with the barriers between them. With async compute (Vulkan on
@@ -135,24 +136,28 @@ gpu_timings :: proc(r: ^Renderer) -> []rhi.Timing {
 // camera; render scopes cannot hold barriers.
 @(private = "file")
 camera_passes :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
-  if len(r.live_cameras) == 0 do return
+  if r.camera_slots.count == 0 do return
   discards := make([dynamic]TextureHandle, context.temp_allocator)
-  for &cam in r.live_cameras do for a in AttachmentType do append(&discards, cam.attachments[a])
+  c: u32
+  for i in cont.slots_next(&r.camera_slots, &c) do for a in AttachmentType do append(&discards, r.cameras[i].attachments[a][f])
   // render-to-texture: a material may sample last frame's lit image
   barrier_discard(r, cmd, discards[:], .CULL_TO_INDIRECT, .COLOR_TO_SAMPLE)
   {
     scope(r, cmd, "gbuffer")
-    for &cam in r.live_cameras do material_record(r, cmd, f, &cam, .GBUFFER)
+    c = 0
+    for i in cont.slots_next(&r.camera_slots, &c) do material_record(r, cmd, f, i, .GBUFFER)
   }
   barrier(r, cmd, .GBUFFER_TO_LIGHTING)
   {
     scope(r, cmd, "lighting")
-    for &cam in r.live_cameras do lighting_record(r, cmd, f, &cam)
+    c = 0
+    for i in cont.slots_next(&r.camera_slots, &c) do lighting_record(r, cmd, f, i)
   }
   barrier(r, cmd, .LIGHTING_TO_FORWARD)
   {
     scope(r, cmd, "forward")
-    for &cam in r.live_cameras do material_record(r, cmd, f, &cam, .FORWARD)
+    c = 0
+    for i in cont.slots_next(&r.camera_slots, &c) do material_record(r, cmd, f, i, .FORWARD)
   }
   barrier(r, cmd, .FORWARD_TO_COMPUTE)
 }
@@ -165,9 +170,9 @@ clear_backbuffer :: proc(r: ^Renderer, cmd: rhi.CommandList) {
   dev.cmd_end_pass(&r.gpu, cmd)
 }
 
-// Records, submits and presents the frame flush described. RESIZE: the swapchain is out of date.
+// Records, submits and presents the frame flush wrote. RESIZE: the swapchain is out of date.
 @(private)
-frame_run :: proc(r: ^Renderer) -> (submitted: bool, status: rhi.FrameStatus) {
+frame_run :: proc(r: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool, status: rhi.FrameStatus) {
   if !dev.ready(&r.gpu) do return false, .OK
   // the frame slot's previous submissions are done: its per-frame buffers may be rewritten
   slot, waited := dev.frame_wait(&r.gpu)
@@ -176,12 +181,11 @@ frame_run :: proc(r: ^Renderer) -> (submitted: bool, status: rhi.FrameStatus) {
   tables_sync(r, f)
   overlay_upload(r, f)
   if !shadow_atlas_reserve(r, f, r.shadow_view_count) do return false, .ERROR
-  pyramids_bind(r)
-  if begun := dev.frame_begin(&r.gpu, r.framebuffer_size); begun != .OK do return false, begun
-  bindless := r.res.caps.bindless
-  async := r.res.caps.async_compute
-  main_cam: ^FrameCamera
-  if r.main_live >= 0 do main_cam = &r.live_cameras[r.main_live]
+  pyramids_bind(r, f)
+  if begun := dev.frame_begin(&r.gpu, framebuffer_size); begun != .OK do return false, begun
+  async := dev.caps(&r.gpu).async_compute
+  main := u32(r.main_camera)
+  has_main := cont.slots_live(&r.camera_slots, main)
 
   // The staged uploads land first: on their own submission, which the compute list waits for
   // and the graphics list follows on its queue, or at the head of the one list.
@@ -206,25 +210,26 @@ frame_run :: proc(r: ^Renderer) -> (submitted: bool, status: rhi.FrameStatus) {
     scope(r, cmd, "skinning")
     skin_record(r, cmd, f)
   }
-  if !bindless {
+  // a when body is no scope of its own: the braces end the label
+  when !BINDLESS {{
     scope(r, cmd, "cull")
     cull_record(r, cmd, f)
-  }
+  }}
   {
     scope(r, cmd, "shadows")
     shadow_record(r, cmd, f)
   }
   camera_passes(r, cmd, f)
-  if main_cam != nil {
-    slot := main_cam.slot if bindless else main_cam.next_slot
+  if has_main {
     barrier(r, cmd, .CULL_TO_COPY)
-    draw_count_record(r, cmd, slot, f)
+    // the lists the main camera drew: culled last frame (Vulkan) or this one (WebGPU)
+    draw_count_record(r, cmd, camera_slot(main) + f if BINDLESS else camera_next_slot(main, f), f)
     barrier(r, cmd, .COLOR_TO_SAMPLE)
     {
       scope(r, cmd, "post")
-      post_record(r, cmd, f, main_cam)
+      post_record(r, cmd, f, main)
     }
-    debug_line_record(r, cmd, f, main_cam)
+    debug_line_record(r, cmd, f, main)
   } else {
     clear_backbuffer(r, cmd)
   }
@@ -237,11 +242,11 @@ frame_run :: proc(r: ^Renderer) -> (submitted: bool, status: rhi.FrameStatus) {
     scope(r, cmd, "particles")
     particles_simulate(r, cmd, f)
   }
-  if bindless {
+  when BINDLESS {{
     if !async do barrier(r, cmd, .FRAME_TO_CULL)
     scope(r, compute, "cull")
     cull_record(r, compute, f)
-  }
+  }}
   dev.cmd_end(&r.gpu, cmd)
   graphics_cmds := [1]rhi.CommandList{cmd}
   if !async {

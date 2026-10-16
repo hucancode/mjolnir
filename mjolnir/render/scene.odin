@@ -8,6 +8,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "core:sync"
+import mu "vendor:microui"
 
 // direct_light packs camera indices into 16 bits
 #assert(MAX_ACTIVE_CAMERAS < 0xFFFF)
@@ -39,70 +40,144 @@ CameraHandle :: distinct u32
 // materials, the main camera): application lifetime. Everything made after init lives for
 // the map: teardown frees it in one go, back to the marks init leaves.
 Renderer :: struct {
-  gpu:                 Backend,
-  // what the backend reads each frame besides the tables: the environment light, light and
-  // shadow view counts, particle parameters; flush fills the per-frame rest
-  using frame:         FrameDesc,
-  mesh_slots:          cont.Slots,
-  material_slots:      cont.Slots,
-  emitter_slots:       cont.Slots,
-  forcefield_slots:    cont.Slots,
+  gpu:                    Backend,
+  // render's tables, the one copy; bit r of dirty[t] is region r of tables[t] (TABLE_REGIONS),
+  // written since the last submitted frame. tables_sync brings the GPU copies up to date.
+  tables:                 [Table][]u8,
+  dirty:                  [Table]u64,
+  // cull dispatches cover the slots below this
+  node_count:             u32,
+  // the skinning dispatch covers skinned vertices below this
+  skinned_vertex_count:   u32,
+  // this frame's lights are sorted by type, each type one range of the light table
+  light_count:            [LightType]u32,
+  shadow_view_count:      u32,
+  environment_map:        TextureHandle,
+  brdf_lut:               TextureHandle,
+  irradiance_cube:        TextureHandle,
+  prefilter_cube:         TextureHandle,
+  skybox_intensity:       f32,
+  skybox_blur:            f32,
+  // scales image-based lighting
+  ibl_intensity:          f32,
+  particle_params:        ParticleSystemParams,
+  mesh_slots:             cont.Slots,
+  material_slots:         cont.Slots,
+  emitter_slots:          cont.Slots,
+  forcefield_slots:       cont.Slots,
   // each light and the slot it shines from (bound_at)
-  lights:              []struct {
+  lights:                 []struct {
     node_index: u32,
     light:      Light,
   },
-  light_slots:         cont.Slots,
-  builtin_materials:   [Color]MaterialHandle,
-  builtin_meshes:      [Primitive]MeshHandle,
-  cameras:             []Camera,
-  camera_slots:        cont.Slots,
-  main_camera:         CameraHandle,
-  // scales image-based lighting
-  ibl_intensity:       f32,
+  light_slots:            cont.Slots,
+  builtin_materials:      [Color]MaterialHandle,
+  builtin_meshes:         [Primitive]MeshHandle,
+  cameras:                []Camera,
+  camera_slots:           cont.Slots,
+  main_camera:            CameraHandle,
   // every camera runs the stack in order
-  effect_stack:        [dynamic]PostprocessEffect,
+  effect_stack:           [dynamic]PostprocessEffect,
   // pass i writes slot i % POST_PROCESS_RING; its input and original are the two slots before
-  post_process_ring:   [FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
+  post_process_ring:      [FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
   // render targets below MAX_RENDER_TARGETS, every other texture above (bindless_textures.odin)
-  target_slots:        cont.Slots,
-  texture_slots:       cont.Slots,
-  mesh_slabs:          [MeshStream]cont.SlabAllocator,
-  bone_matrix_slab:    cont.SlabAllocator,
+  target_slots:           cont.Slots,
+  texture_slots:          cont.Slots,
+  mesh_slabs:             [MeshStream]cont.SlabAllocator,
+  bone_matrix_slab:       cont.SlabAllocator,
   // the skinned vertex ranges of skinned slots (pass_skin.odin)
-  skin_slab:           cont.SlabAllocator,
+  skin_slab:              cont.SlabAllocator,
   // simulated seconds; an emitter emits floor(rate * time) particles in total
-  particle_time:       f64,
+  particle_time:          f64,
   // segments added since the last frame, per ring: [0] depth-tested, [1] drawn over the scene
-  debug_lines:         [2][dynamic]DebugLineSegment,
+  debug_lines:            [2][dynamic]DebugLineSegment,
   // segments each ring has taken in total (debug_line.odin)
-  debug_filled:        [2]u64,
-  debug_time:          f32,
-  debug_mutex:         sync.Mutex,
-  ui:                  OverlayRenderer,
-  shadow_casters:      [MAX_SHADOW_MAPS]Caster,
-  // what render owns on the device (resources.odin) and each pass's pipelines
-  res:                 Resources,
-  cull:                CullState,
-  shadow:              ShadowState,
-  material:            MaterialState,
-  lighting:            LightingState,
-  post:                PostState,
-  particle_gpu:        ParticleState,
-  skin:                SkinState,
-  debug_line:          DebugLineState,
-  overlay_gpu:         OverlayState,
-  // the last compute submission, which the next frame's graphics waits for
-  last_compute:        rhi.SyncPoint,
-  texture_descs:       [MAX_TEXTURES]TextureDesc,
-  // draws are batched per mesh and material (batches.odin), where the backend has no multi-draw
-  batched:             bool,
-  batches:             BatchState,
+  debug_filled:           [2]u64,
+  debug_time:             f32,
+  debug_mutex:            sync.Mutex,
+  shadow_casters:         [MAX_SHADOW_MAPS]Caster,
   // per pyramid slot: the depth pyramid camera_slot(c) + frame of camera c
-  pyramids:            [MAX_PYRAMID_SLOTS]TextureHandle,
-  mutex:               sync.Recursive_Mutex,
+  pyramids:               [MAX_PYRAMID_SLOTS]TextureHandle,
+  // the last compute submission, which the next frame's graphics waits for
+  last_compute:           rhi.SyncPoint,
+  // the buffers render owns on the device (resources.odin): a copy per frame in flight of
+  // each table, one of the rest
+  buffers:                [SceneBuffer][FRAMES_IN_FLIGHT]rhi.Buffer,
+  // per table and frame in flight: the regions render wrote that the copy lacks
+  table_stale:            [Table][FRAMES_IN_FLIGHT]u64,
+  ui_vertex_buffers:      [FRAMES_IN_FLIGHT]rhi.Buffer,
+  ui_index_buffers:       [FRAMES_IN_FLIGHT]rhi.Buffer,
+  // bound where a slot has none: white 2D and black cube
+  white, black_cube:      TextureHandle,
+  // the shadow atlas of each frame in flight (pass_shadow.odin)
+  atlas:                  [FRAMES_IN_FLIGHT]TextureHandle,
+  atlas_layers:           [FRAMES_IN_FLIGHT]u32,
+  // a bindless device has one layout and group per frame, at .NONE, which every pass binds
+  scene_layouts:          [ScenePass]rhi.BindLayout,
+  scene_groups:           [ScenePass][FRAMES_IN_FLIGHT]rhi.BindGroup,
+  texture_layouts:        [TextureLayout]rhi.BindLayout,
+  texture_groups:         map[TextureGroupKey]rhi.BindGroup,
+  // culling (pass_cull.odin)
+  cull_pipeline:          rhi.Pipeline,
+  // batched: writes the draw of each batch
+  cull_draws_pipeline:    rhi.Pipeline,
+  // the pyramid build: compacted builds every mip at once, batched mip by mip
+  reduce_pipeline:        rhi.Pipeline,
+  // batched: group 3 of the cull and of the pyramid build
+  cull_layout:            rhi.BindLayout,
+  reduce_layout:          rhi.BindLayout,
+  cull_groups:            map[CullKey]rhi.BindGroup,
+  reduce_groups:          map[ReduceKey]rhi.BindGroup,
+  draw_lists:             [MAX_DRAW_LIST_SLOTS]GpuDrawList,
+  // the slot's storage views are in the bindless array
+  pyramid_bound:          [MAX_PYRAMID_SLOTS]bool,
+  pyramid_counters:       rhi.Buffer,
+  // the main camera's visible opaque draws, copied out per frame in flight
+  draw_count_readback:    [FRAMES_IN_FLIGHT]rhi.Buffer,
+  // draws are batched per mesh and material where they are not compacted (batches.odin):
+  // (material, mesh) -> batch id, the nodes in each batch, the freed ids, the ids below
+  // batch_high in use or free, and whether first_instance and capacity are stale
+  batch_ids:              map[u64]u32,
+  batch_members:          [MAX_BATCHES]u32,
+  batch_free:             [dynamic]u32,
+  batch_high:             u32,
+  batch_stale:            bool,
+  batch_warned:           bool,
+  // each pass's pipelines
+  shadow_pipeline:        rhi.Pipeline,
+  material_pipelines:     [MaterialPass][len(MaterialType)]rhi.Pipeline,
+  lighting_pipeline:      rhi.Pipeline,
+  // WebGPU: group 3 of the lighting dispatch, the image it writes, a group per image
+  lighting_output_layout: rhi.BindLayout,
+  lighting_output_groups: map[TextureHandle]rhi.BindGroup,
+  // [is_last][tag]: every pass writes an HDR ring image but the last, which writes the backbuffer
+  post_pipelines:         [2][POST_EFFECT_COUNT]rhi.Pipeline,
+  particle_emit_pipeline: rhi.Pipeline,
+  particle_sim_pipeline:  rhi.Pipeline,
+  particle_draw_pipeline: rhi.Pipeline,
+  skin_pipeline:          rhi.Pipeline,
+  // by ring
+  debug_line_pipelines:   [2]rhi.Pipeline,
+  overlay_pipeline:       rhi.Pipeline,
+  // the 2D overlay (overlay_renderer.odin): UI_MAX_VERTICES and UI_MAX_INDICES, the first
+  // ui_vertex_count and ui_index_count this frame's, in batches of one scissor and texture
+  ui_vertices:            []Vertex2D,
+  ui_indices:             []u32,
+  ui_vertex_count:        u32,
+  ui_index_count:         u32,
+  ui_batches:             [dynamic]UIBatch,
+  // sampled by text commands
+  ui_font_atlas:          TextureHandle,
+  ui_font_atlas_size:     [2]f32,
+  ui_debug_ctx:           mu.Context,
+  // mu.begin ran this frame; frame closes it
+  ui_debug_open:          bool,
+  // microui's builtin atlas
+  ui_debug_atlas:         TextureHandle,
+  dpi_scale:              f32,
+  mutex:                  sync.Recursive_Mutex,
   // ready ran init_resources
-  initialized:         bool,
+  initialized:            bool,
 }
 
 // Bring the renderer up on a window: the GPU backend, every resource and an empty scene
@@ -115,17 +190,10 @@ init :: proc(
   framebuffer_size: [2]u32,
   dpi_scale: f32,
 ) -> bool {
-  table_size: [Table]int
-  for t, binding in TABLES do table_size[binding] = t.stride * t.capacity
-  mesh_size: [MeshStream]int
-  for stream, s in MESH_STREAMS {
-    cont.slab_init(&self.mesh_slabs[s], stream.slab)
-    mesh_size[s] = int(self.mesh_slabs[s].capacity) * stream.elem_size
-  }
+  for stream, s in MESH_STREAMS do cont.slab_init(&self.mesh_slabs[s], stream.slab)
   dev.init(&self.gpu, app_name, window, framebuffer_size) or_return
-  tables_init(self)
-  self.batched = !dev.caps(&self.gpu).multi_draw_indirect_count
-  self.ui.dpi_scale = dpi_scale
+  for t, i in TABLES do self.tables[i] = make([]u8, t.stride * t.capacity)
+  self.dpi_scale = dpi_scale
   if dev.ready(&self.gpu) do return ready(self)
   return true
 }
@@ -210,9 +278,7 @@ teardown :: proc(self: ^Renderer) {
   dev.wait_idle(&self.gpu)
   for r in cont.slots_flush(&self.target_slots) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
   for i in self.texture_slots.mark ..< self.texture_slots.high_water do dev.texture_destroy(&self.gpu, TextureHandle(i))
-  texture_groups_clear(self)
-  cull_groups_clear(self)
-  lighting_groups_clear(self)
+  groups_clear(self)
   cont.slots_rewind(&self.texture_slots)
   self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
   cont.slots_rewind(&self.camera_slots)
@@ -224,7 +290,7 @@ teardown :: proc(self: ^Renderer) {
   slice.zero(write_table(self, .NODES, NodeData)[:self.node_count])
   mark_dirty(self, .NODES, 0, int(self.node_count))
   self.node_count = 0
-  if self.batched do batches_reset(self)
+  when !BINDLESS do batches_reset(self)
   cont.slab_rewind(&self.bone_matrix_slab)
   cont.slab_rewind(&self.skin_slab)
   clear_entry(self, .SKIN_OWNERS, 0, self.skinned_vertex_count)
@@ -247,15 +313,17 @@ load_environment_map :: proc(self: ^Renderer, data: []u8) -> bool {
 
 // Destroy everything, whatever map is up.
 shutdown :: proc(self: ^Renderer) {
-  cull_shutdown(self)
-  lighting_shutdown(self)
-  delete(self.res.texture_groups)
+  delete(self.cull_groups)
+  delete(self.reduce_groups)
+  delete(self.lighting_output_groups)
+  delete(self.texture_groups)
   dev.shutdown(&self.gpu)
-  tables_destroy(self)
-  batches_destroy(self)
-  delete(self.ui.batches)
-  delete(self.ui.vertices)
-  delete(self.ui.indices)
+  for table in self.tables do delete(table)
+  delete(self.batch_ids)
+  delete(self.batch_free)
+  delete(self.ui_batches)
+  delete(self.ui_vertices)
+  delete(self.ui_indices)
   delete(self.effect_stack)
   for inbox in self.debug_lines do delete(inbox)
   for &slab in self.mesh_slabs do cont.slab_destroy(&slab)
@@ -286,7 +354,7 @@ recreate_swapchain :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale:
   }
   post_process_release_images(self)
   post_process_create_images(self) or_return
-  self.ui.dpi_scale = dpi_scale
+  self.dpi_scale = dpi_scale
   return true
 }
 
@@ -355,11 +423,7 @@ tick_resource_pools :: proc(self: ^Renderer) {
     dev.texture_destroy(&self.gpu, TextureHandle(r.index))
     destroyed = true
   }
-  if destroyed {
-    texture_groups_clear(self)
-    cull_groups_clear(self)
-    lighting_groups_clear(self)
-  }
+  if destroyed do groups_clear(self)
   for r in cont.slots_tick(&self.mesh_slots) {
     free_mesh(self, write_table(self, .MESHES, MeshData)[r.index])
     clear_entry(self, .MESHES, r.index)
@@ -914,7 +978,6 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   self.light_count, self.shadow_view_count = pack_lights(lights[:n], dst)
   mark_dirty(self, .LIGHTS, 0, n)
   mark_dirty(self, .VIEWS, SHADOW_VIEW_BASE, int(self.shadow_view_count))
-  self.shadow_draw_list = SHADOW_DRAW_SLOT_BASE + frame_index
   for &l in dst[:n] {
     if l.shadow_map == 0 do continue
     for f in 0 ..< SHADOW_FACE_COUNT[l.type] {
@@ -934,7 +997,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
         require_flags   = SHADOW_CASTER_FLAGS,
         instance_tag    = v << 16,
         layer           = v - SHADOW_VIEW_BASE,
-        draw_list       = self.shadow_draw_list,
+        draw_list       = SHADOW_DRAW_SLOT_BASE + frame_index,
         list_capacity   = SHADOW_LIST_CAPACITY,
       }
     }
@@ -970,31 +1033,21 @@ flush_particles :: proc(self: ^Renderer) {
   p.frame_counter += 1
 }
 
-// Writes the camera views and lists the live cameras for the backend, in slot order.
+// Writes the camera views, in slot order.
 @(private = "file")
-flush_cameras :: proc(self: ^Renderer, frame_index: u32) -> (cameras: []FrameCamera, main: int) {
+flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
   views := write_table(self, .VIEWS, ViewGPU)
   // a slot without a camera keeps an empty view that draws no type
-  next_frame_index := (frame_index + 1) % FRAMES_IN_FLIGHT
-  prev_frame_index := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
-  serial := dev.frame_serial(&self.gpu)
   slot_count := self.camera_slots.high_water
   slice.zero(views[CAMERA_VIEW_BASE:][:slot_count])
   mark_dirty(self, .VIEWS, CAMERA_VIEW_BASE, int(slot_count))
   all_types := u32(1 << len(MaterialType) - 1)
-  list := make([dynamic]FrameCamera, 0, self.camera_slots.count, context.temp_allocator)
-  main = -1
   c: u32
   for i in cont.slots_next(&self.camera_slots, &c) {
     cam := &self.cameras[i]
     view := camera_view_matrix(cam)
     projection := camera_projection_matrix(cam)
     view_projection := projection * view
-    slot := camera_slot(i) + frame_index
-    // frame N builds pyramid N from N-1's depth and culls into N+1's lists
-    next_slot := camera_slot(i) + next_frame_index
-    pyramid := self.pyramids[slot]
-    ready := serial >= cam.ready_serial
     v := &views[CAMERA_VIEW_BASE + i]
     v^ = {
       view                = view,
@@ -1006,68 +1059,24 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) -> (cameras: []FrameCam
       extent              = {f32(cam.extent[0]), f32(cam.extent[1])},
       near                = cam.near,
       far                 = cam.far,
-      pyramid             = u32(pyramid),
-      occlusion_mask      = GBUFFER_TYPES if ready else 0,
+      pyramid             = u32(self.pyramids[camera_slot(i) + frame_index]),
+      occlusion_mask      = GBUFFER_TYPES if camera_ready(self, i) else 0,
       list_stride         = 1,
       type_mask           = all_types,
       require_flags       = {.VISIBLE},
-      draw_list           = next_slot,
+      // frame N builds pyramid N from N-1's depth and culls into N+1's lists
+      draw_list           = camera_next_slot(i, frame_index),
       list_capacity       = CAMERA_LIST_CAPACITY,
     }
     for a in AttachmentType do v.attachments[a] = u32(cam.attachments[a][frame_index])
-    if CameraHandle(i) == self.main_camera do main = len(list)
-    fc := FrameCamera {
-      index        = i,
-      prev_depth   = cam.attachments[.DEPTH][prev_frame_index],
-      pyramid      = pyramid,
-      slot         = slot,
-      next_slot    = next_slot,
-      extent       = cam.extent,
-      near         = cam.near,
-      far          = cam.far,
-      ready        = ready,
-    }
-    for a in AttachmentType do fc.attachments[a] = cam.attachments[a][frame_index]
-    append(&list, fc)
   }
-  return list[:], main
 }
 
-// The effect stack as passes over the main camera's image: pass i writes ring slot
-// i % POST_PROCESS_RING, the last one the presented image. Blur and bloom take two passes
-// (horizontal, then vertical); an empty stack copies the image unchanged (nil effect).
-@(private = "file")
-flush_post_passes :: proc(self: ^Renderer, frame_index: u32) -> []PostPass {
-  if self.main_live < 0 do return nil
-  effects := self.effect_stack[:]
-  copy_only := [1]PostprocessEffect{nil}
-  if len(effects) == 0 do effects = copy_only[:]
-  passes := make([dynamic]PostPass, 0, 2 * len(effects), context.temp_allocator)
-  input := self.live_cameras[self.main_live].attachments[.FINAL_IMAGE]
-  original := input
-  for effect in effects {
-    pass_count: u32 = 1
-    #partial switch _ in effect {
-    case BlurEffect, BloomEffect:
-      pass_count = 2
-    }
-    for pass in 0 ..< pass_count {
-      output := self.post_process_ring[frame_index][len(passes) % POST_PROCESS_RING]
-      append(&passes, PostPass{effect, pass, input, original, output})
-      original, input = input, output
-    }
-  }
-  passes[len(passes) - 1].output = NO_TEXTURE
-  return passes[:]
-}
-
-// Writes the render-generated tables and describes the frame for the backend. Once per
-// frame under the render mutex.
+// Writes the render-generated tables. Once per frame under the render mutex.
 @(private)
 flush :: proc(self: ^Renderer, frame_index: u32, debug_ui: bool) {
-  desc := &self.frame
   // before the lights: shadow casters are ranked by the camera views
-  desc.live_cameras, desc.main_live = flush_cameras(self, frame_index)
+  flush_cameras(self, frame_index)
   flush_particles(self)
   collect_lights(self, frame_index)
   flush_debug_lines(self)
@@ -1075,13 +1084,7 @@ flush :: proc(self: ^Renderer, frame_index: u32, debug_ui: bool) {
   // cull dispatches cover the slots up to the last one holding anything
   nodes := write_table(self, .NODES, NodeData)
   for self.node_count > 0 && nodes[self.node_count - 1] == {} do self.node_count -= 1
-  desc.camera_view_count = self.camera_slots.high_water - 1
-  desc.post_passes = flush_post_passes(self, frame_index)
-  desc.debug_line_counts = {u32(min(self.debug_filled[0], DEBUG_RING)), u32(min(self.debug_filled[1], DEBUG_RING))}
-  sync.mutex_lock(&self.debug_mutex)
-  desc.debug_line_time = self.debug_time
-  sync.mutex_unlock(&self.debug_mutex)
-  overlay_batch(self, desc.main_live >= 0, debug_ui)
+  overlay_flush(self, debug_ui)
 }
 
 // frame renders and presents one frame, closing the debug UI opened by debug_ui
@@ -1094,15 +1097,14 @@ frame :: proc(
   show_stats := false,
 ) -> bool {
   frame_index := current_frame(self)
-  self.frame.framebuffer_size = framebuffer_size
   if show_stats do stats_panel(self)
   debug_ui_drawn := debug_ui_close(self)
   guard(self)
   tick_resource_pools(self)
   flush(self, frame_index, debug_ui_drawn)
-  submitted, status := frame_run(self)
-  // staged commands point into caller memory valid for this frame only
-  self.ui.commands = nil
+  submitted, status := frame_run(self, framebuffer_size)
+  // the staged overlay is this frame's only
+  overlay_clear(self)
   if submitted {
     // simulated: the next frame's time accumulates from zero
     self.particle_params.delta_time = 0

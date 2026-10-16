@@ -4,11 +4,9 @@ package render
 @(private = "file")
 TEXTURE_LUT_GGX :: #load("assets/lut_ggx.png")
 
-@(private = "file")
+// face sizes of the image-based lighting cubes (pass_ibl.odin)
 ENV_CUBE_SIZE :: 512
-@(private = "file")
 IRRADIANCE_SIZE :: 32
-@(private = "file")
 PREFILTER_SIZE :: 128
 
 ambient_init :: proc(r: ^Renderer) -> bool {

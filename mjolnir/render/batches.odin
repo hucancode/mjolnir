@@ -21,20 +21,6 @@ Batch :: struct {
 }
 #assert(size_of(Batch) == 16)
 
-@(private)
-BatchState :: struct {
-  // (material, mesh) -> batch id
-  ids:        map[u64]u32,
-  // nodes in each batch
-  members:    [MAX_BATCHES]u32,
-  free:       [dynamic]u32,
-  // ids below this are in use or free
-  high:       u32,
-  // members changed: first_instance and capacity are stale
-  stale:      bool,
-  warned:     bool,
-}
-
 @(private = "file")
 batch_key :: #force_inline proc(mesh, material: u32) -> u64 {
   return u64(material) << 32 | u64(mesh)
@@ -44,27 +30,26 @@ batch_key :: #force_inline proc(mesh, material: u32) -> u64 {
 // batches the node is not drawn.
 @(private)
 batch_join :: proc(self: ^Renderer, slot, mesh, material: u32) {
-  if !self.batched do return
-  s := &self.batches
-  s.high = max(s.high, 1)
+  when BINDLESS do return
+  self.batch_high = max(self.batch_high, 1)
   key := batch_key(mesh, material)
-  id, found := s.ids[key]
+  id, found := self.batch_ids[key]
   if !found {
-    if len(s.free) > 0 {
-      id = pop(&s.free)
-    } else if s.high < MAX_BATCHES {
-      id = s.high
-      s.high += 1
+    if len(self.batch_free) > 0 {
+      id = pop(&self.batch_free)
+    } else if self.batch_high < MAX_BATCHES {
+      id = self.batch_high
+      self.batch_high += 1
     } else {
-      if !s.warned do log.warnf("More than %d distinct (mesh, material) pairs; the nodes past them are not drawn", MAX_BATCHES - 1)
-      s.warned = true
+      if !self.batch_warned do log.warnf("More than %d distinct (mesh, material) pairs; the nodes past them are not drawn", MAX_BATCHES - 1)
+      self.batch_warned = true
       return
     }
-    s.ids[key] = id
+    self.batch_ids[key] = id
     write_table(self, .BATCHES, Batch)[id] = {mesh_id = mesh, material_id = material}
   }
-  s.members[id] += 1
-  s.stale = true
+  self.batch_members[id] += 1
+  self.batch_stale = true
   write_table(self, .NODE_BATCH, u32)[slot] = id
   mark_dirty(self, .NODE_BATCH, int(slot))
 }
@@ -72,54 +57,44 @@ batch_join :: proc(self: ^Renderer, slot, mesh, material: u32) {
 // Takes the node at `slot` out of its batch; an emptied batch is freed.
 @(private)
 batch_leave :: proc(self: ^Renderer, slot: u32) {
-  if !self.batched do return
-  s := &self.batches
+  when BINDLESS do return
   node_batch := write_table(self, .NODE_BATCH, u32)
   id := node_batch[slot]
   if id == 0 do return
   node_batch[slot] = 0
   mark_dirty(self, .NODE_BATCH, int(slot))
-  s.members[id] -= 1
-  s.stale = true
-  if s.members[id] > 0 do return
+  self.batch_members[id] -= 1
+  self.batch_stale = true
+  if self.batch_members[id] > 0 do return
   entry := &write_table(self, .BATCHES, Batch)[id]
-  delete_key(&s.ids, batch_key(entry.mesh_id, entry.material_id))
+  delete_key(&self.batch_ids, batch_key(entry.mesh_id, entry.material_id))
   entry^ = {}
-  append(&s.free, id)
+  append(&self.batch_free, id)
 }
 
 // Forgets every batch, with every node's membership already zeroed.
 @(private)
 batches_reset :: proc(self: ^Renderer) {
-  s := &self.batches
-  clear(&s.ids)
-  clear(&s.free)
-  s.members = {}
-  s.high = 0
-  s.stale = false
+  clear(&self.batch_ids)
+  clear(&self.batch_free)
+  self.batch_members = {}
+  self.batch_high = 0
+  self.batch_stale = false
   clear_entry(self, .BATCHES, 0, MAX_BATCHES)
   clear_entry(self, .NODE_BATCH, 0, MAX_NODES_IN_SCENE)
-}
-
-@(private)
-batches_destroy :: proc(self: ^Renderer) {
-  delete(self.batches.ids)
-  delete(self.batches.free)
 }
 
 // Before a frame: lays the batches' instance ranges end to end when membership changed.
 @(private)
 batches_flush :: proc(self: ^Renderer) {
-  s := &self.batches
-  self.frame.batch_count = s.high
-  if !s.stale do return
-  s.stale = false
+  if !self.batch_stale do return
+  self.batch_stale = false
   entries := write_table(self, .BATCHES, Batch)
   first: u32
-  for id in 1 ..< s.high {
+  for id in 1 ..< self.batch_high {
     entries[id].first_instance = first
-    entries[id].capacity = s.members[id]
-    first += s.members[id]
+    entries[id].capacity = self.batch_members[id]
+    first += self.batch_members[id]
   }
-  mark_dirty(self, .BATCHES, 0, int(s.high))
+  mark_dirty(self, .BATCHES, 0, int(self.batch_high))
 }

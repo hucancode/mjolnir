@@ -12,6 +12,10 @@ FRAMES_IN_FLIGHT :: 1
 // RETIRE_GRACE is the frames a freed resource or pool slot waits before it is destroyed or
 // reused: WebGPU keeps destroyed objects alive for submitted work and orders uploads after it.
 RETIRE_GRACE :: 1
+// Textures reach shaders through bind groups, not global arrays.
+BINDLESS :: false
+// A pass renders into one layer.
+LAYERED_RENDERING :: false
 
 // Depth pyramids and draw lists live in slots render assigns: a pyramid and a draw-list slot
 // per camera and frame in flight, plus a draw-list slot per frame for the shadow views.
@@ -52,8 +56,20 @@ Backend :: struct {
   uniform_cursor:             int,
   mipgen_layout:              wgpu.BindGroupLayout,
   mipgen_pipelines:           [dynamic]MipgenPipeline,
-  // what rhi's handles name (rhi.odin)
-  rhi:                        RhiState,
+  // what rhi handles name (rhi.Pool: index 0 is none, released slots are reused)
+  buffers:                    rhi.Pool(wgpu.Buffer),
+  layouts:                    rhi.Pool(wgpu.BindGroupLayout),
+  groups:                     rhi.Pool(Group),
+  pipelines:                  rhi.Pool(Pipeline),
+  // the frame frame_begin acquired
+  surface_texture:            wgpu.Texture,
+  surface_output:             wgpu.TextureView,
+  // bytes of the uniform ring already written to the queue this frame
+  flushed:                    int,
+  // READBACK buffers by handle
+  readbacks:                  map[rhi.Buffer]Readback,
+  // the command lists being recorded or awaiting submission; an encoder marks one taken
+  cmds:                       [MAX_CMDS]Cmd,
 }
 
 // init brings WebGPU up on window: instance, surface, then adapter and device, which the web

@@ -268,16 +268,6 @@ fn prefilter_max_lod() -> f32 {
     return f32(textureNumLevels(prefilter_cube) - 1u);
 }
 
-fn fresnel_schlick_roughness(cos_theta: f32, f0: vec3f, roughness: f32) -> vec3f {
-    return f0 + (max(vec3f(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
-}
-
-fn dir_to_equirect_uv(dir: vec3f) -> vec2f {
-    let u = atan2(dir.z, dir.x) / (2.0 * PI) + 0.5;
-    let v = acos(clamp(dir.y, -1.0, 1.0)) / PI;
-    return vec2f(u, v);
-}
-
 fn sample_skybox(camera: View, uv: vec2f) -> vec3f {
     let ndc = uv * 2.0 - 1.0;
     let world_far = camera.inv_view_projection * vec4f(ndc, 1.0, 1.0);

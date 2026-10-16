@@ -38,21 +38,22 @@ PrecomputePush :: struct {
 // Each dispatch writes one cube level as six storage layers.
 @(private)
 precompute_ibl :: proc(r: ^Renderer, equirect, env_cube, irradiance_cube, prefilter_cube: TextureHandle) -> bool {
-  caps := r.res.caps
   Dispatch :: struct {
     shader: PrecomputeShader,
     src:    TextureHandle,
     dst:    TextureHandle,
+    // the face size of dst's level 0
+    size:   u32,
     mip:    u32,
     value:  f32,
     count:  u32,
   }
   dispatches: [PRECOMPUTE_DISPATCHES]Dispatch
-  dispatches[0] = {.EQUIRECT, equirect, env_cube, 0, 0, 0}
-  dispatches[1] = {.IRRADIANCE, env_cube, irradiance_cube, 0, IRRADIANCE_SAMPLE_DELTA, 0}
+  dispatches[0] = {.EQUIRECT, equirect, env_cube, ENV_CUBE_SIZE, 0, 0, 0}
+  dispatches[1] = {.IRRADIANCE, env_cube, irradiance_cube, IRRADIANCE_SIZE, 0, IRRADIANCE_SAMPLE_DELTA, 0}
   for mip in 0 ..< u32(PREFILTER_MIPS) {
     roughness := f32(mip) / f32(PREFILTER_MIPS - 1)
-    dispatches[2 + mip] = {.PREFILTER, env_cube, prefilter_cube, mip, roughness, PREFILTER_SAMPLES}
+    dispatches[2 + mip] = {.PREFILTER, env_cube, prefilter_cube, PREFILTER_SIZE, mip, roughness, PREFILTER_SAMPLES}
   }
   common := wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/ibl_common.wgsl"))
   spirvs := [PrecomputeShader][]u8 {
@@ -65,7 +66,7 @@ precompute_ibl :: proc(r: ^Renderer, equirect, env_cube, irradiance_cube, prefil
     .IRRADIANCE = wgsl_join(common, wgsl("shader/wgpu/ibl_irradiance.wgsl")),
     .PREFILTER  = wgsl_join(common, wgsl("shader/wgpu/ibl_prefilter.wgsl")),
   }
-  layouts: [PrecomputeShader]rhi.BindLayout
+  when !BINDLESS do layouts: [PrecomputeShader]rhi.BindLayout
   pipelines: [PrecomputeShader]rhi.Pipeline
   groups: [PRECOMPUTE_DISPATCHES]rhi.BindGroup
   defer {
@@ -74,7 +75,7 @@ precompute_ibl :: proc(r: ^Renderer, equirect, env_cube, irradiance_cube, prefil
   }
   for shader in PrecomputeShader {
     layout := pipeline_layout(r, .NONE)
-    if !caps.bindless {
+    when !BINDLESS {
       stages := bit_set[rhi.ShaderStage]{.COMPUTE}
       entries := [?]rhi.BindEntry{{kind = .TEXTURE_FLOAT if shader == .EQUIRECT else .TEXTURE_CUBE, stages = stages}, {kind = .STORAGE_TEXTURE_ARRAY, stages = stages, format = .RGBA16F}}
       layouts[shader] = dev.bind_layout_create(&r.gpu, {entries = entries[:]}) or_return
@@ -82,7 +83,7 @@ precompute_ibl :: proc(r: ^Renderer, equirect, env_cube, irradiance_cube, prefil
     }
     pipelines[shader] = dev.compute_pipeline_create(&r.gpu, {{spirv = {comp = spirvs[shader]}, wgsl = wgsls[shader]}, layout}) or_return
   }
-  if caps.bindless {
+  when BINDLESS {
     for d, i in dispatches do dev.bindless_write(&r.gpu, .STORAGE_IMAGES, PRECOMPUTE_STORAGE_BASE + u32(i), rhi.TextureView{d.dst, i32(d.mip)})
   } else {
     for d, i in dispatches {
@@ -98,10 +99,10 @@ precompute_ibl :: proc(r: ^Renderer, equirect, env_cube, irradiance_cube, prefil
   dev.cmd_barrier(&r.gpu, cmd, nil, cubes[:])
   dev.cmd_begin_compute(&r.gpu, cmd)
   for d, i in dispatches {
-    size := max(r.texture_descs[d.dst].extent.x >> d.mip, 1)
+    size := max(d.size >> d.mip, 1)
     push := PrecomputePush{u32(d.src), PRECOMPUTE_STORAGE_BASE + u32(i), size, d.value, d.count}
     pipeline_bind(r, cmd, pipelines[d.shader], .NONE, 0, &push, .NONE)
-    if !caps.bindless do dev.cmd_bind_group(&r.gpu, cmd, 3, groups[i])
+    when !BINDLESS do dev.cmd_bind_group(&r.gpu, cmd, 3, groups[i])
     dev.cmd_dispatch(&r.gpu, cmd, (size + 7) / 8, (size + 7) / 8, 6)
     // later dispatches sample the env cube, the lighting passes the outputs
     written := [1]rhi.Barrier{{{.COMPUTE_SHADER}, {.COMPUTE_SHADER, .FRAGMENT_SHADER}, {.SHADER_WRITE}, {.SHADER_READ}}}
@@ -115,7 +116,7 @@ precompute_ibl :: proc(r: ^Renderer, equirect, env_cube, irradiance_cube, prefil
   dev.wait_idle(&r.gpu)
   log.infof(
     "IBL precompute done: env=%d^2, irradiance=%d^2, prefilter=%d^2 x %d mips",
-    r.texture_descs[env_cube].extent.x, r.texture_descs[irradiance_cube].extent.x, r.texture_descs[prefilter_cube].extent.x, PREFILTER_MIPS,
+    ENV_CUBE_SIZE, IRRADIANCE_SIZE, PREFILTER_SIZE, PREFILTER_MIPS,
   )
   return true
 }

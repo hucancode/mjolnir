@@ -34,11 +34,6 @@ PARTICLE_ALIVE_HEADER :: 4
 @(private = "file")
 MAX_PARTICLE_TEXTURES :: 8
 
-@(private)
-ParticleState :: struct {
-  emit, simulate, draw: rhi.Pipeline,
-}
-
 @(private = "file")
 ParticleDrawPush :: struct {
   camera_index: u32,
@@ -50,16 +45,15 @@ ParticleDrawPush :: struct {
 @(private)
 particles_init :: proc(r: ^Renderer) -> bool {
   common := wgsl("shader/wgpu/common.wgsl")
-  bindless := r.res.caps.bindless
-  r.particle_gpu.emit = dev.compute_pipeline_create(
+  r.particle_emit_pipeline = dev.compute_pipeline_create(
     &r.gpu,
     {{spirv = {comp = spirv("shader/vulkan/particle/emitter.spv")}, wgsl = wgsl_join(common, wgsl("shader/wgpu/particle_emit.wgsl"))}, pipeline_layout(r, .PARTICLE_EMIT)},
   ) or_return
-  r.particle_gpu.simulate = dev.compute_pipeline_create(
+  r.particle_sim_pipeline = dev.compute_pipeline_create(
     &r.gpu,
     {{spirv = {comp = spirv("shader/vulkan/particle/compute.spv")}, wgsl = wgsl_join(common, wgsl("shader/wgpu/particle_simulate.wgsl"))}, pipeline_layout(r, .PARTICLE_SIMULATE)},
   ) or_return
-  r.particle_gpu.draw = dev.graphics_pipeline_create(
+  r.particle_draw_pipeline = dev.graphics_pipeline_create(
     &r.gpu,
     {
       shader = {
@@ -67,7 +61,7 @@ particles_init :: proc(r: ^Renderer) -> bool {
         wgsl = wgsl_join(common, wgsl("shader/wgpu/particle.wgsl")),
       },
       layout = pipeline_layout(r, .PARTICLE_DRAW, .PARTICLES),
-      topology = .POINT_LIST if bindless else .TRIANGLE_LIST,
+      topology = .POINT_LIST if BINDLESS else .TRIANGLE_LIST,
       // drawn in the forward pass
       color_formats = material_pass_formats(.FORWARD),
       blend = .ALPHA,
@@ -80,9 +74,9 @@ particles_init :: proc(r: ^Renderer) -> bool {
 // Kills every particle before the next frame.
 @(private)
 particles_gpu_reset :: proc(r: ^Renderer) -> bool {
-  dev.buffer_write(&r.gpu, r.res.particles, 0, make([]u8, MAX_PARTICLES * size_of(Particle), context.temp_allocator)) or_return
-  header := [PARTICLE_ALIVE_HEADER]u32{0, 1, 0, 0} if r.res.caps.bindless else {6, 0, 0, 0}
-  return dev.buffer_write(&r.gpu, r.res.particle_alive, 0, ([^]u8)(&header)[:size_of(header)])
+  dev.buffer_write(&r.gpu, r.buffers[.PARTICLES][0], 0, make([]u8, MAX_PARTICLES * size_of(Particle), context.temp_allocator)) or_return
+  header := [PARTICLE_ALIVE_HEADER]u32{0, 1, 0, 0} if BINDLESS else {6, 0, 0, 0}
+  return dev.buffer_write(&r.gpu, r.buffers[.PARTICLE_ALIVE][0], 0, ([^]u8)(&header)[:size_of(header)])
 }
 
 // After drawing: the next frame draws what this simulates.
@@ -92,16 +86,16 @@ particles_simulate :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
   // the previous simulation and this frame's draws use what gets rewritten
   barrier(r, cmd, .PARTICLES_TO_FILL)
   // the alive count: the vertex count for points, the instance count for quads
-  count_word := 0 if r.res.caps.bindless else size_of(u32)
-  dev.cmd_fill_buffer(&r.gpu, cmd, r.res.particle_alive, count_word, size_of(u32))
+  count_word := 0 if BINDLESS else size_of(u32)
+  dev.cmd_fill_buffer(&r.gpu, cmd, r.buffers[.PARTICLE_ALIVE][0], count_word, size_of(u32))
   dev.cmd_begin_compute(&r.gpu, cmd)
   defer dev.cmd_end_compute(&r.gpu, cmd)
   if params.emit_total > 0 {
-    pipeline_bind(r, cmd, r.particle_gpu.emit, .PARTICLE_EMIT, f, params, .NONE)
+    pipeline_bind(r, cmd, r.particle_emit_pipeline, .PARTICLE_EMIT, f, params, .NONE)
     dev.cmd_dispatch(&r.gpu, cmd, (params.emit_total + 63) / 64, 1, 1)
   }
   barrier(r, cmd, .FILL_TO_COMPUTE)
-  pipeline_bind(r, cmd, r.particle_gpu.simulate, .PARTICLE_SIMULATE, f, params, .NONE)
+  pipeline_bind(r, cmd, r.particle_sim_pipeline, .PARTICLE_SIMULATE, f, params, .NONE)
   dev.cmd_dispatch(&r.gpu, cmd, MAX_PARTICLES / COMPUTE_PARTICLE_BATCH, 1, 1)
 }
 
@@ -111,7 +105,7 @@ particles_simulate :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
 particles_draw :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, camera_index: u32) {
   push := ParticleDrawPush{camera_index = camera_index}
   textures: [MAX_PARTICLE_TEXTURES]TextureHandle
-  if !r.res.caps.bindless {
+  when !BINDLESS {
     n := 0
     emitters := write_table(r, .EMITTERS, Emitter)[:r.particle_params.emitter_count]
     outer: for &em in emitters {
@@ -122,6 +116,6 @@ particles_draw :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, camera_index:
       n += 1
     }
   }
-  pipeline_bind(r, cmd, r.particle_gpu.draw, .PARTICLE_DRAW, f, &push, .PARTICLES, ..textures[:])
-  dev.cmd_draw_indirect(&r.gpu, cmd, r.res.particle_alive, 0, 1, 0)
+  pipeline_bind(r, cmd, r.particle_draw_pipeline, .PARTICLE_DRAW, f, &push, .PARTICLES, ..textures[:])
+  dev.cmd_draw_indirect(&r.gpu, cmd, r.buffers[.PARTICLE_ALIVE][0], 0, 1, 0)
 }

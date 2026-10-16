@@ -37,7 +37,7 @@ UI_MAX_INDICES :: 98304
 // draw. Id 0 is none.
 MAX_BATCHES :: 4096
 
-// TABLE_REGIONS is the granularity of FrameDesc.dirty: region r of a table of n bytes is
+// TABLE_REGIONS is the granularity of Renderer.dirty: region r of a table of n bytes is
 // bytes [r * size, (r + 1) * size), size = ceil(n / TABLE_REGIONS).
 TABLE_REGIONS :: 64
 
@@ -235,15 +235,6 @@ PostprocessEffect :: union {
   DoFEffect,
 }
 
-// PostPass is one fullscreen pass of the effect stack: pass `pass` of effect (blur and bloom
-// take two) reads input, the previous pass's output, and original, the previous pass's input,
-// and writes output; NO_TEXTURE (0) is the presented image. A nil effect copies input.
-PostPass :: struct {
-  effect:                   PostprocessEffect,
-  pass:                     u32,
-  input, original, output:  TextureHandle,
-}
-
 ParticleSystemParams :: struct {
   emitter_count:    u32,
   forcefield_count: u32,
@@ -254,63 +245,3 @@ ParticleSystemParams :: struct {
   // ring slot of the frame's first new particle
   emit_cursor:      u32,
 }
-
-// FrameCamera is a live camera as frame records it; textures and slots are this frame's.
-FrameCamera :: struct {
-  index:        u32,
-  attachments:  [AttachmentType]TextureHandle,
-  // the previous frame's depth, which the depth pyramid is built from
-  prev_depth:   TextureHandle,
-  // the depth pyramid built this frame
-  pyramid:      TextureHandle,
-  // this frame's pyramid and draw-list slot; this frame's cull writes the lists of next_slot
-  slot:         u32,
-  next_slot:    u32,
-  extent:       [2]u32,
-  near, far:    f32,
-  // its draw lists and pyramid hold data: until then the camera draws nothing
-  ready:       bool,
-}
-
-// FrameDesc is everything frame records.
-FrameDesc :: struct {
-  // the window's size in pixels, as the platform reports it
-  framebuffer_size:     [2]u32,
-  // render's tables, the one copy; bit r of dirty[t] is region r of tables[t] (TABLE_REGIONS),
-  // written since the last submitted frame
-  tables:               [Table][]u8,
-  dirty:                [Table]u64,
-  live_cameras:         []FrameCamera,
-  // index into live_cameras of the camera presented to the swapchain, -1 for none
-  main_live:            int,
-  // camera views covered by the cull dispatch, from CAMERA_VIEW_BASE + 1
-  camera_view_count:    u32,
-  node_count:           u32,
-  // the skinning dispatch covers skinned vertices below this
-  skinned_vertex_count: u32,
-  // batch ids in use are below this (Table.BATCHES)
-  batch_count:          u32,
-  // lights are sorted by type, each type one range of the light table
-  light_count:          [LightType]u32,
-  shadow_view_count:    u32,
-  // draw-list slot the shadow views cull into and draw from
-  shadow_draw_list:     u32,
-  environment_map:      TextureHandle,
-  brdf_lut:             TextureHandle,
-  irradiance_cube:      TextureHandle,
-  prefilter_cube:       TextureHandle,
-  skybox_intensity:     f32,
-  skybox_blur:          f32,
-  // over the main camera's image, the last one presenting
-  post_passes:          []PostPass,
-  particle_params:      ParticleSystemParams,
-  // filled segments of each debug line ring
-  debug_line_counts:    [2]u32,
-  // render clock time; the shader skips segments past their expiry
-  debug_line_time:      f32,
-  ui_batches:           []UIBatch,
-  ui_vertices:          []Vertex2D,
-  ui_indices:           []u32,
-}
-
-

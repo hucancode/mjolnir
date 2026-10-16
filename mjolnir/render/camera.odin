@@ -30,6 +30,18 @@ CameraProjection :: union {
 camera_slot :: #force_inline proc "contextless" (camera: u32) -> u32 {
   return camera * FRAMES_IN_FLIGHT
 }
+
+// Frame f's cull of camera c writes the lists frame f + 1 draws.
+@(private)
+camera_next_slot :: #force_inline proc "contextless" (camera, f: u32) -> u32 {
+  return camera_slot(camera) + (f + 1) % FRAMES_IN_FLIGHT
+}
+
+// Camera c's draw lists and pyramid hold data: until then the camera draws nothing.
+@(private)
+camera_ready :: proc(self: ^Renderer, c: u32) -> bool {
+  return dev.frame_serial(&self.gpu) >= self.cameras[c].ready_serial
+}
 @(private)
 SHADOW_DRAW_SLOT_BASE :: MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
 #assert(SHADOW_DRAW_SLOT_BASE + FRAMES_IN_FLIGHT <= MAX_DRAW_LIST_SLOTS)
@@ -43,8 +55,11 @@ SHADOW_LIST_CAPACITY :: 4096 * MAX_SHADOW_VIEWS
 // (the shadow slot has a view per shadow map face), each of room for every node's instance.
 @(private)
 draw_list_shape :: proc(self: ^Renderer, shadow: bool) -> (lists, capacity: u32) {
-  if self.batched do return MAX_SHADOW_VIEWS if shadow else 1, MAX_NODES_IN_SCENE
-  return 1 if shadow else len(MaterialType), SHADOW_LIST_CAPACITY if shadow else CAMERA_LIST_CAPACITY
+  when BINDLESS {
+    return 1 if shadow else len(MaterialType), SHADOW_LIST_CAPACITY if shadow else CAMERA_LIST_CAPACITY
+  } else {
+    return MAX_SHADOW_VIEWS if shadow else 1, MAX_NODES_IN_SCENE
+  }
 }
 
 // Camera is a view into the scene: pose and projection, plus the images it renders into.
@@ -208,7 +223,7 @@ camera_set_orthographic :: proc(
 // window coordinates as input.State reports them (the DPI scale is applied here).
 cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (origin, dir: [3]f32, ok: bool) {
   cam := main_camera(self) or_return
-  p := cursor * self.ui.dpi_scale
+  p := cursor * self.dpi_scale
   ndc := 2 * p / [2]f32{f32(cam.extent[0]), f32(cam.extent[1])} - 1
   ray_eye := linalg.matrix4_inverse(camera_projection_matrix(cam)) * [4]f32{ndc.x, ndc.y, -1, 1}
   ray_eye = {ray_eye.x, ray_eye.y, -1, 0}
@@ -338,9 +353,7 @@ ViewGPU :: struct {
 }
 #assert(size_of(ViewGPU) == 448)
 
-// A camera's attachments, depth pyramids and draw lists, one set per frame in flight: frame
-// N's culling writes the lists frame N+1 draws. A depth pyramid is a max-depth texture at
-// half the camera's resolution.
+// A camera's attachments and depth pyramids, one set per frame in flight (pyramid_shape).
 @(private)
 create_targets :: proc(self: ^Renderer, index: u32) -> bool {
   camera := &self.cameras[index]
@@ -352,18 +365,19 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
       camera.attachments[a][frame] = allocate_texture(self, desc, target = true) or_return
     }
   }
-  half := [2]u32{max(1, camera.extent.x / 2), max(1, camera.extent.y / 2)}
+  half, mips := pyramid_shape(camera.extent)
   pyramid := TextureDesc {
     extent     = half,
     format     = .R32F,
     usage      = {.SAMPLED, .STORAGE},
-    mip_levels = calculate_mip_levels(half.x, half.y),
+    mip_levels = mips,
     shared     = true,
   }
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     slot := camera_slot(index) + frame
     self.pyramids[slot] = allocate_texture(self, pyramid, target = true) or_return
-    pyramid_create(self, slot, half, pyramid.mip_levels)
+    // its storage views enter the bindless array at the slot's next frame (pyramids_bind)
+    self.pyramid_bound[slot] = false
   }
   camera.ready_serial = dev.frame_serial(&self.gpu) + 1
   return true
@@ -374,9 +388,10 @@ destroy_targets :: proc(self: ^Renderer, index: u32) {
   camera := &self.cameras[index]
   for frames in camera.attachments do for handle in frames do destroy_texture(self, handle)
   camera.attachments = {}
+  cull_groups_clear(self)
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     slot := camera_slot(index) + frame
-    pyramid_destroy(self, slot)
+    self.pyramid_bound[slot] = false
     destroy_texture(self, self.pyramids[slot])
     self.pyramids[slot] = 0
   }

@@ -6,11 +6,6 @@ struct Effect {
     end: f32,
 }
 
-// Distance along the view axis from a [0, 1] perspective depth value.
-fn linearize_depth(depth: f32) -> f32 {
-    return u.camera_near * u.camera_far / (u.camera_far - depth * (u.camera_far - u.camera_near));
-}
-
 fn fog_factor(distance: f32) -> f32 {
     if (distance >= u.effect.end) {
         return 1.0;

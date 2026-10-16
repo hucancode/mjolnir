@@ -49,40 +49,19 @@ DrawList :: struct {
   atlas_size: [2]u32,
 }
 
-// OverlayRenderer batches 2D output drawn into the swapchain image after post-processing,
-// one vertex stream handed to the backend: draw2d commands staged by the app (sorted by
-// z_order, clipped per command) and the microui debug context (clipped per microui clip
-// rect, scaled by the window DPI). A batch is one scissor and one texture.
-OverlayRenderer :: struct {
-  // UI_MAX_VERTICES and UI_MAX_INDICES; the first vertex_count and index_count are this frame's
-  vertices:        []Vertex2D,
-  indices:         []u32,
-  vertex_count:    u32,
-  index_count:     u32,
-  batches:         [dynamic]UIBatch,
-  // Staged draw2d commands, owned by the caller until the frame is recorded.
-  commands:        []RenderCommand,
-  white_texture:   TextureHandle, // drawn for NO_TEXTURE
-  font_atlas:      TextureHandle, // sampled by text commands
-  font_atlas_size: [2]f32,
-  debug_ctx:       mu.Context,
-  debug_open:      bool, // mu.begin ran this frame; frame closes it
-  debug_atlas:     TextureHandle, // microui's builtin atlas
-  dpi_scale:       f32,
-}
-
+// The overlay batches 2D output drawn into the swapchain image after post-processing, one
+// vertex stream: draw2d commands staged by the app (sorted by z_order, clipped per command)
+// and the microui debug context (clipped per microui clip rect, scaled by the window DPI). A
+// batch is one scissor and one texture.
 @(private)
 overlay_init :: proc(r: ^Renderer) -> bool {
-  self := &r.ui
-  self.batches = make([dynamic]UIBatch, 0, 64)
-  self.vertices = make([]Vertex2D, UI_MAX_VERTICES)
-  self.indices = make([]u32, UI_MAX_INDICES)
-  mu.init(&self.debug_ctx)
-  self.debug_ctx.text_width = mu.default_atlas_text_width
-  self.debug_ctx.text_height = mu.default_atlas_text_height
-  white_pixel := [4]u8{255, 255, 255, 255}
-  self.white_texture = allocate_texture(r, {extent = {1, 1}, format = .RGBA8_UNORM, usage = {.SAMPLED}}, white_pixel[:]) or_return
-  self.debug_atlas = allocate_alpha_texture(r, mu.default_atlas_alpha[:], mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT) or_return
+  r.ui_batches = make([dynamic]UIBatch, 0, 64)
+  r.ui_vertices = make([]Vertex2D, UI_MAX_VERTICES)
+  r.ui_indices = make([]u32, UI_MAX_INDICES)
+  mu.init(&r.ui_debug_ctx)
+  r.ui_debug_ctx.text_width = mu.default_atlas_text_width
+  r.ui_debug_ctx.text_height = mu.default_atlas_text_height
+  r.ui_debug_atlas = allocate_alpha_texture(r, mu.default_atlas_alpha[:], mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT) or_return
   return true
 }
 
@@ -91,92 +70,90 @@ allocate_alpha_texture :: proc(r: ^Renderer, pixels: []u8, width, height: u32) -
   return allocate_texture(r, {extent = {width, height}, format = .A8, usage = {.SAMPLED}}, pixels)
 }
 
-// Fills the UI vertices, indices and batches; draw2d commands draw only with a main camera.
+// Empties the overlay: what frame draws is staged again for the next.
 @(private)
-overlay_batch :: proc(r: ^Renderer, draw_commands, draw_debug: bool) {
-  self := &r.ui
-  self.vertex_count = 0
-  self.index_count = 0
-  clear(&self.batches)
-  r.ui_batches, r.ui_vertices, r.ui_indices = nil, nil, nil
-  if !draw_commands && !draw_debug do return
-  extent := dev.extent(&r.gpu)
-  if draw_commands do batch_commands(self, extent)
+overlay_clear :: proc(r: ^Renderer) {
+  r.ui_vertex_count = 0
+  r.ui_index_count = 0
+  clear(&r.ui_batches)
+}
+
+// Adds the debug UI over the staged draw2d commands, which draw only with a main camera.
+@(private)
+overlay_flush :: proc(r: ^Renderer, draw_debug: bool) {
+  if _, ok := main_camera(r); !ok do overlay_clear(r)
   if draw_debug {
-    begin_batch(self, {0, 0, i32(extent.x), i32(extent.y)})
-    batch_debug_ui(self, extent)
+    extent := dev.extent(&r.gpu)
+    begin_batch(r, {0, 0, i32(extent.x), i32(extent.y)})
+    batch_debug_ui(r, extent)
   }
-  end_batch(self)
-  if self.index_count == 0 do return
-  r.ui_batches = self.batches[:]
-  r.ui_vertices = self.vertices[:self.vertex_count]
-  r.ui_indices = self.indices[:self.index_count]
+  end_batch(r)
 }
 
 // A batch takes the texture of its first quad.
 @(private)
-begin_batch :: proc(self: ^OverlayRenderer, scissor: [4]i32) {
+begin_batch :: proc(self: ^Renderer, scissor: [4]i32) {
   end_batch(self)
-  append(&self.batches, UIBatch{first_index = self.index_count, scissor = scissor})
+  append(&self.ui_batches, UIBatch{first_index = self.ui_index_count, scissor = scissor})
 }
 
 // A texture change starts a batch in the same scissor.
 @(private)
-use_texture :: proc(self: ^OverlayRenderer, texture: TextureHandle) {
-  if len(self.batches) == 0 do return
-  last := &self.batches[len(self.batches) - 1]
-  if last.first_index == self.index_count {
+use_texture :: proc(self: ^Renderer, texture: TextureHandle) {
+  if len(self.ui_batches) == 0 do return
+  last := &self.ui_batches[len(self.ui_batches) - 1]
+  if last.first_index == self.ui_index_count {
     last.texture = texture
   } else if last.texture != texture {
     begin_batch(self, last.scissor)
-    self.batches[len(self.batches) - 1].texture = texture
+    self.ui_batches[len(self.ui_batches) - 1].texture = texture
   }
 }
 
 @(private)
-end_batch :: proc(self: ^OverlayRenderer) {
-  if len(self.batches) == 0 do return
-  last := &self.batches[len(self.batches) - 1]
-  last.index_count = self.index_count - last.first_index
+end_batch :: proc(self: ^Renderer) {
+  if len(self.ui_batches) == 0 do return
+  last := &self.ui_batches[len(self.ui_batches) - 1]
+  last.index_count = self.ui_index_count - last.first_index
 }
 
 // quads beyond the buffer capacity are dropped
 @(private)
 push_quad :: proc(
-  self: ^OverlayRenderer,
+  self: ^Renderer,
   p0, p1, uv0, uv1: [2]f32,
   color: [4]u8,
   texture: TextureHandle,
 ) {
-  if int(self.vertex_count) + 4 > len(self.vertices) || int(self.index_count) + 6 > len(self.indices) do return
+  if int(self.ui_vertex_count) + 4 > len(self.ui_vertices) || int(self.ui_index_count) + 6 > len(self.ui_indices) do return
   use_texture(self, texture)
-  vertices := self.vertices
-  base := self.vertex_count
+  vertices := self.ui_vertices
+  base := self.ui_vertex_count
   vertices[base + 0] = {p0, uv0, color}
   vertices[base + 1] = {{p1.x, p0.y}, {uv1.x, uv0.y}, color}
   vertices[base + 2] = {p1, uv1, color}
   vertices[base + 3] = {{p0.x, p1.y}, {uv0.x, uv1.y}, color}
   quad := [6]u32{base, base + 1, base + 2, base, base + 2, base + 3}
-  copy(self.indices[self.index_count:], quad[:])
-  self.vertex_count += 4
-  self.index_count += 6
+  copy(self.ui_indices[self.ui_index_count:], quad[:])
+  self.ui_vertex_count += 4
+  self.ui_index_count += 6
 }
 
 // Text draws nothing until a font atlas is staged.
 @(private)
-batch_commands :: proc(self: ^OverlayRenderer, extent: [2]u32) {
+batch_commands :: proc(self: ^Renderer, commands: []RenderCommand, extent: [2]u32) {
   CommandSortKey :: struct {
     z_order:   i32,
     cmd_index: int,
   }
-  keys := make([]CommandSortKey, len(self.commands), context.temp_allocator)
-  for command, i in self.commands do keys[i] = {command.z_order, i}
+  keys := make([]CommandSortKey, len(commands), context.temp_allocator)
+  for command, i in commands do keys[i] = {command.z_order, i}
   slice.stable_sort_by(keys, proc(a, b: CommandSortKey) -> bool {
     return a.z_order < b.z_order
   })
   scissor := [4]i32{-1, -1, 0, 0}
   for key in keys {
-    command := &self.commands[key.cmd_index]
+    command := &commands[key.cmd_index]
     // a new batch wherever the clip changes
     if s := clip_scissor(command.clip, extent); s != scissor {
       scissor = s
@@ -186,10 +163,10 @@ batch_commands :: proc(self: ^OverlayRenderer, extent: [2]u32) {
     case DrawQuadCommand:
       push_quad(self, c.position, c.position + c.size, {0, 0}, {1, 1}, c.color, resolve_texture(self, c.texture_id))
     case DrawTextCommand:
-      if self.font_atlas == 0 do continue
-      atlas_size := self.font_atlas_size
+      if self.ui_font_atlas == 0 do continue
+      atlas_size := self.ui_font_atlas_size
       for g in c.glyphs {
-        push_quad(self, g.p0, g.p1, g.uv0 / atlas_size, g.uv1 / atlas_size, c.color, self.font_atlas)
+        push_quad(self, g.p0, g.p1, g.uv0 / atlas_size, g.uv1 / atlas_size, c.color, self.ui_font_atlas)
       }
     case DrawMeshCommand:
       push_mesh(self, c, resolve_texture(self, c.texture_id))
@@ -208,43 +185,43 @@ clip_scissor :: proc(clip: [4]f32, extent: [2]u32) -> [4]i32 {
 }
 
 @(private)
-resolve_texture :: proc(self: ^OverlayRenderer, texture_id: u32) -> TextureHandle {
-  return self.white_texture if texture_id == NO_TEXTURE else TextureHandle(texture_id)
+resolve_texture :: proc(self: ^Renderer, texture_id: u32) -> TextureHandle {
+  return self.white if texture_id == NO_TEXTURE else TextureHandle(texture_id)
 }
 
 @(private)
-push_mesh :: proc(self: ^OverlayRenderer, mesh: DrawMeshCommand, texture: TextureHandle) {
-  if int(self.vertex_count) + len(mesh.vertices) > len(self.vertices) ||
-     int(self.index_count) + len(mesh.indices) > len(self.indices) {
+push_mesh :: proc(self: ^Renderer, mesh: DrawMeshCommand, texture: TextureHandle) {
+  if int(self.ui_vertex_count) + len(mesh.vertices) > len(self.ui_vertices) ||
+     int(self.ui_index_count) + len(mesh.indices) > len(self.ui_indices) {
     return
   }
   use_texture(self, texture)
-  vertices, indices := self.vertices, self.indices
-  base := self.vertex_count
+  vertices, indices := self.ui_vertices, self.ui_indices
+  base := self.ui_vertex_count
   for v in mesh.vertices {
-    vertices[self.vertex_count] = {mesh.position + v.pos, v.uv, v.color}
-    self.vertex_count += 1
+    vertices[self.ui_vertex_count] = {mesh.position + v.pos, v.uv, v.color}
+    self.ui_vertex_count += 1
   }
   for idx in mesh.indices {
-    indices[self.index_count] = base + idx
-    self.index_count += 1
+    indices[self.ui_index_count] = base + idx
+    self.ui_index_count += 1
   }
 }
 
 // microui works in window coordinates; scaled by dpi_scale
 @(private)
-batch_debug_ui :: proc(self: ^OverlayRenderer, extent: [2]u32) {
+batch_debug_ui :: proc(self: ^Renderer, extent: [2]u32) {
   atlas_size := [2]f32{mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT}
   scale := self.dpi_scale
-  quad :: proc(self: ^OverlayRenderer, dst, src: mu.Rect, color: mu.Color, atlas_size: [2]f32, scale: f32) {
+  quad :: proc(self: ^Renderer, dst, src: mu.Rect, color: mu.Color, atlas_size: [2]f32, scale: f32) {
     p0 := [2]f32{f32(dst.x), f32(dst.y)} * scale
     p1 := [2]f32{f32(dst.x + dst.w), f32(dst.y + dst.h)} * scale
     uv0 := [2]f32{f32(src.x), f32(src.y)} / atlas_size
     uv1 := [2]f32{f32(src.x + src.w), f32(src.y + src.h)} / atlas_size
-    push_quad(self, p0, p1, uv0, uv1, {color.r, color.g, color.b, color.a}, self.debug_atlas)
+    push_quad(self, p0, p1, uv0, uv1, {color.r, color.g, color.b, color.a}, self.ui_debug_atlas)
   }
   iter: ^mu.Command
-  for variant in mu.next_command_iterator(&self.debug_ctx, &iter) {
+  for variant in mu.next_command_iterator(&self.ui_debug_ctx, &iter) {
     switch c in variant {
     case ^mu.Command_Rect:
       quad(self, c.rect, mu.default_atlas[mu.DEFAULT_ATLAS_WHITE], c.color, atlas_size, scale)

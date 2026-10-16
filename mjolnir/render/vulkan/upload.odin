@@ -36,19 +36,11 @@ PendingImage :: struct {
   mip_levels: u32,
 }
 
-@(private)
-PendingFill :: struct {
-  dst:          vk.Buffer,
-  offset, size: vk.DeviceSize,
-  value:        u32,
-}
-
 // Uploads is the pending staged-write state of a GPUContext. Writes go into host-visible
 // staging blocks and are recorded in bulk by record_uploads, so uploading never waits on the GPU.
 Uploads :: struct {
   blocks: [dynamic]StagingBlock,
   copies: [dynamic]PendingCopy,
-  fills:  [dynamic]PendingFill,
   images: [dynamic]PendingImage,
   // fresh images to move out of UNDEFINED
   inits:  [dynamic]ImageDiscard,
@@ -72,14 +64,14 @@ staging_alloc :: proc(
     at := mem.align_forward_int(b.used, STAGING_ALIGNMENT)
     if at + size > int(b.buffer.size) do continue
     b.used = at + size
-    return b.buffer.buffer, at, &b.buffer.mapped[at], .SUCCESS
+    return b.buffer.buffer, at, &allocation_mapped(gctx, b.buffer.memory)[at], .SUCCESS
   }
   block := StagingBlock {
     buffer = buffer_create(gctx, vk.DeviceSize(max(size, STAGING_BLOCK_SIZE)), {.TRANSFER_SRC}) or_return,
     used   = size,
   }
   append(&u.blocks, block)
-  return block.buffer.buffer, 0, block.buffer.mapped, .SUCCESS
+  return block.buffer.buffer, 0, allocation_mapped(gctx, block.buffer.memory), .SUCCESS
 }
 
 // queue_buffer_write stages data for buffer at element index (in elements of T); the copy lands in the next recorded command buffer.
@@ -107,19 +99,6 @@ queue_buffer_write :: proc(
     },
   )
   return .SUCCESS
-}
-
-// queue_buffer_fill fills size bytes of buffer from byte offset with the u32 value, in the next recorded command buffer.
-// The range must not overlap a queued write to the same buffer.
-queue_buffer_fill :: proc(
-  gctx: ^GPUContext,
-  buffer: ^Buffer,
-  offset: vk.DeviceSize = 0,
-  size := vk.DeviceSize(vk.WHOLE_SIZE),
-  value: u32 = 0,
-) {
-  sync.mutex_guard(&gctx.uploads.mutex)
-  append(&gctx.uploads.fills, PendingFill{buffer.buffer, offset, size, value})
 }
 
 // queue_image_write stages size bytes of data as mip 0 of img, the rest of the chain blitted down, in the next recorded command buffer.
@@ -161,8 +140,7 @@ record_uploads :: proc(gctx: ^GPUContext, cmd: vk.CommandBuffer) {
     image_discard_barrier(cmd, ..u.inits[:])
     clear(&u.inits)
   }
-  if len(u.copies) == 0 && len(u.fills) == 0 && len(u.images) == 0 do return
-  for f in u.fills do vk.CmdFillBuffer(cmd, f.dst, f.offset, f.size, f.value)
+  if len(u.copies) == 0 && len(u.images) == 0 do return
   slice.sort_by(u.copies[:], proc(a, b: PendingCopy) -> bool {
     if a.src != b.src do return a.src < b.src
     return a.dst < b.dst
@@ -179,7 +157,6 @@ record_uploads :: proc(gctx: ^GPUContext, cmd: vk.CommandBuffer) {
   }
   if len(u.images) > 0 do record_image_uploads(cmd, u.images[:])
   clear(&u.copies)
-  clear(&u.fills)
   clear(&u.images)
   for &b in u.blocks do if b.used > 0 {
     b.used = 0
@@ -241,7 +218,6 @@ record_image_uploads :: proc(cmd: vk.CommandBuffer, images: []PendingImage) {
 discard_uploads :: proc(gctx: ^GPUContext) {
   sync.mutex_guard(&gctx.uploads.mutex)
   clear(&gctx.uploads.copies)
-  clear(&gctx.uploads.fills)
   clear(&gctx.uploads.images)
   clear(&gctx.uploads.inits)
   for &b in gctx.uploads.blocks do b.used, b.ready = 0, 0
@@ -252,7 +228,6 @@ uploads_destroy :: proc(gctx: ^GPUContext) {
   for &b in gctx.uploads.blocks do buffer_destroy(gctx, &b.buffer)
   delete(gctx.uploads.blocks)
   delete(gctx.uploads.copies)
-  delete(gctx.uploads.fills)
   delete(gctx.uploads.images)
   delete(gctx.uploads.inits)
   gctx.uploads = {}

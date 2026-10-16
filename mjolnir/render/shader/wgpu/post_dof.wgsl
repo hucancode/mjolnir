@@ -12,11 +12,6 @@ struct Effect {
 
 const MAX_BLUR_RADIUS: f32 = 16.0;
 
-// Distance along the view axis from a [0, 1] perspective depth value.
-fn linearize_depth(depth: f32) -> f32 {
-    return u.camera_near * u.camera_far / (u.camera_far - depth * (u.camera_far - u.camera_near));
-}
-
 fn blur_amount(linear_depth: f32) -> f32 {
     let distance_from_focus = abs(linear_depth - u.effect.focus_distance);
     if (distance_from_focus <= u.effect.focus_range) {
@@ -24,10 +19,6 @@ fn blur_amount(linear_depth: f32) -> f32 {
     }
     let blur_factor = (distance_from_focus - u.effect.focus_range) / (u.effect.focus_distance * 0.5);
     return clamp(blur_factor * u.effect.blur_strength, 0.0, MAX_BLUR_RADIUS);
-}
-
-fn gaussian_weight(distance: f32, sigma: f32) -> f32 {
-    return exp(-0.5 * distance * distance / (sigma * sigma));
 }
 
 // Circular sampling pattern, bright samples weighted up for the bokeh look.

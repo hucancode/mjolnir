@@ -9,10 +9,6 @@
 
 const AMBIENT_STRENGTH: f32 = 3.0;
 
-fn fresnel_schlick_roughness(cos_theta: f32, f0: vec3f, roughness: f32) -> vec3f {
-    return f0 + (max(vec3f(1.0 - roughness), f0) - f0) * pow(max(1.0 - cos_theta, 0.0), 5.0);
-}
-
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let material = materials[nodes[in.node_index].material_id];

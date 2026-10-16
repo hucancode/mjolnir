@@ -5,11 +5,6 @@ struct Effect {
     thickness: f32,
 }
 
-// Distance along the view axis from a [0, 1] perspective depth value.
-fn linearize_depth(depth: f32) -> f32 {
-    return u.camera_near * u.camera_far / (u.camera_far - depth * (u.camera_far - u.camera_near));
-}
-
 fn sample_normal(uv: vec2f) -> vec3f {
     let size = vec2i(textureDimensions(normal_texture));
     let n = textureLoad(normal_texture, clamp(vec2i(uv * vec2f(size)), vec2i(0), size - 1), 0).rgb;

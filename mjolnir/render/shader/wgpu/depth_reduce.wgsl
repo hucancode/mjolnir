@@ -1,8 +1,14 @@
 // One level of a max-depth pyramid: each texel holds the farthest depth of the 2x2 source
-// texels below it (source_texel: the depth image for mip 0, half its size, the mip above
-// otherwise). Clamping repeats the last row and column of an odd-sized source.
+// texels below it (source: the depth image for mip 0, read as unfilterable float, half its
+// size, the mip above otherwise). Clamping repeats the last row and column of an odd-sized
+// source.
 
+@group(3) @binding(0) var source: texture_2d<f32>;
 @group(3) @binding(1) var destination: texture_storage_2d<r32float, write>;
+
+fn source_texel(p: vec2i) -> f32 {
+    return textureLoad(source, p, 0).r;
+}
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3u) {

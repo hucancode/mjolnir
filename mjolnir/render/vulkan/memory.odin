@@ -3,11 +3,11 @@ package vulkan_backend
 import vk "vendor:vulkan"
 
 // Buffer is shared by the graphics and compute queues; its memory is a range of a block
-// (allocator.odin). Host-visible buffers are persistently mapped at `mapped`; device-local ones (mapped = nil) are written through queue_buffer_write.
+// (allocator.odin). Host-visible buffers are persistently mapped (allocation_mapped);
+// device-local ones are written through queue_buffer_write.
 Buffer :: struct {
   buffer: vk.Buffer,
   memory: Allocation,
-  mapped: [^]u8,
   size:   vk.DeviceSize,
 }
 
@@ -39,7 +39,7 @@ buffer_create :: proc(
   vk.GetBufferMemoryRequirements(gctx.device, buffer.buffer, &mem_reqs)
   properties: vk.MemoryPropertyFlags = {.HOST_VISIBLE, .HOST_COHERENT} if host_visible else {.DEVICE_LOCAL}
   if host_visible && host_cached {
-    if _, ok := find_memory_type_index(gctx.physical_device, mem_reqs.memoryTypeBits, properties + {.HOST_CACHED}); ok {
+    if _, ok := find_memory_type_index(gctx, mem_reqs.memoryTypeBits, properties + {.HOST_CACHED}); ok {
       properties += {.HOST_CACHED}
     }
   }
@@ -47,9 +47,8 @@ buffer_create :: proc(
     // the mappable device heap may be small (256 MiB without resizable BAR): fall back
     if memory, res := memory_alloc(gctx, mem_reqs, properties + {.DEVICE_LOCAL}, linear = true); res == .SUCCESS do buffer.memory = memory
   }
-  if buffer.memory.block == nil do buffer.memory = memory_alloc(gctx, mem_reqs, properties, linear = true) or_return
-  vk.BindBufferMemory(gctx.device, buffer.buffer, buffer.memory.memory, buffer.memory.offset) or_return
-  buffer.mapped = buffer.memory.mapped
+  if buffer.memory.block == 0 do buffer.memory = memory_alloc(gctx, mem_reqs, properties, linear = true) or_return
+  vk.BindBufferMemory(gctx.device, buffer.buffer, allocation_memory(gctx, buffer.memory), buffer.memory.offset) or_return
   return buffer, .SUCCESS
 }
 
@@ -65,20 +64,11 @@ buffer_destroy :: proc(gctx: ^GPUContext, buffer: ^Buffer) {
   buffer^ = {}
 }
 
-// mapped views count elements of T from byte offset of a mapped buffer; count < 0 takes every whole element to the end.
-mapped :: proc(buffer: ^Buffer, $T: typeid, offset: vk.DeviceSize = 0, count := -1) -> []T {
-  count := count
-  if count < 0 do count = int((buffer.size - offset) / size_of(T))
-  return ([^]T)(&buffer.mapped[offset])[:count]
-}
-
 // Trash is a resource that defer_destroy can queue; pool-managed resources retire through their pool instead.
 Trash :: union {
   Buffer,
   vk.ImageView,
   vk.Pipeline,
-  vk.PipelineLayout,
-  vk.DescriptorSetLayout,
   RetiredSet,
 }
 
@@ -109,17 +99,13 @@ destroy_item :: proc(gctx: ^GPUContext, item: ^TrashItem) {
     vk.DestroyImageView(device, t, nil)
   case vk.Pipeline:
     vk.DestroyPipeline(device, t, nil)
-  case vk.PipelineLayout:
-    vk.DestroyPipelineLayout(device, t, nil)
-  case vk.DescriptorSetLayout:
-    vk.DestroyDescriptorSetLayout(device, t, nil)
   case RetiredSet:
     set := t.set
     vk.FreeDescriptorSets(device, t.pool, 1, &set)
   }
 }
 
-// deferred_tick destroys every queued resource whose grace has elapsed. Call once per frame, after wait_frame.
+// deferred_tick destroys every queued resource whose grace has elapsed. Call once per frame, after frame_wait.
 deferred_tick :: proc(gctx: ^GPUContext) {
   i := 0
   for i < len(gctx.trash) {

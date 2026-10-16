@@ -48,7 +48,7 @@ SKIN_CAPACITY ::
 #assert(SKIN_SLAB_CONFIG[4].block_count == 0)
 
 // The tables render writes: `capacity` entries of `stride` bytes. render keeps the one copy
-// (FrameDesc.tables) and marks what it writes in FrameDesc.dirty; the backend brings its GPU
+// (Renderer.tables) and marks what it writes in Renderer.dirty; tables_sync brings the GPU
 // copies up to date from those each frame. The entry layouts are the GPU data contract: every
 // backend's shaders mirror them.
 @(private)
@@ -68,16 +68,6 @@ TABLES := [Table]struct {
   .BATCHES = {size_of(Batch), MAX_BATCHES},
   .NODE_BATCH = {size_of(u32), MAX_NODES_IN_SCENE},
   .SKIN_OWNERS = {size_of(u32), SKIN_CAPACITY},
-}
-
-@(private)
-tables_init :: proc(self: ^Renderer) {
-  for t, i in TABLES do self.tables[i] = make([]u8, t.stride * t.capacity)
-}
-
-@(private)
-tables_destroy :: proc(self: ^Renderer) {
-  for table in self.tables do delete(table)
 }
 
 // The frame in flight frame records next: it picks this frame's copy of per-frame resources.

@@ -97,39 +97,12 @@ MAX_TIMED_SCOPES :: 256
 @(private = "file")
 MAX_LABEL_DEPTH :: 16
 
-// What rhi's handles name (rhi.Pool: index 0 is none, released slots are reused).
-@(private)
-RhiState :: struct {
-  buffers:       rhi.Pool(Buffer),
-  layouts:       rhi.Pool(RhiLayout),
-  groups:        rhi.Pool(RhiGroup),
-  pipelines:     rhi.Pool(RhiPipeline),
-  // kept until shutdown: there are a handful
-  pipeline_layouts: map[PipelineLayoutKey]vk.PipelineLayout,
-  // the views bindless_write made for the storage image array, by index
-  storage_views: [MAX_STORAGE_IMAGES]vk.ImageView,
-  set_pool:      vk.DescriptorPool,
-  // per recording thread, queue and frame slot: the lists' pool, reset whole by frame_wait
-  cmd_pools:     [rhi.MAX_RECORD_THREADS][rhi.Queue][FRAMES_IN_FLIGHT]CmdPool,
-  // per frame slot: its timed scopes and their timestamps
-  timing:        [FRAMES_IN_FLIGHT]TimingSlot,
-  // the scopes of the slot frame_wait last waited for
-  timings:       [dynamic]rhi.Timing,
-  frame_index:   u32,
-  // an image is acquired and not yet presented
-  acquired:      bool,
-  // the backbuffer left UNDEFINED this frame
-  backbuffer_in: bool,
-  // per queue: the value the next submission signals, and per frame slot the last one signalled
-  next_value:    [rhi.Queue]u64,
-  slot_value:    [FRAMES_IN_FLIGHT][rhi.Queue]u64,
-}
 
 // A thread's lists of one queue and frame slot; `cursor` of them are taken since the reset.
 @(private)
 CmdPool :: struct {
   pool:   vk.CommandPool,
-  lists:  [dynamic]^RhiCmd,
+  lists:  [dynamic]Cmd,
   cursor: int,
 }
 
@@ -142,19 +115,19 @@ TimingSlot :: struct {
 }
 
 @(private)
-RhiLayout :: struct {
+Layout :: struct {
   set_layout: vk.DescriptorSetLayout,
   kinds:      []rhi.BindKind,
 }
 
 @(private)
-RhiGroup :: struct {
+Group :: struct {
   set:   vk.DescriptorSet,
   views: [dynamic]vk.ImageView,
 }
 
 @(private)
-RhiPipeline :: struct {
+Pipeline :: struct {
   pipeline:     vk.Pipeline,
   layout:       vk.PipelineLayout,
   bind_point:   vk.PipelineBindPoint,
@@ -165,9 +138,9 @@ RhiPipeline :: struct {
 // One command list: a command buffer, the pipeline bound on it and the sets bound per bind
 // point (graphics, compute), so a set already bound with the same layout is not bound again.
 @(private)
-RhiCmd :: struct {
+Cmd :: struct {
   cb:         vk.CommandBuffer,
-  pipeline:   ^RhiPipeline,
+  pipeline:   rhi.Pipeline,
   queue:      rhi.Queue,
   // renders into the backbuffer: ends in the present layout
   presenting: bool,
@@ -177,6 +150,15 @@ RhiCmd :: struct {
   slot:       u32,
   labels:     [MAX_LABEL_DEPTH]u32,
   depth:      u32,
+}
+
+// A CommandList packs where its Cmd is: cmd_pools[thread][queue][slot].lists[index].
+#assert(rhi.MAX_RECORD_THREADS <= 8 && len(rhi.Queue) <= 2 && FRAMES_IN_FLIGHT <= 16)
+
+@(private = "file")
+cmd_get :: proc(b: ^Backend, handle: rhi.CommandList) -> ^Cmd {
+  h := u32(handle)
+  return &b.cmd_pools[h & 7][rhi.Queue(h >> 3 & 1)][h >> 4 & 15].lists[h >> 8]
 }
 
 @(private)
@@ -194,7 +176,7 @@ rhi_init :: proc(b: ^Backend) -> vk.Result {
     queryType  = .TIMESTAMP,
     queryCount = 2 * MAX_TIMED_SCOPES,
   }
-  for &t in b.rhi.timing {
+  for &t in b.timing {
     vk.CreateQueryPool(b.gctx.device, &info, nil, &t.queries) or_return
     vk.ResetQueryPool(b.gctx.device, t.queries, 0, 2 * MAX_TIMED_SCOPES)
   }
@@ -205,43 +187,38 @@ rhi_init :: proc(b: ^Backend) -> vk.Result {
 @(private)
 rhi_shutdown :: proc(b: ^Backend) {
   device := b.gctx.device
-  for &thread in b.rhi.cmd_pools do for &queue in thread do for &p in queue {
-    for c in p.lists do free(c)
+  for &thread in b.cmd_pools do for &queue in thread do for &p in queue {
     delete(p.lists)
     if p.pool != 0 do vk.DestroyCommandPool(device, p.pool, nil)
   }
-  for t in b.rhi.timing do if t.queries != 0 do vk.DestroyQueryPool(device, t.queries, nil)
-  delete(b.rhi.timings)
-  for &buf in b.rhi.buffers.items do if buf.buffer != 0 do buffer_destroy(&b.gctx, &buf)
-  for view in b.rhi.storage_views do if view != 0 do vk.DestroyImageView(device, view, nil)
-  for &g in b.rhi.groups.items {
+  for t in b.timing do if t.queries != 0 do vk.DestroyQueryPool(device, t.queries, nil)
+  delete(b.timings)
+  for &buf in b.buffers.items do if buf.buffer != 0 do buffer_destroy(&b.gctx, &buf)
+  for view in b.storage_views do if view != 0 do vk.DestroyImageView(device, view, nil)
+  for &g in b.groups.items {
     for v in g.views do vk.DestroyImageView(device, v, nil)
     delete(g.views)
   }
-  if b.rhi.set_pool != 0 do vk.DestroyDescriptorPool(device, b.rhi.set_pool, nil)
-  for &l in b.rhi.layouts.items {
+  if b.set_pool != 0 do vk.DestroyDescriptorPool(device, b.set_pool, nil)
+  for &l in b.layouts.items {
     if l.set_layout != 0 do vk.DestroyDescriptorSetLayout(device, l.set_layout, nil)
     delete(l.kinds)
   }
-  for &p in b.rhi.pipelines.items do if p.pipeline != 0 do vk.DestroyPipeline(device, p.pipeline, nil)
-  for _, layout in b.rhi.pipeline_layouts do vk.DestroyPipelineLayout(device, layout, nil)
-  delete(b.rhi.pipeline_layouts)
-  rhi.pool_destroy(&b.rhi.buffers)
-  rhi.pool_destroy(&b.rhi.layouts)
-  rhi.pool_destroy(&b.rhi.groups)
-  rhi.pool_destroy(&b.rhi.pipelines)
+  for &p in b.pipelines.items do if p.pipeline != 0 do vk.DestroyPipeline(device, p.pipeline, nil)
+  for _, layout in b.pipeline_layouts do vk.DestroyPipelineLayout(device, layout, nil)
+  delete(b.pipeline_layouts)
+  rhi.pool_destroy(&b.buffers)
+  rhi.pool_destroy(&b.layouts)
+  rhi.pool_destroy(&b.groups)
+  rhi.pool_destroy(&b.pipelines)
 }
 
 rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
   return {
-    bindless = true,
     multi_draw_indirect_count = b.gctx.draw_indirect_count,
-    layered_rendering = true,
-    explicit_barriers = true,
     async_compute = has_async_compute(&b.gctx),
     indirect_first_instance = true,
     timestamps = timestamps_supported(&b.gctx),
-    parallel_recording = true,
   }
 }
 
@@ -272,22 +249,22 @@ rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, boo
     prefer_device_local = desc.memory == .UPLOAD,
   )
   if !check(res, "rhi buffer") do return 0, false
-  slot := rhi.pool_take(&b.rhi.buffers)
-  b.rhi.buffers.items[slot] = buffer
+  slot := rhi.pool_take(&b.buffers)
+  b.buffers.items[slot] = buffer
   return rhi.Buffer(slot), true
 }
 
 // Destroyed RETIRE_GRACE frames on, once no frame in flight reads it.
 rhi_buffer_retire :: proc(b: ^Backend, handle: rhi.Buffer) {
   if handle == 0 do return
-  defer_destroy(&b.gctx, b.rhi.buffers.items[handle])
-  rhi.pool_release(&b.rhi.buffers, u32(handle))
+  defer_destroy(&b.gctx, b.buffers.items[handle])
+  rhi.pool_release(&b.buffers, u32(handle))
 }
 
 rhi_buffer_read :: proc(b: ^Backend, handle: rhi.Buffer, offset: int, dst: []u8) -> bool {
-  buffer := &b.rhi.buffers.items[handle]
-  if buffer.mapped == nil do return false
-  copy(dst, buffer.mapped[offset:][:len(dst)])
+  mapped := allocation_mapped(&b.gctx, b.buffers.items[handle].memory)
+  if mapped == nil do return false
+  copy(dst, mapped[offset:][:len(dst)])
   return true
 }
 
@@ -300,16 +277,16 @@ rhi_bindless_write :: proc(b: ^Backend, array: rhi.BindlessArray, index: u32, re
     view_ref, ok := resource.(rhi.TextureView)
     img := texture_image(b, view_ref.texture) if ok else nil
     if img == nil do return
-    old := b.rhi.storage_views[index]
+    old := b.storage_views[index]
     if old != 0 do defer_destroy(&b.gctx, old)
     view, res := mip_view_create(b, img, u32(max(view_ref.mip, 0)))
     if !check(res, "rhi storage view") do return
-    b.rhi.storage_views[index] = view
+    b.storage_views[index] = view
     write_descriptor(&b.gctx, set, BINDING_STORAGE_IMAGES, index, .STORAGE_IMAGE, vk.DescriptorImageInfo{imageView = view, imageLayout = .GENERAL})
   case .DRAW_LISTS, .PYRAMID_COUNTERS:
     range, ok := resource.(rhi.BufferRange)
     if !ok do return
-    buffer := &b.rhi.buffers.items[range.buffer]
+    buffer := &b.buffers.items[range.buffer]
     binding: u32 = BINDING_DRAW_LISTS if array == .DRAW_LISTS else BINDING_PYRAMID_COUNTERS
     write_descriptor(&b.gctx, set, binding, index, .STORAGE_BUFFER, buffer_info(buffer))
   }
@@ -317,9 +294,9 @@ rhi_bindless_write :: proc(b: ^Backend, array: rhi.BindlessArray, index: u32, re
 
 rhi_buffer_write :: proc(b: ^Backend, handle: rhi.Buffer, offset: int, data: []u8) -> bool {
   if len(data) == 0 do return true
-  buffer := &b.rhi.buffers.items[handle]
-  if buffer.mapped != nil {
-    copy(buffer.mapped[offset:][:len(data)], data)
+  buffer := &b.buffers.items[handle]
+  if mapped := allocation_mapped(&b.gctx, buffer.memory); mapped != nil {
+    copy(mapped[offset:][:len(data)], data)
     return true
   }
   return check(queue_buffer_write(&b.gctx, buffer, data, offset), "rhi buffer write")
@@ -370,14 +347,14 @@ rhi_bind_layout_create :: proc(b: ^Backend, desc: rhi.BindLayoutDesc) -> (rhi.Bi
     delete(kinds)
     return 0, false
   }
-  slot := rhi.pool_take(&b.rhi.layouts)
-  b.rhi.layouts.items[slot] = {layout, kinds}
+  slot := rhi.pool_take(&b.layouts)
+  b.layouts.items[slot] = {layout, kinds}
   return rhi.BindLayout(slot), true
 }
 
 @(private = "file")
 set_pool_get :: proc(b: ^Backend) -> bool {
-  if b.rhi.set_pool != 0 do return true
+  if b.set_pool != 0 do return true
   sizes := [?]vk.DescriptorPoolSize {
     {.STORAGE_BUFFER, RHI_MAX_SETS * 4},
     {.SAMPLED_IMAGE, RHI_MAX_SETS * 8},
@@ -390,28 +367,28 @@ set_pool_get :: proc(b: ^Backend) -> bool {
     poolSizeCount = len(sizes),
     pPoolSizes    = raw_data(sizes[:]),
   }
-  return check(vk.CreateDescriptorPool(b.gctx.device, &info, nil, &b.rhi.set_pool), "rhi set pool")
+  return check(vk.CreateDescriptorPool(b.gctx.device, &info, nil, &b.set_pool), "rhi set pool")
 }
 
 rhi_bind_group_create :: proc(b: ^Backend, desc: rhi.BindGroupDesc) -> (rhi.BindGroup, bool) {
   if !set_pool_get(b) do return 0, false
-  layout := &b.rhi.layouts.items[desc.layout]
+  layout := &b.layouts.items[desc.layout]
   set: vk.DescriptorSet
   info := vk.DescriptorSetAllocateInfo {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-    descriptorPool     = b.rhi.set_pool,
+    descriptorPool     = b.set_pool,
     descriptorSetCount = 1,
     pSetLayouts        = &layout.set_layout,
   }
   if !check(vk.AllocateDescriptorSets(b.gctx.device, &info, &set), "rhi bind group") do return 0, false
-  slot := rhi.pool_take(&b.rhi.groups)
-  group := &b.rhi.groups.items[slot]
+  slot := rhi.pool_take(&b.groups)
+  group := &b.groups.items[slot]
   group.set = set
   for r, i in desc.resources {
     type := descriptor_type(layout.kinds[i])
     switch v in r {
     case rhi.BufferRange:
-      buffer := &b.rhi.buffers.items[v.buffer]
+      buffer := &b.buffers.items[v.buffer]
       range := vk.DeviceSize(v.size) if v.size > 0 else buffer.size - vk.DeviceSize(v.offset)
       write_descriptor(&b.gctx, set, u32(i), 0, type, vk.DescriptorBufferInfo{buffer = buffer.buffer, offset = vk.DeviceSize(v.offset), range = range})
     case rhi.TextureView:
@@ -432,11 +409,11 @@ rhi_bind_group_create :: proc(b: ^Backend, desc: rhi.BindGroupDesc) -> (rhi.Bind
 
 rhi_bind_group_retire :: proc(b: ^Backend, handle: rhi.BindGroup) {
   if handle == 0 do return
-  group := &b.rhi.groups.items[handle]
-  defer_destroy(&b.gctx, RetiredSet{b.rhi.set_pool, group.set})
+  group := &b.groups.items[handle]
+  defer_destroy(&b.gctx, RetiredSet{b.set_pool, group.set})
   for v in group.views do defer_destroy(&b.gctx, v)
   delete(group.views)
-  rhi.pool_release(&b.rhi.groups, u32(handle))
+  rhi.pool_release(&b.groups, u32(handle))
 }
 
 // The set layouts of desc, the bindless layout after them when asked, and the push range; made
@@ -445,7 +422,7 @@ rhi_bind_group_retire :: proc(b: ^Backend, handle: rhi.BindGroup) {
 pipeline_layout_get :: proc(b: ^Backend, desc: rhi.PipelineLayoutDesc) -> (layout: vk.PipelineLayout, bindless_set: u32, ok: bool) {
   key := PipelineLayoutKey{push_size = desc.push_size}
   for l in desc.layouts do if l != rhi.PUSH_GROUP {
-    key.sets[key.count] = b.rhi.layouts.items[l].set_layout
+    key.sets[key.count] = b.layouts.items[l].set_layout
     key.count += 1
   }
   bindless_set = key.count
@@ -453,7 +430,7 @@ pipeline_layout_get :: proc(b: ^Backend, desc: rhi.PipelineLayoutDesc) -> (layou
     key.sets[key.count] = b.bindless_layout
     key.count += 1
   }
-  if cached, found := b.rhi.pipeline_layouts[key]; found do return cached, bindless_set, true
+  if cached, found := b.pipeline_layouts[key]; found do return cached, bindless_set, true
   range := vk.PushConstantRange{stageFlags = PUSH_STAGES, size = max(desc.push_size, 4)}
   info := vk.PipelineLayoutCreateInfo {
     sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
@@ -463,14 +440,14 @@ pipeline_layout_get :: proc(b: ^Backend, desc: rhi.PipelineLayoutDesc) -> (layou
     pPushConstantRanges    = &range,
   }
   ok = check(vk.CreatePipelineLayout(b.gctx.device, &info, nil, &layout), "rhi pipeline layout")
-  if ok do b.rhi.pipeline_layouts[key] = layout
+  if ok do b.pipeline_layouts[key] = layout
   return
 }
 
 @(private = "file")
-pipeline_store :: proc(b: ^Backend, p: RhiPipeline) -> rhi.Pipeline {
-  slot := rhi.pool_take(&b.rhi.pipelines)
-  b.rhi.pipelines.items[slot] = p
+pipeline_store :: proc(b: ^Backend, p: Pipeline) -> rhi.Pipeline {
+  slot := rhi.pool_take(&b.pipelines)
+  b.pipelines.items[slot] = p
   return rhi.Pipeline(slot)
 }
 
@@ -482,8 +459,16 @@ rhi_compute_pipeline_create :: proc(b: ^Backend, desc: rhi.ComputePipelineDesc) 
   }
   layout, bindless_set, layout_ok := pipeline_layout_get(b, desc.layout)
   if !layout_ok do return 0, false
-  pipeline, res := create_compute_pipeline(&b.gctx, code, layout)
-  if !check(res, "rhi compute pipeline") do return 0, false
+  module, module_res := create_shader_module(b.gctx.device, code)
+  if !check(module_res, "rhi shader module") do return 0, false
+  defer vk.DestroyShaderModule(b.gctx.device, module, nil)
+  info := vk.ComputePipelineCreateInfo {
+    sType  = .COMPUTE_PIPELINE_CREATE_INFO,
+    stage  = {sType = .PIPELINE_SHADER_STAGE_CREATE_INFO, stage = {.COMPUTE}, module = module, pName = "main"},
+    layout = layout,
+  }
+  pipeline: vk.Pipeline
+  if !check(vk.CreateComputePipelines(b.gctx.device, b.gctx.pipeline_cache, 1, &info, nil, &pipeline), "rhi compute pipeline") do return 0, false
   return pipeline_store(b, {pipeline, layout, .COMPUTE, bindless_set}), true
 }
 
@@ -533,32 +518,14 @@ rhi_graphics_pipeline_create :: proc(b: ^Backend, desc: rhi.GraphicsPipelineDesc
     for a in vb.attributes do append(&attributes, vk.VertexInputAttributeDescription{location = a.location, binding = u32(i), format = VERTEX_FORMATS[a.format], offset = a.offset})
   }
   formats := make([]vk.Format, len(desc.color_formats), context.temp_allocator)
-  blend := make([]vk.PipelineColorBlendAttachmentState, len(desc.color_formats), context.temp_allocator)
+  blends := make([]vk.PipelineColorBlendAttachmentState, len(desc.color_formats), context.temp_allocator)
   for f, i in desc.color_formats {
     formats[i] = b.swapchain.format.format if f == .BACKBUFFER else FORMATS[f]
     switch desc.blend {
-    case .NONE:     blend[i] = BLEND_OVERRIDE
-    case .ALPHA:    blend[i] = BLEND_ALPHA
-    case .ADDITIVE: blend[i] = BLEND_ADDITIVE
+    case .NONE:     blends[i] = BLEND_OVERRIDE
+    case .ALPHA:    blends[i] = BLEND_ALPHA
+    case .ADDITIVE: blends[i] = BLEND_ADDITIVE
     }
-  }
-  info := GraphicsPipelineDesc {
-    vert              = shader.vert,
-    frag              = shader.frag,
-    vertex_bindings   = bindings,
-    vertex_attributes = attributes[:],
-    topology          = TOPOLOGIES[desc.topology],
-    polygon_mode      = .LINE if desc.wireframe && b.gctx.fill_mode_non_solid else .FILL,
-    cull_mode         = CULL_MODES[desc.cull],
-    blend             = blend,
-    color_formats     = formats,
-    layout            = layout,
-  }
-  if depth, ok := desc.depth.?; ok {
-    info.depth = {depthTestEnable = true, depthWriteEnable = b32(depth.write), depthCompareOp = COMPARE_OPS[depth.compare]}
-    info.depth_format = .D32_SFLOAT
-    info.depth_clamp = b32(depth.clamp && b.gctx.depth_clamp)
-    info.depth_bias = {0, depth.slope_bias}
   }
   specialization: vk.SpecializationInfo
   if len(desc.constants) > 0 {
@@ -570,17 +537,108 @@ rhi_graphics_pipeline_create :: proc(b: ^Backend, desc: rhi.GraphicsPipelineDesc
       dataSize      = len(desc.constants) * size_of(u32),
       pData         = raw_data(desc.constants),
     }
-    info.specialization = &specialization
   }
-  pipeline, res := create_graphics_pipeline(&b.gctx, info)
-  if !check(res, "rhi graphics pipeline") do return 0, false
+  // shaders are SPIR-V with entry point "main"; the fragment stage may be absent
+  stages: [2]vk.PipelineShaderStageCreateInfo
+  stage_count: u32
+  defer for s in stages[:stage_count] do vk.DestroyShaderModule(b.gctx.device, s.module, nil)
+  codes := [2][]u8{shader.vert, shader.frag}
+  stage_flags := [2]vk.ShaderStageFlags{{.VERTEX}, {.FRAGMENT}}
+  for code, i in codes {
+    if len(code) == 0 do continue
+    module, res := create_shader_module(b.gctx.device, code)
+    if !check(res, "rhi shader module") do return 0, false
+    stages[stage_count] = {
+      sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage               = stage_flags[i],
+      module              = module,
+      pName               = "main",
+      pSpecializationInfo = &specialization if len(desc.constants) > 0 else nil,
+    }
+    stage_count += 1
+  }
+  vertex_input := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = u32(len(bindings)),
+    pVertexBindingDescriptions      = raw_data(bindings),
+    vertexAttributeDescriptionCount = u32(len(attributes)),
+    pVertexAttributeDescriptions    = raw_data(attributes),
+  }
+  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology = TOPOLOGIES[desc.topology],
+  }
+  viewport := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
+  }
+  // front faces wind counter-clockwise
+  raster := vk.PipelineRasterizationStateCreateInfo {
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .LINE if desc.wireframe && b.gctx.fill_mode_non_solid else .FILL,
+    cullMode    = CULL_MODES[desc.cull],
+    frontFace   = .COUNTER_CLOCKWISE,
+    lineWidth   = 1,
+  }
+  multisample := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    rasterizationSamples = {._1},
+  }
+  depth_state := vk.PipelineDepthStencilStateCreateInfo{sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO}
+  depth_format: vk.Format
+  depth, has_depth := desc.depth.?
+  if has_depth {
+    depth_state.depthTestEnable = true
+    depth_state.depthWriteEnable = b32(depth.write)
+    depth_state.depthCompareOp = COMPARE_OPS[depth.compare]
+    depth_format = .D32_SFLOAT
+    // clamp depth instead of clipping at the near and far planes
+    raster.depthClampEnable = b32(depth.clamp && b.gctx.depth_clamp)
+    raster.depthBiasEnable = b32(depth.slope_bias != 0)
+    raster.depthBiasSlopeFactor = depth.slope_bias
+  }
+  blend := vk.PipelineColorBlendStateCreateInfo {
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    attachmentCount = u32(len(blends)),
+    pAttachments    = raw_data(blends),
+  }
+  dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  dynamic_state := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = len(dynamic_states),
+    pDynamicStates    = raw_data(dynamic_states[:]),
+  }
+  rendering := vk.PipelineRenderingCreateInfo {
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+    colorAttachmentCount    = u32(len(formats)),
+    pColorAttachmentFormats = raw_data(formats),
+    depthAttachmentFormat   = depth_format,
+  }
+  info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    pNext               = &rendering,
+    stageCount          = stage_count,
+    pStages             = raw_data(stages[:]),
+    pVertexInputState   = &vertex_input,
+    pInputAssemblyState = &input_assembly,
+    pViewportState      = &viewport,
+    pRasterizationState = &raster,
+    pMultisampleState   = &multisample,
+    pDepthStencilState  = &depth_state if has_depth else nil,
+    pColorBlendState    = &blend if len(blends) > 0 else nil,
+    pDynamicState       = &dynamic_state,
+    layout              = layout,
+  }
+  pipeline: vk.Pipeline
+  if !check(vk.CreateGraphicsPipelines(b.gctx.device, b.gctx.pipeline_cache, 1, &info, nil, &pipeline), "rhi graphics pipeline") do return 0, false
   return pipeline_store(b, {pipeline, layout, .GRAPHICS, bindless_set}), true
 }
 
 rhi_pipeline_retire :: proc(b: ^Backend, handle: rhi.Pipeline) {
   if handle == 0 do return
-  defer_destroy(&b.gctx, b.rhi.pipelines.items[handle].pipeline)
-  rhi.pool_release(&b.rhi.pipelines, u32(handle))
+  defer_destroy(&b.gctx, b.pipelines.items[handle].pipeline)
+  rhi.pool_release(&b.pipelines, u32(handle))
 }
 
 @(private = "file")
@@ -592,13 +650,13 @@ timeline :: proc(b: ^Backend, queue: rhi.Queue) -> vk.Semaphore {
 // may be rewritten. Separate from frame_begin so the caller places the wait.
 rhi_frame_wait :: proc(b: ^Backend) -> (rhi.Frame, bool) {
   slot := u32(b.gctx.frame_serial % FRAMES_IN_FLIGHT)
-  b.rhi.frame_index = slot
+  b.frame_index = slot
   frame := rhi.Frame{index = slot}
   semaphores: [2]vk.Semaphore
   values: [2]u64
   count: u32
   for q in rhi.Queue {
-    value := b.rhi.slot_value[slot][q]
+    value := b.slot_value[slot][q]
     if value == 0 do continue
     semaphores[count], values[count] = timeline(b, q), value
     count += 1
@@ -613,7 +671,7 @@ rhi_frame_wait :: proc(b: ^Backend) -> (rhi.Frame, bool) {
     if !check(vk.WaitSemaphores(b.gctx.device, &info, math.max(u64)), "rhi frame wait") do return frame, false
   }
   // nothing of the slot is pending: its lists and timestamps start over
-  for &thread in b.rhi.cmd_pools do for &queue in thread {
+  for &thread in b.cmd_pools do for &queue in thread {
     p := &queue[slot]
     if p.cursor == 0 do continue
     vk.ResetCommandPool(b.gctx.device, p.pool, {})
@@ -623,13 +681,13 @@ rhi_frame_wait :: proc(b: ^Backend) -> (rhi.Frame, bool) {
   return frame, true
 }
 
-// Reads the slot's timestamps into b.rhi.timings and resets them.
+// Reads the slot's timestamps into b.timings and resets them.
 @(private = "file")
 timings_collect :: proc(b: ^Backend, slot: u32) {
-  clear(&b.rhi.timings)
+  clear(&b.timings)
   if !timestamps_supported(&b.gctx) do return
   device := b.gctx.device
-  t := &b.rhi.timing[slot]
+  t := &b.timing[slot]
   if t.queries == 0 do return
   n := min(t.count, MAX_TIMED_SCOPES)
   if n == 0 do return
@@ -646,21 +704,22 @@ timings_collect :: proc(b: ^Backend, slot: u32) {
     if begin[1] == 0 || end[1] == 0 || begin[0] == 0 || end[0] < begin[0] do continue
     timing := t.scopes[i]
     timing.ms = f32(f64(end[0] - begin[0]) * period / 1e6)
-    append(&b.rhi.timings, timing)
+    append(&b.timings, timing)
   }
 }
 
 rhi_frame_timings :: proc(b: ^Backend) -> []rhi.Timing {
-  return b.rhi.timings[:]
+  return b.timings[:]
 }
 
 // A suboptimal image is still acquired: the frame goes on and frame_present asks for the resize.
 rhi_frame_begin :: proc(b: ^Backend, framebuffer_size: [2]u32) -> rhi.FrameStatus {
-  res := acquire_next_image(b.gctx.device, &b.swapchain, b.rhi.frame_index)
+  sc := &b.swapchain
+  res := vk.AcquireNextImageKHR(b.gctx.device, sc.handle, math.max(u64), sc.image_available_semaphores[b.frame_index], 0, &sc.image_index)
   if res == .ERROR_OUT_OF_DATE_KHR do return .RESIZE
   if res != .SUBOPTIMAL_KHR && !check(res, "rhi acquire") do return .ERROR
-  b.rhi.acquired = true
-  b.rhi.backbuffer_in = false
+  b.acquired = true
+  b.backbuffer_in = false
   return .OK
 }
 
@@ -678,18 +737,18 @@ rhi_submit :: proc(b: ^Backend, desc: rhi.SubmitDesc) -> rhi.SyncPoint {
     }
     append(&waits, vk.SemaphoreSubmitInfo{sType = .SEMAPHORE_SUBMIT_INFO, semaphore = timeline(b, w.queue), value = w.value, stageMask = mask})
   }
-  assert(!desc.present || (queue == .GRAPHICS && b.rhi.acquired), "present: a graphics submission of an acquired frame")
-  for c in desc.cmds do assert(desc.present || !(^RhiCmd)(c).presenting, "a list that renders the backbuffer is in the presenting submission")
+  assert(!desc.present || (queue == .GRAPHICS && b.acquired), "present: a graphics submission of an acquired frame")
+  for c in desc.cmds do assert(desc.present || !cmd_get(b, c).presenting, "a list that renders the backbuffer is in the presenting submission")
   sc := &b.swapchain
   if desc.present {
-    append(&waits, vk.SemaphoreSubmitInfo{sType = .SEMAPHORE_SUBMIT_INFO, semaphore = sc.image_available_semaphores[b.rhi.frame_index], stageMask = {.COLOR_ATTACHMENT_OUTPUT}})
+    append(&waits, vk.SemaphoreSubmitInfo{sType = .SEMAPHORE_SUBMIT_INFO, semaphore = sc.image_available_semaphores[b.frame_index], stageMask = {.COLOR_ATTACHMENT_OUTPUT}})
     append(&signals, vk.SemaphoreSubmitInfo{sType = .SEMAPHORE_SUBMIT_INFO, semaphore = sc.render_finished_semaphores[sc.image_index], stageMask = {.ALL_COMMANDS}})
   }
-  b.rhi.next_value[queue] += 1
-  value := b.rhi.next_value[queue]
+  b.next_value[queue] += 1
+  value := b.next_value[queue]
   append(&signals, vk.SemaphoreSubmitInfo{sType = .SEMAPHORE_SUBMIT_INFO, semaphore = timeline(b, queue), value = value, stageMask = {.ALL_COMMANDS}})
   infos := make([]vk.CommandBufferSubmitInfo, len(desc.cmds), context.temp_allocator)
-  for c, i in desc.cmds do infos[i] = {sType = .COMMAND_BUFFER_SUBMIT_INFO, commandBuffer = (^RhiCmd)(c).cb}
+  for c, i in desc.cmds do infos[i] = {sType = .COMMAND_BUFFER_SUBMIT_INFO, commandBuffer = cmd_get(b, c).cb}
   submit := vk.SubmitInfo2 {
     sType                    = .SUBMIT_INFO_2,
     waitSemaphoreInfoCount   = u32(len(waits)),
@@ -701,7 +760,7 @@ rhi_submit :: proc(b: ^Backend, desc: rhi.SubmitDesc) -> rhi.SyncPoint {
   }
   vk_queue := gctx.graphics_queue if queue == .GRAPHICS else gctx.compute_queue
   check(vk.QueueSubmit2(vk_queue, 1, &submit, 0), "rhi submit")
-  b.rhi.slot_value[b.rhi.frame_index][queue] = value
+  b.slot_value[b.frame_index][queue] = value
   return {queue = queue, value = value}
 }
 
@@ -717,7 +776,7 @@ rhi_frame_present :: proc(b: ^Backend) -> rhi.FrameStatus {
     pImageIndices      = raw_data(indices[:]),
   }
   res := vk.QueuePresentKHR(b.gctx.present_queue, &info)
-  b.rhi.acquired = false
+  b.acquired = false
   b.gctx.frame_serial += 1
   if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR do return .RESIZE
   if !check(res, "rhi present") do return .ERROR
@@ -727,8 +786,8 @@ rhi_frame_present :: proc(b: ^Backend) -> rhi.FrameStatus {
 // Lists are made once per thread, queue and frame slot, from a transient pool frame_wait resets
 // whole; a thread touches only its own pools.
 rhi_cmd_begin :: proc(b: ^Backend, queue: rhi.Queue, thread: u32) -> rhi.CommandList {
-  slot := b.rhi.frame_index
-  p := &b.rhi.cmd_pools[thread][queue][slot]
+  slot := b.frame_index
+  p := &b.cmd_pools[thread][queue][slot]
   if p.pool == 0 {
     info := vk.CommandPoolCreateInfo {
       sType            = .COMMAND_POOL_CREATE_INFO,
@@ -738,35 +797,35 @@ rhi_cmd_begin :: proc(b: ^Backend, queue: rhi.Queue, thread: u32) -> rhi.Command
     check(vk.CreateCommandPool(b.gctx.device, &info, nil, &p.pool), "rhi command pool")
   }
   if p.cursor == len(p.lists) {
-    cmd := new(RhiCmd)
-    cmd.queue = queue
+    cmd := Cmd{queue = queue}
     allocate_command_buffer(&b.gctx, ([^]vk.CommandBuffer)(&cmd.cb)[:1], p.pool)
     append(&p.lists, cmd)
   }
-  cmd := p.lists[p.cursor]
-  p.cursor += 1
-  cmd.pipeline, cmd.presenting, cmd.bound, cmd.slot, cmd.depth = nil, false, {}, slot, 0
+  cmd := &p.lists[p.cursor]
+  cmd.pipeline, cmd.presenting, cmd.bound, cmd.slot, cmd.depth = 0, false, {}, slot, 0
   begin_record(cmd.cb)
-  return rhi.CommandList(cmd)
+  handle := rhi.CommandList(u32(p.cursor) << 8 | slot << 4 | u32(queue) << 3 | thread)
+  p.cursor += 1
+  return handle
 }
 
 rhi_cmd_flush_uploads :: proc(b: ^Backend, handle: rhi.CommandList) {
-  record_uploads(&b.gctx, (^RhiCmd)(handle).cb)
+  record_uploads(&b.gctx, cmd_get(b, handle).cb)
 }
 
 rhi_cmd_end :: proc(b: ^Backend, handle: rhi.CommandList) {
-  cmd := (^RhiCmd)(handle)
+  cmd := cmd_get(b, handle)
   if cmd.presenting do present_barrier(cmd.cb, b.swapchain.images[b.swapchain.image_index])
   vk.EndCommandBuffer(cmd.cb)
 }
 
 @(private = "file")
-attachment_view :: proc(b: ^Backend, cmd: ^RhiCmd, texture: rhi.TextureHandle) -> (view: vk.ImageView, extent: vk.Extent2D) {
+attachment_view :: proc(b: ^Backend, cmd: ^Cmd, texture: rhi.TextureHandle) -> (view: vk.ImageView, extent: vk.Extent2D) {
   if texture == rhi.BACKBUFFER {
     sc := &b.swapchain
     // the image leaves UNDEFINED the first time it is used
-    if !b.rhi.backbuffer_in {
-      b.rhi.backbuffer_in = true
+    if !b.backbuffer_in {
+      b.backbuffer_in = true
       image_discard_barrier(cmd.cb, {sc.images[sc.image_index], {.COLOR}, {.COLOR_ATTACHMENT_WRITE}, {.COLOR_ATTACHMENT_OUTPUT}})
     }
     cmd.presenting = true
@@ -787,7 +846,7 @@ vk_load_op :: proc(op: rhi.LoadOp) -> vk.AttachmentLoadOp {
 }
 
 rhi_cmd_begin_pass :: proc(b: ^Backend, handle: rhi.CommandList, desc: rhi.PassDesc) {
-  cmd := (^RhiCmd)(handle)
+  cmd := cmd_get(b, handle)
   extent: vk.Extent2D
   colors := make([]vk.RenderingAttachmentInfo, len(desc.colors), context.temp_allocator)
   for c, i in desc.colors {
@@ -806,7 +865,7 @@ rhi_cmd_begin_pass :: proc(b: ^Backend, handle: rhi.CommandList, desc: rhi.PassD
 }
 
 rhi_cmd_end_pass :: proc(b: ^Backend, handle: rhi.CommandList) {
-  vk.CmdEndRendering((^RhiCmd)(handle).cb)
+  vk.CmdEndRendering(cmd_get(b, handle).cb)
 }
 
 // Compute needs no scope on Vulkan.
@@ -816,13 +875,13 @@ rhi_cmd_end_compute :: proc(b: ^Backend, handle: rhi.CommandList) {}
 
 // A debug label, and a timestamp at each end when the device has them.
 rhi_cmd_label_begin :: proc(b: ^Backend, handle: rhi.CommandList, name: string) {
-  cmd := (^RhiCmd)(handle)
+  cmd := cmd_get(b, handle)
   if b.gctx.debug_labels {
     label := vk.DebugUtilsLabelEXT{sType = .DEBUG_UTILS_LABEL_EXT, pLabelName = strings.clone_to_cstring(name, context.temp_allocator)}
     vk.CmdBeginDebugUtilsLabelEXT(cmd.cb, &label)
   }
   index := u32(MAX_TIMED_SCOPES)
-  t := &b.rhi.timing[cmd.slot]
+  t := &b.timing[cmd.slot]
   if t.queries != 0 && b.gctx.timestamp_bits[0 if cmd.queue == .GRAPHICS else 1] > 0 {
     index = intrinsics.atomic_add(&t.count, 1)
     if index < MAX_TIMED_SCOPES {
@@ -838,26 +897,27 @@ rhi_cmd_label_begin :: proc(b: ^Backend, handle: rhi.CommandList, name: string) 
 }
 
 rhi_cmd_label_end :: proc(b: ^Backend, handle: rhi.CommandList) {
-  cmd := (^RhiCmd)(handle)
+  cmd := cmd_get(b, handle)
   assert(cmd.depth > 0, "label end without a begin")
   cmd.depth -= 1
   if index := cmd.labels[cmd.depth]; index < MAX_TIMED_SCOPES {
-    vk.CmdWriteTimestamp2(cmd.cb, {.ALL_COMMANDS}, b.rhi.timing[cmd.slot].queries, 2 * index + 1)
+    vk.CmdWriteTimestamp2(cmd.cb, {.ALL_COMMANDS}, b.timing[cmd.slot].queries, 2 * index + 1)
   }
   if b.gctx.debug_labels do vk.CmdEndDebugUtilsLabelEXT(cmd.cb)
 }
 
 rhi_cmd_bind_pipeline :: proc(b: ^Backend, handle: rhi.CommandList, pipeline: rhi.Pipeline) {
-  cmd := (^RhiCmd)(handle)
-  cmd.pipeline = &b.rhi.pipelines.items[pipeline]
-  vk.CmdBindPipeline(cmd.cb, cmd.pipeline.bind_point, cmd.pipeline.pipeline)
+  cmd := cmd_get(b, handle)
+  cmd.pipeline = pipeline
+  p := &b.pipelines.items[pipeline]
+  vk.CmdBindPipeline(cmd.cb, p.bind_point, p.pipeline)
 }
 
 // Binds `set` at index for the current pipeline unless it is bound there already with the same
 // layout (a set bound with a pipeline layout stays bound across pipelines sharing it).
 @(private = "file")
-set_bind :: proc(cmd: ^RhiCmd, index: u32, set: vk.DescriptorSet) {
-  p := cmd.pipeline
+set_bind :: proc(b: ^Backend, cmd: ^Cmd, index: u32, set: vk.DescriptorSet) {
+  p := &b.pipelines.items[cmd.pipeline]
   bound := &cmd.bound[0 if p.bind_point == .GRAPHICS else 1]
   if bound.layout != p.layout do bound^ = {layout = p.layout}
   if bound.sets[index] == set do return
@@ -867,54 +927,54 @@ set_bind :: proc(cmd: ^RhiCmd, index: u32, set: vk.DescriptorSet) {
 }
 
 rhi_cmd_bind_group :: proc(b: ^Backend, handle: rhi.CommandList, set: u32, group: rhi.BindGroup) {
-  set_bind((^RhiCmd)(handle), set, b.rhi.groups.items[group].set)
+  set_bind(b, cmd_get(b, handle), set, b.groups.items[group].set)
 }
 
 rhi_cmd_bind_bindless :: proc(b: ^Backend, handle: rhi.CommandList) {
-  cmd := (^RhiCmd)(handle)
-  set_bind(cmd, cmd.pipeline.bindless_set, b.bindless_set)
+  cmd := cmd_get(b, handle)
+  set_bind(b, cmd, b.pipelines.items[cmd.pipeline].bindless_set, b.bindless_set)
 }
 
 rhi_cmd_push :: proc(b: ^Backend, handle: rhi.CommandList, data: rawptr, size: u32) {
-  cmd := (^RhiCmd)(handle)
+  cmd := cmd_get(b, handle)
   if size == 0 do return
-  vk.CmdPushConstants(cmd.cb, cmd.pipeline.layout, PUSH_STAGES, 0, size, data)
+  vk.CmdPushConstants(cmd.cb, b.pipelines.items[cmd.pipeline].layout, PUSH_STAGES, 0, size, data)
 }
 
 rhi_cmd_set_scissor :: proc(b: ^Backend, handle: rhi.CommandList, x, y, w, h: u32) {
   scissor := vk.Rect2D{offset = {i32(x), i32(y)}, extent = {w, h}}
-  vk.CmdSetScissor((^RhiCmd)(handle).cb, 0, 1, &scissor)
+  vk.CmdSetScissor(cmd_get(b, handle).cb, 0, 1, &scissor)
 }
 
 rhi_cmd_set_viewport :: proc(b: ^Backend, handle: rhi.CommandList, x, y, w, h: u32) {
   viewport := vk.Viewport{x = f32(x), y = f32(y), width = f32(w), height = f32(h), maxDepth = 1}
-  vk.CmdSetViewport((^RhiCmd)(handle).cb, 0, 1, &viewport)
+  vk.CmdSetViewport(cmd_get(b, handle).cb, 0, 1, &viewport)
 }
 
 rhi_cmd_bind_vertex :: proc(b: ^Backend, handle: rhi.CommandList, slot: u32, buffer: rhi.Buffer, offset: int) {
-  buffers := [1]vk.Buffer{b.rhi.buffers.items[buffer].buffer}
+  buffers := [1]vk.Buffer{b.buffers.items[buffer].buffer}
   offsets := [1]vk.DeviceSize{vk.DeviceSize(offset)}
-  vk.CmdBindVertexBuffers((^RhiCmd)(handle).cb, slot, 1, raw_data(buffers[:]), raw_data(offsets[:]))
+  vk.CmdBindVertexBuffers(cmd_get(b, handle).cb, slot, 1, raw_data(buffers[:]), raw_data(offsets[:]))
 }
 
 rhi_cmd_bind_index :: proc(b: ^Backend, handle: rhi.CommandList, buffer: rhi.Buffer, offset: int) {
-  vk.CmdBindIndexBuffer((^RhiCmd)(handle).cb, b.rhi.buffers.items[buffer].buffer, vk.DeviceSize(offset), .UINT32)
+  vk.CmdBindIndexBuffer(cmd_get(b, handle).cb, b.buffers.items[buffer].buffer, vk.DeviceSize(offset), .UINT32)
 }
 
 rhi_cmd_draw :: proc(b: ^Backend, handle: rhi.CommandList, vertex_count, instance_count, first_vertex, first_instance: u32) {
-  vk.CmdDraw((^RhiCmd)(handle).cb, vertex_count, instance_count, first_vertex, first_instance)
+  vk.CmdDraw(cmd_get(b, handle).cb, vertex_count, instance_count, first_vertex, first_instance)
 }
 
 rhi_cmd_draw_indexed :: proc(b: ^Backend, handle: rhi.CommandList, index_count, instance_count, first_index: u32, vertex_offset: i32, first_instance: u32) {
-  vk.CmdDrawIndexed((^RhiCmd)(handle).cb, index_count, instance_count, first_index, vertex_offset, first_instance)
+  vk.CmdDrawIndexed(cmd_get(b, handle).cb, index_count, instance_count, first_index, vertex_offset, first_instance)
 }
 
 rhi_cmd_draw_indirect :: proc(b: ^Backend, handle: rhi.CommandList, buffer: rhi.Buffer, offset: int, draw_count, stride: u32) {
-  vk.CmdDrawIndirect((^RhiCmd)(handle).cb, b.rhi.buffers.items[buffer].buffer, vk.DeviceSize(offset), draw_count, stride)
+  vk.CmdDrawIndirect(cmd_get(b, handle).cb, b.buffers.items[buffer].buffer, vk.DeviceSize(offset), draw_count, stride)
 }
 
 rhi_cmd_draw_indexed_indirect :: proc(b: ^Backend, handle: rhi.CommandList, buffer: rhi.Buffer, offset: int, draw_count, stride: u32) {
-  vk.CmdDrawIndexedIndirect((^RhiCmd)(handle).cb, b.rhi.buffers.items[buffer].buffer, vk.DeviceSize(offset), draw_count, stride)
+  vk.CmdDrawIndexedIndirect(cmd_get(b, handle).cb, b.buffers.items[buffer].buffer, vk.DeviceSize(offset), draw_count, stride)
 }
 
 rhi_cmd_draw_indexed_indirect_count :: proc(
@@ -927,10 +987,10 @@ rhi_cmd_draw_indexed_indirect_count :: proc(
   max_count, stride: u32,
 ) {
   vk.CmdDrawIndexedIndirectCount(
-    (^RhiCmd)(handle).cb,
-    b.rhi.buffers.items[buffer].buffer,
+    cmd_get(b, handle).cb,
+    b.buffers.items[buffer].buffer,
     vk.DeviceSize(offset),
-    b.rhi.buffers.items[count_buffer].buffer,
+    b.buffers.items[count_buffer].buffer,
     vk.DeviceSize(count_offset),
     max_count,
     stride,
@@ -938,16 +998,16 @@ rhi_cmd_draw_indexed_indirect_count :: proc(
 }
 
 rhi_cmd_dispatch :: proc(b: ^Backend, handle: rhi.CommandList, x, y, z: u32) {
-  vk.CmdDispatch((^RhiCmd)(handle).cb, x, y, z)
+  vk.CmdDispatch(cmd_get(b, handle).cb, x, y, z)
 }
 
 rhi_cmd_fill_buffer :: proc(b: ^Backend, handle: rhi.CommandList, buffer: rhi.Buffer, offset, size: int) {
-  vk.CmdFillBuffer((^RhiCmd)(handle).cb, b.rhi.buffers.items[buffer].buffer, vk.DeviceSize(offset), vk.DeviceSize(size), 0)
+  vk.CmdFillBuffer(cmd_get(b, handle).cb, b.buffers.items[buffer].buffer, vk.DeviceSize(offset), vk.DeviceSize(size), 0)
 }
 
 rhi_cmd_copy_buffer :: proc(b: ^Backend, handle: rhi.CommandList, src: rhi.Buffer, src_offset: int, dst: rhi.Buffer, dst_offset, size: int) {
   region := vk.BufferCopy{srcOffset = vk.DeviceSize(src_offset), dstOffset = vk.DeviceSize(dst_offset), size = vk.DeviceSize(size)}
-  vk.CmdCopyBuffer((^RhiCmd)(handle).cb, b.rhi.buffers.items[src].buffer, b.rhi.buffers.items[dst].buffer, 1, &region)
+  vk.CmdCopyBuffer(cmd_get(b, handle).cb, b.buffers.items[src].buffer, b.buffers.items[dst].buffer, 1, &region)
 }
 
 @(private = "file")
@@ -995,5 +1055,5 @@ rhi_cmd_barrier :: proc(b: ^Backend, handle: rhi.CommandList, barriers: []rhi.Ba
   images := make([]ImageDiscard, len(discards), context.temp_allocator)
   for t, i in discards do images[i] = attachment_discard(texture_image(b, t))
   image_discards_fill(&dep, images)
-  vk.CmdPipelineBarrier2((^RhiCmd)(handle).cb, &dep)
+  vk.CmdPipelineBarrier2(cmd_get(b, handle).cb, &dep)
 }

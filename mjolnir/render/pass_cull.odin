@@ -1,5 +1,6 @@
 package render
 
+import cont "../containers"
 import "rhi"
 
 // Culling decides what each view draws and writes it as indirect draws.
@@ -61,28 +62,6 @@ ReduceKey :: struct {
   depth:     TextureHandle,
 }
 
-@(private)
-CullState :: struct {
-  cull:             rhi.Pipeline,
-  // batched: writes the draw of each batch
-  draws:            rhi.Pipeline,
-  // [from_depth]: compacted has only [0], which builds every mip; batched builds mip by mip
-  reduce:           [2]rhi.Pipeline,
-  // batched: group 3 of the cull and of the pyramid build
-  cull_layout:      rhi.BindLayout,
-  reduce_layouts:   [2]rhi.BindLayout,
-  cull_groups:      map[CullKey]rhi.BindGroup,
-  reduce_groups:    map[ReduceKey]rhi.BindGroup,
-  lists:            [MAX_DRAW_LIST_SLOTS]GpuDrawList,
-  // the slot's storage views are in the bindless array
-  pyramid_bound:    [MAX_PYRAMID_SLOTS]bool,
-  pyramid_extent:   [MAX_PYRAMID_SLOTS][2]u32,
-  pyramid_mips:     [MAX_PYRAMID_SLOTS]u32,
-  pyramid_counters: rhi.Buffer,
-  // the main camera's visible opaque draws, copied out per frame in flight
-  readback:         [FRAMES_IN_FLIGHT]rhi.Buffer,
-}
-
 @(private = "file")
 CullPush :: struct {
   node_count: u32,
@@ -112,85 +91,67 @@ BatchPush :: struct {
 
 @(private)
 cull_init :: proc(r: ^Renderer) -> bool {
-  c := &r.cull
-  for &b in c.readback do b = dev.buffer_create(&r.gpu, {size = size_of(u32), usage = {.COPY_DST}, memory = .READBACK}) or_return
-  if r.res.caps.bindless {
+  for &b in r.draw_count_readback do b = dev.buffer_create(&r.gpu, {size = size_of(u32), usage = {.COPY_DST}, memory = .READBACK}) or_return
+  when BINDLESS {
     layout := pipeline_layout(r, .CULL)
-    c.cull = dev.compute_pipeline_create(&r.gpu, {{spirv = {comp = spirv("shader/vulkan/occlusion_culling/cull.spv")}}, layout}) or_return
-    c.reduce[0] = dev.compute_pipeline_create(&r.gpu, {{spirv = {comp = spirv("shader/vulkan/occlusion_culling/depth_reduce.spv")}}, layout}) or_return
-    c.pyramid_counters = dev.buffer_create(&r.gpu, {size = MAX_PYRAMID_SLOTS * size_of(u32), usage = {.STORAGE}}) or_return
-    dev.buffer_write(&r.gpu, c.pyramid_counters, 0, make([]u8, MAX_PYRAMID_SLOTS * size_of(u32), context.temp_allocator))
-    dev.bindless_write(&r.gpu, .PYRAMID_COUNTERS, 0, rhi.BufferRange{buffer = c.pyramid_counters})
-    return true
-  }
-  stages := bit_set[rhi.ShaderStage]{.COMPUTE}
-  cull_entries := [?]rhi.BindEntry{{kind = .STORAGE_BUFFER, stages = stages}, {kind = .TEXTURE_UNFILTERABLE, stages = stages}}
-  c.cull_layout = dev.bind_layout_create(&r.gpu, {entries = cull_entries[:]}) or_return
-  common := wgsl("shader/wgpu/common.wgsl")
-  cull_layout := pipeline_layout(r, .CULL, .NONE, c.cull_layout)
-  c.cull = dev.compute_pipeline_create(&r.gpu, {{wgsl = wgsl_join(common, wgsl("shader/wgpu/cull.wgsl"))}, cull_layout}) or_return
-  c.draws = dev.compute_pipeline_create(&r.gpu, {{wgsl = wgsl_join(common, wgsl("shader/wgpu/cull_draws.wgsl"))}, cull_layout}) or_return
-  for &layout, from_depth in c.reduce_layouts {
-    entries := [?]rhi.BindEntry{{kind = .TEXTURE_DEPTH if from_depth == 1 else .TEXTURE_UNFILTERABLE, stages = stages}, {kind = .STORAGE_TEXTURE, stages = stages, format = .R32F}}
-    layout = dev.bind_layout_create(&r.gpu, {entries = entries[:]}) or_return
-  }
-  reduce_from_mip := wgsl_join(common, wgsl("shader/wgpu/depth_reduce_from_mip.wgsl"), wgsl("shader/wgpu/depth_reduce.wgsl"))
-  reduce_from_depth := wgsl_join(common, wgsl("shader/wgpu/depth_reduce_from_depth.wgsl"), wgsl("shader/wgpu/depth_reduce.wgsl"))
-  reduce_sources := [2]string{reduce_from_mip, reduce_from_depth}
-  for from_depth in 0 ..< 2 {
-    layout := pipeline_layout(r, .NONE, .NONE, c.reduce_layouts[from_depth])
-    c.reduce[from_depth] = dev.compute_pipeline_create(&r.gpu, {{wgsl = reduce_sources[from_depth]}, layout}) or_return
+    r.cull_pipeline = dev.compute_pipeline_create(&r.gpu, {{spirv = {comp = spirv("shader/vulkan/occlusion_culling/cull.spv")}}, layout}) or_return
+    r.reduce_pipeline = dev.compute_pipeline_create(&r.gpu, {{spirv = {comp = spirv("shader/vulkan/occlusion_culling/depth_reduce.spv")}}, layout}) or_return
+    r.pyramid_counters = dev.buffer_create(&r.gpu, {size = MAX_PYRAMID_SLOTS * size_of(u32), usage = {.STORAGE}}) or_return
+    dev.buffer_write(&r.gpu, r.pyramid_counters, 0, make([]u8, MAX_PYRAMID_SLOTS * size_of(u32), context.temp_allocator))
+    dev.bindless_write(&r.gpu, .PYRAMID_COUNTERS, 0, rhi.BufferRange{buffer = r.pyramid_counters})
+  } else {
+    stages := bit_set[rhi.ShaderStage]{.COMPUTE}
+    cull_entries := [?]rhi.BindEntry{{kind = .STORAGE_BUFFER, stages = stages}, {kind = .TEXTURE_UNFILTERABLE, stages = stages}}
+    r.cull_layout = dev.bind_layout_create(&r.gpu, {entries = cull_entries[:]}) or_return
+    common := wgsl("shader/wgpu/common.wgsl")
+    cull_layout := pipeline_layout(r, .CULL, .NONE, r.cull_layout)
+    r.cull_pipeline = dev.compute_pipeline_create(&r.gpu, {{wgsl = wgsl_join(common, wgsl("shader/wgpu/cull.wgsl"))}, cull_layout}) or_return
+    r.cull_draws_pipeline = dev.compute_pipeline_create(&r.gpu, {{wgsl = wgsl_join(common, wgsl("shader/wgpu/cull_draws.wgsl"))}, cull_layout}) or_return
+    // the depth image reads as unfilterable float, like the mips
+    reduce_entries := [?]rhi.BindEntry{{kind = .TEXTURE_UNFILTERABLE, stages = stages}, {kind = .STORAGE_TEXTURE, stages = stages, format = .R32F}}
+    r.reduce_layout = dev.bind_layout_create(&r.gpu, {entries = reduce_entries[:]}) or_return
+    reduce_layout := pipeline_layout(r, .NONE, .NONE, r.reduce_layout)
+    r.reduce_pipeline = dev.compute_pipeline_create(&r.gpu, {{wgsl = wgsl_join(common, wgsl("shader/wgpu/depth_reduce.wgsl"))}, reduce_layout}) or_return
   }
   return true
 }
 
+// A depth pyramid is a mipmapped max-depth R32F texture at half its camera's resolution.
 @(private)
-cull_shutdown :: proc(r: ^Renderer) {
-  c := &r.cull
-  delete(c.cull_groups)
-  delete(c.reduce_groups)
-}
-
-// pyramid_create makes pyramid slot `slot` build into `pyramid`, a mipmapped R32F storage
-// texture. Its storage views enter the bindless array at the slot's next frame
-// (pyramids_bind), once no frame in flight reads the previous ones.
-@(private)
-pyramid_create :: proc(r: ^Renderer, slot: u32, extent: [2]u32, mips: u32) {
+pyramid_shape :: proc(extent: [2]u32) -> (half: [2]u32, mips: u32) {
+  half = {max(1, extent.x / 2), max(1, extent.y / 2)}
+  mips = calculate_mip_levels(half.x, half.y)
   assert(mips <= MAX_DEPTH_MIPS)
-  r.cull.pyramid_bound[slot] = false
-  r.cull.pyramid_extent[slot], r.cull.pyramid_mips[slot] = extent, mips
-}
-
-// pyramid_destroy forgets slot's views and bind groups; the texture is destroyed by render.
-@(private)
-pyramid_destroy :: proc(r: ^Renderer, slot: u32) {
-  r.cull.pyramid_bound[slot] = false
-  cull_groups_clear(r)
+  return
 }
 
 // Registers the storage views of the live cameras' pyramids that are not yet, and of the
-// lit image the lighting pass writes at the same slot (LIT_STORAGE_BASE).
+// lit image the lighting pass writes at the same slot (LIT_STORAGE_BASE). A pyramid's views
+// enter the bindless array at its slot's next frame, once no frame in flight reads the
+// previous ones.
 @(private)
-pyramids_bind :: proc(r: ^Renderer) {
-  if !r.res.caps.bindless do return
-  for &cam in r.live_cameras {
-    if r.cull.pyramid_bound[cam.slot] do continue
-    r.cull.pyramid_bound[cam.slot] = true
-    for mip in 0 ..< r.cull.pyramid_mips[cam.slot] {
-      dev.bindless_write(&r.gpu, .STORAGE_IMAGES, cam.slot * MAX_DEPTH_MIPS + mip, rhi.TextureView{cam.pyramid, i32(mip)})
+pyramids_bind :: proc(r: ^Renderer, f: u32) {
+  when !BINDLESS do return
+  c: u32
+  for i in cont.slots_next(&r.camera_slots, &c) {
+    slot := camera_slot(i) + f
+    if r.pyramid_bound[slot] do continue
+    r.pyramid_bound[slot] = true
+    _, mips := pyramid_shape(r.cameras[i].extent)
+    for mip in 0 ..< mips {
+      dev.bindless_write(&r.gpu, .STORAGE_IMAGES, slot * MAX_DEPTH_MIPS + mip, rhi.TextureView{r.pyramids[slot], i32(mip)})
     }
-    dev.bindless_write(&r.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + cam.slot, rhi.TextureView{cam.attachments[.FINAL_IMAGE], 0})
+    dev.bindless_write(&r.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + slot, rhi.TextureView{r.cameras[i].attachments[.FINAL_IMAGE][f], 0})
   }
 }
 
 // Drops the bind groups of the cull and the pyramid build, made again on use.
 @(private)
 cull_groups_clear :: proc(r: ^Renderer) {
-  c := &r.cull
-  for _, g in c.cull_groups do dev.bind_group_retire(&r.gpu, g)
-  clear(&c.cull_groups)
-  for _, g in c.reduce_groups do dev.bind_group_retire(&r.gpu, g)
-  clear(&c.reduce_groups)
+  for _, g in r.cull_groups do dev.bind_group_retire(&r.gpu, g)
+  clear(&r.cull_groups)
+  for _, g in r.reduce_groups do dev.bind_group_retire(&r.gpu, g)
+  clear(&r.reduce_groups)
 }
 
 // draw_list_create makes draw-list slot `slot`: `lists` lists with room for `capacity` draws
@@ -200,7 +161,7 @@ draw_list_create :: proc(r: ^Renderer, slot, lists, capacity: u32) -> bool {
   draw_list_destroy(r, slot)
   dl := GpuDrawList{lists = lists, capacity = capacity}
   words: u32
-  if r.res.caps.bindless {
+  when BINDLESS {
     dl.draws_base, dl.draws_stride = DRAW_LIST_HEADER, capacity
     words = DRAW_LIST_HEADER + lists * capacity * DRAW_WORDS
   } else {
@@ -210,15 +171,15 @@ draw_list_create :: proc(r: ^Renderer, slot, lists, capacity: u32) -> bool {
   }
   dl.bytes = int(words) * size_of(u32)
   dl.buffer = dev.buffer_create(&r.gpu, {size = dl.bytes, usage = {.STORAGE, .INDIRECT, .VERTEX, .COPY_SRC, .COPY_DST}}) or_return
-  r.cull.lists[slot] = dl
-  if r.res.caps.bindless do dev.bindless_write(&r.gpu, .DRAW_LISTS, slot, rhi.BufferRange{buffer = dl.buffer})
+  r.draw_lists[slot] = dl
+  when BINDLESS do dev.bindless_write(&r.gpu, .DRAW_LISTS, slot, rhi.BufferRange{buffer = dl.buffer})
   return true
 }
 
 // draw_list_destroy releases slot's draw lists once no frame in flight uses them.
 @(private)
 draw_list_destroy :: proc(r: ^Renderer, slot: u32) {
-  dl := &r.cull.lists[slot]
+  dl := &r.draw_lists[slot]
   if dl.buffer == 0 do return
   dev.buffer_retire(&r.gpu, dl.buffer)
   dl^ = {}
@@ -230,10 +191,13 @@ draw_list_destroy :: proc(r: ^Renderer, slot: u32) {
 // (instanceCount 0 draws nothing). Order earlier indirect reads before it and the cull after it.
 @(private)
 draw_lists_clear :: proc(r: ^Renderer, cmd: rhi.CommandList, slot: u32) {
-  dl := &r.cull.lists[slot]
+  dl := &r.draw_lists[slot]
   size := dl.bytes
-  if r.res.caps.multi_draw_indirect_count do size = DRAW_LIST_HEADER * size_of(u32)
-  if !r.res.caps.bindless do size = int(dl.draws_base) * size_of(u32)
+  when BINDLESS {
+    if dev.caps(&r.gpu).multi_draw_indirect_count do size = DRAW_LIST_HEADER * size_of(u32)
+  } else {
+    size = int(dl.draws_base) * size_of(u32)
+  }
   dev.cmd_fill_buffer(&r.gpu, cmd, dl.buffer, 0, size)
 }
 
@@ -244,31 +208,35 @@ draw_lists_clear :: proc(r: ^Renderer, cmd: rhi.CommandList, slot: u32) {
 // on the one command list, which draws the frame after.
 @(private)
 cull_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
-  c := &r.cull
-  bindless := r.res.caps.bindless
-  for &cam in r.live_cameras do draw_lists_clear(r, cmd, cam.next_slot)
-  if !bindless && r.shadow_view_count > 0 do draw_lists_clear(r, cmd, r.shadow_draw_list)
+  c: u32
+  for i in cont.slots_next(&r.camera_slots, &c) do draw_lists_clear(r, cmd, camera_next_slot(i, f))
+  when !BINDLESS do if r.shadow_view_count > 0 do draw_lists_clear(r, cmd, SHADOW_DRAW_SLOT_BASE + f)
   dev.cmd_begin_compute(&r.gpu, cmd)
   defer dev.cmd_end_compute(&r.gpu, cmd)
-  if bindless {
+  when BINDLESS {
     bound := false
-    for &cam in r.live_cameras {
-      if !cam.ready do continue
+    c = 0
+    for i in cont.slots_next(&r.camera_slots, &c) {
+      if !camera_ready(r, i) do continue
       if !bound {
-        dev.cmd_bind_pipeline(&r.gpu, cmd, c.reduce[0])
+        dev.cmd_bind_pipeline(&r.gpu, cmd, r.reduce_pipeline)
         scene_bind(r, cmd, .CULL, f)
         bound = true
       }
-      pyramid_build_bindless(r, cmd, &cam)
+      pyramid_build_bindless(r, cmd, i, f)
     }
     barrier(r, cmd, .FILL_TO_COMPUTE)
-    cull_compacted(r, cmd, f, CAMERA_VIEW_BASE + 1, r.camera_view_count)
-    return
+    cull_compacted(r, cmd, f, CAMERA_VIEW_BASE + 1, r.camera_slots.high_water - 1)
+  } else {
+    c = 0
+    for i in cont.slots_next(&r.camera_slots, &c) do if camera_ready(r, i) do pyramid_build_groups(r, cmd, i, f)
+    if r.batch_high == 0 do return
+    c = 0
+    for i in cont.slots_next(&r.camera_slots, &c) {
+      cull_batched(r, cmd, camera_next_slot(i, f), CAMERA_VIEW_BASE + i, 1, r.pyramids[camera_slot(i) + f])
+    }
+    if r.shadow_view_count > 0 do cull_batched(r, cmd, SHADOW_DRAW_SLOT_BASE + f, SHADOW_VIEW_BASE, r.shadow_view_count, 0)
   }
-  for &cam in r.live_cameras do if cam.ready do pyramid_build_groups(r, cmd, &cam)
-  if r.batch_count == 0 do return
-  for &cam in r.live_cameras do cull_batched(r, cmd, cam.next_slot, CAMERA_VIEW_BASE + cam.index, 1, cam.pyramid)
-  if r.shadow_view_count > 0 do cull_batched(r, cmd, r.shadow_draw_list, SHADOW_VIEW_BASE, r.shadow_view_count, 0)
 }
 
 // Tests every node against `view_count` views from first_view, appending to the lists the views
@@ -277,65 +245,65 @@ cull_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
 cull_compacted :: proc(r: ^Renderer, cmd: rhi.CommandList, f, first_view, view_count: u32) {
   if r.node_count == 0 || view_count == 0 do return
   push := CullPush{r.node_count, first_view}
-  pipeline_bind(r, cmd, r.cull.cull, .CULL, f, &push, .NONE)
+  pipeline_bind(r, cmd, r.cull_pipeline, .CULL, f, &push, .NONE)
   dev.cmd_dispatch(&r.gpu, cmd, (r.node_count + 63) / 64, view_count, 1)
 }
 
+// Camera c's pyramid of frame f, from the previous frame's depth.
 @(private = "file")
-pyramid_build_bindless :: proc(r: ^Renderer, cmd: rhi.CommandList, cam: ^FrameCamera) {
-  if !r.cull.pyramid_bound[cam.slot] do return
-  extent := r.cull.pyramid_extent[cam.slot]
+pyramid_build_bindless :: proc(r: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
+  slot := camera_slot(c) + f
+  if !r.pyramid_bound[slot] do return
+  extent, mips := pyramid_shape(r.cameras[c].extent)
+  prev_depth := r.cameras[c].attachments[.DEPTH][(f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT]
   groups := [2]u32{(extent.x + PYRAMID_TILE - 1) / PYRAMID_TILE, (extent.y + PYRAMID_TILE - 1) / PYRAMID_TILE}
-  push := DepthReducePush{u32(cam.prev_depth), r.cull.pyramid_mips[cam.slot], groups.x * groups.y, cam.slot}
+  push := DepthReducePush{u32(prev_depth), mips, groups.x * groups.y, slot}
   dev.cmd_push(&r.gpu, cmd, &push, size_of(push))
   dev.cmd_dispatch(&r.gpu, cmd, groups.x, groups.y, 1)
 }
 
 // One dispatch per mip: mip 0 from the depth image, each other from the mip above.
 @(private = "file")
-pyramid_build_groups :: proc(r: ^Renderer, cmd: rhi.CommandList, cam: ^FrameCamera) {
-  c := &r.cull
-  extent := r.cull.pyramid_extent[cam.slot]
-  for mip in 0 ..< r.cull.pyramid_mips[cam.slot] {
-    from_depth := int(mip == 0)
-    key := ReduceKey{cam.slot, mip, cam.prev_depth if mip == 0 else 0}
-    group, cached := c.reduce_groups[key]
+pyramid_build_groups :: proc(r: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
+  slot := camera_slot(c) + f
+  pyramid := r.pyramids[slot]
+  prev_depth := r.cameras[c].attachments[.DEPTH][(f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT]
+  extent, mips := pyramid_shape(r.cameras[c].extent)
+  for mip in 0 ..< mips {
+    key := ReduceKey{slot, mip, prev_depth if mip == 0 else 0}
+    group, cached := r.reduce_groups[key]
     if !cached {
-      src := TextureView{cam.prev_depth, -1} if mip == 0 else TextureView{cam.pyramid, i32(mip - 1)}
-      resources := [2]rhi.BindResource{rhi.TextureView(src), rhi.TextureView{cam.pyramid, i32(mip)}}
+      src := rhi.TextureView{prev_depth, -1} if mip == 0 else rhi.TextureView{pyramid, i32(mip - 1)}
+      resources := [2]rhi.BindResource{src, rhi.TextureView{pyramid, i32(mip)}}
       ok: bool
-      group, ok = dev.bind_group_create(&r.gpu, {layout = c.reduce_layouts[from_depth], resources = resources[:]})
+      group, ok = dev.bind_group_create(&r.gpu, {layout = r.reduce_layout, resources = resources[:]})
       if !ok do return
-      c.reduce_groups[key] = group
+      r.reduce_groups[key] = group
     }
     zero: u32
-    pipeline_bind(r, cmd, c.reduce[from_depth], .NONE, 0, &zero, .NONE)
+    pipeline_bind(r, cmd, r.reduce_pipeline, .NONE, 0, &zero, .NONE)
     dev.cmd_bind_group(&r.gpu, cmd, 3, group)
     size := [2]u32{max(extent.x >> mip, 1), max(extent.y >> mip, 1)}
     dev.cmd_dispatch(&r.gpu, cmd, (size.x + 7) / 8, (size.y + 7) / 8, 1)
   }
 }
 
-@(private = "file")
-TextureView :: rhi.TextureView
-
 // Batched: fills `views` lists of slot from views first_view ..., testing against `pyramid`
 // (the white texture for a view without occlusion).
 @(private = "file")
 cull_batched :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, first_view, views: u32, pyramid: TextureHandle) {
-  c := &r.cull
-  dl := &c.lists[slot]
+  dl := &r.draw_lists[slot]
   key := CullKey{slot, pyramid}
-  group, cached := c.cull_groups[key]
+  group, cached := r.cull_groups[key]
   if !cached {
     resources := [2]rhi.BindResource {
       rhi.BufferRange{buffer = dl.buffer},
-      rhi.TextureView{texture = pyramid if pyramid != 0 else r.res.white, mip = -1},
+      rhi.TextureView{texture = pyramid if pyramid != 0 else r.white, mip = -1},
     }
     ok: bool
-    group, ok = dev.bind_group_create(&r.gpu, {layout = c.cull_layout, resources = resources[:]})
+    group, ok = dev.bind_group_create(&r.gpu, {layout = r.cull_layout, resources = resources[:]})
     if !ok do return
-    c.cull_groups[key] = group
+    r.cull_groups[key] = group
   }
   push := BatchPush {
     node_count      = r.node_count,
@@ -344,14 +312,14 @@ cull_batched :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, first_view, views
     draws_base      = dl.draws_base,
     instances_base  = dl.instances_base,
     max_batches     = MAX_BATCHES,
-    batch_count     = r.batch_count,
-    first_instance  = u32(r.res.caps.indirect_first_instance),
+    batch_count     = r.batch_high,
+    first_instance  = u32(dev.caps(&r.gpu).indirect_first_instance),
   }
-  pipeline_bind(r, cmd, c.draws, .CULL, 0, &push, .NONE)
+  pipeline_bind(r, cmd, r.cull_draws_pipeline, .CULL, 0, &push, .NONE)
   dev.cmd_bind_group(&r.gpu, cmd, 3, group)
-  dev.cmd_dispatch(&r.gpu, cmd, (r.batch_count + 63) / 64, views, 1)
+  dev.cmd_dispatch(&r.gpu, cmd, (r.batch_high + 63) / 64, views, 1)
   if r.node_count == 0 do return
-  pipeline_bind(r, cmd, c.cull, .CULL, 0, &push, .NONE)
+  pipeline_bind(r, cmd, r.cull_pipeline, .CULL, 0, &push, .NONE)
   dev.cmd_bind_group(&r.gpu, cmd, 3, group)
   dev.cmd_dispatch(&r.gpu, cmd, (r.node_count + 63) / 64, views, 1)
 }
@@ -361,20 +329,21 @@ cull_batched :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, first_view, views
 // `materials` binds each material's textures between batches (WebGPU).
 @(private)
 draw_list_draw :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, types: []MaterialType, pipelines: []rhi.Pipeline, f: u32, materials := true) {
-  if r.res.caps.bindless {
-    dl := &r.cull.lists[slot]
+  when BINDLESS {
+    dl := &r.draw_lists[slot]
+    count := dev.caps(&r.gpu).multi_draw_indirect_count
     for type, i in types {
       dev.cmd_bind_pipeline(&r.gpu, cmd, pipelines[i])
       offset := int(dl.draws_base + u32(type) * dl.draws_stride * DRAW_WORDS) * size_of(u32)
-      if r.res.caps.multi_draw_indirect_count {
+      if count {
         dev.cmd_draw_indexed_indirect_count(&r.gpu, cmd, dl.buffer, offset, dl.buffer, int(type) * size_of(u32), dl.capacity, DRAW_BYTES)
       } else {
         dev.cmd_draw_indexed_indirect(&r.gpu, cmd, dl.buffer, offset, dl.capacity, DRAW_BYTES)
       }
     }
-    return
+  } else {
+    draw_batches(r, cmd, slot, list, types, pipelines, materials)
   }
-  draw_batches(r, cmd, slot, list, types, pipelines, materials)
 }
 
 // The batched draw loop: an indirect draw per batch, its nodes the instance stream at the
@@ -383,11 +352,11 @@ draw_list_draw :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, type
 // drawing nothing, is one multi-draw.
 @(private = "file")
 draw_batches :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, types: []MaterialType, pipelines: []rhi.Pipeline, materials: bool) {
-  if r.batch_count == 0 do return
-  batches := write_table(r, .BATCHES, Batch)[:r.batch_count]
+  if r.batch_high == 0 do return
+  batches := write_table(r, .BATCHES, Batch)[:r.batch_high]
   material_table := write_table(r, .MATERIALS, Material)
-  dl := &r.cull.lists[slot]
-  first_instance := r.res.caps.indirect_first_instance
+  dl := &r.draw_lists[slot]
+  first_instance := dev.caps(&r.gpu).indirect_first_instance
   if first_instance do dev.cmd_bind_vertex(&r.gpu, cmd, 1, dl.buffer, 0)
   bound: u32
   for type, t in types {
@@ -435,7 +404,7 @@ draw_batches :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, types:
 // Copies the main camera's opaque draw count out of slot's lists, for draw_count.
 @(private)
 draw_count_record :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, f: u32) {
-  dev.cmd_copy_buffer(&r.gpu, cmd, r.cull.lists[slot].buffer, 0, r.cull.readback[f], 0, size_of(u32))
+  dev.cmd_copy_buffer(&r.gpu, cmd, r.draw_lists[slot].buffer, 0, r.draw_count_readback[f], 0, size_of(u32))
 }
 
 // draw_count is the opaque draws the main camera's cull wrote, a few frames back (WebGPU) or
@@ -443,6 +412,6 @@ draw_count_record :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, f: u32) {
 @(private)
 draw_count :: proc(r: ^Renderer, f: u32) -> u32 {
   value: [size_of(u32)]u8
-  dev.buffer_read(&r.gpu, r.cull.readback[f], 0, value[:])
+  dev.buffer_read(&r.gpu, r.draw_count_readback[f], 0, value[:])
   return (^u32)(&value)^
 }

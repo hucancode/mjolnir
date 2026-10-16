@@ -13,10 +13,6 @@ fn luminance(color: vec3f) -> f32 {
     return dot(color, vec3f(0.2126, 0.7152, 0.0722));
 }
 
-fn gaussian_weight(distance: f32, sigma: f32) -> f32 {
-    return exp(-0.5 * distance * distance / (sigma * sigma));
-}
-
 // UE4/Karis soft-knee bright-pass: a smooth transition around threshold avoids the hard
 // cutoff that creates ringing and amplitude cliffs.
 fn soft_brightpass(c: vec3f, lum: f32, threshold: f32) -> vec3f {

@@ -13,20 +13,46 @@ FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 // RETIRE_GRACE is the frames a freed resource or pool slot waits before it is
 // destroyed or reused: frames in flight plus one for async compute.
 RETIRE_GRACE :: FRAMES_IN_FLIGHT + 1
+// Textures and storage images reach shaders through global arrays indexed by handle.
+BINDLESS :: true
+// One pass renders into several layers of a texture (rhi.PassDesc.layer_count).
+LAYERED_RENDERING :: true
 
 // Backend is every Vulkan object the renderer draws with. render keeps it opaque and goes
 // through PROCS (rhi.odin) and the procs below; textures are indexed by render's TextureHandle.
 Backend :: struct {
-  gctx:           GPUContext,
-  swapchain:      Swapchain,
-  textures:       []Image,
-  samplers:       [SamplerType]vk.Sampler,
+  gctx:             GPUContext,
+  swapchain:        Swapchain,
+  textures:         []Image,
+  samplers:         [SamplerType]vk.Sampler,
   // set 1 of every pipeline that asks: the global texture, sampler, storage image, draw list
   // and pyramid counter arrays (textures.odin)
-  bindless_layout: vk.DescriptorSetLayout,
-  bindless_set:   vk.DescriptorSet,
-  // what rhi's handles name (rhi.odin)
-  rhi:            RhiState,
+  bindless_layout:  vk.DescriptorSetLayout,
+  bindless_set:     vk.DescriptorSet,
+  // what rhi's handles name (rhi.Pool: index 0 is none, released slots are reused)
+  buffers:          rhi.Pool(Buffer),
+  layouts:          rhi.Pool(Layout),
+  groups:           rhi.Pool(Group),
+  pipelines:        rhi.Pool(Pipeline),
+  // kept until shutdown: there are a handful
+  pipeline_layouts: map[PipelineLayoutKey]vk.PipelineLayout,
+  // the views bindless_write made for the storage image array, by index
+  storage_views:    [MAX_STORAGE_IMAGES]vk.ImageView,
+  set_pool:         vk.DescriptorPool,
+  // per recording thread, queue and frame slot: the lists' pool, reset whole by frame_wait
+  cmd_pools:        [rhi.MAX_RECORD_THREADS][rhi.Queue][FRAMES_IN_FLIGHT]CmdPool,
+  // per frame slot: its timed scopes and their timestamps
+  timing:           [FRAMES_IN_FLIGHT]TimingSlot,
+  // the scopes of the slot frame_wait last waited for
+  timings:          [dynamic]rhi.Timing,
+  frame_index:      u32,
+  // an image is acquired and not yet presented
+  acquired:         bool,
+  // the backbuffer left UNDEFINED this frame
+  backbuffer_in:    bool,
+  // per queue: the value the next submission signals, and per frame slot the last one signalled
+  next_value:       [rhi.Queue]u64,
+  slot_value:       [FRAMES_IN_FLIGHT][rhi.Queue]u64,
 }
 
 // WindowHandle is the window render draws into.

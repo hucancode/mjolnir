@@ -69,52 +69,42 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   cmd_barrier                     = rhi_cmd_barrier,
 }
 
-// What rhi handles name (rhi.Pool: index 0 is none, released slots are reused).
-@(private)
-RhiState :: struct {
-  buffers:     rhi.Pool(wgpu.Buffer),
-  layouts:     rhi.Pool(wgpu.BindGroupLayout),
-  groups:      rhi.Pool(RhiGroup),
-  pipelines:   rhi.Pool(RhiPipeline),
-  // the frame frame_begin acquired
-  surface:     wgpu.Texture,
-  output:      wgpu.TextureView,
-  // bytes of the uniform ring already written to the queue this frame
-  flushed:     int,
-  // per queue: the value the next submission signals
-  next_value:  [rhi.Queue]u64,
-  // READBACK buffers by handle
-  readbacks:   map[rhi.Buffer]^Readback,
-}
 
 // A READBACK buffer is a ring of mappable buffers, as a buffer cannot be copied into while it
-// maps; `data` is the last copy that came back. A retired one is freed once no entry maps.
+// maps; `data` is the last copy that came back. A retired one is freed, and its handle with
+// it, once no entry maps.
 @(private)
 Readback :: struct {
-  slots:   [3]ReadbackSlot,
+  slots:   [READBACK_RING]ReadbackSlot,
   data:    []u8,
   retired: bool,
 }
 
 @(private)
+READBACK_RING :: 3
+
+@(private)
 ReadbackSlot :: struct {
   buffer:  wgpu.Buffer,
-  owner:   ^Readback,
   // copied this frame, to map once submitted
   copied:  bool,
   // copied or mapping
   pending: bool,
 }
 
+// Command lists recorded at once: the frame's, plus a precompute's.
 @(private)
-RhiGroup :: struct {
+MAX_CMDS :: 8
+
+@(private)
+Group :: struct {
   group: wgpu.BindGroup,
   // views made for it, released with it
   views: [dynamic]wgpu.TextureView,
 }
 
 @(private)
-RhiPipeline :: struct {
+Pipeline :: struct {
   render:   wgpu.RenderPipeline,
   compute:  wgpu.ComputePipeline,
   // the set of the push group
@@ -123,7 +113,7 @@ RhiPipeline :: struct {
 
 // One command list: an encoder and the pass open on it.
 @(private)
-CmdState :: struct {
+Cmd :: struct {
   encoder:  wgpu.CommandEncoder,
   render:   wgpu.RenderPassEncoder,
   compute:  wgpu.ComputePassEncoder,
@@ -150,54 +140,55 @@ rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, boo
     }
   }
   if desc.memory == .READBACK {
-    rb := new(Readback)
-    rb.data = make([]u8, (max(desc.size, 4) + 3) &~ 3)
-    for &s in rb.slots {
-      s.buffer = buffer_create(b, len(rb.data), {.MapRead, .CopyDst})
-      s.owner = rb
-    }
-    slot := rhi.pool_take(&b.rhi.buffers)
-    b.rhi.buffers.items[slot] = rb.slots[0].buffer
-    b.rhi.readbacks[rhi.Buffer(slot)] = rb
+    rb := Readback{data = make([]u8, (max(desc.size, 4) + 3) &~ 3)}
+    for &s in rb.slots do s.buffer = buffer_create(b, len(rb.data), {.MapRead, .CopyDst})
+    slot := rhi.pool_take(&b.buffers)
+    b.buffers.items[slot] = rb.slots[0].buffer
+    b.readbacks[rhi.Buffer(slot)] = rb
     return rhi.Buffer(slot), true
   }
   buffer := buffer_create(b, max(desc.size, 16), usage)
   if buffer == nil do return 0, false
-  slot := rhi.pool_take(&b.rhi.buffers)
-  b.rhi.buffers.items[slot] = buffer
+  slot := rhi.pool_take(&b.buffers)
+  b.buffers.items[slot] = buffer
   return rhi.Buffer(slot), true
 }
 
 // The last copy of a READBACK buffer that came back (zeros before the first).
 rhi_buffer_read :: proc(b: ^Backend, buffer: rhi.Buffer, offset: int, dst: []u8) -> bool {
-  rb, ok := b.rhi.readbacks[buffer]
+  rb, ok := b.readbacks[buffer]
   if !ok do return false
   copy(dst, rb.data[offset:])
   return true
 }
 
-// WebGPU has no bindless arrays: callers branch on Caps.bindless.
+// WebGPU has no bindless arrays: callers branch on BINDLESS.
 rhi_bindless_write :: proc(b: ^Backend, array: rhi.BindlessArray, index: u32, resource: rhi.BindResource) {
-  log.errorf("WebGPU has no bindless arrays (Caps.bindless)")
+  log.errorf("WebGPU has no bindless arrays")
 }
 
-// Maps every ring entry copied into since the last submission.
+// Maps every ring entry copied into since the last submission. The callback finds the entry
+// by its readback's handle and ring index.
 @(private = "file")
 readbacks_map :: proc(b: ^Backend) {
-  for _, rb in b.rhi.readbacks {
-    for &s in rb.slots {
+  for handle, &rb in b.readbacks {
+    for &s, i in rb.slots {
       if !s.copied do continue
       s.copied = false
-      wgpu.BufferMapAsync(s.buffer, {.Read}, 0, uint(len(rb.data)), {mode = .AllowProcessEvents, callback = readback_mapped, userdata1 = b, userdata2 = &s})
+      key := uintptr(u32(handle) * READBACK_RING + u32(i))
+      wgpu.BufferMapAsync(s.buffer, {.Read}, 0, uint(len(rb.data)), {mode = .AllowProcessEvents, callback = readback_mapped, userdata1 = b, userdata2 = rawptr(key)})
     }
   }
 }
 
 @(private = "file")
 readback_mapped :: proc "c" (status: wgpu.MapAsyncStatus, message: wgpu.StringView, userdata1, userdata2: rawptr) {
-  context = (^Backend)(userdata1).context_
-  slot := (^ReadbackSlot)(userdata2)
-  rb := slot.owner
+  b := (^Backend)(userdata1)
+  context = b.context_
+  handle := rhi.Buffer(u32(uintptr(userdata2)) / READBACK_RING)
+  if handle not_in b.readbacks do return
+  rb := &b.readbacks[handle]
+  slot := &rb.slots[u32(uintptr(userdata2)) % READBACK_RING]
   if status == .Success {
     if !rb.retired {
       bytes := wgpu.BufferGetConstMappedRangeSlice(slot.buffer, 0, len(rb.data), u8)
@@ -206,35 +197,32 @@ readback_mapped :: proc "c" (status: wgpu.MapAsyncStatus, message: wgpu.StringVi
     wgpu.BufferUnmap(slot.buffer)
   }
   slot.pending = false
-  if rb.retired && !readback_mapping(rb) do readback_free(rb)
+  if rb.retired do readback_free(b, handle)
 }
 
-// An entry is mapping once submitted (pending, no longer just copied).
+// Frees a retired readback's ring and handle once no entry maps (pending, no longer just copied).
 @(private = "file")
-readback_mapping :: proc(rb: ^Readback) -> bool {
-  for s in rb.slots do if s.pending && !s.copied do return true
-  return false
-}
-
-@(private = "file")
-readback_free :: proc(rb: ^Readback) {
+readback_free :: proc(b: ^Backend, handle: rhi.Buffer) {
+  rb := &b.readbacks[handle]
+  for s in rb.slots do if s.pending && !s.copied do return
   for s in rb.slots do wgpu.BufferRelease(s.buffer)
   delete(rb.data)
-  free(rb)
+  delete_key(&b.readbacks, handle)
+  rhi.pool_release(&b.buffers, u32(handle))
 }
 
 // WebGPU keeps a released buffer alive for work already submitted. A READBACK buffer's ring
 // goes with it, once no entry maps.
 rhi_buffer_retire :: proc(b: ^Backend, buffer: rhi.Buffer) {
   if buffer == 0 do return
-  if rb, ok := b.rhi.readbacks[buffer]; ok {
-    delete_key(&b.rhi.readbacks, buffer)
+  if buffer in b.readbacks {
+    rb := &b.readbacks[buffer]
     rb.retired = true
-    if !readback_mapping(rb) do readback_free(rb)
-  } else {
-    wgpu.BufferRelease(b.rhi.buffers.items[buffer])
+    readback_free(b, buffer)
+    return
   }
-  rhi.pool_release(&b.rhi.buffers, u32(buffer))
+  wgpu.BufferRelease(b.buffers.items[buffer])
+  rhi.pool_release(&b.buffers, u32(buffer))
 }
 
 rhi_buffer_write :: proc(b: ^Backend, buffer: rhi.Buffer, offset: int, data: []u8) -> bool {
@@ -242,12 +230,12 @@ rhi_buffer_write :: proc(b: ^Backend, buffer: rhi.Buffer, offset: int, data: []u
   // WriteBuffer takes 4-byte multiples
   size := (len(data) + 3) &~ 3
   if size == len(data) {
-    wgpu.QueueWriteBuffer(b.queue, b.rhi.buffers.items[buffer], u64(offset), raw_data(data), uint(size))
+    wgpu.QueueWriteBuffer(b.queue, b.buffers.items[buffer], u64(offset), raw_data(data), uint(size))
     return true
   }
   padded := make([]u8, size, context.temp_allocator)
   copy(padded, data)
-  wgpu.QueueWriteBuffer(b.queue, b.rhi.buffers.items[buffer], u64(offset), raw_data(padded), uint(size))
+  wgpu.QueueWriteBuffer(b.queue, b.buffers.items[buffer], u64(offset), raw_data(padded), uint(size))
   return true
 }
 
@@ -283,20 +271,20 @@ rhi_bind_layout_create :: proc(b: ^Backend, desc: rhi.BindLayoutDesc) -> (rhi.Bi
   }
   layout := wgpu.DeviceCreateBindGroupLayout(b.device, &{entryCount = uint(len(entries)), entries = raw_data(entries)})
   if layout == nil do return 0, false
-  slot := rhi.pool_take(&b.rhi.layouts)
-  b.rhi.layouts.items[slot] = layout
+  slot := rhi.pool_take(&b.layouts)
+  b.layouts.items[slot] = layout
   return rhi.BindLayout(slot), true
 }
 
 rhi_bind_group_create :: proc(b: ^Backend, desc: rhi.BindGroupDesc) -> (rhi.BindGroup, bool) {
   entries := make([]wgpu.BindGroupEntry, len(desc.resources), context.temp_allocator)
-  slot := rhi.pool_take(&b.rhi.groups)
-  group := &b.rhi.groups.items[slot]
+  slot := rhi.pool_take(&b.groups)
+  group := &b.groups.items[slot]
   for r, i in desc.resources {
     entries[i].binding = u32(i)
     switch v in r {
     case rhi.BufferRange:
-      buffer := b.rhi.buffers.items[v.buffer]
+      buffer := b.buffers.items[v.buffer]
       size := u64(v.size) if v.size > 0 else wgpu.BufferGetSize(buffer) - u64(v.offset)
       entries[i].buffer = buffer
       entries[i].offset = u64(v.offset)
@@ -317,7 +305,7 @@ rhi_bind_group_create :: proc(b: ^Backend, desc: rhi.BindGroupDesc) -> (rhi.Bind
       }
     }
   }
-  layout := b.rhi.layouts.items[desc.layout]
+  layout := b.layouts.items[desc.layout]
   group.group = wgpu.DeviceCreateBindGroup(b.device, &{layout = layout, entryCount = uint(len(entries)), entries = raw_data(entries)})
   if group.group == nil {
     rhi_bind_group_retire(b, rhi.BindGroup(slot))
@@ -328,11 +316,11 @@ rhi_bind_group_create :: proc(b: ^Backend, desc: rhi.BindGroupDesc) -> (rhi.Bind
 
 rhi_bind_group_retire :: proc(b: ^Backend, handle: rhi.BindGroup) {
   if handle == 0 do return
-  group := &b.rhi.groups.items[handle]
+  group := &b.groups.items[handle]
   if group.group != nil do wgpu.BindGroupRelease(group.group)
   for view in group.views do wgpu.TextureViewRelease(view)
   delete(group.views)
-  rhi.pool_release(&b.rhi.groups, u32(handle))
+  rhi.pool_release(&b.groups, u32(handle))
 }
 
 // The layouts of desc, the push group where PUSH_GROUP marks it, else after them.
@@ -345,7 +333,7 @@ pipeline_layout_make :: proc(b: ^Backend, desc: rhi.PipelineLayoutDesc) -> (wgpu
       push_set = u32(i)
       append(&layouts, b.frame_layout)
     } else {
-      append(&layouts, b.rhi.layouts.items[l])
+      append(&layouts, b.layouts.items[l])
     }
   }
   if int(push_set) == len(desc.layouts) do append(&layouts, b.frame_layout)
@@ -354,9 +342,9 @@ pipeline_layout_make :: proc(b: ^Backend, desc: rhi.PipelineLayoutDesc) -> (wgpu
 }
 
 @(private = "file")
-pipeline_store :: proc(b: ^Backend, p: RhiPipeline) -> rhi.Pipeline {
-  slot := rhi.pool_take(&b.rhi.pipelines)
-  b.rhi.pipelines.items[slot] = p
+pipeline_store :: proc(b: ^Backend, p: Pipeline) -> rhi.Pipeline {
+  slot := rhi.pool_take(&b.pipelines)
+  b.pipelines.items[slot] = p
   return rhi.Pipeline(slot)
 }
 
@@ -479,10 +467,10 @@ rhi_graphics_pipeline_create :: proc(b: ^Backend, desc: rhi.GraphicsPipelineDesc
 
 rhi_pipeline_retire :: proc(b: ^Backend, handle: rhi.Pipeline) {
   if handle == 0 do return
-  p := &b.rhi.pipelines.items[handle]
+  p := &b.pipelines.items[handle]
   if p.render != nil do wgpu.RenderPipelineRelease(p.render)
   if p.compute != nil do wgpu.ComputePipelineRelease(p.compute)
-  rhi.pool_release(&b.rhi.pipelines, u32(handle))
+  rhi.pool_release(&b.pipelines, u32(handle))
 }
 
 // Queue order is the only sync: no frame slot to wait for.
@@ -504,8 +492,8 @@ rhi_frame_begin :: proc(b: ^Backend, framebuffer_size: [2]u32) -> rhi.FrameStatu
     log.errorf("WebGPU surface texture: %v", surface_texture.status)
     return .ERROR
   }
-  b.rhi.surface = surface_texture.texture
-  b.rhi.output = wgpu.TextureCreateView(
+  b.surface_texture = surface_texture.texture
+  b.surface_output = wgpu.TextureCreateView(
     surface_texture.texture,
     &{format = b.surface_view_format, dimension = ._2D, mipLevelCount = 1, arrayLayerCount = 1},
   )
@@ -516,38 +504,40 @@ rhi_frame_begin :: proc(b: ^Backend, framebuffer_size: [2]u32) -> rhi.FrameStatu
 // uniforms written so far go first.
 rhi_submit :: proc(b: ^Backend, desc: rhi.SubmitDesc) -> rhi.SyncPoint {
   cmds, queue := desc.cmds, desc.queue
-  if b.uniform_cursor > b.rhi.flushed {
+  if b.uniform_cursor > b.flushed {
     wgpu.QueueWriteBuffer(
       b.queue,
       b.uniform_buffer,
-      u64(b.rhi.flushed),
-      &b.uniforms[b.rhi.flushed],
-      uint(b.uniform_cursor - b.rhi.flushed),
+      u64(b.flushed),
+      &b.uniforms[b.flushed],
+      uint(b.uniform_cursor - b.flushed),
     )
-    b.rhi.flushed = b.uniform_cursor
+    b.flushed = b.uniform_cursor
   }
   buffers := make([]wgpu.CommandBuffer, len(cmds), context.temp_allocator)
-  for c, i in cmds do buffers[i] = (^CmdState)(c).finished
+  for c, i in cmds do buffers[i] = b.cmds[c].finished
   wgpu.QueueSubmit(b.queue, buffers)
   for c in cmds {
-    state := (^CmdState)(c)
+    state := &b.cmds[c]
     wgpu.CommandBufferRelease(state.finished)
     wgpu.CommandEncoderRelease(state.encoder)
     for v in state.views do wgpu.TextureViewRelease(v)
-    delete(state.views)
-    free(state)
+    // the slot is free again; its views array is kept for the next list
+    views := state.views
+    clear(&views)
+    state^ = {views = views}
   }
   readbacks_map(b)
-  b.rhi.next_value[queue] += 1
-  return {queue = queue, value = b.rhi.next_value[queue]}
+  // one queue orders everything: nothing waits on a value
+  return {queue = queue}
 }
 
 rhi_frame_present :: proc(b: ^Backend) -> rhi.FrameStatus {
   wgpu.SurfacePresent(b.surface)
-  wgpu.TextureViewRelease(b.rhi.output)
-  wgpu.TextureRelease(b.rhi.surface)
-  b.rhi.output, b.rhi.surface = nil, nil
-  b.uniform_cursor, b.rhi.flushed = 0, 0
+  wgpu.TextureViewRelease(b.surface_output)
+  wgpu.TextureRelease(b.surface_texture)
+  b.surface_output, b.surface_texture = nil, nil
+  b.uniform_cursor, b.flushed = 0, 0
   b.frame_serial += 1
   return .OK
 }
@@ -557,15 +547,17 @@ rhi_frame_timings :: proc(b: ^Backend) -> []rhi.Timing {
   return nil
 }
 
-// One queue and one recording thread (Caps.parallel_recording false): `thread` is always 0.
+// One queue and one recording thread: `thread` is always 0.
 rhi_cmd_begin :: proc(b: ^Backend, queue: rhi.Queue, thread: u32) -> rhi.CommandList {
-  state := new(CmdState)
-  state.encoder = wgpu.DeviceCreateCommandEncoder(b.device)
-  return rhi.CommandList(state)
+  for &c, i in b.cmds do if c.encoder == nil {
+    c.encoder = wgpu.DeviceCreateCommandEncoder(b.device)
+    return rhi.CommandList(i)
+  }
+  panic("more than MAX_CMDS command lists at once")
 }
 
 rhi_cmd_end :: proc(b: ^Backend, cmd: rhi.CommandList) {
-  state := (^CmdState)(cmd)
+  state := &b.cmds[cmd]
   state.finished = wgpu.CommandEncoderFinish(state.encoder)
 }
 
@@ -574,7 +566,7 @@ rhi_cmd_flush_uploads :: proc(b: ^Backend, cmd: rhi.CommandList) {}
 
 @(private = "file")
 texture_view_of :: proc(b: ^Backend, texture: rhi.TextureHandle) -> wgpu.TextureView {
-  return b.rhi.output if texture == rhi.BACKBUFFER else b.textures[texture].view
+  return b.surface_output if texture == rhi.BACKBUFFER else b.textures[texture].view
 }
 
 // WebGPU has no undefined load: DONT_CARE clears.
@@ -589,7 +581,7 @@ load_op :: proc(op: rhi.LoadOp) -> wgpu.LoadOp {
 }
 
 rhi_cmd_begin_pass :: proc(b: ^Backend, cmd: rhi.CommandList, desc: rhi.PassDesc) {
-  state := (^CmdState)(cmd)
+  state := &b.cmds[cmd]
   colors := make([]wgpu.RenderPassColorAttachment, len(desc.colors), context.temp_allocator)
   for c, i in desc.colors {
     colors[i] = {
@@ -620,27 +612,27 @@ rhi_cmd_begin_pass :: proc(b: ^Backend, cmd: rhi.CommandList, desc: rhi.PassDesc
 }
 
 rhi_cmd_end_pass :: proc(b: ^Backend, cmd: rhi.CommandList) {
-  state := (^CmdState)(cmd)
+  state := &b.cmds[cmd]
   wgpu.RenderPassEncoderEnd(state.render)
   wgpu.RenderPassEncoderRelease(state.render)
   state.render = nil
 }
 
 rhi_cmd_begin_compute :: proc(b: ^Backend, cmd: rhi.CommandList) {
-  state := (^CmdState)(cmd)
+  state := &b.cmds[cmd]
   state.compute = wgpu.CommandEncoderBeginComputePass(state.encoder)
 }
 
 rhi_cmd_end_compute :: proc(b: ^Backend, cmd: rhi.CommandList) {
-  state := (^CmdState)(cmd)
+  state := &b.cmds[cmd]
   wgpu.ComputePassEncoderEnd(state.compute)
   wgpu.ComputePassEncoderRelease(state.compute)
   state.compute = nil
 }
 
 rhi_cmd_bind_pipeline :: proc(b: ^Backend, cmd: rhi.CommandList, pipeline: rhi.Pipeline) {
-  state := (^CmdState)(cmd)
-  p := &b.rhi.pipelines.items[pipeline]
+  state := &b.cmds[cmd]
+  p := &b.pipelines.items[pipeline]
   state.push_set = p.push_set
   if state.render != nil {
     wgpu.RenderPassEncoderSetPipeline(state.render, p.render)
@@ -650,8 +642,8 @@ rhi_cmd_bind_pipeline :: proc(b: ^Backend, cmd: rhi.CommandList, pipeline: rhi.P
 }
 
 rhi_cmd_bind_group :: proc(b: ^Backend, cmd: rhi.CommandList, set: u32, group: rhi.BindGroup) {
-  state := (^CmdState)(cmd)
-  g := b.rhi.groups.items[group].group
+  state := &b.cmds[cmd]
+  g := b.groups.items[group].group
   if state.render != nil {
     wgpu.RenderPassEncoderSetBindGroup(state.render, set, g)
   } else {
@@ -661,7 +653,7 @@ rhi_cmd_bind_group :: proc(b: ^Backend, cmd: rhi.CommandList, set: u32, group: r
 
 // A debug group on the pass open, else on the encoder; it closes where it opened.
 rhi_cmd_label_begin :: proc(b: ^Backend, cmd: rhi.CommandList, name: string) {
-  state := (^CmdState)(cmd)
+  state := &b.cmds[cmd]
   if state.render != nil {
     wgpu.RenderPassEncoderPushDebugGroup(state.render, name)
   } else if state.compute != nil {
@@ -672,7 +664,7 @@ rhi_cmd_label_begin :: proc(b: ^Backend, cmd: rhi.CommandList, name: string) {
 }
 
 rhi_cmd_label_end :: proc(b: ^Backend, cmd: rhi.CommandList) {
-  state := (^CmdState)(cmd)
+  state := &b.cmds[cmd]
   if state.render != nil {
     wgpu.RenderPassEncoderPopDebugGroup(state.render)
   } else if state.compute != nil {
@@ -687,7 +679,7 @@ rhi_cmd_bind_bindless :: proc(b: ^Backend, cmd: rhi.CommandList) {}
 
 // Writes data to the next entry of the uniform ring and binds the push group at its offset.
 rhi_cmd_push :: proc(b: ^Backend, cmd: rhi.CommandList, data: rawptr, size: u32) {
-  state := (^CmdState)(cmd)
+  state := &b.cmds[cmd]
   assert(size <= UNIFORM_ALIGNMENT)
   offset := b.uniform_cursor
   assert(offset + UNIFORM_ALIGNMENT <= UNIFORM_CAPACITY, "uniform ring full")
@@ -701,48 +693,44 @@ rhi_cmd_push :: proc(b: ^Backend, cmd: rhi.CommandList, data: rawptr, size: u32)
 }
 
 rhi_cmd_set_scissor :: proc(b: ^Backend, cmd: rhi.CommandList, x, y, w, h: u32) {
-  wgpu.RenderPassEncoderSetScissorRect((^CmdState)(cmd).render, x, y, w, h)
+  wgpu.RenderPassEncoderSetScissorRect(b.cmds[cmd].render, x, y, w, h)
 }
 
 rhi_cmd_set_viewport :: proc(b: ^Backend, cmd: rhi.CommandList, x, y, w, h: u32) {
-  wgpu.RenderPassEncoderSetViewport((^CmdState)(cmd).render, f32(x), f32(y), f32(w), f32(h), 0, 1)
+  wgpu.RenderPassEncoderSetViewport(b.cmds[cmd].render, f32(x), f32(y), f32(w), f32(h), 0, 1)
 }
 
 rhi_cmd_bind_vertex :: proc(b: ^Backend, cmd: rhi.CommandList, slot: u32, buffer: rhi.Buffer, offset: int) {
-  state := (^CmdState)(cmd)
-  buf := b.rhi.buffers.items[buffer]
+  state := &b.cmds[cmd]
+  buf := b.buffers.items[buffer]
   wgpu.RenderPassEncoderSetVertexBuffer(state.render, slot, buf, u64(offset), wgpu.BufferGetSize(buf) - u64(offset))
 }
 
 rhi_cmd_bind_index :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset: int) {
-  state := (^CmdState)(cmd)
-  buf := b.rhi.buffers.items[buffer]
+  state := &b.cmds[cmd]
+  buf := b.buffers.items[buffer]
   wgpu.RenderPassEncoderSetIndexBuffer(state.render, buf, .Uint32, u64(offset), wgpu.BufferGetSize(buf) - u64(offset))
 }
 
 rhi_cmd_draw :: proc(b: ^Backend, cmd: rhi.CommandList, vertex_count, instance_count, first_vertex, first_instance: u32) {
-  wgpu.RenderPassEncoderDraw((^CmdState)(cmd).render, vertex_count, instance_count, first_vertex, first_instance)
+  wgpu.RenderPassEncoderDraw(b.cmds[cmd].render, vertex_count, instance_count, first_vertex, first_instance)
 }
 
 rhi_cmd_draw_indexed :: proc(b: ^Backend, cmd: rhi.CommandList, index_count, instance_count, first_index: u32, vertex_offset: i32, first_instance: u32) {
-  wgpu.RenderPassEncoderDrawIndexed((^CmdState)(cmd).render, index_count, instance_count, first_index, vertex_offset, first_instance)
+  wgpu.RenderPassEncoderDrawIndexed(b.cmds[cmd].render, index_count, instance_count, first_index, vertex_offset, first_instance)
+}
+
+// A draw each: render's commands are 5 words apart, and a non-indexed multi-draw reads them
+// 4 words apart.
+rhi_cmd_draw_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset: int, draw_count, stride: u32) {
+  render, buf := b.cmds[cmd].render, b.buffers.items[buffer]
+  for i in 0 ..< draw_count do wgpu.RenderPassEncoderDrawIndirect(render, buf, u64(offset) + u64(i) * u64(stride))
 }
 
 // Natively consecutive commands are one multi-draw (wgpu-native has it on every adapter, in
 // hardware or not); the web, or commands apart, take a draw each.
-rhi_cmd_draw_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset: int, draw_count, stride: u32) {
-  render, buf := (^CmdState)(cmd).render, b.rhi.buffers.items[buffer]
-  when ODIN_OS != .JS {
-    if draw_count > 1 && stride == 4 * size_of(u32) {
-      wgpu.RenderPassEncoderMultiDrawIndirect(render, buf, u64(offset), draw_count)
-      return
-    }
-  }
-  for i in 0 ..< draw_count do wgpu.RenderPassEncoderDrawIndirect(render, buf, u64(offset) + u64(i) * u64(stride))
-}
-
 rhi_cmd_draw_indexed_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset: int, draw_count, stride: u32) {
-  render, buf := (^CmdState)(cmd).render, b.rhi.buffers.items[buffer]
+  render, buf := b.cmds[cmd].render, b.buffers.items[buffer]
   when ODIN_OS != .JS {
     if draw_count > 1 && stride == 5 * size_of(u32) {
       wgpu.RenderPassEncoderMultiDrawIndexedIndirect(render, buf, u64(offset), draw_count)
@@ -766,18 +754,19 @@ rhi_cmd_draw_indexed_indirect_count :: proc(
 }
 
 rhi_cmd_dispatch :: proc(b: ^Backend, cmd: rhi.CommandList, x, y, z: u32) {
-  wgpu.ComputePassEncoderDispatchWorkgroups((^CmdState)(cmd).compute, x, y, z)
+  wgpu.ComputePassEncoderDispatchWorkgroups(b.cmds[cmd].compute, x, y, z)
 }
 
 // Outside any pass; zeroes the range (WebGPU fills nothing else).
 rhi_cmd_fill_buffer :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset, size: int) {
-  wgpu.CommandEncoderClearBuffer((^CmdState)(cmd).encoder, b.rhi.buffers.items[buffer], u64(offset), u64(size))
+  wgpu.CommandEncoderClearBuffer(b.cmds[cmd].encoder, b.buffers.items[buffer], u64(offset), u64(size))
 }
 
 rhi_cmd_copy_buffer :: proc(b: ^Backend, cmd: rhi.CommandList, src: rhi.Buffer, src_offset: int, dst: rhi.Buffer, dst_offset, size: int) {
-  target := b.rhi.buffers.items[dst]
-  if rb, ok := b.rhi.readbacks[dst]; ok {
+  target := b.buffers.items[dst]
+  if dst in b.readbacks {
     target = nil
+    rb := &b.readbacks[dst]
     for &s in rb.slots do if !s.pending {
       target = s.buffer
       s.pending, s.copied = true, true
@@ -787,8 +776,8 @@ rhi_cmd_copy_buffer :: proc(b: ^Backend, cmd: rhi.CommandList, src: rhi.Buffer, 
     if target == nil do return
   }
   wgpu.CommandEncoderCopyBufferToBuffer(
-    (^CmdState)(cmd).encoder,
-    b.rhi.buffers.items[src],
+    b.cmds[cmd].encoder,
+    b.buffers.items[src],
     u64(src_offset),
     target,
     u64(dst_offset),
@@ -802,25 +791,27 @@ rhi_cmd_barrier :: proc(b: ^Backend, cmd: rhi.CommandList, barriers: []rhi.Barri
 // Releases what rhi made that shutdown has not: buffers, layouts, groups and pipelines.
 @(private)
 rhi_shutdown :: proc(b: ^Backend) {
-  // a readback's ring holds the buffer b.rhi.buffers names
-  for handle, rb in b.rhi.readbacks {
-    b.rhi.buffers.items[handle] = nil
-    readback_free(rb)
+  // a readback's ring holds the buffer b.buffers names
+  for handle, rb in b.readbacks {
+    b.buffers.items[handle] = nil
+    for s in rb.slots do wgpu.BufferRelease(s.buffer)
+    delete(rb.data)
   }
-  delete(b.rhi.readbacks)
-  for buffer in b.rhi.buffers.items do if buffer != nil do wgpu.BufferRelease(buffer)
-  for layout in b.rhi.layouts.items do if layout != nil do wgpu.BindGroupLayoutRelease(layout)
-  for &g in b.rhi.groups.items {
+  delete(b.readbacks)
+  for &c in b.cmds do delete(c.views)
+  for buffer in b.buffers.items do if buffer != nil do wgpu.BufferRelease(buffer)
+  for layout in b.layouts.items do if layout != nil do wgpu.BindGroupLayoutRelease(layout)
+  for &g in b.groups.items {
     if g.group != nil do wgpu.BindGroupRelease(g.group)
     for v in g.views do wgpu.TextureViewRelease(v)
     delete(g.views)
   }
-  for p in b.rhi.pipelines.items {
+  for p in b.pipelines.items {
     if p.render != nil do wgpu.RenderPipelineRelease(p.render)
     if p.compute != nil do wgpu.ComputePipelineRelease(p.compute)
   }
-  rhi.pool_destroy(&b.rhi.buffers)
-  rhi.pool_destroy(&b.rhi.layouts)
-  rhi.pool_destroy(&b.rhi.groups)
-  rhi.pool_destroy(&b.rhi.pipelines)
+  rhi.pool_destroy(&b.buffers)
+  rhi.pool_destroy(&b.layouts)
+  rhi.pool_destroy(&b.groups)
+  rhi.pool_destroy(&b.pipelines)
 }
