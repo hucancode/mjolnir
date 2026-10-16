@@ -40,6 +40,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   frame_begin                     = rhi_frame_begin,
   submit                          = rhi_submit,
   frame_present                   = rhi_frame_present,
+  frame_timings                   = rhi_frame_timings,
   cmd_begin                       = rhi_cmd_begin,
   cmd_end                         = rhi_cmd_end,
   cmd_flush_uploads               = rhi_cmd_flush_uploads,
@@ -47,6 +48,8 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   cmd_end_pass                    = rhi_cmd_end_pass,
   cmd_begin_compute               = rhi_cmd_begin_compute,
   cmd_end_compute                 = rhi_cmd_end_compute,
+  cmd_label_begin                 = rhi_cmd_label_begin,
+  cmd_label_end                   = rhi_cmd_label_end,
   cmd_bind_pipeline               = rhi_cmd_bind_pipeline,
   cmd_bind_group                  = rhi_cmd_bind_group,
   cmd_bind_bindless               = rhi_cmd_bind_bindless,
@@ -130,7 +133,7 @@ CmdState :: struct {
 }
 
 rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
-  return {}
+  return {indirect_first_instance = b.indirect_first_instance}
 }
 
 rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, bool) {
@@ -548,7 +551,13 @@ rhi_frame_present :: proc(b: ^Backend) -> rhi.FrameStatus {
   return .OK
 }
 
-rhi_cmd_begin :: proc(b: ^Backend, queue: rhi.Queue) -> rhi.CommandList {
+// Caps.timestamps is false: no scope is timed.
+rhi_frame_timings :: proc(b: ^Backend) -> []rhi.Timing {
+  return nil
+}
+
+// One queue and one recording thread (Caps.parallel_recording false): `thread` is always 0.
+rhi_cmd_begin :: proc(b: ^Backend, queue: rhi.Queue, thread: u32) -> rhi.CommandList {
   state := new(CmdState)
   state.encoder = wgpu.DeviceCreateCommandEncoder(b.device)
   return rhi.CommandList(state)
@@ -649,6 +658,29 @@ rhi_cmd_bind_group :: proc(b: ^Backend, cmd: rhi.CommandList, set: u32, group: r
   }
 }
 
+// A debug group on the pass open, else on the encoder; it closes where it opened.
+rhi_cmd_label_begin :: proc(b: ^Backend, cmd: rhi.CommandList, name: string) {
+  state := (^CmdState)(cmd)
+  if state.render != nil {
+    wgpu.RenderPassEncoderPushDebugGroup(state.render, name)
+  } else if state.compute != nil {
+    wgpu.ComputePassEncoderPushDebugGroup(state.compute, name)
+  } else {
+    wgpu.CommandEncoderPushDebugGroup(state.encoder, name)
+  }
+}
+
+rhi_cmd_label_end :: proc(b: ^Backend, cmd: rhi.CommandList) {
+  state := (^CmdState)(cmd)
+  if state.render != nil {
+    wgpu.RenderPassEncoderPopDebugGroup(state.render)
+  } else if state.compute != nil {
+    wgpu.ComputePassEncoderPopDebugGroup(state.compute)
+  } else {
+    wgpu.CommandEncoderPopDebugGroup(state.encoder)
+  }
+}
+
 // WebGPU has no bindless arrays.
 rhi_cmd_bind_bindless :: proc(b: ^Backend, cmd: rhi.CommandList) {}
 
@@ -691,12 +723,28 @@ rhi_cmd_draw_indexed :: proc(b: ^Backend, cmd: rhi.CommandList, index_count, ins
   wgpu.RenderPassEncoderDrawIndexed((^CmdState)(cmd).render, index_count, instance_count, first_index, vertex_offset, first_instance)
 }
 
+// Natively consecutive commands are one multi-draw (wgpu-native has it on every adapter, in
+// hardware or not); the web, or commands apart, take a draw each.
 rhi_cmd_draw_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset: int, draw_count, stride: u32) {
-  for i in 0 ..< draw_count do wgpu.RenderPassEncoderDrawIndirect((^CmdState)(cmd).render, b.rhi.buffers.items[buffer], u64(offset) + u64(i) * u64(stride))
+  render, buf := (^CmdState)(cmd).render, b.rhi.buffers.items[buffer]
+  when ODIN_OS != .JS {
+    if draw_count > 1 && stride == 4 * size_of(u32) {
+      wgpu.RenderPassEncoderMultiDrawIndirect(render, buf, u64(offset), draw_count)
+      return
+    }
+  }
+  for i in 0 ..< draw_count do wgpu.RenderPassEncoderDrawIndirect(render, buf, u64(offset) + u64(i) * u64(stride))
 }
 
 rhi_cmd_draw_indexed_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset: int, draw_count, stride: u32) {
-  for i in 0 ..< draw_count do wgpu.RenderPassEncoderDrawIndexedIndirect((^CmdState)(cmd).render, b.rhi.buffers.items[buffer], u64(offset) + u64(i) * u64(stride))
+  render, buf := (^CmdState)(cmd).render, b.rhi.buffers.items[buffer]
+  when ODIN_OS != .JS {
+    if draw_count > 1 && stride == 5 * size_of(u32) {
+      wgpu.RenderPassEncoderMultiDrawIndexedIndirect(render, buf, u64(offset), draw_count)
+      return
+    }
+  }
+  for i in 0 ..< draw_count do wgpu.RenderPassEncoderDrawIndexedIndirect(render, buf, u64(offset) + u64(i) * u64(stride))
 }
 
 // Caps.multi_draw_indirect_count is false: callers branch on it.

@@ -34,6 +34,8 @@ Backend :: struct {
   surface_view_format:        wgpu.TextureFormat,
   surface_extent:             [2]u32,
   frame_serial:               u64,
+  // the device took indirect-first-instance (rhi.Caps.indirect_first_instance)
+  indirect_first_instance:    bool,
   // what init was given, for finishing once the device arrives
   framebuffer_size:           [2]u32,
   // the device is up and every resource made; failed: it never will be
@@ -87,10 +89,19 @@ on_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Adapter
   }
   b.adapter = adapter
   // core WebGPU's default limits fit: the largest storage binding (the vertex buffer) is the
-  // default 128 MiB, and a stage binds at most the default 8 storage buffers
+  // default 128 MiB, and a stage binds at most the default 8 storage buffers. Indirect first
+  // instance lets batches of a material share one instance stream binding.
+  features: [1]wgpu.FeatureName
+  feature_count := 0
+  if wgpu.AdapterHasFeature(adapter, .IndirectFirstInstance) {
+    features[0] = .IndirectFirstInstance
+    feature_count = 1
+  }
   wgpu.AdapterRequestDevice(
     adapter,
     &{
+      requiredFeatureCount = uint(feature_count),
+      requiredFeatures = raw_data(features[:]),
       uncapturedErrorCallbackInfo = {callback = on_error, userdata1 = b},
       deviceLostCallbackInfo = {mode = .AllowProcessEvents, callback = on_lost, userdata1 = b},
     },
@@ -109,6 +120,8 @@ on_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, me
   }
   b.device = device
   b.queue = wgpu.DeviceGetQueue(device)
+  b.indirect_first_instance = bool(wgpu.DeviceHasFeature(device, .IndirectFirstInstance))
+  log.infof("WebGPU indirect first instance: %v", b.indirect_first_instance)
   resources_init(b)
   b.up = true
 }

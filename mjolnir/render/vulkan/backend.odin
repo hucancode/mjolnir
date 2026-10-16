@@ -60,6 +60,7 @@ init_vulkan :: proc(b: ^Backend, app_name: string, window: glfw.WindowHandle, fr
   b.textures = make([]Image, rhi.MAX_TEXTURES)
   init_descriptor_pool(gctx) or_return
   bindless_init(b) or_return
+  rhi_init(b) or_return
   return .SUCCESS
 }
 
@@ -90,7 +91,7 @@ shutdown :: proc(b: ^Backend) {
   vk.DeviceWaitIdle(gctx.device)
   deferred_flush(gctx)
   rhi_shutdown(b)
-  for &img in b.textures do image_destroy(gctx.device, &img)
+  for &img in b.textures do image_destroy(gctx, &img)
   delete(b.textures)
   bindless_shutdown(b)
   swapchain_destroy(&b.swapchain, gctx.device)

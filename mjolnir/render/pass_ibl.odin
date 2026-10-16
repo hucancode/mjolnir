@@ -90,9 +90,10 @@ precompute_ibl :: proc(r: ^Renderer, equirect, env_cube, irradiance_cube, prefil
       groups[i] = dev.bind_group_create(&r.gpu, {layout = layouts[d.shader], resources = resources[:]}) or_return
     }
   }
-  cmd := dev.cmd_begin(&r.gpu, .GRAPHICS)
+  cmd := dev.cmd_begin(&r.gpu, .GRAPHICS, 0)
   // the equirect source may still be staged
   dev.cmd_flush_uploads(&r.gpu, cmd)
+  dev.cmd_label_begin(&r.gpu, cmd, "ibl precompute")
   cubes := [3]TextureHandle{env_cube, irradiance_cube, prefilter_cube}
   dev.cmd_barrier(&r.gpu, cmd, nil, cubes[:])
   dev.cmd_begin_compute(&r.gpu, cmd)
@@ -107,6 +108,7 @@ precompute_ibl :: proc(r: ^Renderer, equirect, env_cube, irradiance_cube, prefil
     dev.cmd_barrier(&r.gpu, cmd, written[:], nil)
   }
   dev.cmd_end_compute(&r.gpu, cmd)
+  dev.cmd_label_end(&r.gpu, cmd)
   dev.cmd_end(&r.gpu, cmd)
   cmds := [1]rhi.CommandList{cmd}
   dev.submit(&r.gpu, {queue = .GRAPHICS, cmds = cmds[:]})

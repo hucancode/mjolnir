@@ -2,8 +2,10 @@ package vulkan_backend
 
 import rhi "../rhi"
 
+import "base:intrinsics"
 import "core:log"
 import "core:math"
+import "core:strings"
 import vk "vendor:vulkan"
 
 // The backend's half of rhi's explicit contract (rhi/device.odin): PROCS is the conformance
@@ -38,6 +40,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   frame_begin                     = rhi_frame_begin,
   submit                          = rhi_submit,
   frame_present                   = rhi_frame_present,
+  frame_timings                   = rhi_frame_timings,
   cmd_begin                       = rhi_cmd_begin,
   cmd_end                         = rhi_cmd_end,
   cmd_flush_uploads               = rhi_cmd_flush_uploads,
@@ -45,6 +48,8 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   cmd_end_pass                    = rhi_cmd_end_pass,
   cmd_begin_compute               = rhi_cmd_begin_compute,
   cmd_end_compute                 = rhi_cmd_end_compute,
+  cmd_label_begin                 = rhi_cmd_label_begin,
+  cmd_label_end                   = rhi_cmd_label_end,
   cmd_bind_pipeline               = rhi_cmd_bind_pipeline,
   cmd_bind_group                  = rhi_cmd_bind_group,
   cmd_bind_bindless               = rhi_cmd_bind_bindless,
@@ -83,6 +88,14 @@ PipelineLayoutKey :: struct {
   push_size: u32,
 }
 
+// Timed label scopes per frame slot; two timestamps each.
+@(private = "file")
+MAX_TIMED_SCOPES :: 256
+
+// Label scopes open at once in one list.
+@(private = "file")
+MAX_LABEL_DEPTH :: 16
+
 // What rhi's handles name (rhi.Pool: index 0 is none, released slots are reused).
 @(private)
 RhiState :: struct {
@@ -95,9 +108,12 @@ RhiState :: struct {
   // the views bindless_write made for the storage image array, by index
   storage_views: [MAX_STORAGE_IMAGES]vk.ImageView,
   set_pool:      vk.DescriptorPool,
-  // command lists made so far per queue and frame slot, and how many this frame took
-  cmds:          [rhi.Queue][FRAMES_IN_FLIGHT][dynamic]^RhiCmd,
-  cmd_cursor:    [rhi.Queue]int,
+  // per recording thread, queue and frame slot: the lists' pool, reset whole by frame_wait
+  cmd_pools:     [rhi.MAX_RECORD_THREADS][rhi.Queue][FRAMES_IN_FLIGHT]CmdPool,
+  // per frame slot: its timed scopes and their timestamps
+  timing:        [FRAMES_IN_FLIGHT]TimingSlot,
+  // the scopes of the slot frame_wait last waited for
+  timings:       [dynamic]rhi.Timing,
   frame_index:   u32,
   // an image is acquired and not yet presented
   acquired:      bool,
@@ -106,6 +122,22 @@ RhiState :: struct {
   // per queue: the value the next submission signals, and per frame slot the last one signalled
   next_value:    [rhi.Queue]u64,
   slot_value:    [FRAMES_IN_FLIGHT][rhi.Queue]u64,
+}
+
+// A thread's lists of one queue and frame slot; `cursor` of them are taken since the reset.
+@(private)
+CmdPool :: struct {
+  pool:   vk.CommandPool,
+  lists:  [dynamic]^RhiCmd,
+  cursor: int,
+}
+
+@(private)
+TimingSlot :: struct {
+  queries: vk.QueryPool,
+  // scopes begun, in any thread; past MAX_TIMED_SCOPES they are not timed
+  count:   u32,
+  scopes:  [MAX_TIMED_SCOPES]rhi.Timing,
 }
 
 @(private)
@@ -139,6 +171,11 @@ RhiCmd :: struct {
   // renders into the backbuffer: ends in the present layout
   presenting: bool,
   bound:      [2]BoundSets,
+  // the frame slot it was begun in, and its open label scopes (their timed index, or
+  // MAX_TIMED_SCOPES when untimed)
+  slot:       u32,
+  labels:     [MAX_LABEL_DEPTH]u32,
+  depth:      u32,
 }
 
 @(private)
@@ -147,15 +184,34 @@ BoundSets :: struct {
   sets:   [MAX_PIPELINE_SETS]vk.DescriptorSet,
 }
 
+// Makes what rhi needs from the start: a timestamp pool per frame slot, when timed.
+@(private)
+rhi_init :: proc(b: ^Backend) -> vk.Result {
+  if !timestamps_supported(&b.gctx) do return .SUCCESS
+  info := vk.QueryPoolCreateInfo {
+    sType      = .QUERY_POOL_CREATE_INFO,
+    queryType  = .TIMESTAMP,
+    queryCount = 2 * MAX_TIMED_SCOPES,
+  }
+  for &t in b.rhi.timing {
+    vk.CreateQueryPool(b.gctx.device, &info, nil, &t.queries) or_return
+    vk.ResetQueryPool(b.gctx.device, t.queries, 0, 2 * MAX_TIMED_SCOPES)
+  }
+  return .SUCCESS
+}
+
 // Frees what rhi made that shutdown has not: lists, the set pool and the layouts of groups.
 @(private)
 rhi_shutdown :: proc(b: ^Backend) {
   device := b.gctx.device
-  for q in rhi.Queue do for frame in 0 ..< FRAMES_IN_FLIGHT {
-    for c in b.rhi.cmds[q][frame] do free(c)
-    delete(b.rhi.cmds[q][frame])
+  for &thread in b.rhi.cmd_pools do for &queue in thread do for &p in queue {
+    for c in p.lists do free(c)
+    delete(p.lists)
+    if p.pool != 0 do vk.DestroyCommandPool(device, p.pool, nil)
   }
-  for &buf in b.rhi.buffers.items do if buf.buffer != 0 do buffer_destroy(device, &buf)
+  for t in b.rhi.timing do if t.queries != 0 do vk.DestroyQueryPool(device, t.queries, nil)
+  delete(b.rhi.timings)
+  for &buf in b.rhi.buffers.items do if buf.buffer != 0 do buffer_destroy(&b.gctx, &buf)
   for view in b.rhi.storage_views do if view != 0 do vk.DestroyImageView(device, view, nil)
   for &g in b.rhi.groups.items {
     for v in g.views do vk.DestroyImageView(device, v, nil)
@@ -182,7 +238,16 @@ rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
     layered_rendering = true,
     explicit_barriers = true,
     async_compute = has_async_compute(&b.gctx),
+    indirect_first_instance = true,
+    timestamps = timestamps_supported(&b.gctx),
+    parallel_recording = true,
   }
+}
+
+// Timestamps reset from the CPU, so a slot's scopes are read and reset in frame_wait.
+@(private = "file")
+timestamps_supported :: proc(gctx: ^GPUContext) -> bool {
+  return gctx.host_query_reset && gctx.timestamp_bits[0] > 0 && gctx.device_properties.limits.timestampPeriod > 0
 }
 
 rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, bool) {
@@ -537,14 +602,55 @@ rhi_frame_wait :: proc(b: ^Backend) -> (rhi.Frame, bool) {
     semaphores[count], values[count] = timeline(b, q), value
     count += 1
   }
-  if count == 0 do return frame, true
-  info := vk.SemaphoreWaitInfo {
-    sType          = .SEMAPHORE_WAIT_INFO,
-    semaphoreCount = count,
-    pSemaphores    = &semaphores[0],
-    pValues        = &values[0],
+  if count > 0 {
+    info := vk.SemaphoreWaitInfo {
+      sType          = .SEMAPHORE_WAIT_INFO,
+      semaphoreCount = count,
+      pSemaphores    = &semaphores[0],
+      pValues        = &values[0],
+    }
+    if !check(vk.WaitSemaphores(b.gctx.device, &info, math.max(u64)), "rhi frame wait") do return frame, false
   }
-  return frame, check(vk.WaitSemaphores(b.gctx.device, &info, math.max(u64)), "rhi frame wait")
+  // nothing of the slot is pending: its lists and timestamps start over
+  for &thread in b.rhi.cmd_pools do for &queue in thread {
+    p := &queue[slot]
+    if p.cursor == 0 do continue
+    vk.ResetCommandPool(b.gctx.device, p.pool, {})
+    p.cursor = 0
+  }
+  timings_collect(b, slot)
+  return frame, true
+}
+
+// Reads the slot's timestamps into b.rhi.timings and resets them.
+@(private = "file")
+timings_collect :: proc(b: ^Backend, slot: u32) {
+  clear(&b.rhi.timings)
+  if !timestamps_supported(&b.gctx) do return
+  device := b.gctx.device
+  t := &b.rhi.timing[slot]
+  if t.queries == 0 do return
+  n := min(t.count, MAX_TIMED_SCOPES)
+  if n == 0 do return
+  t.count = 0
+  // per query: the value, then whether it is available
+  results := make([][2]u64, 2 * n, context.temp_allocator)
+  vk.GetQueryPoolResults(device, t.queries, 0, 2 * n, len(results) * size_of([2]u64), raw_data(results), size_of([2]u64), {._64, .WITH_AVAILABILITY})
+  vk.ResetQueryPool(device, t.queries, 0, 2 * n)
+  period := f64(b.gctx.device_properties.limits.timestampPeriod)
+  for i in 0 ..< n {
+    begin, end := results[2 * i], results[2 * i + 1]
+    // a tiler may leave a timestamp unsampled (0) or sample a scope's ends out of order
+    // (MoltenVK): no time for it
+    if begin[1] == 0 || end[1] == 0 || begin[0] == 0 || end[0] < begin[0] do continue
+    timing := t.scopes[i]
+    timing.ms = f32(f64(end[0] - begin[0]) * period / 1e6)
+    append(&b.rhi.timings, timing)
+  }
+}
+
+rhi_frame_timings :: proc(b: ^Backend) -> []rhi.Timing {
+  return b.rhi.timings[:]
 }
 
 // A suboptimal image is still acquired: the frame goes on and frame_present asks for the resize.
@@ -553,7 +659,6 @@ rhi_frame_begin :: proc(b: ^Backend, framebuffer_size: [2]u32) -> rhi.FrameStatu
   if res == .ERROR_OUT_OF_DATE_KHR do return .RESIZE
   if res != .SUBOPTIMAL_KHR && !check(res, "rhi acquire") do return .ERROR
   b.rhi.acquired = true
-  b.rhi.cmd_cursor = {}
   b.rhi.backbuffer_in = false
   return .OK
 }
@@ -618,21 +723,28 @@ rhi_frame_present :: proc(b: ^Backend) -> rhi.FrameStatus {
   return .OK
 }
 
-// Lists are made once per queue and frame slot and reset by cmd_begin.
-rhi_cmd_begin :: proc(b: ^Backend, queue: rhi.Queue) -> rhi.CommandList {
+// Lists are made once per thread, queue and frame slot, from a transient pool frame_wait resets
+// whole; a thread touches only its own pools.
+rhi_cmd_begin :: proc(b: ^Backend, queue: rhi.Queue, thread: u32) -> rhi.CommandList {
   slot := b.rhi.frame_index
-  ring := &b.rhi.cmds[queue][slot]
-  cursor := b.rhi.cmd_cursor[queue]
-  if cursor == len(ring) {
+  p := &b.rhi.cmd_pools[thread][queue][slot]
+  if p.pool == 0 {
+    info := vk.CommandPoolCreateInfo {
+      sType            = .COMMAND_POOL_CREATE_INFO,
+      flags            = {.TRANSIENT},
+      queueFamilyIndex = b.gctx.graphics_family if queue == .GRAPHICS else b.gctx.compute_family,
+    }
+    check(vk.CreateCommandPool(b.gctx.device, &info, nil, &p.pool), "rhi command pool")
+  }
+  if p.cursor == len(p.lists) {
     cmd := new(RhiCmd)
     cmd.queue = queue
-    pool := b.gctx.command_pool if queue == .GRAPHICS else b.gctx.compute_command_pool
-    allocate_command_buffer(&b.gctx, ([^]vk.CommandBuffer)(&cmd.cb)[:1], pool)
-    append(ring, cmd)
+    allocate_command_buffer(&b.gctx, ([^]vk.CommandBuffer)(&cmd.cb)[:1], p.pool)
+    append(&p.lists, cmd)
   }
-  b.rhi.cmd_cursor[queue] += 1
-  cmd := ring[cursor]
-  cmd.pipeline, cmd.presenting, cmd.bound = nil, false, {}
+  cmd := p.lists[p.cursor]
+  p.cursor += 1
+  cmd.pipeline, cmd.presenting, cmd.bound, cmd.slot, cmd.depth = nil, false, {}, slot, 0
   begin_record(cmd.cb)
   return rhi.CommandList(cmd)
 }
@@ -700,6 +812,39 @@ rhi_cmd_end_pass :: proc(b: ^Backend, handle: rhi.CommandList) {
 rhi_cmd_begin_compute :: proc(b: ^Backend, handle: rhi.CommandList) {}
 
 rhi_cmd_end_compute :: proc(b: ^Backend, handle: rhi.CommandList) {}
+
+// A debug label, and a timestamp at each end when the device has them.
+rhi_cmd_label_begin :: proc(b: ^Backend, handle: rhi.CommandList, name: string) {
+  cmd := (^RhiCmd)(handle)
+  if b.gctx.debug_labels {
+    label := vk.DebugUtilsLabelEXT{sType = .DEBUG_UTILS_LABEL_EXT, pLabelName = strings.clone_to_cstring(name, context.temp_allocator)}
+    vk.CmdBeginDebugUtilsLabelEXT(cmd.cb, &label)
+  }
+  index := u32(MAX_TIMED_SCOPES)
+  t := &b.rhi.timing[cmd.slot]
+  if t.queries != 0 && b.gctx.timestamp_bits[0 if cmd.queue == .GRAPHICS else 1] > 0 {
+    index = intrinsics.atomic_add(&t.count, 1)
+    if index < MAX_TIMED_SCOPES {
+      t.scopes[index] = {name = name, queue = cmd.queue, depth = cmd.depth}
+      vk.CmdWriteTimestamp2(cmd.cb, {.ALL_COMMANDS}, t.queries, 2 * index)
+    } else {
+      index = MAX_TIMED_SCOPES
+    }
+  }
+  assert(cmd.depth < MAX_LABEL_DEPTH, "label scopes nest too deep")
+  cmd.labels[cmd.depth] = index
+  cmd.depth += 1
+}
+
+rhi_cmd_label_end :: proc(b: ^Backend, handle: rhi.CommandList) {
+  cmd := (^RhiCmd)(handle)
+  assert(cmd.depth > 0, "label end without a begin")
+  cmd.depth -= 1
+  if index := cmd.labels[cmd.depth]; index < MAX_TIMED_SCOPES {
+    vk.CmdWriteTimestamp2(cmd.cb, {.ALL_COMMANDS}, b.rhi.timing[cmd.slot].queries, 2 * index + 1)
+  }
+  if b.gctx.debug_labels do vk.CmdEndDebugUtilsLabelEXT(cmd.cb)
+}
 
 rhi_cmd_bind_pipeline :: proc(b: ^Backend, handle: rhi.CommandList, pipeline: rhi.Pipeline) {
   cmd := (^RhiCmd)(handle)

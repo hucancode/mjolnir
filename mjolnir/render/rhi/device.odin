@@ -45,6 +45,25 @@ Caps :: struct {
   // the COMPUTE queue runs beside the GRAPHICS one, ordered only by the SyncPoints a submission
   // waits on. When false a COMPUTE list is recorded into the graphics list instead.
   async_compute:             bool,
+  // an indirect draw's first instance offsets its instance-rate vertex streams; when false it
+  // must be 0 (core WebGPU without indirect-first-instance)
+  indirect_first_instance:   bool,
+  // label scopes are timed on the GPU (frame_timings)
+  timestamps:                bool,
+  // command lists of different `thread`s (cmd_begin) may be recorded at once, each on its own
+  // thread; resource creation, buffer_write, cmd_flush_uploads and submission stay on one
+  parallel_recording:        bool,
+}
+
+// Threads that may record command lists at once: cmd_begin's `thread` is below it.
+MAX_RECORD_THREADS :: 8
+
+// Timing is a label scope's GPU time, in milliseconds. `depth` is how many scopes enclose it.
+Timing :: struct {
+  name:  string,
+  queue: Queue,
+  depth: u32,
+  ms:    f32,
 }
 
 // SubmitDesc is one submission: `cmds` in order on `queue` once `waits` are reached. `present`
@@ -364,9 +383,13 @@ Procs :: struct($Device: typeid, $Window: typeid) {
   frame_begin:                   proc(d: ^Device, framebuffer_size: [2]u32) -> FrameStatus,
   submit:                        proc(d: ^Device, desc: SubmitDesc) -> SyncPoint,
   frame_present:                 proc(d: ^Device) -> FrameStatus,
+  // Caps.timestamps: the label scopes of the frame slot frame_wait last waited for, in the order
+  // they began; valid until the next frame_wait
+  frame_timings:                 proc(d: ^Device) -> []Timing,
 
-  // command recording
-  cmd_begin:                     proc(d: ^Device, queue: Queue) -> CommandList,
+  // command recording. A list is the frame slot's: begun after frame_wait, reused once the slot
+  // comes round again. `thread` (below MAX_RECORD_THREADS) is the recording thread's index.
+  cmd_begin:                     proc(d: ^Device, queue: Queue, thread: u32) -> CommandList,
   cmd_end:                       proc(d: ^Device, cmd: CommandList),
   // records every staged write (buffer_write to GPU buffers, texture data) and makes it
   // visible to everything after it; first in the first list a frame submits
@@ -376,6 +399,10 @@ Procs :: struct($Device: typeid, $Window: typeid) {
   // a compute scope: a pass on WebGPU, nothing on Vulkan
   cmd_begin_compute:             proc(d: ^Device, cmd: CommandList),
   cmd_end_compute:               proc(d: ^Device, cmd: CommandList),
+  // a named scope for debuggers (RenderDoc, Xcode) and, with Caps.timestamps, timed. Scopes nest
+  // and close in the list, pass or compute scope they opened in. `name` outlives the frame.
+  cmd_label_begin:               proc(d: ^Device, cmd: CommandList, name: string),
+  cmd_label_end:                 proc(d: ^Device, cmd: CommandList),
   cmd_bind_pipeline:             proc(d: ^Device, cmd: CommandList, pipeline: Pipeline),
   cmd_bind_group:                proc(d: ^Device, cmd: CommandList, set: u32, group: BindGroup),
   // the global bindless arrays (Caps.bindless), at the set after the layouts of the pipeline

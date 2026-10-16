@@ -9,9 +9,12 @@
 // are Caps. Staged uploads land where the caller records cmd_flush_uploads, and only the
 // submission the caller marks present touches the swapchain. Pipelines of one interface share a
 // pipeline layout, so a command list binds a set once for all of them, and UPLOAD buffers sit
-// in mappable device memory where there is room. Below rhi it wraps Vulkan: GPUContext
-// (instance, device, queues, context.odin), Swapchain, Image and Buffer, pipeline helpers,
-// deferred destruction (defer_destroy, memory.odin) and batched staging uploads (queue_*,
-// upload.odin). The window is a GLFW window it makes a Vulkan surface on. It owns no shaders,
+// in mappable device memory where there is room. Command lists come from a transient pool per
+// recording thread, queue and frame slot, reset whole by frame_wait, so threads record apart;
+// label scopes are debug-utils labels and, with host query reset, timestamps read back once
+// their slot is waited for. Below rhi it wraps Vulkan: GPUContext (instance, device, queues,
+// context.odin), Swapchain, Image and Buffer, whose memory is a range of a large block
+// (allocator.odin), pipeline helpers, deferred destruction (defer_destroy, memory.odin) and
+// batched staging uploads (queue_*, upload.odin). The window is a GLFW window it makes a Vulkan surface on. It owns no shaders,
 // scene data or passes: render does.
 package vulkan_backend

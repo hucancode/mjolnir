@@ -2,11 +2,11 @@ package vulkan_backend
 
 import vk "vendor:vulkan"
 
-// Buffer is shared by the graphics and compute queues. Host-visible buffers are persistently
-// mapped at `mapped`; device-local ones (mapped = nil) are written through queue_buffer_write.
+// Buffer is shared by the graphics and compute queues; its memory is a range of a block
+// (allocator.odin). Host-visible buffers are persistently mapped at `mapped`; device-local ones (mapped = nil) are written through queue_buffer_write.
 Buffer :: struct {
   buffer: vk.Buffer,
-  memory: vk.DeviceMemory,
+  memory: Allocation,
   mapped: [^]u8,
   size:   vk.DeviceSize,
 }
@@ -34,7 +34,7 @@ buffer_create :: proc(
   families: [2]u32
   set_sharing(gctx, &create_info, true, &families)
   vk.CreateBuffer(gctx.device, &create_info, nil, &buffer.buffer) or_return
-  defer if ret != .SUCCESS do buffer_destroy(gctx.device, &buffer)
+  defer if ret != .SUCCESS do buffer_destroy(gctx, &buffer)
   mem_reqs: vk.MemoryRequirements
   vk.GetBufferMemoryRequirements(gctx.device, buffer.buffer, &mem_reqs)
   properties: vk.MemoryPropertyFlags = {.HOST_VISIBLE, .HOST_COHERENT} if host_visible else {.DEVICE_LOCAL}
@@ -44,16 +44,12 @@ buffer_create :: proc(
     }
   }
   if host_visible && prefer_device_local {
-    if _, ok := find_memory_type_index(gctx.physical_device, mem_reqs.memoryTypeBits, properties + {.DEVICE_LOCAL}); ok {
-      // the mappable device heap may be small (256 MiB without resizable BAR): fall back
-      if memory, res := allocate_memory(gctx, mem_reqs, properties + {.DEVICE_LOCAL}); res == .SUCCESS do buffer.memory = memory
-    }
+    // the mappable device heap may be small (256 MiB without resizable BAR): fall back
+    if memory, res := memory_alloc(gctx, mem_reqs, properties + {.DEVICE_LOCAL}, linear = true); res == .SUCCESS do buffer.memory = memory
   }
-  if buffer.memory == 0 do buffer.memory = allocate_memory(gctx, mem_reqs, properties) or_return
-  vk.BindBufferMemory(gctx.device, buffer.buffer, buffer.memory, 0) or_return
-  if host_visible {
-    vk.MapMemory(gctx.device, buffer.memory, 0, size, {}, auto_cast &buffer.mapped) or_return
-  }
+  if buffer.memory.block == nil do buffer.memory = memory_alloc(gctx, mem_reqs, properties, linear = true) or_return
+  vk.BindBufferMemory(gctx.device, buffer.buffer, buffer.memory.memory, buffer.memory.offset) or_return
+  buffer.mapped = buffer.memory.mapped
   return buffer, .SUCCESS
 }
 
@@ -62,11 +58,10 @@ buffer_info :: proc(buffer: ^Buffer) -> vk.DescriptorBufferInfo {
   return {buffer = buffer.buffer, range = buffer.size}
 }
 
-// buffer_destroy unmaps and frees buffer immediately.
-buffer_destroy :: proc(device: vk.Device, buffer: ^Buffer) {
-  if buffer.mapped != nil do vk.UnmapMemory(device, buffer.memory)
-  vk.DestroyBuffer(device, buffer.buffer, nil)
-  vk.FreeMemory(device, buffer.memory, nil)
+// buffer_destroy frees buffer and its memory immediately.
+buffer_destroy :: proc(gctx: ^GPUContext, buffer: ^Buffer) {
+  vk.DestroyBuffer(gctx.device, buffer.buffer, nil)
+  memory_free(gctx, &buffer.memory)
   buffer^ = {}
 }
 
@@ -105,10 +100,11 @@ defer_destroy :: proc(gctx: ^GPUContext, trash: Trash) {
 }
 
 @(private = "file")
-destroy_item :: proc(device: vk.Device, item: ^TrashItem) {
+destroy_item :: proc(gctx: ^GPUContext, item: ^TrashItem) {
+  device := gctx.device
   switch &t in item.trash {
   case Buffer:
-    buffer_destroy(device, &t)
+    buffer_destroy(gctx, &t)
   case vk.ImageView:
     vk.DestroyImageView(device, t, nil)
   case vk.Pipeline:
@@ -131,7 +127,7 @@ deferred_tick :: proc(gctx: ^GPUContext) {
       i += 1
       continue
     }
-    destroy_item(gctx.device, &gctx.trash[i])
+    destroy_item(gctx, &gctx.trash[i])
     unordered_remove(&gctx.trash, i)
   }
 }
@@ -139,7 +135,7 @@ deferred_tick :: proc(gctx: ^GPUContext) {
 // deferred_flush destroys every queued resource now. Only after vkDeviceWaitIdle.
 deferred_flush :: proc(gctx: ^GPUContext) {
   discard_uploads(gctx)
-  for &item in gctx.trash do destroy_item(gctx.device, &item)
+  for &item in gctx.trash do destroy_item(gctx, &item)
   clear(&gctx.trash)
 }
 

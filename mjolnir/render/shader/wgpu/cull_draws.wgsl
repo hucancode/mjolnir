@@ -1,7 +1,8 @@
 // Writes the indirect draw of batch x in draw list y of the slot's buffer (layout in
 // cull.wgsl), no instances: the cull counts those after. Wireframe and random-color draws
 // are non-indexed (pulled from the index buffer): vertex count, instance count, first
-// vertex, first instance.
+// vertex, first instance. With first_instance a draw starts at its batch's instances, so
+// one instance stream binding serves every batch.
 
 @group(0) @binding(2) var<storage, read> meshes: array<Mesh>;
 @group(0) @binding(3) var<storage, read> materials: array<Material>;
@@ -15,7 +16,8 @@ struct CullUniforms {
     instances_base: u32,
     max_batches: u32,
     batch_count: u32,
-    _pad: u32,
+    // 1: a draw's first instance is where its batch's instances start (indirect first instance)
+    first_instance: u32,
 }
 @group(2) @binding(0) var<uniform> u: CullUniforms;
 
@@ -31,12 +33,15 @@ fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wid: v
     if (batch.capacity != 0u) {
         let mesh = meshes[batch.mesh_id];
         let material_type = materials[batch.material_id].material_type;
+        let first = select(0u, u.instances_base + wid.y * u.instance_stride + batch.first_instance, u.first_instance != 0u);
         if (material_type == MATERIAL_WIREFRAME || material_type == MATERIAL_RANDOM_COLOR) {
             draw[0] = select(mesh.index_count, mesh.index_count * 2u, material_type == MATERIAL_WIREFRAME);
+            draw[3] = first;
         } else {
             draw[0] = mesh.index_count;
             draw[2] = mesh.first_index;
             draw[3] = bitcast<u32>(mesh.vertex_offset);
+            draw[4] = first;
         }
     }
     for (var k = 0u; k < 5u; k++) {

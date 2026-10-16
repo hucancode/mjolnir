@@ -155,7 +155,7 @@ image_from_desc :: proc(b: ^Backend, desc: rhi.TextureDesc, data: []u8) -> (img:
   img = image_create(gctx, extent, FORMATS[desc.format], usage, max(desc.mip_levels, 1), cube = desc.cube, layers = max(desc.layers, 1), array = desc.layers > 1, shared = desc.shared, components = swizzle) or_return
   if data != nil {
     if ret = queue_image_write(gctx, &img, raw_data(data), len(data)); ret != .SUCCESS {
-      image_destroy(gctx.device, &img)
+      image_destroy(gctx, &img)
       return
     }
   }
@@ -172,7 +172,7 @@ image_from_desc :: proc(b: ^Backend, desc: rhi.TextureDesc, data: []u8) -> (img:
 
 // texture_destroy destroys handle's texture at once: render retires the handle first.
 texture_destroy :: proc(b: ^Backend, handle: rhi.TextureHandle) {
-  image_destroy(b.gctx.device, &b.textures[handle])
+  image_destroy(&b.gctx, &b.textures[handle])
 }
 
 @(private)

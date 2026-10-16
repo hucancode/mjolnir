@@ -107,7 +107,7 @@ BatchPush :: struct {
   instances_base:  u32,
   max_batches:     u32,
   batch_count:     u32,
-  _:               u32,
+  first_instance:  u32,
 }
 
 @(private)
@@ -343,6 +343,7 @@ cull_batched :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, first_view, views
     instances_base  = dl.instances_base,
     max_batches     = MAX_BATCHES,
     batch_count     = r.batch_count,
+    first_instance  = u32(r.res.caps.indirect_first_instance),
   }
   pipeline_bind(r, cmd, c.draws, .CULL, 0, &push, .NONE)
   dev.cmd_bind_group(&r.gpu, cmd, 3, group)
@@ -374,19 +375,27 @@ draw_list_draw :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, type
   draw_batches(r, cmd, slot, list, types, pipelines, materials)
 }
 
-// The batched draw loop: one indirect draw per batch, its nodes the instance stream at the
-// batch's range.
+// The batched draw loop: an indirect draw per batch, its nodes the instance stream at the
+// batch's range. Where a draw's first instance places the stream (Caps.indirect_first_instance)
+// the stream is bound once and a run of batches that draw alike, the empty ones among them
+// drawing nothing, is one multi-draw.
 @(private = "file")
 draw_batches :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, types: []MaterialType, pipelines: []rhi.Pipeline, materials: bool) {
   if r.batch_count == 0 do return
   batches := write_table(r, .BATCHES, Batch)[:r.batch_count]
   material_table := write_table(r, .MATERIALS, Material)
   dl := &r.cull.lists[slot]
+  first_instance := r.res.caps.indirect_first_instance
+  if first_instance do dev.cmd_bind_vertex(&r.gpu, cmd, 1, dl.buffer, 0)
   bound: u32
   for type, t in types {
     pipeline_set := false
-    for batch, id in batches {
-      if batch.capacity == 0 || material_table[batch.material_id].type != type do continue
+    for id := 0; id < len(batches); {
+      batch := batches[id]
+      if batch.capacity == 0 || material_table[batch.material_id].type != type {
+        id += 1
+        continue
+      }
       if !pipeline_set {
         dev.cmd_bind_pipeline(&r.gpu, cmd, pipelines[t])
         pipeline_set = true
@@ -397,14 +406,26 @@ draw_batches :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, list: u32, types:
         m := &material_table[bound]
         texture_bind(r, cmd, .MATERIAL, m.albedo_index, m.metallic_roughness_index, m.normal_index, m.emissive_index)
       }
-      instances := int(dl.instances_base + list * dl.capacity + batch.first_instance) * size_of(u32)
-      dev.cmd_bind_vertex(&r.gpu, cmd, 1, dl.buffer, instances)
+      run := 1
+      if first_instance {
+        // up to the last batch that draws alike
+        for next := id + 1; next < len(batches); next += 1 {
+          b := batches[next]
+          if b.capacity == 0 do continue
+          if material_table[b.material_id].type != type || (materials && b.material_id != bound) do break
+          run = next - id + 1
+        }
+      } else {
+        instances := int(dl.instances_base + list * dl.capacity + batch.first_instance) * size_of(u32)
+        dev.cmd_bind_vertex(&r.gpu, cmd, 1, dl.buffer, instances)
+      }
       draw := int(dl.draws_base + (list * dl.draws_stride + u32(id)) * DRAW_WORDS) * size_of(u32)
       if type in PULLED_TYPES {
-        dev.cmd_draw_indirect(&r.gpu, cmd, dl.buffer, draw, 1, DRAW_BYTES)
+        dev.cmd_draw_indirect(&r.gpu, cmd, dl.buffer, draw, u32(run), DRAW_BYTES)
       } else {
-        dev.cmd_draw_indexed_indirect(&r.gpu, cmd, dl.buffer, draw, 1, DRAW_BYTES)
+        dev.cmd_draw_indexed_indirect(&r.gpu, cmd, dl.buffer, draw, u32(run), DRAW_BYTES)
       }
+      id += run
     }
   }
 }

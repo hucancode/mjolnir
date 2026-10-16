@@ -6,7 +6,7 @@ import vk "vendor:vulkan"
 // Image is a device-local, optimal-tiling 2D or cube image with a view over every mip and layer.
 Image :: struct {
   image:      vk.Image,
-  memory:     vk.DeviceMemory,
+  memory:     Allocation,
   view:       vk.ImageView,
   extent:     vk.Extent2D,
   format:     vk.Format,
@@ -80,8 +80,8 @@ image_create :: proc(
   vk.CreateImage(gctx.device, &create_info, nil, &img.image) or_return
   mem_reqs: vk.MemoryRequirements
   vk.GetImageMemoryRequirements(gctx.device, img.image, &mem_reqs)
-  img.memory = allocate_memory(gctx, mem_reqs, {.DEVICE_LOCAL}) or_return
-  vk.BindImageMemory(gctx.device, img.image, img.memory, 0) or_return
+  img.memory = memory_alloc(gctx, mem_reqs, {.DEVICE_LOCAL}, linear = false) or_return
+  vk.BindImageMemory(gctx.device, img.image, img.memory.memory, img.memory.offset) or_return
   img.view = image_create_view(
     gctx.device,
     &img,
@@ -135,9 +135,9 @@ image_create_view :: proc(
 }
 
 // image_destroy frees the view, image and memory of img.
-image_destroy :: proc(device: vk.Device, img: ^Image) {
-  vk.DestroyImageView(device, img.view, nil)
-  vk.DestroyImage(device, img.image, nil)
-  vk.FreeMemory(device, img.memory, nil)
+image_destroy :: proc(gctx: ^GPUContext, img: ^Image) {
+  vk.DestroyImageView(gctx.device, img.view, nil)
+  vk.DestroyImage(gctx.device, img.image, nil)
+  memory_free(gctx, &img.memory)
   img^ = {}
 }

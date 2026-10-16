@@ -20,7 +20,8 @@ struct CullUniforms {
     instances_base: u32,
     max_batches: u32,
     batch_count: u32,
-    _pad: u32,
+    // 1: a draw's first instance is where its batch's instances start (indirect first instance)
+    first_instance: u32,
 }
 @group(2) @binding(0) var<uniform> u: CullUniforms;
 

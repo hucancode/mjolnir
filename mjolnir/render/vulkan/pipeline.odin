@@ -164,12 +164,11 @@ create_graphics_pipeline :: proc(
   return pipeline, .SUCCESS
 }
 
-// begin_record resets and begins command_buffer, one-time submit by default.
+// begin_record begins command_buffer, fresh or of a pool reset since, one-time submit by default.
 begin_record :: proc(
   command_buffer: vk.CommandBuffer,
   flags: vk.CommandBufferUsageFlags = {.ONE_TIME_SUBMIT},
 ) -> vk.Result {
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
   return vk.BeginCommandBuffer(
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = flags},
@@ -194,7 +193,7 @@ allocate_descriptor_set :: proc(
   )
 }
 
-// allocate_command_buffer allocates primary command buffers from pool (default: the graphics pool).
+// allocate_command_buffer allocates primary command buffers from pool (default: the one-off pool).
 allocate_command_buffer :: proc(
   gctx: ^GPUContext,
   out_commands: []vk.CommandBuffer,

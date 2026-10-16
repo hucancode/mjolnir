@@ -103,6 +103,26 @@ barrier_discard :: proc(r: ^Renderer, cmd: rhi.CommandList, textures: []TextureH
   dev.cmd_barrier(&r.gpu, cmd, descs[:len(barriers)], textures)
 }
 
+// Opens a label scope named `name` on cmd (a debugger's marker, timed where the device can:
+// gpu_timings), closed at the end of the caller's block.
+@(private, deferred_in = scope_end)
+scope :: proc(r: ^Renderer, cmd: rhi.CommandList, name: string) {
+  dev.cmd_label_begin(&r.gpu, cmd, name)
+}
+
+@(private)
+scope_end :: proc(r: ^Renderer, cmd: rhi.CommandList, name: string) {
+  dev.cmd_label_end(&r.gpu, cmd)
+}
+
+// gpu_timings is the GPU time of each pass of a frame a few frames back, in the order they
+// began; empty where the device cannot time them (rhi.Caps.timestamps). Valid until the next
+// frame.
+gpu_timings :: proc(r: ^Renderer) -> []rhi.Timing {
+  if !dev.ready(&r.gpu) do return nil
+  return dev.frame_timings(&r.gpu)
+}
+
 // Phase by phase across cameras (G-buffer, lighting, forward) so one barrier serves every
 // camera; render scopes cannot hold barriers.
 @(private = "file")
@@ -112,11 +132,20 @@ camera_passes :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
   for &cam in r.live_cameras do for a in AttachmentType do append(&discards, cam.attachments[a])
   // render-to-texture: a material may sample last frame's lit image
   barrier_discard(r, cmd, discards[:], .CULL_TO_INDIRECT, .COLOR_TO_SAMPLE)
-  for &cam in r.live_cameras do material_record(r, cmd, f, &cam, .GBUFFER)
+  {
+    scope(r, cmd, "gbuffer")
+    for &cam in r.live_cameras do material_record(r, cmd, f, &cam, .GBUFFER)
+  }
   barrier(r, cmd, .GBUFFER_TO_LIGHTING)
-  for &cam in r.live_cameras do lighting_record(r, cmd, f, &cam)
+  {
+    scope(r, cmd, "lighting")
+    for &cam in r.live_cameras do lighting_record(r, cmd, f, &cam)
+  }
   barrier(r, cmd, .LIGHTING_TO_FORWARD)
-  for &cam in r.live_cameras do material_record(r, cmd, f, &cam, .FORWARD)
+  {
+    scope(r, cmd, "forward")
+    for &cam in r.live_cameras do material_record(r, cmd, f, &cam, .FORWARD)
+  }
   barrier(r, cmd, .FORWARD_TO_COMPUTE)
 }
 
@@ -150,32 +179,54 @@ frame_run :: proc(r: ^Renderer) -> (submitted: bool, status: rhi.FrameStatus) {
   // and the graphics list follows on its queue, or at the head of the one list.
   uploaded: rhi.SyncPoint
   if async {
-    uploads := [1]rhi.CommandList{dev.cmd_begin(&r.gpu, .GRAPHICS)}
-    dev.cmd_flush_uploads(&r.gpu, uploads[0])
+    uploads := [1]rhi.CommandList{dev.cmd_begin(&r.gpu, .GRAPHICS, 0)}
+    {
+      scope(r, uploads[0], "uploads")
+      dev.cmd_flush_uploads(&r.gpu, uploads[0])
+    }
     dev.cmd_end(&r.gpu, uploads[0])
     uploaded = dev.submit(&r.gpu, {queue = .GRAPHICS, cmds = uploads[:]})
   }
-  cmd := dev.cmd_begin(&r.gpu, .GRAPHICS)
-  if !async do dev.cmd_flush_uploads(&r.gpu, cmd)
-  compute := dev.cmd_begin(&r.gpu, .COMPUTE) if async else cmd
-  if !bindless do cull_record(r, cmd, f)
-  shadow_record(r, cmd, f)
+  cmd := dev.cmd_begin(&r.gpu, .GRAPHICS, 0)
+  if !async {
+    scope(r, cmd, "uploads")
+    dev.cmd_flush_uploads(&r.gpu, cmd)
+  }
+  compute := dev.cmd_begin(&r.gpu, .COMPUTE, 0) if async else cmd
+  if !bindless {
+    scope(r, cmd, "cull")
+    cull_record(r, cmd, f)
+  }
+  {
+    scope(r, cmd, "shadows")
+    shadow_record(r, cmd, f)
+  }
   camera_passes(r, cmd, f)
   if main_cam != nil {
     slot := main_cam.slot if bindless else main_cam.next_slot
     barrier(r, cmd, .CULL_TO_COPY)
     draw_count_record(r, cmd, slot, f)
     barrier(r, cmd, .COLOR_TO_SAMPLE)
-    post_record(r, cmd, f, main_cam)
+    {
+      scope(r, cmd, "post")
+      post_record(r, cmd, f, main_cam)
+    }
     debug_line_record(r, cmd, f, main_cam)
   } else {
     clear_backbuffer(r, cmd)
   }
-  overlay_record(r, cmd, f)
+  {
+    scope(r, cmd, "overlay")
+    overlay_record(r, cmd, f)
+  }
   // after drawing: the next frame draws what this simulates
-  particles_simulate(r, cmd, f)
+  {
+    scope(r, cmd, "particles")
+    particles_simulate(r, cmd, f)
+  }
   if bindless {
     if !async do barrier(r, cmd, .FRAME_TO_CULL)
+    scope(r, compute, "cull")
     cull_record(r, compute, f)
   }
   dev.cmd_end(&r.gpu, cmd)

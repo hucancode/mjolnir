@@ -249,7 +249,7 @@ discard_uploads :: proc(gctx: ^GPUContext) {
 
 @(private)
 uploads_destroy :: proc(gctx: ^GPUContext) {
-  for &b in gctx.uploads.blocks do buffer_destroy(gctx.device, &b.buffer)
+  for &b in gctx.uploads.blocks do buffer_destroy(gctx, &b.buffer)
   delete(gctx.uploads.blocks)
   delete(gctx.uploads.copies)
   delete(gctx.uploads.fills)
