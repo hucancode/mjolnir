@@ -32,17 +32,14 @@ struct View {
 layout(set = 0, binding = 0) readonly buffer ViewBuffer {
     View views[];
 };
-// set 1 (textures), not available in vertex shader
-layout(set = 0, binding = 4) readonly buffer BoneMatrices {
-    mat4 bones[];
-};
-
 struct NodeData {
     mat4 world_matrix;
     uint material_id;
     uint mesh_id;
     uint attachment_data_index;
     uint flags;
+    uint skin_vertex_base; // first of the skinned vertices when skinned
+    uint _node_pad[3];
 };
 
 layout(set = 0, binding = 1) readonly buffer NodeBuffer {
@@ -66,13 +63,15 @@ layout(set = 0, binding = 2) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
-struct VertexSkinningData {
-    uvec4 joints;
-    vec4 weights;
+// what the skinning pass wrote; w of position and normal is unused
+struct SkinnedVertex {
+    vec4 position;
+    vec4 normal;
+    vec4 tangent;
 };
 
-layout(set = 0, binding = 5) readonly buffer VertexSkinningBuffer {
-    VertexSkinningData vertex_skinning[];
+layout(set = 0, binding = 16) readonly buffer SkinnedVertexBuffer {
+    SkinnedVertex skinned[];
 };
 
 layout(push_constant) uniform PushConstants {
@@ -98,18 +97,10 @@ void main() {
     vec4 modelTangent;
     bool is_skinned = (node.flags & NODE_FLAG_SKINNED) != 0u; // only set on a skinned mesh
     if (is_skinned) {
-        int local_index = gl_VertexIndex - mesh.vertex_offset;
-        uint vertex_index = mesh.vertex_skinning_offset + uint(local_index);
-        VertexSkinningData skin = vertex_skinning[vertex_index];
-        uvec4 indices = skin.joints + uvec4(node.attachment_data_index);
-        mat4 skinMatrix =
-            skin.weights.x * bones[indices.x] +
-            skin.weights.y * bones[indices.y] +
-            skin.weights.z * bones[indices.z] +
-            skin.weights.w * bones[indices.w];
-        modelPosition = skinMatrix * vec4(inPosition, 1.0);
-        modelNormal = mat3(skinMatrix) * inNormal;
-        modelTangent = vec4(mat3(skinMatrix) * inTangent.xyz, inTangent.w);
+        SkinnedVertex skin = skinned[node.skin_vertex_base + uint(gl_VertexIndex - mesh.vertex_offset)];
+        modelPosition = vec4(skin.position.xyz, 1.0);
+        modelNormal = skin.normal.xyz;
+        modelTangent = skin.tangent;
     } else {
         modelPosition = vec4(inPosition, 1.0);
         modelNormal = inNormal;

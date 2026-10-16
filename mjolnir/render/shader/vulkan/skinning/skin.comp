@@ -1,0 +1,106 @@
+#version 450
+
+// One thread per skinned vertex: deforms vertex v of its owner's mesh by the owner's bone
+// palette into skinned[v], which the vertex shaders drawing the node read instead of the
+// mesh's. A free vertex, one past the owner's mesh, or an invisible owner is skipped.
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct NodeData {
+    mat4 world_matrix;
+    uint material_id;
+    uint mesh_id;
+    uint attachment_data_index;
+    uint flags;
+    uint skin_vertex_base; // first of the skinned vertices when skinned
+    uint _node_pad[3];
+};
+
+struct MeshData {
+    vec3 aabb_min;
+    uint index_count;
+    vec3 aabb_max;
+    uint first_index;
+    int vertex_offset;
+    uint vertex_skinning_offset;
+    uint flags;
+    uint vertex_count;
+};
+
+struct VertexSkinningData {
+    uvec4 joints;
+    vec4 weights;
+};
+
+struct SkinnedVertex {
+    vec4 position;
+    vec4 normal;
+    vec4 tangent;
+};
+
+const uint NODE_FLAG_VISIBLE = 1u << 0;
+const uint NODE_FLAG_SKINNED = 1u << 2;
+
+layout(set = 0, binding = 1) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
+layout(set = 0, binding = 2) readonly buffer MeshBuffer {
+    MeshData meshes[];
+};
+
+layout(set = 0, binding = 4) readonly buffer BoneMatrices {
+    mat4 bones[];
+};
+
+layout(set = 0, binding = 5) readonly buffer VertexSkinningBuffer {
+    VertexSkinningData vertex_skinning[];
+};
+
+// slot + 1 per skinned vertex, 0 for none
+layout(set = 0, binding = 15) readonly buffer SkinOwnerBuffer {
+    uint owners[];
+};
+
+layout(set = 0, binding = 16) writeonly buffer SkinnedVertexBuffer {
+    SkinnedVertex skinned[];
+};
+
+// Vertex as 16 floats: position 0..3, normal 3..6, color 6..10, uv 10..12, tangent 12..16
+layout(set = 0, binding = 17) readonly buffer VertexBuffer {
+    float vertices[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint vertex_count;
+};
+
+void main() {
+    uint v = gl_GlobalInvocationID.x;
+    if (v >= vertex_count) return;
+    uint owner = owners[v];
+    if (owner == 0u) return;
+    NodeData node = nodes[owner - 1u];
+    if ((node.flags & (NODE_FLAG_VISIBLE | NODE_FLAG_SKINNED)) != (NODE_FLAG_VISIBLE | NODE_FLAG_SKINNED)) return;
+    MeshData mesh = meshes[node.mesh_id];
+    uint local_index = v - node.skin_vertex_base;
+    if (local_index >= mesh.vertex_count) return;
+
+    uint base = uint(mesh.vertex_offset + int(local_index)) * 16u;
+    vec3 position = vec3(vertices[base], vertices[base + 1u], vertices[base + 2u]);
+    vec3 normal = vec3(vertices[base + 3u], vertices[base + 4u], vertices[base + 5u]);
+    vec4 tangent = vec4(vertices[base + 12u], vertices[base + 13u], vertices[base + 14u], vertices[base + 15u]);
+
+    VertexSkinningData skin = vertex_skinning[mesh.vertex_skinning_offset + local_index];
+    uvec4 joints = skin.joints + uvec4(node.attachment_data_index);
+    mat4 skin_matrix =
+        skin.weights.x * bones[joints.x] +
+        skin.weights.y * bones[joints.y] +
+        skin.weights.z * bones[joints.z] +
+        skin.weights.w * bones[joints.w];
+    mat3 skin3 = mat3(skin_matrix);
+    skinned[v] = SkinnedVertex(
+        vec4((skin_matrix * vec4(position, 1.0)).xyz, 1.0),
+        vec4(skin3 * normal, 0.0),
+        vec4(skin3 * tangent.xyz, tangent.w));
+}

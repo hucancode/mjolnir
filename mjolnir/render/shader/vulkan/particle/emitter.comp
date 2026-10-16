@@ -57,6 +57,8 @@ struct NodeData {
     uint mesh_id;
     uint attachment_data_index;
     uint flags;
+    uint skin_vertex_base; // first of the skinned vertices when skinned
+    uint _node_pad[3];
 };
 
 layout(set = 0, binding = 1) readonly buffer WorldMatrixBuffer {

@@ -1,6 +1,6 @@
 // The vertex shader of materials drawn without an index buffer (wireframe, random color):
 // each vertex pulls its index from the index buffer and its vertex from the vertex buffer,
-// both bound as storage (scene group MESH), then is skinned like mesh.wgsl. The draw is
+// both bound as storage (scene group MESH), skinned like mesh.wgsl. The draw is
 // non-indexed from first vertex 0; pulled_index maps vertex_index to the k-th index of the
 // mesh (it is declared by the material's file).
 
@@ -8,11 +8,11 @@
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
 @group(0) @binding(2) var<storage, read> meshes: array<Mesh>;
 @group(0) @binding(3) var<storage, read> materials: array<Material>;
-@group(0) @binding(4) var<storage, read> bones: array<mat4x4f>;
-@group(0) @binding(5) var<storage, read> skinning: array<Skinning>;
+// what the skinning pass wrote (skin.wgsl)
+@group(0) @binding(4) var<storage, read> skinned: array<SkinnedVertex>;
 // Vertex as 16 floats: position 0..3, normal 3..6, color 6..10, uv 10..12, tangent 12..16
-@group(0) @binding(6) var<storage, read> vertices: array<f32>;
-@group(0) @binding(7) var<storage, read> indices: array<u32>;
+@group(0) @binding(5) var<storage, read> vertices: array<f32>;
+@group(0) @binding(6) var<storage, read> indices: array<u32>;
 
 struct MeshUniforms {
     camera_index: u32,
@@ -43,15 +43,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, @location(5) node_index: u3
     var model_position = vec4f(vertices[base], vertices[base + 1u], vertices[base + 2u], 1.0);
     let color = vec4f(vertices[base + 6u], vertices[base + 7u], vertices[base + 8u], vertices[base + 9u]);
     if ((node.flags & NODE_FLAG_SKINNED) != 0u) {
-        let local_index = vertex - mesh.vertex_offset;
-        let skin = skinning[mesh.skinning_offset + u32(local_index)];
-        let joints = skin.joints + vec4u(node.attachment_data_index);
-        let skin_matrix =
-            skin.weights.x * bones[joints.x] +
-            skin.weights.y * bones[joints.y] +
-            skin.weights.z * bones[joints.z] +
-            skin.weights.w * bones[joints.w];
-        model_position = skin_matrix * model_position;
+        model_position = vec4f(skinned[node.skin_vertex_base + u32(vertex - mesh.vertex_offset)].position.xyz, 1.0);
     }
     let world_position = node.world_matrix * model_position;
     var out: VertexOut;

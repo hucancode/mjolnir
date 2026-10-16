@@ -23,6 +23,8 @@ ScenePass :: enum {
   PARTICLE_SIMULATE,
   PARTICLE_DRAW,
   DEBUG_LINE,
+  // the skinning compute shader
+  SKIN,
 }
 
 @(private)
@@ -45,6 +47,8 @@ SceneBuffer :: enum {
   NODE_BATCH,
   // the shadow atlas, a texture; only in the scene set of a bindless device
   SHADOW_MAPS,
+  SKIN_OWNERS,
+  SKINNED_VERTICES,
 }
 
 // The scene set of a bindless device: the shaders' set 0, bindings in this order, every one
@@ -66,6 +70,9 @@ SCENE_SET :: [?]SceneBuffer {
   .DEBUG_LINES,
   .BATCHES,
   .NODE_BATCH,
+  .SKIN_OWNERS,
+  .SKINNED_VERTICES,
+  .VERTICES,
 }
 // The scene groups of a device without bindless: the buffers each pass reads (or, for
 // compute, writes), in binding order.
@@ -77,14 +84,15 @@ SCENE_PASSES := [ScenePass]struct {
   writes:     bit_set[SceneBuffer],
 } {
   .NONE              = {},
-  .MESH              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .BONES, .SKINNING, .VERTICES, .INDICES}, {.VERTEX, .FRAGMENT}, {}},
+  .MESH              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .SKINNED_VERTICES, .VERTICES, .INDICES}, {.VERTEX, .FRAGMENT}, {}},
   .LIGHTING          = {{.VIEWS, .LIGHTS}, {.VERTEX, .FRAGMENT}, {}},
-  .SHADOW            = {{.VIEWS, .NODES, .MESHES, .BONES, .SKINNING}, {.VERTEX}, {}},
+  .SHADOW            = {{.VIEWS, .NODES, .MESHES, .SKINNED_VERTICES}, {.VERTEX}, {}},
   .CULL              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .BATCHES, .NODE_BATCH}, {.COMPUTE}, {}},
   .PARTICLE_EMIT     = {{.NODES, .EMITTERS, .PARTICLES}, {.COMPUTE}, {.PARTICLES}},
   .PARTICLE_SIMULATE = {{.NODES, .FORCEFIELDS, .PARTICLES, .PARTICLE_ALIVE}, {.COMPUTE}, {.PARTICLES, .PARTICLE_ALIVE}},
   .PARTICLE_DRAW     = {{.VIEWS, .PARTICLES, .PARTICLE_ALIVE}, {.VERTEX}, {}},
   .DEBUG_LINE        = {{.VIEWS, .DEBUG_LINES}, {.VERTEX}, {}},
+  .SKIN              = {{.NODES, .MESHES, .BONES, .SKINNING, .VERTICES, .SKIN_OWNERS, .SKINNED_VERTICES}, {.COMPUTE}, {.SKINNED_VERTICES}},
 }
 
 // Texture groups of a device without bindless: each slot is a texture of this kind.
@@ -146,6 +154,8 @@ Resources :: struct {
   vertices:          rhi.Buffer,
   indices:           rhi.Buffer,
   skinning:          rhi.Buffer,
+  // what the skinning pass writes: SkinnedVertex per skin slab entry
+  skinned_vertices:  rhi.Buffer,
   // the particle ring, and the alive list whose header is the indirect draw
   particles:         rhi.Buffer,
   particle_alive:    rhi.Buffer,
@@ -181,6 +191,7 @@ resources_init :: proc(r: ^Renderer) -> bool {
   res.vertices = mesh_buffer(r, .VERTEX, {.VERTEX, .STORAGE}) or_return
   res.indices = mesh_buffer(r, .INDEX, {.INDEX, .STORAGE}) or_return
   res.skinning = mesh_buffer(r, .SKINNING, {.STORAGE}) or_return
+  res.skinned_vertices = dev.buffer_create(&r.gpu, {size = SKIN_CAPACITY * size_of(SkinnedVertex), usage = {.STORAGE}}) or_return
   res.particle_alive = dev.buffer_create(&r.gpu, {size = (PARTICLE_ALIVE_HEADER + MAX_PARTICLES) * size_of(u32), usage = {.STORAGE, .INDIRECT}}) or_return
   res.particles = dev.buffer_create(&r.gpu, {size = MAX_PARTICLES * size_of(Particle), usage = {.STORAGE}}) or_return
   for f in 0 ..< FRAMES_IN_FLIGHT {
@@ -255,6 +266,8 @@ scene_buffer :: proc(r: ^Renderer, buffer: SceneBuffer, frame: u32) -> rhi.Buffe
   case .BATCHES:        return res.tables[.BATCHES][frame]
   case .NODE_BATCH:     return res.tables[.NODE_BATCH][frame]
   case .SHADOW_MAPS:    return 0
+  case .SKIN_OWNERS:      return res.tables[.SKIN_OWNERS][frame]
+  case .SKINNED_VERTICES: return res.skinned_vertices
   }
   return 0
 }

@@ -1,11 +1,12 @@
-// The vertex shader of mesh materials (scene group MESH), skinned by the node's bone palette.
+// The vertex shader of mesh materials (scene group MESH); a skinned node's vertices are the
+// skinning pass's.
 
 @group(0) @binding(0) var<storage, read> views: array<View>;
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
 @group(0) @binding(2) var<storage, read> meshes: array<Mesh>;
 @group(0) @binding(3) var<storage, read> materials: array<Material>;
-@group(0) @binding(4) var<storage, read> bones: array<mat4x4f>;
-@group(0) @binding(5) var<storage, read> skinning: array<Skinning>;
+// what the skinning pass wrote (skin.wgsl)
+@group(0) @binding(4) var<storage, read> skinned: array<SkinnedVertex>;
 
 struct MeshUniforms {
     camera_index: u32,
@@ -47,17 +48,10 @@ fn vs_main(in: VertexIn) -> VertexOut {
     var model_tangent = in.tangent;
     if ((node.flags & NODE_FLAG_SKINNED) != 0u) {
         let mesh = meshes[node.mesh_id];
-        let local_index = i32(in.vertex_index) - mesh.vertex_offset;
-        let skin = skinning[mesh.skinning_offset + u32(local_index)];
-        let joints = skin.joints + vec4u(node.attachment_data_index);
-        let skin_matrix =
-            skin.weights.x * bones[joints.x] +
-            skin.weights.y * bones[joints.y] +
-            skin.weights.z * bones[joints.z] +
-            skin.weights.w * bones[joints.w];
-        model_position = skin_matrix * model_position;
-        model_normal = mat3_of(skin_matrix) * in.normal;
-        model_tangent = vec4f(mat3_of(skin_matrix) * in.tangent.xyz, in.tangent.w);
+        let skin = skinned[node.skin_vertex_base + u32(i32(in.vertex_index) - mesh.vertex_offset)];
+        model_position = vec4f(skin.position.xyz, 1.0);
+        model_normal = skin.normal.xyz;
+        model_tangent = skin.tangent;
     }
     let world_position = world * model_position;
     var out: VertexOut;

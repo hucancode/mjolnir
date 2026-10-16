@@ -63,6 +63,11 @@ struct Node {
     // first bone of the node's palette when skinned
     attachment_data_index: u32,
     flags: u32,
+    // first of the node's skinned vertices when skinned (skin.wgsl)
+    skin_vertex_base: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 struct Mesh {
@@ -110,6 +115,13 @@ struct Light {
 struct Skinning {
     joints: vec4u,
     weights: vec4f,
+}
+
+// A vertex skin.wgsl deformed (render's SkinnedVertex); w of position and normal is unused.
+struct SkinnedVertex {
+    position: vec4f,
+    normal: vec4f,
+    tangent: vec4f,
 }
 
 // A draw batch: the nodes drawing one mesh with one material (render's Batch).

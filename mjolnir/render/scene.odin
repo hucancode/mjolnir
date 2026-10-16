@@ -69,6 +69,8 @@ Renderer :: struct {
   texture_slots:       cont.Slots,
   mesh_slabs:          [MeshStream]cont.SlabAllocator,
   bone_matrix_slab:    cont.SlabAllocator,
+  // the skinned vertex ranges of skinned slots (pass_skin.odin)
+  skin_slab:           cont.SlabAllocator,
   // simulated seconds; an emitter emits floor(rate * time) particles in total
   particle_time:       f64,
   // segments added since the last frame, per ring: [0] depth-tested, [1] drawn over the scene
@@ -87,6 +89,7 @@ Renderer :: struct {
   lighting:            LightingState,
   post:                PostState,
   particle_gpu:        ParticleState,
+  skin:                SkinState,
   debug_line:          DebugLineState,
   overlay_gpu:         OverlayState,
   // the last compute submission, which the next frame's graphics waits for
@@ -151,6 +154,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
   lighting_init(self) or_return
   post_init(self) or_return
   particles_init(self) or_return
+  skin_init(self) or_return
   debug_line_init(self) or_return
   overlay_init_pass(self) or_return
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
@@ -164,6 +168,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
   cont.slots_init(&self.forcefield_slots, MAX_FORCE_FIELDS)
   cont.slots_init(&self.light_slots, MAX_LIGHTS)
   cont.slab_init(&self.bone_matrix_slab, BONE_SLAB_CONFIG)
+  cont.slab_init(&self.skin_slab, SKIN_SLAB_CONFIG)
   self.lights = make(type_of(self.lights), MAX_LIGHTS)
   self.cameras = make([]Camera, MAX_ACTIVE_CAMERAS)
   init_builtin_materials(self)
@@ -220,6 +225,9 @@ teardown :: proc(self: ^Renderer) {
   self.node_count = 0
   if self.batched do batches_reset(self)
   cont.slab_rewind(&self.bone_matrix_slab)
+  cont.slab_rewind(&self.skin_slab)
+  clear_entry(self, .SKIN_OWNERS, 0, self.skinned_vertex_count)
+  self.skinned_vertex_count = 0
   cont.slots_rewind(&self.light_slots)
   clear_entry(self, .EMITTERS, 0, self.emitter_slots.high_water)
   cont.slots_rewind(&self.emitter_slots)
@@ -250,6 +258,7 @@ shutdown :: proc(self: ^Renderer) {
   for inbox in self.debug_lines do delete(inbox)
   for &slab in self.mesh_slabs do cont.slab_destroy(&slab)
   cont.slab_destroy(&self.bone_matrix_slab)
+  cont.slab_destroy(&self.skin_slab)
   cont.slots_destroy(&self.camera_slots)
   cont.slots_destroy(&self.mesh_slots)
   cont.slots_destroy(&self.material_slots)
@@ -385,8 +394,9 @@ NodeFlagSet :: bit_set[NodeFlag;u32]
 @(private)
 SHADOW_CASTER_FLAGS :: NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
 
-// The zero record is an empty slot: mesh and material 0 are none. attachment_data_index is
-// the first entry of the slot's bone table range when .SKINNED is set.
+// The zero record is an empty slot: mesh and material 0 are none. When .SKINNED is set,
+// attachment_data_index is the first entry of the slot's bone table range and
+// skin_vertex_base the first of its skinned vertices (pass_skin.odin).
 @(private)
 NodeData :: struct #packed {
   world_matrix:          matrix[4, 4]f32,
@@ -394,8 +404,10 @@ NodeData :: struct #packed {
   mesh_id:               u32,
   attachment_data_index: u32,
   flags:                 NodeFlagSet,
+  skin_vertex_base:      u32,
+  _:                     [3]u32,
 }
-#assert(size_of(NodeData) == 80)
+#assert(size_of(NodeData) == 96)
 
 // MeshAttachment draws mesh handle with material from a slot's transform.
 MeshAttachment :: struct {
@@ -490,15 +502,34 @@ skinned_mesh :: proc(self: ^Renderer, mesh_id: u32) -> bool {
   return .SKINNED in write_table(self, .MESHES, MeshData)[mesh_id].flags
 }
 
-// caller holds the render mutex
+// Gives the skinned vertices of the range at `base` to `owner` (slot + 1, 0 for none), for
+// the skinning pass. The whole block: the pass skips vertices past the owner's mesh.
+@(private = "file")
+skin_own :: proc(self: ^Renderer, base, owner: u32) {
+  size := cont.slab_block_size(&self.skin_slab, base)
+  slice.fill(write_table(self, .SKIN_OWNERS, u32)[base:][:size], owner)
+  mark_dirty(self, .SKIN_OWNERS, int(base), int(size))
+  self.skinned_vertex_count = max(self.skinned_vertex_count, base + size)
+}
+
+// Drops the slot's bone palette and skinned vertices. Caller holds the render mutex.
 @(private = "file")
 release_bones :: proc(self: ^Renderer, slot: u32) {
   node := &write_table(self, .NODES, NodeData)[slot]
   if .SKINNED not_in node.flags do return
   cont.slab_free(&self.bone_matrix_slab, node.attachment_data_index)
-  node.attachment_data_index = 0
+  skin_own(self, node.skin_vertex_base, 0)
+  cont.slab_free(&self.skin_slab, node.skin_vertex_base)
+  node.attachment_data_index, node.skin_vertex_base = 0, 0
   node.flags -= {.SKINNED}
   mark_dirty(self, .NODES, int(slot))
+}
+
+// whether the slot's skinned vertex range holds mesh_id's vertices
+@(private = "file")
+skin_fits :: proc(self: ^Renderer, node: NodeData, mesh_id: u32) -> bool {
+  vertex_count := write_table(self, .MESHES, MeshData)[mesh_id].vertex_count
+  return cont.slab_block_size(&self.skin_slab, node.skin_vertex_base) >= vertex_count
 }
 
 // Skin palette (bone skinning matrices) for the skinned mesh at `slot`, attached first.
@@ -519,8 +550,16 @@ stage_bones :: proc(self: ^Renderer, slot: u32, matrices: []matrix[4, 4]f32) {
       log.warnf("No bone range for a %d-bone palette; the mesh draws unskinned", count)
       return
     }
-    node.attachment_data_index = offset
+    vertex_count := write_table(self, .MESHES, MeshData)[node.mesh_id].vertex_count
+    base, skin_ok := cont.slab_alloc(&self.skin_slab, vertex_count)
+    if !skin_ok {
+      cont.slab_free(&self.bone_matrix_slab, offset)
+      log.warnf("No skinned vertex range for %d vertices; the mesh draws unskinned", vertex_count)
+      return
+    }
+    node.attachment_data_index, node.skin_vertex_base = offset, base
     node.flags += {.SKINNED}
+    skin_own(self, base, slot + 1)
     mark_dirty(self, .NODES, int(slot))
   }
   offset := node.attachment_data_index
@@ -529,7 +568,7 @@ stage_bones :: proc(self: ^Renderer, slot: u32, matrices: []matrix[4, 4]f32) {
 }
 
 // attach draws attachment at slot, replacing what the slot drew before. A bone palette
-// stays while the slot draws a skinned mesh.
+// stays while the slot draws a skinned mesh whose vertices fit the slot's skinned range.
 attach :: proc(self: ^Renderer, slot: u32, attachment: Attachment) {
   guard(self)
   node := slot_node(self, slot)
@@ -552,7 +591,7 @@ attach :: proc(self: ^Renderer, slot: u32, attachment: Attachment) {
     if i, ok := bind(&self.forcefield_slots, write_table(self, .FORCEFIELDS, ForceField), slot, a); ok do mark_dirty(self, .FORCEFIELDS, int(i))
     else do log.warnf("No room for more than %d force fields; the force field is dropped", MAX_FORCE_FIELDS - 1)
   }
-  if !skinned_mesh(self, node.mesh_id) do release_bones(self, slot)
+  if !skinned_mesh(self, node.mesh_id) || !skin_fits(self, node^, node.mesh_id) do release_bones(self, slot)
   mark_dirty(self, .NODES, int(slot))
 }
 

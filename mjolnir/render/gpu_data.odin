@@ -130,6 +130,17 @@ Table :: enum {
   // multi-draw (Caps.multi_draw_indirect_count false); empty elsewhere
   BATCHES,
   NODE_BATCH,
+  // per skinned vertex, the slot whose range holds it + 1; 0 is free (pass_skin.odin)
+  SKIN_OWNERS,
+}
+
+// SkinnedVertex is a vertex the skinning pass wrote, read by vertex shaders in place of the
+// mesh's for a skinned node. w of position and normal is unused.
+@(private)
+SkinnedVertex :: struct {
+  position: [4]f32,
+  normal:   [4]f32,
+  tangent:  [4]f32,
 }
 
 // One buffer per stream, sub-allocated by render; skinning is read through the scene set.
@@ -273,6 +284,8 @@ FrameDesc :: struct {
   // camera views covered by the cull dispatch, from CAMERA_VIEW_BASE + 1
   camera_view_count:    u32,
   node_count:           u32,
+  // the skinning dispatch covers skinned vertices below this
+  skinned_vertex_count: u32,
   // batch ids in use are below this (Table.BATCHES)
   batch_count:          u32,
   // lights are sorted by type; point and spot draw these volume meshes

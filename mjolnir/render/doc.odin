@@ -8,7 +8,7 @@
 // render makes every decision. It keeps the one CPU copy of each scene table (tables.odin,
 // gpu_data.odin for their layouts) and marks what it writes; flush resolves the frame (slots,
 // lights, post-process passes) and frame.odin records it through rhi: the table copies per frame
-// in flight (resources.odin), then one file per pass (pass_cull, pass_shadow, pass_material,
+// in flight (resources.odin), then one file per pass (pass_skin, pass_cull, pass_shadow, pass_material,
 // pass_lighting, pass_post, pass_particles, pass_debug_line, pass_overlay; pass_ibl is one-shot),
 // with the barriers between them. Shaders are the passes' too: shader/vulkan (GLSL and its
 // SPIR-V, built by make shader) and shader/wgpu (WGSL), loaded by the pass that uses them.

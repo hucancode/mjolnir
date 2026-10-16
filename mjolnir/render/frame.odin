@@ -27,6 +27,9 @@ Barrier :: enum {
   // the previous simulation and this frame's draws use what the particle pass rewrites
   PARTICLES_TO_FILL,
   POST_PASS,
+  // the previous frame's draws read the skinned vertices the skinning pass rewrites
+  DRAW_TO_SKIN,
+  SKIN_TO_DRAW,
   // the cull recorded after the frame on one queue: it rewrites the lists and pyramids that
   // draws and the previous cull read, from depth the frame wrote
   FRAME_TO_CULL,
@@ -82,6 +85,11 @@ BARRIERS := [Barrier]rhi.Barrier {
   .POST_PASS = {
     src_stage = {.COLOR_ATTACHMENT_OUTPUT, .FRAGMENT_SHADER}, dst_stage = {.FRAGMENT_SHADER, .COLOR_ATTACHMENT_OUTPUT},
     src_access = {.COLOR_ATTACHMENT_WRITE}, dst_access = {.SHADER_READ, .COLOR_ATTACHMENT_WRITE},
+  },
+  .DRAW_TO_SKIN = {src_stage = {.VERTEX_SHADER}, dst_stage = {.COMPUTE_SHADER}},
+  .SKIN_TO_DRAW = {
+    src_stage = {.COMPUTE_SHADER}, dst_stage = {.VERTEX_SHADER},
+    src_access = {.SHADER_WRITE}, dst_access = {.SHADER_READ},
   },
   .FRAME_TO_CULL = {
     src_stage = {.DRAW_INDIRECT, .COMPUTE_SHADER, .TRANSFER, .LATE_FRAGMENT_TESTS}, dst_stage = {.COMPUTE_SHADER, .TRANSFER},
@@ -193,6 +201,11 @@ frame_run :: proc(r: ^Renderer) -> (submitted: bool, status: rhi.FrameStatus) {
     dev.cmd_flush_uploads(&r.gpu, cmd)
   }
   compute := dev.cmd_begin(&r.gpu, .COMPUTE, 0) if async else cmd
+  // before everything that draws a skinned node, so on the graphics list
+  {
+    scope(r, cmd, "skinning")
+    skin_record(r, cmd, f)
+  }
   if !bindless {
     scope(r, cmd, "cull")
     cull_record(r, cmd, f)
