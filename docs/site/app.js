@@ -52,8 +52,8 @@ function renderExamples(root) {
   const title = el('h1');
   const desc = el('p', { className: 'desc' });
   const modeBtn = el('button', { type: 'button' });
-  const codeBtn = el('button', { type: 'button', textContent: 'Show code' });
-  const logBtn = el('button', { type: 'button', textContent: 'Show logs' });
+  const codeBtn = el('button', { type: 'button', textContent: 'Code' });
+  const logBtn = el('button', { type: 'button', textContent: 'Log' });
   const code = el('code');
   const pre = el('pre', {}, code);
   const closeBtn = el('button', { type: 'button', textContent: 'Close' });
@@ -61,7 +61,7 @@ function renderExamples(root) {
   const dialog = el('dialog', { className: 'code-dialog' }, el('header', {}, dialogTitle, closeBtn), pre);
   const logPre = el('pre');
   const logCloseBtn = el('button', { type: 'button', textContent: 'Close' });
-  const logDialog = el('dialog', { className: 'code-dialog' }, el('header', {}, el('strong', { textContent: 'Logs' }), logCloseBtn), logPre);
+  const logDialog = el('dialog', { className: 'code-dialog' }, el('header', {}, el('strong', { textContent: 'Log' }), logCloseBtn), logPre);
   const view = el('section', {}, el('div', { className: 'title-row' }, title, el('p', { className: 'toolbar' }, modeBtn, codeBtn, logBtn)), desc, stage, dialog, logDialog);
   root.append(el('div', { className: 'examples' }, el('search', {}, nav), view));
 
@@ -73,7 +73,7 @@ function renderExamples(root) {
     const e = current;
     modeBtn.hidden = !(e.wasm && e.video && hasGpu);
     logBtn.hidden = !live;
-    modeBtn.textContent = live ? 'Watch video' : 'Run live';
+    modeBtn.textContent = live ? 'Video' : 'Run live';
     if (live) {
       stage.replaceChildren(el('iframe', { src: `live/index.html?example=${encodeURIComponent(e.name)}`, title: e.name, allow: 'fullscreen; gamepad' }));
     } else if (e.video) {
