@@ -50,15 +50,19 @@ function renderExamples(root) {
   const nav = el('nav');
   const stage = el('div', { className: 'stage' });
   const title = el('h1');
-  const desc = el('p');
+  const desc = el('p', { className: 'desc' });
   const modeBtn = el('button', { type: 'button' });
   const codeBtn = el('button', { type: 'button', textContent: 'Show code' });
+  const logBtn = el('button', { type: 'button', textContent: 'Show logs' });
   const code = el('code');
   const pre = el('pre', {}, code);
   const closeBtn = el('button', { type: 'button', textContent: 'Close' });
   const dialogTitle = el('strong');
   const dialog = el('dialog', { className: 'code-dialog' }, el('header', {}, dialogTitle, closeBtn), pre);
-  const view = el('section', {}, title, desc, el('p', { className: 'toolbar' }, modeBtn, codeBtn), stage, dialog);
+  const logPre = el('pre');
+  const logCloseBtn = el('button', { type: 'button', textContent: 'Close' });
+  const logDialog = el('dialog', { className: 'code-dialog' }, el('header', {}, el('strong', { textContent: 'Logs' }), logCloseBtn), logPre);
+  const view = el('section', {}, el('div', { className: 'title-row' }, title, el('p', { className: 'toolbar' }, modeBtn, codeBtn, logBtn)), desc, stage, dialog, logDialog);
   root.append(el('div', { className: 'examples' }, el('search', {}, nav), view));
 
   for (const e of list) nav.append(el('a', { href: '#' + e.name, textContent: e.name }));
@@ -68,6 +72,7 @@ function renderExamples(root) {
   function mount() {
     const e = current;
     modeBtn.hidden = !(e.wasm && e.video && hasGpu);
+    logBtn.hidden = !live;
     modeBtn.textContent = live ? 'Watch video' : 'Run live';
     if (live) {
       stage.replaceChildren(el('iframe', { src: `live/index.html?example=${encodeURIComponent(e.name)}`, title: e.name, allow: 'fullscreen; gamepad' }));
@@ -100,6 +105,21 @@ function renderExamples(root) {
   codeBtn.addEventListener('click', () => dialog.showModal());
   closeBtn.addEventListener('click', () => dialog.close());
   dialog.addEventListener('click', (ev) => { if (ev.target === dialog) dialog.close(); }); // backdrop click
+  // logs live in the (same-origin) iframe's #console; mirror them while the dialog is open
+  let logObserver;
+  logBtn.addEventListener('click', () => {
+    const src = stage.querySelector('iframe')?.contentDocument?.getElementById('console');
+    const sync = () => { logPre.textContent = src ? src.textContent : 'No logs available.'; logPre.scrollTop = logPre.scrollHeight; };
+    sync();
+    if (src) {
+      logObserver = new MutationObserver(sync);
+      logObserver.observe(src, { childList: true, characterData: true, subtree: true });
+    }
+    logDialog.showModal();
+  });
+  logDialog.addEventListener('close', () => logObserver?.disconnect());
+  logCloseBtn.addEventListener('click', () => logDialog.close());
+  logDialog.addEventListener('click', (ev) => { if (ev.target === logDialog) logDialog.close(); });
   addEventListener('hashchange', show);
   show();
 }
