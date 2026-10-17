@@ -118,9 +118,7 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   for h in app.materials {
     m := render.material(&app.renderer, h) or_continue
-    m.frame_columns = u32(bands)
-    m.emissive_value = f32(rim)
-    m.metallic_value = f32(shade)
+    m.params[0] = {f32(bands), f32(rim), f32(shade), 0}
   }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

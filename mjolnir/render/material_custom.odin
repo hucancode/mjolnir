@@ -16,6 +16,7 @@ MaterialShader :: distinct u32
 // mesh vertex stage's outputs, the color output, the scene buffers and the textures.
 // WebGPU: the source follows common.wgsl, mesh.wgsl and material_custom.wgsl, so it reads
 // what they declare; it declares `fs_main(in: VertexOut) -> @location(0) vec4f`.
+// Both read the material's params (Material.params), render's time and the image size there.
 material_shader_create :: proc(
   r: ^Renderer,
   frag_spirv: []u8,

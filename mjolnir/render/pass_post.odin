@@ -92,6 +92,7 @@ post_pipelines_create :: proc(r: ^Renderer, frag_spirv: []u8, frag_wgsl: string)
 // WebGPU: the source follows common.wgsl and postprocess.wgsl, so it reads the bindings, the
 // uniforms `u` and helpers they declare; it declares `struct Effect` (its params) and
 // `fs_main(in: VertexOut) -> @location(0) vec4f`.
+// Both read render's time and the image size (post_resolution) there.
 post_shader_create :: proc(r: ^Renderer, frag_spirv: []u8, frag_wgsl: string) -> (PostShader, bool) {
   pipelines, ok := post_pipelines_create(r, frag_spirv, frag_wgsl)
   if !ok do return 0, false
@@ -114,7 +115,8 @@ post_shader_destroy :: proc(r: ^Renderer, shader: PostShader) {
 }
 
 // make_custom_effect packs `params` into a CustomEffect of `shader`, laid out as the shader's push
-// block reads them.
+// block reads them: declare the same fields in the same order there. A [3]f32 must be followed
+// by an f32 (the shader pads a lone vec3 to 16 bytes), so prefer [4]f32 and scalars.
 make_custom_effect :: proc(shader: PostShader, params: $T, passes: u32 = 1) -> CustomEffect {
   #assert(size_of(T) <= CUSTOM_EFFECT_PARAM_BYTES)
   params := params

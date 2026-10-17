@@ -1,5 +1,3 @@
-// Scene graph: nodes with parent/child links, local transforms and visibility. spawn nodes,
-// move them with translate / rotate / scale, call update once per tick, then hand changes to
-// consumers such as the renderer (render.stage_transforms). init/shutdown own its memory
-// (application lifetime); teardown empties it between maps.
+// A scene graph: a tree of nodes with transforms. Spawn and move nodes, call update each tick,
+// and pass its changes to what draws or simulates them (render.stage_transforms).
 package world

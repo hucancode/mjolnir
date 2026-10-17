@@ -4,6 +4,8 @@ import "rhi"
 import vulkan "vulkan"
 import wgpu "wgpu"
 
+// RENDER_BACKEND picks the GPU backend at compile time (-define:RENDER_BACKEND=...): vulkan, the
+// default, or wgpu, which also runs on the web.
 RENDER_BACKEND :: #config(RENDER_BACKEND, "vulkan")
 #assert(RENDER_BACKEND == "vulkan" || RENDER_BACKEND == "wgpu", "unknown RENDER_BACKEND")
 #assert(RENDER_BACKEND == "wgpu" || ODIN_OS != .JS, "the web takes RENDER_BACKEND=wgpu")

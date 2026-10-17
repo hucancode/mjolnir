@@ -1,7 +1,5 @@
-// Rigid-body physics. A World owns bodies with sphere, box or cylinder colliders: body_create,
-// apply_force / set_velocity / set_pose, step once per tick, then body_poses to copy the moved
-// bodies back into a scene graph. raycast and overlap query the world. init/shutdown own its
-// memory (application lifetime); teardown empties it between maps.
+// Rigid-body simulation and queries. Create bodies with colliders, step each tick and copy
+// body_poses back into your scene; raycast and overlap to ask what is where.
 package physics
 
 // Internals: narrowphase, CCD, the TGS-soft solver, integration and threading are

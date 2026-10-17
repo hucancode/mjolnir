@@ -453,7 +453,7 @@ tick_resource_pools :: proc(self: ^Renderer) {
   cont.slots_tick(&self.camera_slots)
 }
 
-// Advance the render clock (debug line lifetimes) and the particle
+// Advance the render clock (shaders' time, debug line lifetimes) and the particle
 // simulation time. Call once per update tick; the next frame emits and
 // simulates everything accumulated since the previous one.
 update :: proc(self: ^Renderer, delta_time: f32) {
@@ -684,7 +684,7 @@ stage_bones :: proc(self: ^Renderer, slot: u32, matrices: []matrix[4, 4]f32) {
   mark_dirty(self, .BONES, int(offset), int(count))
 }
 
-// attach draws attachment at slot, replacing what the slot drew before. A bone palette
+// attach draws attachment at slot (a world node's index), replacing what the slot drew before. A bone palette
 // stays while the slot draws a skinned mesh whose vertices fit the slot's skinned range.
 attach :: proc(self: ^Renderer, slot: u32, attachment: Attachment) {
   guard(self)

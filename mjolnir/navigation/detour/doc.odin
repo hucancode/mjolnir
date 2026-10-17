@@ -1,7 +1,2 @@
-// Package detour is a port of Detour: the tiled navigation mesh (Nav_Mesh),
-// its queries (Nav_Mesh_Query: find_path, raycast, find_nearest_poly,
-// find_straight_path) and tile serialization to and from bytes (save_navmesh,
-// load_navmesh). Start with nav_mesh_init,
-// nav_mesh_add_tile and nav_mesh_query_init. Most users go through the
-// navigation package instead.
+// A port of Detour, the navigation mesh and its queries; most games use navigation instead.
 package detour
