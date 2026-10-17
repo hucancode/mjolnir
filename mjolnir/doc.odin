@@ -12,3 +12,14 @@ package mjolnir
 // (#load them, or platform.read_file / write_file) and an opaque window handle.
 // An app builds its scene in Loop.setup once render.ready, and frees it in Loop.shutdown:
 // on the web the device arrives after init, and main returns as soon as run does.
+//
+// API conventions, the same in every package:
+//   make_x returns a value (make_point_light, make_material, make_cube); x_create stores one
+//   and returns a handle (light_create); x_init fills a struct the caller owns (spline_init);
+//   x_destroy frees either, ignoring a stale handle.
+//   A getter returns a pointer to edit in place when only the application writes the data
+//   (render.light, physics.body_params), and a copy when the system writes it too
+//   (world.node, physics.body, crowd.agent). Getters that end in `ok` let it be omitted.
+//   Maps: a module's init marks what it holds as kept; teardown frees everything made since
+//   the mark at once. render.setup moves render's mark past what the application made after
+//   init (shared textures, the debug UI atlas).

@@ -1,6 +1,6 @@
 package render
 
-import cont "../containers"
+import "../containers"
 import "rhi"
 
 // The frame: every pass in order, with the barriers between them. With async compute (Vulkan on
@@ -138,25 +138,25 @@ camera_passes :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   if self.camera_slots.count == 0 do return
   discards := make([dynamic]TextureHandle, context.temp_allocator)
   c: u32
-  for i in cont.slots_next(&self.camera_slots, &c) do for a in CameraImage do append(&discards, self.camera_targets[i].images[a][f])
+  for i in containers.slots_next(&self.camera_slots, &c) do for a in CameraImage do append(&discards, self.camera_targets[i].images[a][f])
   // render-to-texture: a material may sample last frame's lit image
   barrier_discard(self, cmd, discards[:], .CULL_TO_INDIRECT, .COLOR_TO_SAMPLE)
   {
     scope(self, cmd, "gbuffer")
     c = 0
-    for i in cont.slots_next(&self.camera_slots, &c) do material_record(self, cmd, f, i, .GBUFFER)
+    for i in containers.slots_next(&self.camera_slots, &c) do material_record(self, cmd, f, i, .GBUFFER)
   }
   barrier(self, cmd, .GBUFFER_TO_LIGHTING)
   {
     scope(self, cmd, "lighting")
     c = 0
-    for i in cont.slots_next(&self.camera_slots, &c) do lighting_record(self, cmd, f, i)
+    for i in containers.slots_next(&self.camera_slots, &c) do lighting_record(self, cmd, f, i)
   }
   barrier(self, cmd, .LIGHTING_TO_FORWARD)
   {
     scope(self, cmd, "forward")
     c = 0
-    for i in cont.slots_next(&self.camera_slots, &c) do material_record(self, cmd, f, i, .FORWARD)
+    for i in containers.slots_next(&self.camera_slots, &c) do material_record(self, cmd, f, i, .FORWARD)
   }
   barrier(self, cmd, .FORWARD_TO_COMPUTE)
 }
@@ -184,7 +184,7 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
   if begun := dev.frame_begin(&self.gpu, framebuffer_size); begun != .OK do return false, begun
   async := dev.caps(&self.gpu).async_compute
   main := u32(self.main_camera)
-  has_main := cont.slots_live(&self.camera_slots, main)
+  has_main := containers.slots_live(&self.camera_slots, main)
 
   // The staged uploads land first: on their own submission, which the compute list waits for
   // and the graphics list follows on its queue, or at the head of the one list.

@@ -67,9 +67,9 @@ setup :: proc(app: ^App) -> bool {
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
   plane_mesh := app.renderer.builtin_meshes[.QUAD_XZ]
   ground_albedo, _ := render.texture_create(&app.renderer, #load("statue-1275469_1280.jpg"), generate_mips = true)
-  plane_material := render.material_create(&app.renderer, .PBR,
+  plane_material := render.material_create(&app.renderer, render.make_material(.PBR,
     albedo_texture = ground_albedo, roughness_value = 0.7, metallic_value = 0.0,
-  )
+  ))
 
   plane := world.spawn(&app.scene, {0, -1, 0})
   render.attach(&app.renderer, render.SlotHandle(plane.index), render.MeshAttachment{mesh = plane_mesh, material = plane_material, cast_shadow = false})
@@ -78,9 +78,9 @@ setup :: proc(app: ^App) -> bool {
   base_color: [4]f32 = {0.85, 0.85, 0.9, 1}
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
-    mat := render.material_create(&app.renderer, type = .PBR, base_color_factor = base_color,
+    mat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = base_color,
       metallic_value = m, roughness_value = r,
-    )
+    ))
     grid_materials[row][col] = mat
     x := f32(col) * SPACING - half
     y := f32(row) * SPACING

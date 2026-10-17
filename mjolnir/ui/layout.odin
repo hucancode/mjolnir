@@ -1,6 +1,6 @@
 package ui
 
-import cont "../containers"
+import "../containers"
 import "../font"
 import "core:slice"
 import "core:strings"
@@ -48,7 +48,7 @@ children_of :: #force_inline proc(self: ^UI, i: u32) -> []u32 {
 @(private = "file")
 parent_of :: proc(self: ^UI, i: u32) -> int {
   p := item(self, i).parent
-  if !cont.slots_valid(&self.slots, p) do return -1
+  if !containers.slots_valid(&self.slots, p) do return -1
   return int(p.index)
 }
 
@@ -69,7 +69,7 @@ build_tree :: proc(self: ^UI) {
   clear(&self.topo)
   slice.zero(self.child_count[:])
   c: u32
-  for i in cont.slots_next(&self.slots, &c) {
+  for i in containers.slots_next(&self.slots, &c) {
     p := parent_of(self, i)
     if p < 0 do append(&self.topo, i)
     else do self.child_count[p] += 1
@@ -82,7 +82,7 @@ build_tree :: proc(self: ^UI) {
   resize(&self.children, int(total))
   fill := make([]u32, len(self.child_count), context.temp_allocator)
   c = 0
-  for i in cont.slots_next(&self.slots, &c) {
+  for i in containers.slots_next(&self.slots, &c) {
     p := parent_of(self, i)
     if p < 0 do continue
     self.children[self.child_first[p] + fill[p]] = i
@@ -298,7 +298,7 @@ place :: proc(self: ^UI, viewport: Rect, f: ^font.Font) {
   slice.sort(keys)
   for key in keys {
     i := shown[u32(key)]
-    append(&self.draw_order, NodeHandle(cont.slots_handle(&self.slots, i)))
+    append(&self.draw_order, NodeHandle(containers.slots_handle(&self.slots, i)))
   }
 }
 

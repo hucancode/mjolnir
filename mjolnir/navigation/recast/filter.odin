@@ -20,7 +20,6 @@ set_con :: proc "contextless" (span: ^Compact_Span, dir: int, i: int) {
 }
 
 // filter_low_hanging_walkable_obstacles marks spans just above a walkable span as walkable if within walkable_climb.
-// Remove walkable spans that are below obstacles where the agent could walk over
 filter_low_hanging_walkable_obstacles :: proc(
   walkable_climb: int,
   heightfield: ^Heightfield,
@@ -51,7 +50,6 @@ filter_low_hanging_walkable_obstacles :: proc(
 }
 
 // filter_ledge_spans marks spans next to a drop or steep slope as unwalkable.
-// Mark spans that are ledges as unwalkable
 filter_ledge_spans :: proc(
   walkable_height, walkable_climb: int,
   heightfield: ^Heightfield,
@@ -127,7 +125,6 @@ filter_ledge_spans :: proc(
 }
 
 // filter_walkable_low_height_spans marks spans with less than walkable_height clearance as unwalkable.
-// Remove walkable spans without enough clearance
 filter_walkable_low_height_spans :: proc(
   walkable_height: int,
   heightfield: ^Heightfield,

@@ -17,6 +17,7 @@ SHADOW_VIEW_BASE :: MAX_ACTIVE_CAMERAS
 @(private)
 MAX_VIEWS :: MAX_ACTIVE_CAMERAS + MAX_SHADOW_VIEWS
 
+// MAX_SHADOW_MAPS is how many shadow-casting lights cast shadows at once.
 MAX_SHADOW_MAPS :: 16
 
 @(private)
@@ -26,6 +27,7 @@ SHADOW_MAP_SIZE :: 512
 @(private)
 MAX_SHADOW_VIEWS :: MAX_SHADOW_MAPS * 6
 
+// MAX_PARTICLES is how many particles live at once, across every emitter.
 MAX_PARTICLES :: 65536
 
 // Debug line segments live in two rings of DEBUG_RING in the debug line table:
@@ -248,13 +250,12 @@ DoFEffect :: struct {
 // PostShader is a user fragment shader made by post_shader_create; 0 is none.
 PostShader :: distinct u32
 
-// The bytes a CustomEffect pushes to its shader, at offset 32 of the push block.
+// CUSTOM_EFFECT_PARAM_BYTES is the size of a CustomEffect's params.
 CUSTOM_EFFECT_PARAM_BYTES :: 80
 
 // CustomEffect runs a user fragment shader (post_shader_create) `passes` times (0 runs it
 // once), each pass reading the previous one's output; the shader tells them apart by the
-// push block's pass. params come first, so the shader sees them at offset 32 like a
-// built-in effect's fields; make_custom_effect packs a struct into them.
+// pass it is in; make_custom_effect packs a struct into params.
 CustomEffect :: struct {
   params: [CUSTOM_EFFECT_PARAM_BYTES]u8,
   shader: PostShader,

@@ -19,6 +19,13 @@ Retiring :: struct {
 // reused only `grace` ticks later, so a consumer lagging up to `grace` ticks
 // never sees it reused.
 Slots :: struct {
+  count:    u32, // live indices
+  capacity: u32,
+  using _:  Slots_State,
+}
+
+@(private)
+Slots_State :: struct {
   live:       []u64, // bit per index
   // per index, bumped when it is freed; stale handles carry an older one
   generation: []u32,
@@ -34,11 +41,9 @@ Slots :: struct {
   high_water: u32,
   // slots_rewind frees every index from here on; slots_mark moves it to high_water
   mark:       u32,
-  count:      u32, // live indices
-  capacity:   u32,
 }
 
-// slots_init sets up s for indices first ..< capacity (index 0 is always reserved) with an
+// slots_init sets up self for indices first ..< capacity (index 0 is always reserved) with an
 // optional reuse grace in ticks. Pools splitting one array take disjoint ranges.
 slots_init :: proc(self: ^Slots, capacity: u32, grace: u64 = 0, first: u32 = 1) {
   self.live = make([]u64, (capacity + 63) / 64)
@@ -49,7 +54,7 @@ slots_init :: proc(self: ^Slots, capacity: u32, grace: u64 = 0, first: u32 = 1) 
   self.mark = self.high_water
 }
 
-// slots_destroy frees the memory held by s and zeroes it.
+// slots_destroy frees the memory held by self and zeroes it.
 slots_destroy :: proc(self: ^Slots) {
   delete(self.live)
   delete(self.generation)
@@ -85,18 +90,18 @@ slots_free :: proc(self: ^Slots, index: u32) -> bool {
 }
 
 // slots_live reports whether index is currently allocated.
-slots_live :: #force_inline proc "contextless" (s: ^Slots, index: u32) -> bool {
-  return index < s.capacity && s.live[index / 64] & (1 << (index % 64)) != 0
+slots_live :: #force_inline proc "contextless" (self: ^Slots, index: u32) -> bool {
+  return index < self.capacity && self.live[index / 64] & (1 << (index % 64)) != 0
 }
 
 // slots_handle returns the handle of a live index.
-slots_handle :: #force_inline proc "contextless" (s: ^Slots, index: u32) -> Handle {
-  return {index, s.generation[index]}
+slots_handle :: #force_inline proc "contextless" (self: ^Slots, index: u32) -> Handle {
+  return {index, self.generation[index]}
 }
 
 // slots_valid reports whether handle h (a Handle or a distinct Handle) is live and not stale.
-slots_valid :: #force_inline proc "contextless" (s: ^Slots, h: $HT) -> bool {
-  return slots_live(s, h.index) && s.generation[h.index] == h.generation
+slots_valid :: #force_inline proc "contextless" (self: ^Slots, h: $HT) -> bool {
+  return slots_live(self, h.index) && self.generation[h.index] == h.generation
 }
 
 // slots_tick advances one tick and reuses the indices freed `grace` ticks ago. Returns
@@ -154,11 +159,11 @@ slots_rewind :: proc(self: ^Slots) {
 // slots_next walks the live indices in order:
 //   cursor: u32
 //   for index in slots_next(&slots, &cursor) { ... }
-slots_next :: proc "contextless" (s: ^Slots, cursor: ^u32) -> (index: u32, ok: bool) {
-  for cursor^ < s.high_water {
+slots_next :: proc "contextless" (self: ^Slots, cursor: ^u32) -> (index: u32, ok: bool) {
+  for cursor^ < self.high_water {
     index = cursor^
     cursor^ += 1
-    if slots_live(s, index) do return index, true
+    if slots_live(self, index) do return index, true
   }
   return 0, false
 }

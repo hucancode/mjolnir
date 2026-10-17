@@ -102,7 +102,7 @@ setup :: proc(app: ^App) -> bool {
     tail_layer = idx
     log.infof("Added tail modifier to node (layer %d)", idx)
   }
-  head_bone, head_found = anim.find_bone(&rig.skeleton, HEAD_BONE)
+  head_bone, head_found = anim.bone_find(&rig.skeleton, HEAD_BONE)
   light := world.spawn(&app.scene, {-4, 10, 6})
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({0.6, 0.7, 1.0, 1.5}, 15.0, false)))
   return true

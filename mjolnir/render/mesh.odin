@@ -18,8 +18,8 @@ Geometry :: struct {
   indices:   []u32,
 }
 
-// geometry_create wraps vertices and indices into a Geometry, generating tangents if missing.
-geometry_create :: proc(
+// make_geometry wraps vertices and indices into a Geometry, generating tangents if missing.
+make_geometry :: proc(
   vertices: []Vertex,
   indices: []u32,
   skinnings: []SkinningData = nil,
@@ -100,9 +100,9 @@ positions :: proc(self: Geometry, allocator := context.allocator) -> [][3]f32 {
   return out
 }
 
-// from_triangles builds renderable geometry from a bare triangle mesh: smooth normals,
+// make_geometry_from_triangles builds renderable geometry from a bare triangle mesh: smooth normals,
 // white color and planar xz UVs. The input arrays are copied.
-from_triangles :: proc(positions: [][3]f32, indices: []u32) -> Geometry {
+make_geometry_from_triangles :: proc(positions: [][3]f32, indices: []u32) -> Geometry {
   n := len(positions)
   vertices := make([]Vertex, n)
   normals := make([][3]f32, n, context.temp_allocator)
@@ -121,5 +121,5 @@ from_triangles :: proc(positions: [][3]f32, indices: []u32) -> Geometry {
     v.color = {1, 1, 1, 1}
     v.uv = v.position.xz * 0.1
   }
-  return geometry_create(vertices, slice.clone(indices))
+  return make_geometry(vertices, slice.clone(indices))
 }

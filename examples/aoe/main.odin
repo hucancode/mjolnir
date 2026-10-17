@@ -59,7 +59,7 @@ setup :: proc(app: ^App) -> bool {
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
   cube_mat := app.renderer.builtin_materials[.CYAN]
-  effector_mat := render.material_create(&app.renderer, emissive_value = 5.0)
+  effector_mat := render.material_create(&app.renderer, render.make_material(emissive_value = 5.0))
   grid_size := 50
   spacing: f32 = 1.0
   log.infof("Spawning %dx%d grid of cubes...", grid_size, grid_size)

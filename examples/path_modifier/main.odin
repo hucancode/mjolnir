@@ -88,7 +88,7 @@ regenerate_points :: proc() {
 rebuild_path :: proc(app: ^App) {
   regenerate_points()
   animation.destroy(&spline)
-  spline = animation.spline_create_closed(path_buf[:])
+  animation.spline_init_closed(&spline, path_buf[:])
   for &a, i in animators do animation.path_points(&a, layer_indices[i], path_buf[:], closed = true)
 }
 
@@ -119,7 +119,7 @@ setup :: proc(app: ^App) -> bool {
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   snake = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
   regenerate_points()
-  spline = animation.spline_create_closed(path_buf[:])
+  animation.spline_init_closed(&spline, path_buf[:])
 
   for s in snake.skinned {
     rig := &snake.rigs[s.rig]

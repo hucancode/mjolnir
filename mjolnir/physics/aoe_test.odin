@@ -2,7 +2,7 @@
 #+private
 package physics
 
-import cont "../containers"
+import "../containers"
 import "../geometry"
 import "core:math/linalg"
 import "core:testing"
@@ -160,7 +160,7 @@ test_physics_kill_y :: proc(t: ^testing.T) {
   phys: World
   init(&phys, thread_count = 1)
   defer shutdown(&phys)
-  user := cont.Handle{index = 7, generation = 1}
+  user := containers.Handle{index = 7, generation = 1}
   falling := body_create(&phys, {0, KILL_Y + 1, 0}, collider = SphereCollider{radius = 0.5}, mass = 1.0, user = user)
   floor := body_create(&phys, {0, KILL_Y - 10, 0}, collider = BoxCollider{half_extents = {1, 1, 1}})
   kills := 0

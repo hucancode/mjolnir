@@ -118,7 +118,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, render.SlotHandle(dir_light.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1, f32(dir_intensity)}, shadow_radius = 12.0, cast_shadow = true)))
 
   // Glowing marker so each light's position is visible.
-  marker_material = render.material_create(&app.renderer, emissive_value = 4.0)
+  marker_material = render.material_create(&app.renderer, render.make_material(emissive_value = 4.0))
 
   for i in 0 ..< STARTUP_LIGHTS do spawn_light(app, .SPOT if i == STARTUP_LIGHTS - 1 else .POINT)
   log.info("Lights: P spawns a point light, O a spot light, DELETE removes a random one")

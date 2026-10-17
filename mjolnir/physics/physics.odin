@@ -1,6 +1,6 @@
 package physics
 
-import cont "../containers"
+import "../containers"
 import "../geometry"
 import "core:log"
 import "core:math"
@@ -38,11 +38,11 @@ SPECULATIVE_DISTANCE :: 0.02
 @(private = "file")
 BVH_REBUILD_THRESHOLD :: #config(PHYSICS_BVH_REBUILD_THRESHOLD, 512)
 
-// BodyHandle is a generational handle to a Body in a World.
 // Handle is an untyped handle, the link a body keeps to what it drives (world.Handle is the
 // same type).
-Handle :: cont.Handle
+Handle :: containers.Handle
 
+// BodyHandle is a generational handle to a Body in a World.
 BodyHandle :: distinct Handle
 
 // MAX_BODIES is how many bodies a World holds at once.
@@ -150,10 +150,11 @@ World_State :: struct {
   contacts:             [dynamic]Contact,
   sensor_overlaps:      [dynamic]SensorOverlap,
   killed:               [dynamic]KilledBody,
+  poses:                [dynamic]BodyPose, // body_poses' result
   last_perf:            PerfFrame,
   // indexed by BodyHandle.index; body_slots says which are live
   bodies:               []Body,
-  body_slots:           cont.Slots,
+  body_slots:           containers.Slots,
   prev_warmstart:       map[u64]ContactWarmstart,
   // Moving bodies (dynamic + kinematic) and static bodies
   dynamic_bvh:          geometry.BVH(BroadPhaseEntry),
@@ -186,7 +187,7 @@ BroadPhaseEntry :: struct {
 // spin-waits at barriers, so oversubscribing cores stalls every worker.
 init :: proc(self: ^World, gravity := [3]f32{0, -9.81, 0}, thread_count := 0) -> bool {
   self^ = {}
-  cont.slots_init(&self.body_slots, MAX_BODIES)
+  containers.slots_init(&self.body_slots, MAX_BODIES)
   self.bodies = make([]Body, MAX_BODIES)
   self.gravity = gravity
   bounds_func :: #force_inline proc(entry: BroadPhaseEntry) -> geometry.Aabb {
@@ -215,11 +216,12 @@ shutdown :: proc(self: ^World) {
     thread.pool_join(&self.thread_pool)
     thread.pool_destroy(&self.thread_pool)
   }
-  cont.slots_destroy(&self.body_slots)
+  containers.slots_destroy(&self.body_slots)
   delete(self.bodies)
   delete(self.contacts)
   delete(self.sensor_overlaps)
   delete(self.killed)
+  delete(self.poses)
   delete(self.prev_warmstart)
   delete(self.awake_list)
   delete(self.solver_color_used)
@@ -233,7 +235,7 @@ shutdown :: proc(self: ^World) {
 
 // teardown drops every body at once; the world stays ready for the next map.
 teardown :: proc(self: ^World) {
-  cont.slots_rewind(&self.body_slots)
+  containers.slots_rewind(&self.body_slots)
   self.dynamic_bvh_stale = 0
   clear(&self.contacts)
   clear(&self.sensor_overlaps)
@@ -258,7 +260,7 @@ body_create :: proc(
   handle: BodyHandle,
   ok: bool,
 ) #optional_ok {
-  index := cont.slots_alloc(&self.body_slots) or_return
+  index := containers.slots_alloc(&self.body_slots) or_return
   body := &self.bodies[index]
   body_init(body, position, rotation, collider, mass, is_sensor, user)
   mark_bvh_dirty(self, body)
@@ -273,7 +275,7 @@ body_destroy :: proc(self: ^World, handle: BodyHandle) {
     self.dynamic_bvh_stale += 1
     if self.dynamic_bvh_stale >= BVH_REBUILD_THRESHOLD do self.dynamic_bvh_dirty = true
   }
-  cont.slots_free(&self.body_slots, handle.index)
+  containers.slots_free(&self.body_slots, handle.index)
 }
 
 // body returns a copy of the body behind handle, or false if the handle is stale. step
@@ -293,13 +295,13 @@ body_params :: proc(self: ^World, handle: BodyHandle) -> (ret: ^BodyParams, ok: 
 
 @(private)
 lookup :: #force_inline proc(self: ^World, handle: BodyHandle) -> (ret: ^Body, ok: bool) #optional_ok {
-  if !cont.slots_valid(&self.body_slots, handle) do return nil, false
+  if !containers.slots_valid(&self.body_slots, handle) do return nil, false
   return &self.bodies[handle.index], true
 }
 
 @(private)
 body_handle :: #force_inline proc(self: ^World, index: u32) -> BodyHandle {
-  return BodyHandle(cont.slots_handle(&self.body_slots, index))
+  return BodyHandle(containers.slots_handle(&self.body_slots, index))
 }
 
 // Bodies are indexed below this; every live index is.
@@ -410,16 +412,16 @@ BodyPose :: struct {
 }
 
 // body_poses returns the poses of awake moving bodies that have a `user` link, for copying back
-// into a scene graph after `step`.
-body_poses :: proc(self: ^World, allocator := context.temp_allocator) -> []BodyPose {
-  poses := make([dynamic]BodyPose, 0, len(self.awake_list), allocator)
+// into a scene graph after `step`; valid until the next body_poses or step.
+body_poses :: proc(self: ^World) -> []BodyPose {
+  clear(&self.poses)
   c: u32
-  for i in cont.slots_next(&self.body_slots, &c) {
+  for i in containers.slots_next(&self.body_slots, &c) {
     body := &self.bodies[i]
     if !body.moving || body.is_sleeping || body.user == {} do continue
-    append(&poses, BodyPose{body.user, body.position, body.rotation})
+    append(&self.poses, BodyPose{body.user, body.position, body.rotation})
   }
-  return poses[:]
+  return self.poses[:]
 }
 
 // contacts returns the touching pairs the last step found; valid until the next step.
@@ -451,7 +453,7 @@ refresh_broadphase :: proc(self: ^World) -> (rebuilt_dynamic, rebuilt_static: bo
   dynamic_entries := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   static_entries := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   c: u32
-  for i in cont.slots_next(&self.body_slots, &c) {
+  for i in containers.slots_next(&self.body_slots, &c) {
     body, handle := &self.bodies[i], body_handle(self, i)
     if body.is_sensor do continue
     update_cached_aabb(body)
@@ -524,7 +526,7 @@ step_island_sleep :: proc(self: ^World, dt: f32) -> (awake_count, sleeping_count
   island_min := make([]f32, n, context.temp_allocator)
   for i in 0 ..< n do island_min[i] = math.F32_MAX
   c: u32
-  for i in cont.slots_next(&self.body_slots, &c) {
+  for i in containers.slots_next(&self.body_slots, &c) {
     body := &self.bodies[i]
     if !body.moving do continue
     if linalg.length2(body.velocity) < SLEEP_LINEAR_THRESHOLD_SQ &&
@@ -538,7 +540,7 @@ step_island_sleep :: proc(self: ^World, dt: f32) -> (awake_count, sleeping_count
     island_min[root] = min(island_min[root], body.sleep_timer)
   }
   c = 0
-  for i in cont.slots_next(&self.body_slots, &c) {
+  for i in containers.slots_next(&self.body_slots, &c) {
     body := &self.bodies[i]
     if !body.moving do continue
     if island_min[find(parent, i32(i))] > SLEEP_TIME_THRESHOLD {
@@ -557,7 +559,7 @@ step_island_sleep :: proc(self: ^World, dt: f32) -> (awake_count, sleeping_count
 step_kill :: proc(self: ^World) {
   clear(&self.killed)
   c: u32
-  for i in cont.slots_next(&self.body_slots, &c) {
+  for i in containers.slots_next(&self.body_slots, &c) {
     body, handle := &self.bodies[i], body_handle(self, i)
     if !is_dynamic(body) || body.position.y >= KILL_Y do continue
     append(&self.killed, KilledBody{handle, body.user})
@@ -570,7 +572,7 @@ step_sensors :: proc(self: ^World) {
   clear(&self.sensor_overlaps)
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   c: u32
-  for i in cont.slots_next(&self.body_slots, &c) {
+  for i in containers.slots_next(&self.body_slots, &c) {
     sensor, sensor_handle := &self.bodies[i], body_handle(self, i)
     if !sensor.is_sensor do continue
     for bvh in ([2]^geometry.BVH(BroadPhaseEntry){&self.dynamic_bvh, &self.static_bvh}) {
@@ -617,7 +619,7 @@ step :: proc(self: ^World, dt: f32) {
   // check the all-asleep fast path (nothing can move → skip the pipeline)
   any_awake := false
   c: u32
-  for i in cont.slots_next(&self.body_slots, &c) {
+  for i in containers.slots_next(&self.body_slots, &c) {
     body := &self.bodies[i]
     body.position0 = body.position
     if body.moving && !body.is_sleeping do any_awake = true
@@ -639,7 +641,7 @@ step :: proc(self: ^World, dt: f32) {
     // built after narrowphase, which can wake sleeping bodies
     clear(&self.awake_list)
     c = 0
-    for i in cont.slots_next(&self.body_slots, &c) {
+    for i in containers.slots_next(&self.body_slots, &c) {
       body := &self.bodies[i]
       if body.moving && !body.is_sleeping do append(&self.awake_list, i)
     }

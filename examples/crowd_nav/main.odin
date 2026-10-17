@@ -108,7 +108,7 @@ build_scene :: proc(app: ^App) {
   for &v in ground_geom.vertices { v.position.x *= WORLD_HALF * 2; v.position.z *= WORLD_HALF * 2 }
   bake.append_triangles(&nav_builder, render.positions(ground_geom, context.temp_allocator), ground_geom.indices)
   gm := render.mesh_create(&app.renderer, ground_geom)
-  gmat := render.material_create(&app.renderer, type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8)
+  gmat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8))
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.MeshAttachment{mesh = gm, material = gmat, cast_shadow = false})
 
@@ -123,7 +123,7 @@ build_scene :: proc(app: ^App) {
     for &v in g.vertices { v.position.x *= o.size.x; v.position.y *= o.size.y; v.position.z *= o.size.z }
     bake.append_triangles(&nav_builder, render.positions(g, context.temp_allocator), g.indices, o.pos, true)
     mh := render.mesh_create(&app.renderer, g)
-    mat := render.material_create(&app.renderer, type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6)
+    mat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6))
     n := world.spawn(&app.scene, o.pos)
     render.attach(&app.renderer, render.SlotHandle(n.index), render.MeshAttachment{mesh = mh, material = mat, cast_shadow = true})
   }
@@ -138,10 +138,10 @@ visualize_navmesh :: proc(app: ^App) {
   world.destroy(&app.scene, navmesh_node_handle)
   positions, indices := nav.debug_triangles(&navmesh, context.temp_allocator)
   for &p in positions do p.y += 0.2 // lift above the ground to avoid z-fighting
-  nm_geom := render.from_triangles(positions, indices)
+  nm_geom := render.make_geometry_from_triangles(positions, indices)
   nm_mesh, mesh_ok := render.mesh_create(&app.renderer, nm_geom)
   if !mesh_ok do return
-  nm_mat, mat_ok := render.material_create(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7})
+  nm_mat, mat_ok := render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7}))
   if !mat_ok do return
   navmesh_node_handle = world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(navmesh_node_handle.index), render.MeshAttachment{mesh = nm_mesh, material = nm_mat, cast_shadow = true})
@@ -184,7 +184,7 @@ spawn_agents :: proc(app: ^App) {
     agents[i].color = palette[i % len(palette)]
     cap_geom := render.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS)
     mh := render.mesh_create(&app.renderer, cap_geom)
-    mat := render.material_create(&app.renderer, type = .PBR, base_color_factor = agents[i].color, emissive_value = 0.4)
+    mat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = agents[i].color, emissive_value = 0.4))
     agents[i].node = world.spawn(&app.scene, pos + {0, AGENT_HEIGHT * 0.5, 0})
     render.attach(&app.renderer, render.SlotHandle(agents[i].node.index), render.MeshAttachment{mesh = mh, material = mat, cast_shadow = true})
   }

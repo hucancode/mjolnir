@@ -126,7 +126,7 @@ setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   ground := app.renderer.builtin_meshes[.QUAD_XZ]
-  dark_mat := render.material_create(&app.renderer, type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0})
+  dark_mat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0}))
   floor := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(floor.index), render.MeshAttachment{mesh = ground, material = dark_mat, cast_shadow = false})
   world.scale(&app.scene, floor, RADIUS * 6.0)
@@ -136,8 +136,8 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {0, 14, 14}, {0, 8, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   for c, i in COLOR_RGB {
-    state.transparent_material[i] = render.material_create(&app.renderer, type = .TRANSPARENT, base_color_factor = {c.x, c.y, c.z, PIECE_ALPHA})
-    state.opaque_material[i] = render.material_create(&app.renderer, type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0})
+    state.transparent_material[i] = render.material_create(&app.renderer, render.make_material(type = .TRANSPARENT, base_color_factor = {c.x, c.y, c.z, PIECE_ALPHA}))
+    state.opaque_material[i] = render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0}))
   }
   state.fall_period = FALL_PERIOD
   reset_game(app)

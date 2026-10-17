@@ -97,18 +97,18 @@ setup :: proc(app: ^App) -> bool {
   fox_handle = fox_scene.skinned[0].node
   rig = &fox_scene.rigs[fox_scene.skinned[0].rig]
   anim.animator_init(&animator, rig)
-  if clip, ok := anim.find_clip(rig, "Walk"); ok {
+  if clip, ok := anim.clip_find(rig, "Walk"); ok {
     if l, ok := anim.layer_create(&animator, rig, anim.ClipParams{clip = clip, speed = 1}); ok do walk_layer = l
   }
-  if clip, ok := anim.find_clip(rig, "Run"); ok {
+  if clip, ok := anim.clip_find(rig, "Run"); ok {
     if l, ok := anim.layer_create(&animator, rig, anim.ClipParams{clip = clip, speed = 1}, weight = 0); ok do run_layer = l
   }
   // Survey drives only the spine and everything above it; legs keep walking.
-  if clip, ok := anim.find_clip(rig, "Survey"); ok {
+  if clip, ok := anim.clip_find(rig, "Survey"); ok {
     upper := anim.bone_subtree(&rig.skeleton, "b_Spine01_02", context.temp_allocator)
     if l, ok := anim.layer_create(&animator, rig, anim.ClipParams{clip = clip, speed = 0.5}, upper, weight = 0); ok do survey_layer = l
   }
-  if bones, ok := anim.find_bones(&rig.skeleton, {"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}, context.temp_allocator); ok {
+  if bones, ok := anim.bones_find(&rig.skeleton, {"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}, context.temp_allocator); ok {
     ik := anim.IKParams{target = {f32(target_x), f32(target_y), f32(target_z)}, pole = {0, 5, 2.5}, pole_weight = 1, space = .WORLD}
     if l, ok := anim.layer_create(&animator, rig, ik, bones, weight = 0); ok do ik_layer = l
   }

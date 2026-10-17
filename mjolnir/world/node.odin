@@ -16,13 +16,17 @@ TRANSFORM_IDENTITY :: Transform {
   scale    = {1, 1, 1},
 }
 
-// translate sets a node's local position, from x/y/z or a vector.
+// translate sets a node's local position:
+//   translate(w, node, x = 0, y = 0, z = 0)
+//   translate(w, node, v: [3]f32)
 translate :: proc {
   translate_xyz,
   translate_vec,
 }
 
-// rotate sets a node's local rotation, from a quaternion or angle (and axis, default Y).
+// rotate sets a node's local rotation:
+//   rotate(w, node, q: quaternion128)
+//   rotate(w, node, angle: f32, axis: [3]f32 = Y) (radians)
 rotate :: proc {
   rotate_quaternion,
   rotate_angle,
@@ -37,13 +41,18 @@ translate_by :: proc(self: ^World, handle: NodeHandle, v: [3]f32) {
   self.cache[handle.index].is_dirty = true
 }
 
-// rotate_by composes a rotation onto a node's local rotation, from a quaternion or angle (and axis, default Y).
+// rotate_by composes a rotation onto a node's local rotation:
+//   rotate_by(w, node, q: quaternion128)
+//   rotate_by(w, node, angle: f32, axis: [3]f32 = Y) (radians)
 rotate_by :: proc {
   rotate_by_quaternion,
   rotate_by_angle,
 }
 
-// scale sets a node's local scale, uniform or per axis (x, y, z or a vector).
+// scale sets a node's local scale:
+//   scale(w, node, s: f32) (uniform)
+//   scale(w, node, x, y, z: f32)
+//   scale(w, node, v: [3]f32)
 scale :: proc {
   scale_uniform,
   scale_xyz,

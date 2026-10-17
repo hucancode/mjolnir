@@ -93,14 +93,14 @@ test_skeleton_find_bone :: proc(t: ^testing.T) {
   skel: Skeleton
   testing.expect(t, make_unsorted_skeleton(&skel))
   defer skeleton_destroy(&skel)
-  idx, ok := find_bone(&skel, "knee")
+  idx, ok := bone_find(&skel, "knee")
   testing.expect(t, ok && idx == 0)
-  idx, ok = find_bone(&skel, "root")
+  idx, ok = bone_find(&skel, "root")
   testing.expect(t, ok && idx == 3)
-  _, ok = find_bone(&skel, "ghost")
+  _, ok = bone_find(&skel, "ghost")
   testing.expect(t, !ok)
   empty: Skeleton
-  _, ok = find_bone(&empty, "any")
+  _, ok = bone_find(&empty, "any")
   testing.expect(t, !ok, "empty skeleton misses")
 }
 
@@ -109,10 +109,10 @@ test_skeleton_find_bones :: proc(t: ^testing.T) {
   skel: Skeleton
   testing.expect(t, make_unsorted_skeleton(&skel))
   defer skeleton_destroy(&skel)
-  indices, ok := find_bones(&skel, []string{"hip", "ankle", "tail"})
+  indices, ok := bones_find(&skel, []string{"hip", "ankle", "tail"})
   defer delete(indices)
   testing.expect(t, ok && indices[0] == 2 && indices[1] == 1 && indices[2] == 4)
-  bad, ok2 := find_bones(&skel, []string{"hip", "ghost"})
+  bad, ok2 := bones_find(&skel, []string{"hip", "ghost"})
   testing.expect(t, !ok2 && bad == nil, "any miss fails")
 }
 

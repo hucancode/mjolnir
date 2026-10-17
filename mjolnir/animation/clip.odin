@@ -5,6 +5,7 @@ import "core:strings"
 
 // TrackRange locates one track's keys inside a Clip's flat arrays. count = 0 means
 // the component is not animated.
+@(private)
 TrackRange :: struct {
   time_offset:   u32,
   value_offset:  u32,
@@ -13,15 +14,22 @@ TrackRange :: struct {
 }
 
 // Channel holds the animated components of one target (a bone, or any caller-defined slot).
+@(private)
 Channel :: struct {
   position, rotation, scale: TrackRange,
 }
 
-// Clip is a set of channels sharing one timeline. All keys live in flat arrays; each
-// channel refers to its slice by range.
+// Clip is a set of channels (one per animated bone, or any caller-defined target) sharing
+// one timeline. Fill it with clip_set_positions, clip_set_rotations and clip_set_scales.
 Clip :: struct {
-  name:      string,
-  duration:  f32,
+  name:     string,
+  duration: f32,
+  using _:  Clip_Keys,
+}
+
+// All keys live in flat arrays; each channel refers to its slice by range.
+@(private)
+Clip_Keys :: struct {
   channels:  []Channel,
   times:     [dynamic]f32,
   positions: [dynamic][3]f32,

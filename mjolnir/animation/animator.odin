@@ -20,8 +20,8 @@ rig_destroy :: proc(self: ^Rig) {
   self^ = {}
 }
 
-// find_clip returns the clip named name.
-find_clip :: proc(self: ^Rig, name: string) -> (clip: ClipHandle, ok: bool) #optional_ok {
+// clip_find returns the clip named name.
+clip_find :: proc(self: ^Rig, name: string) -> (clip: ClipHandle, ok: bool) #optional_ok {
   for c, i in self.clips do if c.name == name do return ClipHandle(i), true
   return 0, false
 }
@@ -255,11 +255,13 @@ bone_segments :: proc(
 
 @(private)
 valid_layer :: #force_inline proc(self: ^Animator, layer: LayerHandle) -> bool {
-  return int(layer) < len(self.layers) && self.layers[layer].params != nil
+  if int(layer.index) >= len(self.layers) do return false
+  l := &self.layers[layer.index]
+  return l.params != nil && l.generation == layer.generation
 }
 
 // layer_create adds a layer doing `params` to `bones` and returns its handle; it stays valid
-// until layer_destroy or clear_layers, and a freed one may be handed out again.
+// until layer_destroy or layers_clear.
 //   ClipParams: bones it animates, nil = all
 //   IKParams, LegParams: a chain, root first, each bone the parent of the next (bone_chain)
 //   TailParams, PathParams: a chain of at least 2 bones, head first (bone_chain_down)
@@ -320,18 +322,20 @@ layer_create :: proc(
   resize(&self.state, len(self.state) + state)
   if _, is_clip := params.(ClipParams); is_clip do self.state[layer.state.start + 1] = 1
   for &l, i in self.layers do if l.params == nil {
+    layer.generation = l.generation
     l = layer
-    return LayerHandle(i), true
+    return {u32(i), l.generation}, true
   }
+  layer.generation = 1
   append(&self.layers, layer)
-  return LayerHandle(len(self.layers) - 1), true
+  return {u32(len(self.layers) - 1), 1}, true
 }
 
 // layer_params returns the inputs of a layer of kind T, to edit in place; false when the
 // layer is gone or of another kind.
 layer_params :: proc(self: ^Animator, layer: LayerHandle, $T: typeid) -> (params: ^T, ok: bool) #optional_ok {
   if !valid_layer(self, layer) do return nil, false
-  return &self.layers[layer].params.(T)
+  return &self.layers[layer.index].params.(T)
 }
 
 // layer_fade moves a layer's weight to `weight` (clamped to [0, 1]) over `duration` seconds
@@ -344,7 +348,7 @@ layer_fade :: proc(
   curve: ease.Ease = .Linear,
 ) -> bool {
   if !valid_layer(self, layer) do return false
-  l := &self.layers[layer]
+  l := &self.layers[layer.index]
   w := clamp(weight, 0, 1)
   if duration <= 0 {
     l.weight, l.fade = w, {}
@@ -356,7 +360,7 @@ layer_fade :: proc(
 
 // layer_weight returns a layer's weight now (a fade moves it each update); 0 when gone.
 layer_weight :: proc(self: ^Animator, layer: LayerHandle) -> f32 {
-  return self.layers[layer].weight if valid_layer(self, layer) else 0
+  return self.layers[layer.index].weight if valid_layer(self, layer) else 0
 }
 
 // Remove a range from the bones (`state` false) or state pool, closing the gap.
@@ -374,37 +378,45 @@ pool_remove :: proc(self: ^Animator, r: Range, state: bool) {
   }
 }
 
-// layer_destroy destroys a layer, leaving the other handles as they are; false if it is gone.
-layer_destroy :: proc(self: ^Animator, layer: LayerHandle) -> bool {
-  if !valid_layer(self, layer) do return false
-  l := &self.layers[layer]
+// layer_destroy destroys a layer, leaving the other handles as they are; a stale handle is
+// ignored.
+layer_destroy :: proc(self: ^Animator, layer: LayerHandle) {
+  if !valid_layer(self, layer) do return
+  l := &self.layers[layer.index]
   bones, state := l.bones, l.state
-  l^ = {}
+  l^ = {generation = l.generation + 1}
   pool_remove(self, bones, false)
   pool_remove(self, state, true)
-  return true
 }
 
-// clear_layers destroys every layer.
-clear_layers :: proc(self: ^Animator) {
-  clear(&self.layers)
+// layers_clear destroys every layer.
+layers_clear :: proc(self: ^Animator) {
+  for &l in self.layers do if l.params != nil do l = {generation = l.generation + 1}
   clear(&self.bones)
   clear(&self.state)
 }
 
-// play replaces the whole stack with clip `name` at full weight.
-play :: proc(self: ^Animator, rig: ^Rig, name: string, mode: PlayMode = .LOOP, speed: f32 = 1) -> bool {
-  clip := find_clip(rig, name) or_return
-  clear_layers(self)
-  _, ok := layer_create(self, rig, ClipParams{clip = clip, speed = speed, mode = mode})
-  return ok
+// play replaces the whole stack with clip `name` at full weight and returns its layer.
+play :: proc(
+  self: ^Animator,
+  rig: ^Rig,
+  name: string,
+  mode: PlayMode = .LOOP,
+  speed: f32 = 1,
+) -> (
+  layer: LayerHandle,
+  ok: bool,
+) #optional_ok {
+  clip := clip_find(rig, name) or_return
+  layers_clear(self)
+  return layer_create(self, rig, ClipParams{clip = clip, speed = speed, mode = mode})
 }
 
 // clip_time returns where a clip layer is in its clip, in seconds; false if it is not a clip
 // layer. A ONCE clip that ended holds its duration.
 clip_time :: proc(self: ^Animator, layer: LayerHandle) -> (time: f32, ok: bool) #optional_ok {
   if !valid_layer(self, layer) do return 0, false
-  l := &self.layers[layer]
+  l := &self.layers[layer.index]
   _ = l.params.(ClipParams) or_return
   return self.state[l.state.start], true
 }
@@ -412,7 +424,7 @@ clip_time :: proc(self: ^Animator, layer: LayerHandle) -> (time: f32, ok: bool) 
 // clip_seek moves a clip layer to `time` seconds and plays it from there.
 clip_seek :: proc(self: ^Animator, layer: LayerHandle, time: f32) -> bool {
   if !valid_layer(self, layer) do return false
-  l := &self.layers[layer]
+  l := &self.layers[layer.index]
   _ = l.params.(ClipParams) or_return
   self.state[l.state.start] = time
   self.state[l.state.start + 2] = 0
@@ -423,7 +435,7 @@ clip_seek :: proc(self: ^Animator, layer: LayerHandle, time: f32) -> bool {
 // a loop when `closed` (needs 3 points). False if it is not a path layer or has < 2 points.
 path_points :: proc(self: ^Animator, layer: LayerHandle, points: [][3]f32, closed := false) -> bool {
   if !valid_layer(self, layer) || len(points) < 2 do return false
-  l := &self.layers[layer]
+  l := &self.layers[layer.index]
   _ = l.params.(PathParams) or_return
   closed := closed && len(points) >= 3
   travelled := self.state[l.state.start]
@@ -440,7 +452,7 @@ path_points :: proc(self: ^Animator, layer: LayerHandle, points: [][3]f32, close
 // leg_foot returns where a leg layer's foot is, world space; false if it is not a leg layer.
 leg_foot :: proc(self: ^Animator, layer: LayerHandle) -> (foot: [3]f32, ok: bool) #optional_ok {
   if !valid_layer(self, layer) do return {}, false
-  l := &self.layers[layer]
+  l := &self.layers[layer.index]
   _ = l.params.(LegParams) or_return
   return leg_state(range_of(self.state[:], l.state)).foot, true
 }

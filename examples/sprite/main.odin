@@ -74,7 +74,7 @@ setup :: proc(app: ^App) -> bool {
 
   xs := [Mode]f32{.LOOP = -3.0, .PINGPONG = 0.0, .ONCE = 3.0}
   for x, mode in xs {
-    sprite := render.material_create(&app.renderer, .SPRITE, albedo_texture = tex, frame_columns = 6, frame_rows = 17) or_continue
+    sprite := render.material_create(&app.renderer, render.make_material(.SPRITE, albedo_texture = tex, frame_columns = 6, frame_rows = 17)) or_continue
     node := world.spawn(&app.scene, {x, 1.5, 0}) or_continue
     render.attach(&app.renderer, render.SlotHandle(node.index), render.MeshAttachment {
       mesh   = app.renderer.builtin_meshes[.QUAD_XY],

@@ -271,7 +271,7 @@ update :: proc(app: ^App, dt: f32) {
     physics.teardown(&phys)
     world.teardown(&app.scene)
     render.teardown(&app.renderer)
-    if render.setup(&app.renderer) do setup(app)
+    setup(app)
     render.update(&app.renderer, dt)
     return
   }

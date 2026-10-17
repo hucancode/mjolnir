@@ -1,7 +1,7 @@
 #+private
 package physics
 
-import cont "../containers"
+import "../containers"
 import "../geometry"
 import "core:math"
 import "core:math/linalg"
@@ -180,7 +180,7 @@ ccd :: proc(world: ^World, dt: f32, ccd_handled: []bool) -> (bodies_tested, tota
     candidates := make([dynamic]BroadPhaseEntry, 0, 64)
     defer delete(candidates)
     #no_bounds_check for i in start ..< end {
-      if !cont.slots_live(&world.body_slots, u32(i)) do continue
+      if !containers.slots_live(&world.body_slots, u32(i)) do continue
       tested, count := ccd_step_body(world, &world.bodies[i], i, ctx.dt, ctx.ccd_handled, &candidates)
       if tested do ctx.bodies_tested[task] += 1
       ctx.total_candidates[task] += count

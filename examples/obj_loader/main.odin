@@ -61,7 +61,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 3.0}, 10.0, false)))
   world.rotate(&app.scene, light, 1.5707963, [3]f32{1, 0, 0})
 
-  display_material = render.material_create(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1})
+  display_material = render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1}))
 
   scales := OBJ_SCALES
   labels := OBJ_LABELS
@@ -71,7 +71,7 @@ setup :: proc(app: ^App) -> bool {
       log.errorf("failed to load %s", labels[i])
       continue
     }
-    geom := render.from_triangles(obj.positions, obj.indices)
+    geom := render.make_geometry_from_triangles(obj.positions, obj.indices)
     obj_mesh_destroy(&obj)
     aabb := render.aabb_from_vertices(geom.vertices)
     log.infof("%s: %d verts, %d tris, aabb %v..%v", labels[i], len(geom.vertices), len(geom.indices) / 3, aabb.min, aabb.max)

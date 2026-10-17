@@ -15,7 +15,8 @@ particles_reset :: proc(self: ^Renderer) -> bool {
 
 // Emitter spawns particles from every slot it is attached to: emission_rate per second (0
 // pauses it), each living particle_lifetime seconds and blending from the *_start values to the
-// *_end ones. make_emitter fills the defaults; emitter_create stores one.
+// *_end ones. size_* is a particle's side in pixels seen from 1 unit away, shrinking with
+// distance. make_emitter fills the defaults; emitter_create stores one.
 Emitter :: struct #align(16) {
   initial_velocity:  [3]f32,
   velocity_spread:   f32,

@@ -1,7 +1,7 @@
 package render
 
-import geom "../geometry"
-import cont "../containers"
+import "../geometry"
+import "../containers"
 import "rhi"
 import "core:log"
 import "core:math"
@@ -43,7 +43,6 @@ Renderer :: struct {
   ibl_intensity:          f32,
   builtin_materials:      [Color]MaterialHandle,
   builtin_meshes:         [Primitive]MeshHandle,
-  main_camera:            CameraHandle,
   // every camera runs the stack in order
   effect_stack:           [dynamic]PostprocessEffect,
   using _:               Renderer_State,
@@ -51,6 +50,8 @@ Renderer :: struct {
 
 @(private)
 Renderer_State :: struct {
+  // presented to the swapchain (main_camera)
+  main_camera:            CameraHandle,
   gpu:                    Backend,
   // render's tables, the one copy; bit r of dirty[t] is region r of tables[t] (TABLE_REGIONS),
   // written since the last submitted frame. tables_sync brings the GPU copies up to date.
@@ -66,28 +67,28 @@ Renderer_State :: struct {
   irradiance_cube:        TextureHandle,
   prefilter_cube:         TextureHandle,
   particle_params:        ParticleSystemParams,
-  mesh_slots:             cont.Slots,
-  material_slots:         cont.Slots,
+  mesh_slots:             containers.Slots,
+  material_slots:         containers.Slots,
   // lights, emitters and force fields: their tables' rows
-  light_slots:            cont.Slots,
-  emitter_slots:          cont.Slots,
-  force_field_slots:       cont.Slots,
+  light_slots:            containers.Slots,
+  emitter_slots:          containers.Slots,
+  force_field_slots:       containers.Slots,
   // where they are attached: the rows of the *_PLACEMENTS tables
-  light_placement_slots:      cont.Slots,
-  emitter_placement_slots:    cont.Slots,
-  force_field_placement_slots: cont.Slots,
+  light_placement_slots:      containers.Slots,
+  emitter_placement_slots:    containers.Slots,
+  force_field_placement_slots: containers.Slots,
   cameras:                []Camera,
   camera_targets:         []CameraTargets,
-  camera_slots:           cont.Slots,
+  camera_slots:           containers.Slots,
   // pass i writes slot i % POST_PROCESS_RING; its input and original are the two slots before
   post_process_ring:      [FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
   // render targets below MAX_RENDER_TARGETS, every other texture above (bindless_textures.odin)
-  target_slots:           cont.Slots,
-  texture_slots:          cont.Slots,
-  mesh_slabs:             [MeshStream]cont.SlabAllocator,
-  bone_matrix_slab:       cont.SlabAllocator,
+  target_slots:           containers.Slots,
+  texture_slots:          containers.Slots,
+  mesh_slabs:             [MeshStream]containers.SlabAllocator,
+  bone_matrix_slab:       containers.SlabAllocator,
   // the skinned vertex ranges of skinned slots (pass_skin.odin)
-  skin_slab:              cont.SlabAllocator,
+  skin_slab:              containers.SlabAllocator,
   // simulated seconds; an emitter emits floor(rate * time) particles in total
   particle_time:          f64,
   // segments added since the last frame, per ring: [0] depth-tested, [1] drawn over the scene
@@ -181,7 +182,7 @@ Renderer_State :: struct {
   initialized:            bool,
 }
 
-// Bring the renderer up on a window: the GPU backend, every resource and an empty scene
+// init brings the renderer up on a window: the GPU backend, every resource and an empty scene
 // with a main camera. Paired with shutdown. A backend whose device arrives asynchronously
 // (wgpu on the web) finishes in ready: until it returns true, nothing but ready may be called.
 init :: proc(
@@ -191,7 +192,7 @@ init :: proc(
   framebuffer_size: [2]u32,
   dpi_scale: f32,
 ) -> bool {
-  for stream, s in MESH_STREAMS do cont.slab_init(&self.mesh_slabs[s], stream.slab)
+  for stream, s in MESH_STREAMS do containers.slab_init(&self.mesh_slabs[s], stream.slab)
   dev.init(&self.gpu, app_name, window, framebuffer_size) or_return
   for t, i in TABLES do self.tables[i] = make([]u8, t.stride * t.capacity)
   self.dpi_scale = dpi_scale
@@ -209,12 +210,12 @@ ready :: proc(self: ^Renderer) -> bool {
 
 @(private = "file")
 init_resources :: proc(self: ^Renderer) -> bool {
-  cont.slots_init(&self.camera_slots, MAX_ACTIVE_CAMERAS, RETIRE_GRACE)
-  cont.slots_init(&self.mesh_slots, MAX_MESHES, RETIRE_GRACE)
-  cont.slots_init(&self.material_slots, MAX_MATERIALS, RETIRE_GRACE)
+  containers.slots_init(&self.camera_slots, MAX_ACTIVE_CAMERAS, RETIRE_GRACE)
+  containers.slots_init(&self.mesh_slots, MAX_MESHES, RETIRE_GRACE)
+  containers.slots_init(&self.material_slots, MAX_MATERIALS, RETIRE_GRACE)
   // retired, not reclaimed: submitted frames may still sample the slot
-  cont.slots_init(&self.target_slots, MAX_RENDER_TARGETS, RETIRE_GRACE)
-  cont.slots_init(&self.texture_slots, MAX_TEXTURES, RETIRE_GRACE, first = MAX_RENDER_TARGETS)
+  containers.slots_init(&self.target_slots, MAX_RENDER_TARGETS, RETIRE_GRACE)
+  containers.slots_init(&self.texture_slots, MAX_TEXTURES, RETIRE_GRACE, first = MAX_RENDER_TARGETS)
   resources_init(self) or_return
   resources_bind(self) or_return
   cull_init(self) or_return
@@ -230,16 +231,16 @@ init_resources :: proc(self: ^Renderer) -> bool {
     lists, capacity := draw_list_shape(self, shadow = true)
     draw_list_create(self, SHADOW_DRAW_SLOT_BASE + frame, lists, capacity) or_return
   }
-  cont.slots_init(&self.light_slots, MAX_LIGHTS, RETIRE_GRACE)
-  cont.slots_init(&self.emitter_slots, MAX_EMITTERS, RETIRE_GRACE)
-  cont.slots_init(&self.force_field_slots, MAX_FORCE_FIELDS, RETIRE_GRACE)
+  containers.slots_init(&self.light_slots, MAX_LIGHTS, RETIRE_GRACE)
+  containers.slots_init(&self.emitter_slots, MAX_EMITTERS, RETIRE_GRACE)
+  containers.slots_init(&self.force_field_slots, MAX_FORCE_FIELDS, RETIRE_GRACE)
   // placements have no handle to go stale and each frame reads its own copy of the
   // table, so no grace
-  cont.slots_init(&self.light_placement_slots, MAX_LIGHTS)
-  cont.slots_init(&self.emitter_placement_slots, MAX_EMITTERS)
-  cont.slots_init(&self.force_field_placement_slots, MAX_FORCE_FIELDS)
-  cont.slab_init(&self.bone_matrix_slab, BONE_SLAB_CONFIG)
-  cont.slab_init(&self.skin_slab, SKIN_SLAB_CONFIG)
+  containers.slots_init(&self.light_placement_slots, MAX_LIGHTS)
+  containers.slots_init(&self.emitter_placement_slots, MAX_EMITTERS)
+  containers.slots_init(&self.force_field_placement_slots, MAX_FORCE_FIELDS)
+  containers.slab_init(&self.bone_matrix_slab, BONE_SLAB_CONFIG)
+  containers.slab_init(&self.skin_slab, SKIN_SLAB_CONFIG)
   self.cameras = make([]Camera, MAX_ACTIVE_CAMERAS)
   self.camera_targets = make([]CameraTargets, MAX_ACTIVE_CAMERAS)
   init_builtin_materials(self)
@@ -258,29 +259,29 @@ init_resources :: proc(self: ^Renderer) -> bool {
   return true
 }
 
-// setup starts a map: no particle is alive, and what was made before it (since init or the
-// previous setup) outlives the map's teardown, as what init makes does.
-setup :: proc(self: ^Renderer) -> bool {
+// setup keeps what the application made so far (since init) through every later teardown,
+// as what init makes is kept. Call it once, after making application-lifetime resources and
+// before the first map; without it teardown frees everything made since init.
+setup :: proc(self: ^Renderer) {
   guard(self)
   mark_resources(self)
-  return particles_reset(self)
 }
 
 // teardown frees from the marks on
 @(private)
 mark_resources :: proc(self: ^Renderer) {
-  cont.slots_mark(&self.mesh_slots)
-  for &slab in self.mesh_slabs do cont.slab_mark(&slab)
-  cont.slots_mark(&self.material_slots)
-  cont.slots_mark(&self.light_slots)
-  cont.slots_mark(&self.emitter_slots)
-  cont.slots_mark(&self.force_field_slots)
-  cont.slots_mark(&self.texture_slots)
-  cont.slots_mark(&self.camera_slots)
+  containers.slots_mark(&self.mesh_slots)
+  for &slab in self.mesh_slabs do containers.slab_mark(&slab)
+  containers.slots_mark(&self.material_slots)
+  containers.slots_mark(&self.light_slots)
+  containers.slots_mark(&self.emitter_slots)
+  containers.slots_mark(&self.force_field_slots)
+  containers.slots_mark(&self.texture_slots)
+  containers.slots_mark(&self.camera_slots)
 }
 
-// teardown ends a map in one go, waiting for the GPU: every slot forgets its attachment
-// and bone palette, and every camera, mesh, material, light, emitter, force field and
+// teardown ends a map in one go, waiting for the GPU: no particle stays alive, every slot
+// forgets its attachment and bone palette, and every camera, mesh, material, light, emitter, force field and
 // texture made since the last setup
 // (or init) is freed, the environment map too if it is one of them. What came before stays:
 // what init made (builtin meshes and materials, the main camera, render targets, pipelines)
@@ -289,33 +290,33 @@ teardown :: proc(self: ^Renderer) {
   guard(self)
   // their render targets and draw lists retire, and go with the flushes below
   c := self.camera_slots.mark
-  for i in cont.slots_next(&self.camera_slots, &c) do camera_destroy(self, CameraHandle(i))
+  for i in containers.slots_next(&self.camera_slots, &c) do camera_destroy(self, CameraHandle(i))
   // queued uploads may be init's: they land before anything is freed
   dev.wait_idle(&self.gpu)
-  for r in cont.slots_flush(&self.target_slots) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
+  for r in containers.slots_flush(&self.target_slots) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
   for i in self.texture_slots.mark ..< self.texture_slots.high_water do dev.texture_destroy(&self.gpu, TextureHandle(i))
   groups_clear(self)
-  cont.slots_rewind(&self.texture_slots)
+  containers.slots_rewind(&self.texture_slots)
   if u32(self.environment_map) >= self.texture_slots.mark {
     self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
   }
-  cont.slots_rewind(&self.camera_slots)
+  containers.slots_rewind(&self.camera_slots)
   clear_entry(self, .MESHES, self.mesh_slots.mark, self.mesh_slots.high_water - self.mesh_slots.mark)
-  cont.slots_rewind(&self.mesh_slots)
-  for &slab in self.mesh_slabs do cont.slab_rewind(&slab)
+  containers.slots_rewind(&self.mesh_slots)
+  for &slab in self.mesh_slabs do containers.slab_rewind(&slab)
   clear_entry(self, .MATERIALS, self.material_slots.mark, self.material_slots.high_water - self.material_slots.mark)
-  cont.slots_rewind(&self.material_slots)
+  containers.slots_rewind(&self.material_slots)
   slice.zero(write_table(self, .NODES, Node)[:self.node_count])
   mark_dirty(self, .NODES, 0, int(self.node_count))
   self.node_count = 0
   when !BINDLESS do batches_reset(self)
-  cont.slab_rewind(&self.bone_matrix_slab)
-  cont.slab_rewind(&self.skin_slab)
+  containers.slab_rewind(&self.bone_matrix_slab)
+  containers.slab_rewind(&self.skin_slab)
   clear_entry(self, .SKIN_OWNERS, 0, self.skinned_vertex_count)
   self.skinned_vertex_count = 0
-  rewind :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table) {
+  rewind :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table) {
     clear_entry(self, table, slots.mark, slots.high_water - slots.mark)
-    cont.slots_rewind(slots)
+    containers.slots_rewind(slots)
   }
   rewind(self, &self.light_slots, .LIGHTS)
   rewind(self, &self.emitter_slots, .EMITTERS)
@@ -324,17 +325,18 @@ teardown :: proc(self: ^Renderer) {
   rewind(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS)
   rewind(self, &self.force_field_placement_slots, .FORCE_FIELD_PLACEMENTS)
   self.shadow_casters = {}
+  if !particles_reset(self) do log.error("teardown: cannot clear the particles")
 }
 
-// Replace the environment map with the equirectangular HDR image encoded in `data` and
-// precompute image-based lighting from it. Without one, IBL and the skybox are black.
+// environment_map_load replaces the environment map with the equirectangular HDR image encoded
+// in `data` and precomputes image-based lighting from it. Without one, IBL and the skybox are black.
 environment_map_load :: proc(self: ^Renderer, data: []u8) -> bool {
   ok := ambient_load_environment(self, data)
   if !ok do log.warnf("Failed to load environment map")
   return ok
 }
 
-// Destroy everything, whatever map is up.
+// shutdown destroys everything, whatever map is up.
 shutdown :: proc(self: ^Renderer) {
   delete(self.cull_groups)
   delete(self.reduce_groups)
@@ -350,20 +352,20 @@ shutdown :: proc(self: ^Renderer) {
   delete(self.effect_stack)
   delete(self.custom_post_pipelines)
   for inbox in self.debug_lines do delete(inbox)
-  for &slab in self.mesh_slabs do cont.slab_destroy(&slab)
-  cont.slab_destroy(&self.bone_matrix_slab)
-  cont.slab_destroy(&self.skin_slab)
-  cont.slots_destroy(&self.camera_slots)
-  cont.slots_destroy(&self.mesh_slots)
-  cont.slots_destroy(&self.material_slots)
-  cont.slots_destroy(&self.light_slots)
-  cont.slots_destroy(&self.emitter_slots)
-  cont.slots_destroy(&self.force_field_slots)
-  cont.slots_destroy(&self.light_placement_slots)
-  cont.slots_destroy(&self.emitter_placement_slots)
-  cont.slots_destroy(&self.force_field_placement_slots)
-  cont.slots_destroy(&self.texture_slots)
-  cont.slots_destroy(&self.target_slots)
+  for &slab in self.mesh_slabs do containers.slab_destroy(&slab)
+  containers.slab_destroy(&self.bone_matrix_slab)
+  containers.slab_destroy(&self.skin_slab)
+  containers.slots_destroy(&self.camera_slots)
+  containers.slots_destroy(&self.mesh_slots)
+  containers.slots_destroy(&self.material_slots)
+  containers.slots_destroy(&self.light_slots)
+  containers.slots_destroy(&self.emitter_slots)
+  containers.slots_destroy(&self.force_field_slots)
+  containers.slots_destroy(&self.light_placement_slots)
+  containers.slots_destroy(&self.emitter_placement_slots)
+  containers.slots_destroy(&self.force_field_placement_slots)
+  containers.slots_destroy(&self.texture_slots)
+  containers.slots_destroy(&self.target_slots)
   delete(self.cameras)
   delete(self.camera_targets)
 }
@@ -375,7 +377,7 @@ recreate_swapchain :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale:
   dev.resize(&self.gpu, framebuffer_size) or_return
   extent := dev.extent(&self.gpu)
   c: u32
-  for i in cont.slots_next(&self.camera_slots, &c) {
+  for i in containers.slots_next(&self.camera_slots, &c) {
     if self.camera_targets[i].extent != old do continue
     camera_resize(self, CameraHandle(i), extent.x, extent.y) or_return
   }
@@ -415,7 +417,7 @@ post_process_release_images :: proc(self: ^Renderer) {
 }
 
 // lock holds off frame while another thread edits through the pointers material, light,
-// emitter and force_field return; stage_*, create_* and destroy_* lock themselves.
+// emitter and force_field return; stage_*, *_create and *_destroy lock themselves.
 lock :: proc(self: ^Renderer) {
   sync.recursive_mutex_lock(&self.mutex)
 }
@@ -437,21 +439,21 @@ tick_resource_pools :: proc(self: ^Renderer) {
   dev.tick(&self.gpu)
   // bind groups name textures by handle: a destroyed one's go
   destroyed := false
-  for r in cont.slots_tick(&self.target_slots) {
+  for r in containers.slots_tick(&self.target_slots) {
     dev.texture_destroy(&self.gpu, TextureHandle(r.index))
     destroyed = true
   }
-  for r in cont.slots_tick(&self.texture_slots) {
+  for r in containers.slots_tick(&self.texture_slots) {
     dev.texture_destroy(&self.gpu, TextureHandle(r.index))
     destroyed = true
   }
   if destroyed do groups_clear(self)
-  for r in cont.slots_tick(&self.mesh_slots) {
+  for r in containers.slots_tick(&self.mesh_slots) {
     free_mesh(self, write_table(self, .MESHES, MeshData)[r.index])
     clear_entry(self, .MESHES, r.index)
   }
-  cont.slots_tick(&self.material_slots)
-  cont.slots_tick(&self.camera_slots)
+  containers.slots_tick(&self.material_slots)
+  containers.slots_tick(&self.camera_slots)
 }
 
 // Advance the render clock (shaders' time, debug line lifetimes) and the particle
@@ -547,17 +549,17 @@ stage_transforms :: proc(self: ^Renderer, changes: []$T) {
 
 // A placement table holds at most one row per slot. The live row of `table` placed at `slot`.
 @(private = "file")
-placed_at :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, $T: typeid, slot: u32) -> (index: u32, ok: bool) {
+placed_at :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, $T: typeid, slot: u32) -> (index: u32, ok: bool) {
   rows := write_table(self, table, T)
   c: u32
-  for i in cont.slots_next(slots, &c) do if rows[i].node == slot do return i, true
+  for i in containers.slots_next(slots, &c) do if rows[i].node == slot do return i, true
   return
 }
 
 // Takes a placement row of `table` for `row`.
 @(private = "file")
-place :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, row: $T) -> bool {
-  i := cont.slots_alloc(slots) or_return
+place :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, row: $T) -> bool {
+  i := containers.slots_alloc(slots) or_return
   write_table(self, table, T)[i] = row
   mark_dirty(self, table, int(i))
   return true
@@ -565,10 +567,10 @@ place :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, row: $T) -> boo
 
 // Frees the slot's placement row of `table`, if any.
 @(private = "file")
-unplace :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, $T: typeid, slot: u32) {
+unplace :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, $T: typeid, slot: u32) {
   i := placed_at(self, slots, table, T, slot) or_else 0
   if i == 0 do return
-  cont.slots_free(slots, i)
+  containers.slots_free(slots, i)
   clear_entry(self, table, i)
 }
 
@@ -582,9 +584,9 @@ unbind :: proc(self: ^Renderer, slot: u32) {
 
 // Stores `value` in a free row of `table`; the row is the resource's handle.
 @(private)
-resource_create :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, value: $T) -> (index: u32, ok: bool) {
+resource_create :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, value: $T) -> (index: u32, ok: bool) {
   guard(self)
-  index = cont.slots_alloc(slots) or_return
+  index = containers.slots_alloc(slots) or_return
   write_table(self, table, T)[index] = value
   mark_dirty(self, table, int(index))
   return index, true
@@ -592,17 +594,17 @@ resource_create :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, value
 
 // The row of a live handle, to edit in place: valid until the next frame, as render.material's.
 @(private)
-resource :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, $T: typeid, index: u32) -> (^T, bool) {
-  if !cont.slots_live(slots, index) do return nil, false
+resource :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, $T: typeid, index: u32) -> (^T, bool) {
+  if !containers.slots_live(slots, index) do return nil, false
   mark_dirty(self, table, int(index))
   return &write_table(self, table, T)[index], true
 }
 
 // Frees a row; what still refers to it reads zeros.
 @(private)
-resource_destroy :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, index: u32) {
+resource_destroy :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, index: u32) {
   guard(self)
-  if !cont.slots_free(slots, index) do return
+  if !containers.slots_free(slots, index) do return
   clear_entry(self, table, index)
 }
 
@@ -628,7 +630,7 @@ skinned_mesh :: proc(self: ^Renderer, mesh_id: u32) -> bool {
 // the skinning pass. The whole block: the pass skips vertices past the owner's mesh.
 @(private = "file")
 skin_own :: proc(self: ^Renderer, base, owner: u32) {
-  size := cont.slab_block_size(&self.skin_slab, base)
+  size := containers.slab_block_size(&self.skin_slab, base)
   slice.fill(write_table(self, .SKIN_OWNERS, u32)[base:][:size], owner)
   mark_dirty(self, .SKIN_OWNERS, int(base), int(size))
   self.skinned_vertex_count = max(self.skinned_vertex_count, base + size)
@@ -639,9 +641,9 @@ skin_own :: proc(self: ^Renderer, base, owner: u32) {
 release_bones :: proc(self: ^Renderer, slot: u32) {
   node := &write_table(self, .NODES, Node)[slot]
   if .SKINNED not_in node.flags do return
-  cont.slab_free(&self.bone_matrix_slab, node.attachment_data_index)
+  containers.slab_free(&self.bone_matrix_slab, node.attachment_data_index)
   skin_own(self, node.skin_vertex_base, 0)
-  cont.slab_free(&self.skin_slab, node.skin_vertex_base)
+  containers.slab_free(&self.skin_slab, node.skin_vertex_base)
   node.attachment_data_index, node.skin_vertex_base = 0, 0
   node.flags -= {.SKINNED}
   mark_dirty(self, .NODES, int(slot))
@@ -651,11 +653,11 @@ release_bones :: proc(self: ^Renderer, slot: u32) {
 @(private = "file")
 skin_fits :: proc(self: ^Renderer, node: Node, mesh_id: u32) -> bool {
   vertex_count := write_table(self, .MESHES, MeshData)[mesh_id].vertex_count
-  return cont.slab_block_size(&self.skin_slab, node.skin_vertex_base) >= vertex_count
+  return containers.slab_block_size(&self.skin_slab, node.skin_vertex_base) >= vertex_count
 }
 
-// Skin palette (bone skinning matrices) for the skinned mesh at `slot`, attached first.
-// The matrices are copied.
+// stage_bones sets the skin palette (bone skinning matrices, animation.Animator.palette) of
+// the skinned mesh attached at `slot`. The matrices are copied.
 stage_bones :: proc(self: ^Renderer, slot: SlotHandle, matrices: []matrix[4, 4]f32) {
   slot := u32(slot)
   count := u32(len(matrices))
@@ -666,17 +668,17 @@ stage_bones :: proc(self: ^Renderer, slot: SlotHandle, matrices: []matrix[4, 4]f
     log.warnf("Slot %d has no skinned mesh; its bone palette is dropped", slot)
     return
   }
-  if .SKINNED not_in node.flags || cont.slab_block_size(&self.bone_matrix_slab, node.attachment_data_index) < count {
+  if .SKINNED not_in node.flags || containers.slab_block_size(&self.bone_matrix_slab, node.attachment_data_index) < count {
     release_bones(self, slot)
-    offset, ok := cont.slab_alloc(&self.bone_matrix_slab, count)
+    offset, ok := containers.slab_alloc(&self.bone_matrix_slab, count)
     if !ok {
       log.warnf("No bone range for a %d-bone palette; the mesh draws unskinned", count)
       return
     }
     vertex_count := write_table(self, .MESHES, MeshData)[node.mesh_id].vertex_count
-    base, skin_ok := cont.slab_alloc(&self.skin_slab, vertex_count)
+    base, skin_ok := containers.slab_alloc(&self.skin_slab, vertex_count)
     if !skin_ok {
-      cont.slab_free(&self.bone_matrix_slab, offset)
+      containers.slab_free(&self.bone_matrix_slab, offset)
       log.warnf("No skinned vertex range for %d vertices; the mesh draws unskinned", vertex_count)
       return
     }
@@ -917,7 +919,7 @@ light_look :: proc(position, direction: [3]f32) -> matrix[4, 4]f32 {
 shadow_face_matrices :: proc(l: Light, position, direction: [3]f32, face: int, camera: ^View) -> (view, projection: matrix[4, 4]f32) {
   perspective :: proc(fovy, radius: f32) -> matrix[4, 4]f32 {
     near :: 0.1
-    return geom.make_perspective_matrix(max(fovy, 0.001), 1.0, near, max(near + 0.1, radius))
+    return geometry.make_perspective_matrix(max(fovy, 0.001), 1.0, near, max(near + 0.1, radius))
   }
   switch l.type {
   case .POINT:
@@ -967,7 +969,7 @@ cascade_matrices :: proc(l: Light, direction: [3]f32, cascade: int, camera: ^Vie
   c.xy = linalg.floor(c.xy / texel) * texel
   // the eye sits r towards the light from the center, the box 2r deep
   view = linalg.matrix4_translate([3]f32{-c.x, -c.y, -(c.z + r)}) * rotation
-  return view, geom.make_ortho_matrix(-r, r, -r, r, 0, 2 * r)
+  return view, geometry.make_ortho_matrix(-r, r, -r, r, 0, 2 * r)
 }
 
 // How far in front of the main camera a directional light's shadow map reaches.
@@ -1016,7 +1018,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
     score: f32 = -1
     for &v in cameras {
       if v.type_mask == 0 do continue
-      if !geom.frustum_test_sphere({v.planes}, bounds.xyz, bounds.w) do continue
+      if !geometry.frustum_test_sphere({v.planes}, bounds.xyz, bounds.w) do continue
       score = max(score, shadow_score(bounds, light.color.a, v.position.xyz))
     }
     if score < 0 do continue
@@ -1039,7 +1041,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
       v := p.shadow_map + f
       view, projection := shadow_face_matrices(light, position, direction, int(f), eye)
       view_projection := projection * view
-      planes := geom.make_frustum(view_projection).planes
+      planes := geometry.make_frustum(view_projection).planes
       // casters between a directional light and its cascade's box still
       // shadow it (the shadow pipeline clamps their depth)
       if light.type == .DIRECTIONAL do planes[4] = {0, 0, 0, 1}
@@ -1098,7 +1100,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
   mark_dirty(self, .VIEWS, CAMERA_VIEW_BASE, int(slot_count))
   all_types := u32(1 << len(MaterialType) - 1)
   c: u32
-  for i in cont.slots_next(&self.camera_slots, &c) {
+  for i in containers.slots_next(&self.camera_slots, &c) {
     cam, targets := &self.cameras[i], &self.camera_targets[i]
     view := camera_view_matrix(cam)
     projection := camera_projection_matrix(cam, targets.extent)
@@ -1109,7 +1111,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       projection          = projection,
       view_projection     = view_projection,
       inv_view_projection = linalg.inverse(view_projection),
-      planes              = geom.make_frustum(view_projection).planes,
+      planes              = geometry.make_frustum(view_projection).planes,
       position            = {cam.position.x, cam.position.y, cam.position.z, 1},
       extent              = {f32(targets.extent[0]), f32(targets.extent[1])},
       near                = cam.near,

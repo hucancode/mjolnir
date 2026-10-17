@@ -2,7 +2,7 @@ package animation
 
 import "core:math/linalg"
 
-// Interpolation selects how a Track blends between keys.
+// Interpolation selects how a clip blends between keys.
 Interpolation :: enum u8 {
   LINEAR,
   STEP,
@@ -12,6 +12,7 @@ Interpolation :: enum u8 {
 // Track is a keyframed curve of any value over flat arrays. A track does not own its
 // memory; it is a view (into a Clip, or into caller arrays).
 // CUBIC stores three values per key: in-tangent, value, out-tangent.
+@(private)
 Track :: struct($T: typeid) {
   times:         []f32,
   values:        []T,

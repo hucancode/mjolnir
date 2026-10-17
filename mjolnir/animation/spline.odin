@@ -5,8 +5,8 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
-// Spline is a Catmull-Rom cubic spline for smooth interpolation through control points
-// Automatically generates tangents using neighboring points
+// Spline is a Catmull-Rom cubic spline through its control points; tangents come from the
+// neighbouring points.
 Spline :: struct($T: typeid) {
   points:    []T,
   times:     []f32,
@@ -244,20 +244,22 @@ spline_arc_length :: proc(spline: Spline($T)) -> f32 {
   return slice.last(table.arc_lengths) if len(table.arc_lengths) > 0 else 0
 }
 
-// spline_create_closed builds a closed-loop Catmull-Rom spline through `base` (base[N-1] must
-// differ from base[0]). Ghost points around the seam keep tangents smooth; the arc table
-// covers t in [0, N], so spline_arc_length is exactly one loop.
-spline_create_closed :: proc(base: [][3]f32, samples := 200) -> Spline([3]f32) {
+// spline_init_closed fills `self` with a closed-loop Catmull-Rom spline through `base`
+// (base[N-1] must differ from base[0]). Ghost points around the seam keep tangents smooth;
+// the arc table covers t in [0, N], so spline_arc_length is exactly one loop. Fails without
+// allocating on fewer than 3 points. Free with spline_destroy.
+spline_init_closed :: proc(self: ^Spline([3]f32), base: [][3]f32, samples := 200) -> bool {
   n := len(base)
-  result := Spline([3]f32){points = make([][3]f32, n + 3), times = make([]f32, n + 3)}
-  closed_points(base, result.points, result.times)
+  if n < 3 do return false
+  self^ = {points = make([][3]f32, n + 3), times = make([]f32, n + 3)}
+  closed_points(base, self.points, self.times)
   table := SplineArcTable([3]f32) {
     arc_lengths = make([]f32, samples),
     times       = make([]f32, samples),
   }
-  arc_fill(result, table.arc_lengths, table.times, 0, f32(n))
-  result.arc_table = table
-  return result
+  arc_fill(self^, table.arc_lengths, table.times, 0, f32(n))
+  self.arc_table = table
+  return true
 }
 
 // The control points (len(base) + 3) and times of a closed loop through `base`.

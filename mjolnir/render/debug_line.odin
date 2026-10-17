@@ -55,7 +55,8 @@ flush_debug_lines :: proc(self: ^Renderer) {
   }
 }
 
-// DEBUG_* are the stock debug line colors.
+// DEBUG_* are the stock debug line colors. Every debug_* proc takes `life`, the seconds the
+// shape stays (0 for one frame), and `bypass_depth` to draw it over everything.
 DEBUG_WHITE :: [4]f32{1, 1, 1, 1}
 DEBUG_BLACK :: [4]f32{0, 0, 0, 1}
 DEBUG_GRAY :: [4]f32{0.5, 0.5, 0.5, 1}

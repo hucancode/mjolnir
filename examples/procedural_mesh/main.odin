@@ -84,9 +84,9 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 12.0)
 
-  wave_mat   := render.material_create(&app.renderer, base_color_factor = {0.3, 0.55, 0.85, 1}, metallic_value = 0.2, roughness_value = 0.5)
-  knot_mat   := render.material_create(&app.renderer, base_color_factor = {0.9, 0.5,  0.2,  1}, metallic_value = 0.8, roughness_value = 0.3)
-  spiral_mat := render.material_create(&app.renderer, base_color_factor = {0.4, 0.85, 0.4,  1}, metallic_value = 0.0, roughness_value = 0.7)
+  wave_mat   := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.3, 0.55, 0.85, 1}, metallic_value = 0.2, roughness_value = 0.5))
+  knot_mat   := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.5,  0.2,  1}, metallic_value = 0.8, roughness_value = 0.3))
+  spiral_mat := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.4, 0.85, 0.4,  1}, metallic_value = 0.0, roughness_value = 0.7))
 
   wave_node   = spawn_mesh(app, render.mesh_create(&app.renderer, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0})
   knot_node   = spawn_mesh(app, render.mesh_create(&app.renderer, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0})
@@ -119,7 +119,7 @@ build_wave :: proc(n: int, size: f32, amp: f32) -> render.Geometry {
     indices[idx + 3] = b; indices[idx + 4] = c; indices[idx + 5] = d
     idx += 6
   }
-  return render.geometry_create(vertices, indices)
+  return render.make_geometry(vertices, indices)
 }
 
 build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -> render.Geometry {
@@ -153,7 +153,7 @@ build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -
     indices[idx + 3] = b; indices[idx + 4] = d; indices[idx + 5] = c
     idx += 6
   }
-  return render.geometry_create(vertices, indices)
+  return render.make_geometry(vertices, indices)
 }
 
 build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height, turns: f32) -> render.Geometry {
@@ -185,7 +185,7 @@ build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height
     indices[idx + 3] = b; indices[idx + 4] = d; indices[idx + 5] = c
     idx += 6
   }
-  return render.geometry_create(vertices, indices)
+  return render.make_geometry(vertices, indices)
 }
 
 update :: proc(app: ^App, dt: f32) {

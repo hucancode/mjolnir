@@ -1,11 +1,11 @@
 package render
 
-import cont "../containers"
+import "../containers"
 import "core:slice"
 
 // About 16 MB per frame in flight.
 @(private)
-BONE_SLAB_CONFIG :: cont.SlabConfig {
+BONE_SLAB_CONFIG :: containers.SlabConfig {
   {block_size = 32, block_count = 256},
   {block_size = 64, block_count = 256},
   {block_size = 128, block_count = 1024},
@@ -28,7 +28,7 @@ BONE_CAPACITY ::
 
 // The skinned vertex ranges, one per skinned node, as many vertices as its mesh: about 24 MB.
 @(private)
-SKIN_SLAB_CONFIG :: cont.SlabConfig {
+SKIN_SLAB_CONFIG :: containers.SlabConfig {
   {block_size = 1024, block_count = 64},
   {block_size = 4096, block_count = 32},
   {block_size = 16384, block_count = 16},

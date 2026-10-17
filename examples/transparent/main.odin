@@ -79,7 +79,7 @@ setup :: proc(app: ^App) -> bool {
   world.scale(&app.scene, ground, 6.0)
 
   // Solid red sphere behind the glass slabs
-  red_mat := render.material_create(&app.renderer, base_color_factor = {0.95, 0.15, 0.15, 1}, roughness_value = 0.4)
+  red_mat := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.95, 0.15, 0.15, 1}, roughness_value = 0.4))
   sphere := world.spawn(&app.scene, {0, 1, -2})
   render.attach(&app.renderer, render.SlotHandle(sphere.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.SPHERE], material = red_mat, cast_shadow = true})
 
@@ -92,7 +92,7 @@ setup :: proc(app: ^App) -> bool {
     {1.0, 0.2, 0.7, 0.85},
   }
   for c, i in colors {
-    mat := render.material_create(&app.renderer, .TRANSPARENT, base_color_factor = c)
+    mat := render.material_create(&app.renderer, render.make_material(.TRANSPARENT, base_color_factor = c))
     h := world.spawn(&app.scene, {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4})
     render.attach(&app.renderer, render.SlotHandle(h.index), render.MeshAttachment{mesh = cube, material = mat, cast_shadow = false})
     world.scale(&app.scene, h, 0.8)

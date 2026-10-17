@@ -8,6 +8,7 @@ import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
+// MAX_MANIFOLD_POINTS is how many points a Contact holds.
 MAX_MANIFOLD_POINTS :: 4
 
 // Warmstart pair keys include handle generations so a recycled slot never

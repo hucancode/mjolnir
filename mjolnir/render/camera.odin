@@ -1,12 +1,13 @@
 package render
 
-import geom "../geometry"
-import cont "../containers"
+import "../geometry"
+import "../containers"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-// The aspect ratio follows the camera's extent.
+// PerspectiveProjection is a perspective projection of vertical field of view `fov` (radians);
+// the aspect ratio follows the camera's size.
 PerspectiveProjection :: struct {
   fov: f32,
 }
@@ -86,8 +87,8 @@ camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   // the camera looks along its -Z axis, up its Y axis
   return linalg.matrix4_look_at(
     camera.position,
-    camera.position - geom.qz(camera.rotation),
-    geom.qy(camera.rotation),
+    camera.position - geometry.qz(camera.rotation),
+    geometry.qy(camera.rotation),
   )
 }
 
@@ -95,7 +96,7 @@ camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
 camera_projection_matrix :: proc(camera: ^Camera, extent: [2]u32) -> matrix[4, 4]f32 {
   switch proj in camera.projection {
   case PerspectiveProjection:
-    return geom.make_perspective_matrix(
+    return geometry.make_perspective_matrix(
       proj.fov,
       f32(extent[0]) / f32(max(extent[1], 1)),
       camera.near,
@@ -104,7 +105,7 @@ camera_projection_matrix :: proc(camera: ^Camera, extent: [2]u32) -> matrix[4, 4
   case OrthographicProjection:
     hw := proj.width / 2
     hh := proj.height / 2
-    return geom.make_ortho_matrix(-hw, hw, -hh, hh, camera.near, camera.far)
+    return geometry.make_ortho_matrix(-hw, hw, -hh, hh, camera.near, camera.far)
   }
   return linalg.MATRIX4F32_IDENTITY
 }
@@ -226,7 +227,7 @@ camera_set_orthographic :: proc(
 
 // cursor_ray returns the world-space ray from the main camera through cursor, given in
 // window coordinates as input.State reports them (the DPI scale is applied here).
-cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (ray: geom.Ray, ok: bool) {
+cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (ray: geometry.Ray, ok: bool) {
   cam := main_camera(self) or_return
   extent := self.camera_targets[self.main_camera].extent
   p := cursor * self.dpi_scale
@@ -239,7 +240,7 @@ cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (ray: geom.Ray, ok: bool)
 
 // camera returns the camera of handle, or false if it is not live.
 camera :: proc(self: ^Renderer, handle: CameraHandle) -> (^Camera, bool) #optional_ok {
-  if !cont.slots_live(&self.camera_slots, u32(handle)) do return nil, false
+  if !containers.slots_live(&self.camera_slots, u32(handle)) do return nil, false
   return &self.cameras[handle], true
 }
 
@@ -263,7 +264,7 @@ camera_create :: proc(
   handle: CameraHandle,
   ok: bool,
 ) #optional_ok {
-  handle = CameraHandle(cont.slots_alloc(&self.camera_slots) or_return)
+  handle = CameraHandle(containers.slots_alloc(&self.camera_slots) or_return)
   cam := &self.cameras[handle]
   cam^ = {}
   self.camera_targets[handle] = {extent = {width, height}}
@@ -284,13 +285,13 @@ camera_create :: proc(
   return handle, true
 }
 
-// camera_destroy frees the camera; its slot is reused once no frame in flight reads it.
+// camera_destroy frees the camera; its handle is stale at once.
 camera_destroy :: proc(self: ^Renderer, handle: CameraHandle) {
   cam := camera(self, handle)
   if cam == nil do return
   destroy_targets(self, u32(handle))
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) do draw_list_destroy(self, camera_slot(u32(handle)) + frame)
-  cont.slots_free(&self.camera_slots, u32(handle))
+  containers.slots_free(&self.camera_slots, u32(handle))
   if handle == self.main_camera do self.main_camera = 0
 }
 

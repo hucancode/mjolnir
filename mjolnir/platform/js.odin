@@ -21,7 +21,7 @@ Platform :: struct {
 @(private)
 Platform_State :: struct {
   // DOM events since the last read_input
-  input:    input.Accumulator,
+  input:    Accumulator,
   context_: runtime.Context,
 }
 
@@ -54,7 +54,7 @@ poll_events :: proc(self: ^Platform) {}
 
 // read_input takes this tick's input snapshot from the events received so far.
 read_input :: proc(self: ^Platform, s: ^input.State) {
-  input.new_frame(s, &self.input)
+  acc_drain(&self.input, s)
 }
 
 // framebuffer_size returns the canvas size in pixels.
@@ -125,12 +125,12 @@ on_key :: proc(e: js.Event) {
   key, ok := key_of_code(e.key.code)
   if ok {
     action: input.Action = .RELEASE if e.kind == .Key_Up else (.REPEAT if e.key.repeat else .PRESS)
-    input.on_key(&self.input, key, action)
+    acc_key(&self.input, key, action)
   }
   // a printable key's name is the character it types
   if e.kind == .Key_Down && !e.key.ctrl && !e.key.meta && utf8.rune_count(e.key.key) == 1 {
     r, _ := utf8.decode_rune(e.key.key)
-    input.on_char(&self.input, r)
+    acc_char(&self.input, r)
   }
 }
 
@@ -139,7 +139,7 @@ on_key :: proc(e: js.Event) {
 on_mouse :: proc(e: js.Event) {
   self := cast(^Platform)e.user_data
   rect := js.get_bounding_client_rect(CANVAS_ID)
-  input.on_cursor(&self.input, f32(f64(e.mouse.client.x) - rect.x), f32(f64(e.mouse.client.y) - rect.y))
+  acc_cursor(&self.input, f32(f64(e.mouse.client.x) - rect.x), f32(f64(e.mouse.client.y) - rect.y))
   if e.kind == .Mouse_Move do return
   // DOM buttons are left, middle, right
   button: input.MouseButton
@@ -149,14 +149,14 @@ on_mouse :: proc(e: js.Event) {
   case 2: button = .RIGHT
   case: return
   }
-  input.on_button(&self.input, button, .RELEASE if e.kind == .Mouse_Up else .PRESS)
+  acc_button(&self.input, button, .RELEASE if e.kind == .Mouse_Up else .PRESS)
 }
 
 // A wheel notch is about 100 pixels; down is negative, as in GLFW.
 @(private = "file")
 on_wheel :: proc(e: js.Event) {
   self := cast(^Platform)e.user_data
-  input.on_scroll(&self.input, f32(-e.wheel.delta.x / 100), f32(-e.wheel.delta.y / 100))
+  acc_scroll(&self.input, f32(-e.wheel.delta.x / 100), f32(-e.wheel.delta.y / 100))
 }
 
 // KeyboardEvent.code to Key; codes name physical keys, as GLFW key codes do.

@@ -77,7 +77,8 @@ setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  return render.setup(&app.renderer) && build_level(app)
+  render.setup(&app.renderer)
+  return build_level(app)
 }
 
 build_level :: proc(app: ^App) -> bool {
@@ -124,10 +125,7 @@ build_level :: proc(app: ^App) -> bool {
     color := [4]f32{0.2 + 0.8 * f32(col) / f32(GRID - 1), 0.3, 1.0 - 0.8 * t, 1.0}
     mat, ok := render.material_create(
       &app.renderer,
-      type = .PBR,
-      base_color_factor = color,
-      metallic_value = t,
-      roughness_value = 1.0 - t,
+      render.make_material(type = .PBR, base_color_factor = color, metallic_value = t, roughness_value = 1.0 - t),
     )
     if !ok do continue
     append(&example_materials, mat)
@@ -268,7 +266,7 @@ update :: proc(app: ^App, delta_time: f32) {
     reset_requested = false
     world.teardown(&app.scene)
     render.teardown(&app.renderer)
-    if render.setup(&app.renderer) do build_level(app)
+    build_level(app)
     render.update(&app.renderer, delta_time)
     return
   }

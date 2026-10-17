@@ -109,20 +109,20 @@ setup :: proc(app: ^App) -> bool {
   cube_mesh   := app.renderer.builtin_meshes[.CUBE]
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
 
-  magenta_emit := render.material_create(&app.renderer, base_color_factor = {1.0, 0.1, 0.8, 1}, emissive_value = 4.0)
+  magenta_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.1, 0.8, 1}, emissive_value = 4.0))
   spawn_mesh(app, sphere_mesh, magenta_emit, {-3.0, 1.2, 1.5})
-  cyan_emit := render.material_create(&app.renderer, base_color_factor = {0.1, 0.9, 1.0, 1}, emissive_value = 4.0)
+  cyan_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.1, 0.9, 1.0, 1}, emissive_value = 4.0))
   spawn_mesh(app, sphere_mesh, cyan_emit, {0.0, 1.2, 1.5})
-  yellow_emit := render.material_create(&app.renderer, base_color_factor = {1.0, 0.9, 0.2, 1}, emissive_value = 4.0)
+  yellow_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.9, 0.2, 1}, emissive_value = 4.0))
   spawn_mesh(app, sphere_mesh, yellow_emit, {3.0, 1.2, 1.5})
 
-  metal := render.material_create(&app.renderer, base_color_factor = {0.9, 0.9, 0.95, 1}, metallic_value = 1.0, roughness_value = 0.15)
+  metal := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.9, 0.95, 1}, metallic_value = 1.0, roughness_value = 0.15))
   spawn_mesh(app, sphere_mesh, metal, {0.5, 1.0, -1.5})
-  rough := render.material_create(&app.renderer, base_color_factor = {0.2, 0.6, 0.8, 1}, metallic_value = 0.0, roughness_value = 0.8)
+  rough := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.2, 0.6, 0.8, 1}, metallic_value = 0.0, roughness_value = 0.8))
   spawn_mesh(app, cube_mesh, rough, {3.0, 1.0, -1.5})
-  orange := render.material_create(&app.renderer, base_color_factor = {1.0, 0.4, 0.1, 1}, emissive_value = 4.0)
+  orange := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.4, 0.1, 1}, emissive_value = 4.0))
   spawn_mesh(app, cube_mesh, orange, {-3.0, 1.0, -1.5})
-  glass := render.material_create(&app.renderer, .TRANSPARENT, base_color_factor = {0.2, 0.9, 0.4, 0.4})
+  glass := render.material_create(&app.renderer, render.make_material(.TRANSPARENT, base_color_factor = {0.2, 0.9, 0.4, 0.4}))
   spawn_mesh(app, sphere_mesh, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
 
   white_mat := app.renderer.builtin_materials[.WHITE]

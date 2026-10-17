@@ -1,5 +1,7 @@
 package animation
 
+import "../containers"
+
 import "core:math"
 import "core:math/ease"
 import "core:math/linalg"
@@ -94,10 +96,11 @@ blend_sample :: proc(acc: ^TRS, acc_w: ^f32, s, rest: TRS, w: f32, mode: BlendMo
   }
 }
 
-// LayerHandle identifies a layer of an Animator (layer_create).
-LayerHandle :: distinct u32
+// LayerHandle identifies a layer of an Animator (layer_create); stale after layer_destroy
+// or layers_clear.
+LayerHandle :: distinct containers.Handle
 
-// ClipHandle identifies a clip of a Rig (find_clip).
+// ClipHandle identifies a clip of a Rig (clip_find).
 ClipHandle :: distinct u32
 
 // LayerParams is what a layer does: play a clip, or edit the pose with an IK chain, a tail
@@ -158,6 +161,8 @@ Layer :: struct {
   state:    Range, // into Animator.state, the kind's own floats
   fresh:    bool, // not updated yet
   params:   LayerParams,
+  // bumped when the layer is destroyed, so its handles go stale; 0 = slot never used
+  generation: u32,
 }
 
 @(private)

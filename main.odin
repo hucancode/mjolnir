@@ -259,7 +259,7 @@ setup :: proc(app: ^App) -> bool {
     if brick_albedo_ok {
       brick_wall_mat_handle, brick_wall_mat_ok = render.material_create(
         &app.renderer,
-        albedo_texture = brick_albedo_handle,
+        render.make_material(albedo_texture = brick_albedo_handle),
       )
     }
     ground_mesh_handle := app.renderer.builtin_meshes[render.Primitive.QUAD_XZ]
@@ -359,7 +359,7 @@ setup :: proc(app: ^App) -> bool {
       character := add_character(gltf_nodes, "idle")
       // Attach a spinning cube to the hand.L bone of the first skinned mesh
       for s, i in gltf_nodes.skinned {
-        bone := animation.find_bone(&gltf_nodes.rigs[s.rig].skeleton, "hand.L") or_continue
+        bone := animation.bone_find(&gltf_nodes.rigs[s.rig].skeleton, "hand.L") or_continue
         hand_cube_handle := spawn(
           app,
           parent = s.node,
@@ -514,7 +514,7 @@ setup :: proc(app: ^App) -> bool {
     log.info("Setting up bloom...")
     append(&app.renderer.effect_stack, render.BloomEffect{threshold = 0.8, intensity = 0.5, blur_radius = 16.0})
     // A bright white ball to test the bloom effect
-    if emissive_texture, emissive_ok := render.material_create(&app.renderer, emissive_value = 30.0); emissive_ok {
+    if emissive_texture, emissive_ok := render.material_create(&app.renderer, render.make_material(emissive_value = 30.0)); emissive_ok {
       bright_ball := spawn(
         app,
         attachment = render.MeshAttachment {
@@ -538,8 +538,7 @@ setup :: proc(app: ^App) -> bool {
     if goldstar_texture_ok {
       goldstar_material_handle, goldstar_material_ok = render.material_create(
         &app.renderer,
-        type = .TRANSPARENT,
-        albedo_texture = goldstar_texture_handle,
+        render.make_material(type = .TRANSPARENT, albedo_texture = goldstar_texture_handle),
       )
     }
     psys_handle1 := world.spawn(&app.scene, {-2.0, 1.9, 0.3})
@@ -630,9 +629,7 @@ setup :: proc(app: ^App) -> bool {
       100.0, // far plane
     )
     portal_material_ok: bool
-    portal_material_handle, portal_material_ok = render.material_create(
-      &app.renderer,
-    )
+    portal_material_handle, portal_material_ok = render.material_create(&app.renderer, render.make_material())
     portal_quad_handle := app.renderer.builtin_meshes[render.Primitive.QUAD_XY]
     portal_mesh_ok := true
     if portal_material_ok && portal_mesh_ok {
@@ -657,7 +654,7 @@ setup :: proc(app: ^App) -> bool {
     )
     if warrior_sprite_ok {
       // 6x17 sprite sheet using frames 0-98, animated in update
-      sprite_material, sprite_ok := render.material_create(&app.renderer, .SPRITE, albedo_texture = warrior_sprite_texture, frame_columns = 6, frame_rows = 17)
+      sprite_material, sprite_ok := render.material_create(&app.renderer, render.make_material(.SPRITE, albedo_texture = warrior_sprite_texture, frame_columns = 6, frame_rows = 17))
       warrior_sprite = sprite_material
       if sprite_ok {
         sprite_attachment := render.MeshAttachment {

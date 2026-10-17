@@ -11,9 +11,6 @@ import "core:strings"
 
 SECTIONS := [?]string{"constants", "variables", "procedures", "types", "procedure groups"}
 
-// render's GPU layer: no application imports these, so the reference leaves them out
-INTERNAL := [?]string{"mjolnir/render/rhi", "mjolnir/render/vulkan", "mjolnir/render/wgpu"}
-
 Sym :: struct {
 	sig: string,
 	doc: string,
@@ -123,30 +120,13 @@ package_dirs :: proc() -> []string {
 		if !strings.has_suffix(f, ".odin") {continue}
 		d, _ := filepath.split(f)
 		d = strings.trim_right(d, "/")
-		if d not_in seen && !slice.contains(INTERNAL[:], d) {
+		if d not_in seen {
 			seen[d] = {}
 			append(&dirs, d)
 		}
 	}
 	slice.sort(dirs[:])
 	return dirs[:]
-}
-
-// definitions in the left-out GPU layer, by qualified name ("rhi.BlendMode" -> "enum {...}")
-internal_defs :: proc() -> map[string]string {
-	defs: map[string]string
-	for path in INTERNAL {
-		_, raw := parse_doc(run("odin", "doc", path))
-		pkg := filepath.base(path)
-		for r in raw {
-			for s in r.syms {
-				if i := strings.index(s.sig, " :: "); i >= 0 {
-					defs[strings.concatenate({pkg, ".", s.sig[:i]})] = s.sig[i + 4:]
-				}
-			}
-		}
-	}
-	return defs
 }
 
 // A struct's anonymous `using _: X` is its private state: the reference shows the public
@@ -167,21 +147,14 @@ drop_private_using :: proc(sig: string) -> string {
 	}
 }
 
-// `defs` resolves aliases of the GPU layer (render's `BlendMode :: rhi.BlendMode`), which the
-// reference leaves out, to their definitions
-load_pkg :: proc(path: string, defs: map[string]string) -> Pkg {
+load_pkg :: proc(path: string) -> Pkg {
 	// test files are #+private, so `odin doc` leaves their symbols out
 	doc, raw := parse_doc(run("odin", "doc", path))
 	sections: [dynamic]Section
 	for r in raw {
 		syms: [dynamic]Sym
 		for s in r.syms {
-			sig := s.sig
-			if i := strings.index(sig, " :: "); i >= 0 {
-				if def, ok := defs[sig[i + 4:]]; ok {sig = strings.concatenate({sig[:i + 4], def})}
-			}
-			sig = drop_private_using(sig)
-			append(&syms, Sym{sig = sig, doc = strings.join(s.doc[:], "\n")})
+			append(&syms, Sym{sig = drop_private_using(s.sig), doc = strings.join(s.doc[:], "\n")})
 		}
 		if len(syms) > 0 {append(&sections, Section{name = r.name, syms = syms[:]})}
 	}
@@ -235,8 +208,7 @@ main :: proc() {
 	}
 
 	pkgs: [dynamic]Pkg
-	defs := internal_defs()
-	for d in package_dirs() {append(&pkgs, load_pkg(d, defs))}
+	for d in package_dirs() {append(&pkgs, load_pkg(d))}
 	emit(strings.concatenate({out, "/api.js"}), "API", pkgs[:])
 	examples := load_examples()
 	emit(strings.concatenate({out, "/examples.js"}), "EXAMPLES", examples)

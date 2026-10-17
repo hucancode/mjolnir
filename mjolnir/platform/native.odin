@@ -20,7 +20,7 @@ Platform :: struct {
 @(private)
 Platform_State :: struct {
   // device events since the last read_input
-  input:    input.Accumulator,
+  input:    Accumulator,
   context_: runtime.Context,
 }
 
@@ -45,7 +45,7 @@ init :: proc(self: ^Platform, width, height: u32, title: string) -> bool {
   glfw.SetScrollCallback(self.window, scroll_callback)
   glfw.SetCharCallback(self.window, char_callback)
   x, y := glfw.GetCursorPos(self.window)
-  input.on_cursor(&self.input, f32(x), f32(y))
+  acc_cursor(&self.input, f32(x), f32(y))
   return true
 }
 
@@ -60,14 +60,14 @@ should_close :: proc(self: ^Platform) -> bool {
   return bool(glfw.WindowShouldClose(self.window))
 }
 
-// poll_events pumps window events into the input accumulator. Main thread only.
+// poll_events collects the window events read_input then reports. Main thread only.
 poll_events :: proc(self: ^Platform) {
   glfw.PollEvents()
 }
 
 // read_input takes this tick's input snapshot from the events polled so far.
 read_input :: proc(self: ^Platform, s: ^input.State) {
-  input.new_frame(s, &self.input)
+  acc_drain(&self.input, s)
 }
 
 // framebuffer_size returns the framebuffer size in pixels.
@@ -124,7 +124,7 @@ platform_of :: proc "contextless" (window: glfw.WindowHandle) -> ^Platform {
 key_callback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
   self := platform_of(window)
   context = self.context_
-  input.on_key(&self.input, input.Key(key), input.Action(action))
+  acc_key(&self.input, input.Key(key), input.Action(action))
 }
 
 @(private = "file")
@@ -132,26 +132,26 @@ mouse_button_callback :: proc "c" (window: glfw.WindowHandle, button, action, mo
   self := platform_of(window)
   context = self.context_
   if button < 0 || button > i32(max(input.MouseButton)) do return
-  input.on_button(&self.input, input.MouseButton(button), input.Action(action))
+  acc_button(&self.input, input.MouseButton(button), input.Action(action))
 }
 
 @(private = "file")
 cursor_callback :: proc "c" (window: glfw.WindowHandle, x, y: f64) {
   self := platform_of(window)
   context = self.context_
-  input.on_cursor(&self.input, f32(x), f32(y))
+  acc_cursor(&self.input, f32(x), f32(y))
 }
 
 @(private = "file")
 scroll_callback :: proc "c" (window: glfw.WindowHandle, dx, dy: f64) {
   self := platform_of(window)
   context = self.context_
-  input.on_scroll(&self.input, f32(dx), f32(dy))
+  acc_scroll(&self.input, f32(dx), f32(dy))
 }
 
 @(private = "file")
 char_callback :: proc "c" (window: glfw.WindowHandle, ch: rune) {
   self := platform_of(window)
   context = self.context_
-  input.on_char(&self.input, ch)
+  acc_char(&self.input, ch)
 }

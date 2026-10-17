@@ -1,6 +1,6 @@
 package render
 
-import cont "../containers"
+import "../containers"
 import "core:c"
 import "core:log"
 import "core:math"
@@ -15,7 +15,7 @@ import stbi "vendor:stb/image"
 MAX_RENDER_TARGETS :: 256
 
 @(private)
-texture_pool :: proc(self: ^Renderer, handle: TextureHandle) -> ^cont.Slots {
+texture_pool :: proc(self: ^Renderer, handle: TextureHandle) -> ^containers.Slots {
   return &self.target_slots if handle < MAX_RENDER_TARGETS else &self.texture_slots
 }
 
@@ -30,27 +30,29 @@ calculate_mip_levels :: proc(width, height: u32) -> u32 {
 allocate_texture :: proc(self: ^Renderer, desc: TextureDesc, data: []u8 = nil, target := false) -> (handle: TextureHandle, ok: bool) {
   guard(self)
   pool := &self.target_slots if target else &self.texture_slots
-  h := cont.slots_alloc(pool) or_return
+  h := containers.slots_alloc(pool) or_return
   if !dev.texture_create(&self.gpu, TextureHandle(h), desc, data) {
-    cont.slots_free(pool, h)
+    containers.slots_free(pool, h)
     return 0, false
   }
   return TextureHandle(h), true
 }
 
-// texture_destroy invalidates handle at once; its slot and image are released once no
-// frame in flight samples them. teardown frees every texture made since init.
+// texture_destroy frees the texture; its handle is stale at once, and frames already
+// submitted still sample it.
 texture_destroy :: proc(self: ^Renderer, handle: TextureHandle) {
   guard(self)
-  cont.slots_free(texture_pool(self, handle), u32(handle))
+  containers.slots_free(texture_pool(self, handle), u32(handle))
 }
 
 // NO_TEXTURE is the TextureHandle of none, as materials, emitters and draw2d commands hold it.
 NO_TEXTURE :: 0
 
 // texture_create makes a 2D texture that lives until texture_destroy or teardown, from either
-//   raw pixels: size.x by size.y texels of format (A8 samples as white with alpha = the pixel)
-//   an encoded image (png, jpg, hdr, ...) held in memory; RGBA32F decodes it as linear HDR
+//   raw pixels, size.x by size.y texels of format (A8 samples as white with alpha = the pixel):
+//     texture_create(r, pixels: []u8, size: [2]u32, format = .RGBA8_SRGB) -> (TextureHandle, ok)
+//   an encoded image (png, jpg, hdr, ...) held in memory; RGBA32F decodes it as linear HDR:
+//     texture_create(r, data: []u8, format = .RGBA8_SRGB, generate_mips = false) -> (TextureHandle, ok)
 texture_create :: proc {
   texture_create_pixels,
   texture_create_encoded,

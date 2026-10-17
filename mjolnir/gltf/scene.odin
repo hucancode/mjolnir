@@ -1,6 +1,6 @@
 package gltf
 
-import anim "../animation"
+import "../animation"
 import "../render"
 import "../world"
 import "core:log"
@@ -19,13 +19,13 @@ SkinnedNode :: struct {
 // to the world and renderer; the scene owns `roots`, `skinned` and the rigs.
 Scene :: struct {
   roots:   [dynamic]world.NodeHandle,
-  rigs:    [dynamic]anim.Rig, // one per skin a mesh node uses, with every animation as a clip
+  rigs:    [dynamic]animation.Rig, // one per skin a mesh node uses, with every animation as a clip
   skinned: [dynamic]SkinnedNode,
 }
 
 // scene_destroy frees the rigs and lists a Scene owns.
 scene_destroy :: proc(self: ^Scene) {
-  for &r in self.rigs do anim.rig_destroy(&r)
+  for &r in self.rigs do animation.rig_destroy(&r)
   delete(self.rigs)
   delete(self.roots)
   delete(self.skinned)

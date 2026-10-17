@@ -74,12 +74,12 @@ setup :: proc(app: ^App) -> bool {
   colors := [?][4]f32{{1.0, 0.45, 0.3, 1}, {0.35, 0.8, 0.45, 1}, {0.35, 0.55, 1.0, 1}, {1.0, 0.85, 0.3, 1}}
   shapes := [?]render.MeshHandle{meshes[.SPHERE], meshes[.CUBE], meshes[.SPHERE], meshes[.CUBE]}
   for color, i in colors {
-    mat := render.material_create(&app.renderer, .CUSTOM, base_color_factor = color, shader = app.toon)
+    mat := render.material_create(&app.renderer, render.make_material(.CUSTOM, base_color_factor = color, shader = app.toon))
     append(&app.materials, mat)
     spawn_mesh(app, shapes[i], mat, {f32(i) * 2.5 - 3.75, 1.0, 0})
   }
   // PBR for comparison, behind
-  pbr := render.material_create(&app.renderer, base_color_factor = {0.9, 0.9, 0.95, 1}, roughness_value = 0.4)
+  pbr := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.9, 0.95, 1}, roughness_value = 0.4))
   spawn_mesh(app, meshes[.SPHERE], pbr, {0, 1.0, -3.0})
 
   sun := world.spawn(&app.scene, {-3, 8, 6})

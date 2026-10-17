@@ -2,6 +2,7 @@ package crowd
 
 import "core:math"
 import "core:math/linalg"
+import "../../containers"
 import "../detour"
 
 @(private = "file")
@@ -80,8 +81,8 @@ Move_Request_State :: enum u8 {
 	Velocity,
 }
 
-// AgentHandle identifies an agent of a crowd (agent_create).
-AgentHandle :: distinct u32
+// AgentHandle identifies an agent of a crowd (agent_create); stale after agent_destroy.
+AgentHandle :: distinct containers.Handle
 
 // Agent is one crowd member: where it is, how fast it moves, the next corners of its path
 // (corners[:corner_count]) and its goal.
@@ -115,6 +116,8 @@ Agent_Internal :: struct {
 	target_pathq_ref:   Path_Queue_Ref,
 	target_replan:      bool,
 	target_replan_time: f32,
+	// bumped by agent_destroy; the slot's handles carry generation + 1, so the zero handle is none
+	generation:         u32,
 }
 
 // Crowd simulates many agents navigating one shared NavMesh.
@@ -223,7 +226,7 @@ agent_create :: proc(self: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS) 
 		}
 	}
 
-	if idx == -1 do return 0, false
+	if idx == -1 do return {}, false
 
 	ag := &self.agents[idx]
 	ag.state = .WALKING
@@ -234,7 +237,7 @@ agent_create :: proc(self: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS) 
 	                                                                      &self.filters[ag.params.query_filter_type])
 	if detour.status_failed(nearest_status) || nearest_ref == detour.INVALID_POLY_REF {
 		ag.state = .INVALID
-		return 0, false
+		return {}, false
 	}
 
 	path_corridor_reset(&ag.corridor, nearest_ref, nearest_pt)
@@ -249,14 +252,24 @@ agent_create :: proc(self: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS) 
 	ag.nvel = {0, 0, 0}
 	ag.velocity = {0, 0, 0}
 
-	return AgentHandle(idx), true
+	return {u32(idx), ag.generation + 1}, true
 }
 
-// agent_destroy deactivates the agent, freeing its slot.
-agent_destroy :: proc(self: ^Crowd, handle: AgentHandle) {
-	idx := int(handle)
+// The live agent behind handle; false when the handle is stale.
+@(private)
+agent_index :: proc(self: ^Crowd, handle: AgentHandle) -> (idx: int, ok: bool) {
+	idx = int(handle.index)
 	if idx >= self.max_agents do return
+	ag := &self.agents[idx]
+	return idx, ag.state != .INVALID && handle.generation == ag.generation + 1
+}
+
+// agent_destroy deactivates the agent, freeing its slot; a stale handle is ignored.
+agent_destroy :: proc(self: ^Crowd, handle: AgentHandle) {
+	idx, ok := agent_index(self, handle)
+	if !ok do return
 	self.agents[idx].state = .INVALID
+	self.agents[idx].generation += 1
 }
 
 @(private)
@@ -278,8 +291,7 @@ request_move_target :: proc(self: ^Crowd, idx: int, ref: detour.Poly_Ref, pos: [
 
 // move_to snaps pos to the mesh within extents and sets it as the agent's goal.
 move_to :: proc(self: ^Crowd, handle: AgentHandle, pos: [3]f32, extents: [3]f32 = {2, 4, 2}) -> bool {
-	idx := int(handle)
-	if idx >= self.max_agents do return false
+	idx := agent_index(self, handle) or_return
 	filter := &self.filters[self.agents[idx].params.query_filter_type]
 	status, ref, snapped := detour.find_nearest_poly(&self.nav_query, pos, extents, filter)
 	if detour.status_failed(status) do return false
@@ -660,14 +672,14 @@ add_neighbour :: proc(idx: int, dist: f32, neis: []Neighbour, nneis: int, max_ne
 // agent returns a copy of the agent; false when the handle is out of range or destroyed.
 // update moves it; give it a goal with move_to and tune it through agent_params.
 agent :: proc(self: ^Crowd, handle: AgentHandle) -> (ag: Agent, ok: bool) #optional_ok {
-	if int(handle) >= self.max_agents || self.agents[handle].state == .INVALID do return
-	return self.agents[handle], true
+	idx := agent_index(self, handle) or_return
+	return self.agents[idx], true
 }
 
 // agent_params returns the agent's parameters, to edit in place; update only reads them.
 agent_params :: proc(self: ^Crowd, handle: AgentHandle) -> (params: ^AgentParams, ok: bool) #optional_ok {
-	if int(handle) >= self.max_agents || self.agents[handle].state == .INVALID do return
-	return &self.agents[handle].params, true
+	idx := agent_index(self, handle) or_return
+	return &self.agents[idx].params, true
 }
 
 // filter returns the query filter agents use for query_filter_type i; false if out of range.

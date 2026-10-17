@@ -109,7 +109,7 @@ create_demo_scene :: proc(app: ^App) {
   for &v in ground_geom.vertices { v.position.x *= 50; v.position.z *= 50 }
   bake.append_triangles(&nav_builder, render.positions(ground_geom, context.temp_allocator), ground_geom.indices)
   ground_mesh := render.mesh_create(&app.renderer, ground_geom)
-  ground_mat := render.material_create(&app.renderer, metallic_value = 0.1, roughness_value = 0.8, emissive_value = 0.02)
+  ground_mat := render.material_create(&app.renderer, render.make_material(metallic_value = 0.1, roughness_value = 0.8, emissive_value = 0.02))
   ground_handle = spawn_mesh(app, ground_mesh, ground_mat)
   world.tag(&app.scene, ground_handle, TAG_ENVIRONMENT)
 
@@ -121,7 +121,7 @@ create_demo_scene :: proc(app: ^App) {
     for &v in g.vertices { v.position.x *= size.x; v.position.y *= size.y; v.position.z *= size.z }
     bake.append_triangles(&nav_builder, render.positions(g, context.temp_allocator), g.indices, pos, true)
     mh := render.mesh_create(&app.renderer, g)
-    mat := render.material_create(&app.renderer, metallic_value = 0.3, roughness_value = 0.7, emissive_value = 0.1)
+    mat := render.material_create(&app.renderer, render.make_material(metallic_value = 0.3, roughness_value = 0.7, emissive_value = 0.1))
     h := spawn_mesh(app, mh, mat, pos)
     world.tag(&app.scene, h, TAG_OBSTACLE)
     append(&obstacle_handles, h)
@@ -132,7 +132,7 @@ create_demo_scene :: proc(app: ^App) {
 create_agent :: proc(app: ^App) {
   agent_geom := render.make_cylinder(16, 2, 0.5, {0.2, 0.5, 1.0, 1.0})
   mh := render.mesh_create(&app.renderer, agent_geom)
-  mat := render.material_create(&app.renderer, metallic_value = 0.3, roughness_value = 0.6, emissive_value = 0.3)
+  mat := render.material_create(&app.renderer, render.make_material(metallic_value = 0.3, roughness_value = 0.6, emissive_value = 0.3))
   agent_handle = spawn_mesh(app, mh, mat, agent_pos + {0, 1, 0})
   world.set_name(&app.scene, agent_handle, "agent")
 }
@@ -151,11 +151,11 @@ setup_navigation_mesh :: proc(app: ^App) {
 visualize_navmesh :: proc(app: ^App) {
   world.destroy(&app.scene, navmesh_node_handle)
   positions, indices := nav.debug_triangles(&navmesh, context.temp_allocator)
-  navmesh_geom := render.from_triangles(positions, indices)
+  navmesh_geom := render.make_geometry_from_triangles(positions, indices)
   log.infof("Built navmesh visualization geometry: %d vertices, %d indices", len(navmesh_geom.vertices), len(navmesh_geom.indices))
   m, m_ok := render.mesh_create(&app.renderer, navmesh_geom)
   if !m_ok { log.error("Failed to create navmesh visualization mesh"); return }
-  mat, mat_ok := render.material_create(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {1.0, 0.8, 0.3, 0.3})
+  mat, mat_ok := render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {1.0, 0.8, 0.3, 0.3}))
   if !mat_ok { log.error("Failed to create navmesh material"); return }
   navmesh_node_handle = spawn_mesh(app, m, mat)
 }
@@ -178,7 +178,7 @@ update_position_marker :: proc(app: ^App, handle: ^world.NodeHandle, pos: [3]f32
   world.destroy(&app.scene, handle^)
   g := render.make_sphere(12, 6, 0.3, color)
   m := render.mesh_create(&app.renderer, g)
-  mat := render.material_create(&app.renderer, metallic_value = 0.2, roughness_value = 0.8, emissive_value = 0.5)
+  mat := render.material_create(&app.renderer, render.make_material(metallic_value = 0.2, roughness_value = 0.8, emissive_value = 0.5))
   handle^ = spawn_mesh(app, m, mat, pos + {0, 0.2, 0})
 }
 

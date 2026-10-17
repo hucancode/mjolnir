@@ -60,7 +60,7 @@ setup :: proc(app: ^App) -> bool {
   app.renderer.skybox_intensity = 0
 
   cube := app.renderer.builtin_meshes[.CUBE]
-  mat := render.material_create(&app.renderer, .WIREFRAME)
+  mat := render.material_create(&app.renderer, render.make_material(.WIREFRAME))
 
   for i in 0 ..< 9 {
     row := i / 3

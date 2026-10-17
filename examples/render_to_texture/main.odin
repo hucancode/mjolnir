@@ -79,7 +79,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1.0, 0.6, 0.3, 1.0}, 12.0, false)))
 
   rtt_camera_handle = render.camera_create(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
-  rtt_material_handle = render.material_create(&app.renderer)
+  rtt_material_handle = render.material_create(&app.renderer, render.make_material())
 
   display_mesh := app.renderer.builtin_meshes[.QUAD_XY]
   display_handle := world.spawn(&app.scene, {0, 2.5, -3.5})

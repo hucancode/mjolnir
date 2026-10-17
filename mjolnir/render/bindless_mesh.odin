@@ -1,6 +1,6 @@
 package render
 
-import cont "../containers"
+import "../containers"
 import "core:log"
 
 // Primitive names a builtin mesh in Renderer.builtin_meshes.
@@ -14,7 +14,7 @@ Primitive :: enum {
 }
 
 @(private = "file")
-VERTEX_SLAB_CONFIG :: cont.SlabConfig {
+VERTEX_SLAB_CONFIG :: containers.SlabConfig {
   {block_size = 256, block_count = 512},
   {block_size = 1024, block_count = 128},
   {block_size = 4096, block_count = 64},
@@ -28,7 +28,7 @@ VERTEX_SLAB_CONFIG :: cont.SlabConfig {
 // Each stream's buffer holds its slab's capacity, so no offset can pass the end of a buffer.
 @(private)
 MESH_STREAMS := [MeshStream]struct {
-  slab:      cont.SlabConfig,
+  slab:      containers.SlabConfig,
   elem_size: int,
 } {
   .VERTEX = {VERTEX_SLAB_CONFIG, size_of(Vertex)},
@@ -53,17 +53,17 @@ MESH_STREAMS := [MeshStream]struct {
 mesh_arena_upload :: proc(self: ^Renderer, stream: MeshStream, data: []$T) -> (offset: u32, ok: bool) {
   if len(data) == 0 do return 0, true
   slab := &self.mesh_slabs[stream]
-  offset = cont.slab_alloc(slab, u32(len(data))) or_return
+  offset = containers.slab_alloc(slab, u32(len(data))) or_return
   ok = mesh_write(self, stream, data, offset)
-  if !ok do cont.slab_free(slab, offset)
+  if !ok do containers.slab_free(slab, offset)
   return
 }
 
 @(private)
 free_mesh :: proc(self: ^Renderer, m: MeshData) {
-  if m.vertex_count > 0 do cont.slab_free(&self.mesh_slabs[.VERTEX], u32(m.vertex_offset))
-  if m.index_count > 0 do cont.slab_free(&self.mesh_slabs[.INDEX], m.first_index)
-  if .SKINNED in m.flags do cont.slab_free(&self.mesh_slabs[.SKINNING], m.skinning_offset)
+  if m.vertex_count > 0 do containers.slab_free(&self.mesh_slabs[.VERTEX], u32(m.vertex_offset))
+  if m.index_count > 0 do containers.slab_free(&self.mesh_slabs[.INDEX], m.first_index)
+  if .SKINNED in m.flags do containers.slab_free(&self.mesh_slabs[.SKINNING], m.skinning_offset)
 }
 
 // Fills entry `index` of the mesh table. On failure the ranges taken so far are freed.
@@ -86,7 +86,7 @@ upload_mesh :: proc(self: ^Renderer, index: u32, g: Geometry) -> (ok: bool) {
   return true
 }
 
-// mesh_create uploads geometry_data into the mesh arena; it lives until mesh_destroy or teardown.
+// mesh_create uploads geometry_data to the GPU; it lives until mesh_destroy or teardown.
 // Ownership of the geometry transfers: it is deleted.
 mesh_create :: proc(
   self: ^Renderer,
@@ -97,19 +97,20 @@ mesh_create :: proc(
 ) #optional_ok {
   defer geometry_destroy(geometry_data)
   guard(self)
-  handle = MeshHandle(cont.slots_alloc(&self.mesh_slots) or_return)
+  handle = MeshHandle(containers.slots_alloc(&self.mesh_slots) or_return)
   if !upload_mesh(self, u32(handle), geometry_data) {
     log.errorf("Mesh %d upload failed", handle)
-    cont.slots_free(&self.mesh_slots, u32(handle))
+    containers.slots_free(&self.mesh_slots, u32(handle))
     return 0, false
   }
   return handle, true
 }
 
-// mesh_destroy invalidates handle at once; the arena ranges are freed once no frame in flight draws it.
+// mesh_destroy frees the mesh; its handle is stale at once, and frames already submitted still
+// draw it.
 mesh_destroy :: proc(self: ^Renderer, handle: MeshHandle) {
   guard(self)
-  cont.slots_free(&self.mesh_slots, u32(handle))
+  containers.slots_free(&self.mesh_slots, u32(handle))
 }
 
 @(private)

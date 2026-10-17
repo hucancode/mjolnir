@@ -1,9 +1,9 @@
 package world
 
-import cont "../containers"
+import "../containers"
 
 // Handle is an untyped handle, for links stored outside world (e.g. a physics body's user).
-Handle :: cont.Handle
+Handle :: containers.Handle
 
 // NodeHandle identifies a node; stale after node_destroy.
 NodeHandle :: distinct Handle

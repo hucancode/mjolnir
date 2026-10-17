@@ -2,7 +2,7 @@
 #+private
 package physics
 
-import cont "../containers"
+import "../containers"
 import "base:runtime"
 import "core:log"
 import "core:math/linalg"
@@ -153,7 +153,7 @@ bench_ccd :: proc(t: ^testing.T) {
 			s := cast(^bench_world_state)opts.user_data
 			s.world = build_serial_world()
 			c: u32
-			for i in cont.slots_next(&s.world.body_slots, &c) do s.world.bodies[i].velocity = {0, -8, 0}
+			for i in containers.slots_next(&s.world.body_slots, &c) do s.world.bodies[i].velocity = {0, -8, 0}
 			for _ in 0 ..< 3 do step(s.world, 1.0 / 60.0)
 			s.ccd_handled = make([]bool, body_range(s.world))
 			return .Okay

@@ -105,14 +105,14 @@ bone_count :: #force_inline proc "contextless" (self: ^Skeleton) -> int {
   return len(self.parents)
 }
 
-// find_bone returns the index of the bone named name.
-find_bone :: proc(self: ^Skeleton, name: string) -> (index: u32, ok: bool) #optional_ok {
+// bone_find returns the index of the bone named name.
+bone_find :: proc(self: ^Skeleton, name: string) -> (index: u32, ok: bool) #optional_ok {
   for n, i in self.names do if n == name do return u32(i), true
   return 0, false
 }
 
-// find_bones returns the indices of the named bones. Fails if any name is missing.
-find_bones :: proc(
+// bones_find returns the indices of the named bones. Fails if any name is missing.
+bones_find :: proc(
   self: ^Skeleton,
   names: []string,
   allocator := context.allocator,
@@ -122,7 +122,7 @@ find_bones :: proc(
 ) #optional_ok {
   indices = make([]u32, len(names), allocator)
   for name, i in names {
-    idx, found := find_bone(self, name)
+    idx, found := bone_find(self, name)
     if !found {
       delete(indices, allocator)
       return nil, false
@@ -142,8 +142,8 @@ bone_chain :: proc(
   indices: []u32,
   ok: bool,
 ) #optional_ok {
-  root := find_bone(self, root_name) or_return
-  tip := find_bone(self, tip_name) or_return
+  root := bone_find(self, root_name) or_return
+  tip := bone_find(self, tip_name) or_return
   count := 1
   for cur := i32(tip); cur != i32(root); cur = self.parents[cur] {
     if self.parents[cur] < 0 do return nil, false
@@ -169,7 +169,7 @@ bone_chain_down :: proc(
   indices: []u32,
   ok: bool,
 ) #optional_ok {
-  root := find_bone(self, root_name) or_return
+  root := bone_find(self, root_name) or_return
   chain := make([dynamic]u32, 0, length, context.temp_allocator)
   append(&chain, root)
   outer: for len(chain) < int(length) {
@@ -193,7 +193,7 @@ bone_subtree :: proc(
   bones: []u32,
   ok: bool,
 ) #optional_ok {
-  root := find_bone(self, root_name) or_return
+  root := bone_find(self, root_name) or_return
   inside := make([]bool, bone_count(self), context.temp_allocator)
   inside[root] = true
   out := make([dynamic]u32, 0, bone_count(self), allocator)
@@ -207,7 +207,7 @@ bone_subtree :: proc(
 
 // rest_position returns the rest-pose position of a bone in skeleton space.
 rest_position :: proc(self: ^Skeleton, name: string) -> (pos: [3]f32, ok: bool) #optional_ok {
-  idx := find_bone(self, name) or_return
+  idx := bone_find(self, name) or_return
   return self.bind[idx][3].xyz, true
 }
 

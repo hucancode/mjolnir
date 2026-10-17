@@ -60,8 +60,8 @@ test_animator_rest_palette_identity :: proc(t: ^testing.T) {
   // no layers: update keeps rest pose
   animator_update(&a, &rig, 0.1)
   for m in a.palette do testing.expect(t, matrix_almost_equal(m, linalg.MATRIX4F32_IDENTITY))
-  testing.expect(t, find_clip(&rig, "bend") == 2)
-  _, ok := find_clip(&rig, "ghost")
+  testing.expect(t, clip_find(&rig, "bend") == 2)
+  _, ok := clip_find(&rig, "ghost")
   testing.expect(t, !ok)
 }
 
@@ -73,8 +73,10 @@ test_animator_play_samples_clip :: proc(t: ^testing.T) {
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  testing.expect(t, play(&a, &rig, "bend"))
-  testing.expect(t, !play(&a, &rig, "ghost"), "unknown clip")
+  _, ok := play(&a, &rig, "bend")
+  testing.expect(t, ok)
+  _, ok = play(&a, &rig, "ghost")
+  testing.expect(t, !ok, "unknown clip")
   palette := animator_update(&a, &rig, 0.5)
   testing.expect_value(t, len(palette), 4)
   s := math.sin(f32(math.PI / 4))
@@ -97,16 +99,16 @@ test_animator_once_holds_last_pose :: proc(t: ^testing.T) {
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  play(&a, &rig, "move", .ONCE)
+  l := play(&a, &rig, "move", .ONCE)
   animator_update(&a, &rig, 0.75)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {7.5, 0, 0}))
   animator_update(&a, &rig, 2)
-  testing.expect_value(t, clip_time(&a, 0), 1)
+  testing.expect_value(t, clip_time(&a, l), 1)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {10, 0, 0}))
   animator_update(&a, &rig, 1)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {10, 0, 0}), "holds last pose")
   testing.expect(t, almost_equal_vec3(model_pos(&a, 2), {10, 2, 0}))
-  testing.expect(t, clip_seek(&a, 0, 0.25))
+  testing.expect(t, clip_seek(&a, l, 0.25))
   animator_update(&a, &rig, 0.25)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {5, 0, 0}), "seek plays again")
 }
@@ -119,13 +121,13 @@ test_animator_ping_pong_keeps_speed :: proc(t: ^testing.T) {
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  play(&a, &rig, "move", .PING_PONG)
+  l := play(&a, &rig, "move", .PING_PONG)
   animator_update(&a, &rig, 1.25)
-  testing.expect(t, abs(clip_time(&a, 0) - 0.75) < 1e-5, "reflected")
-  p := layer_params(&a, 0, ClipParams)
+  testing.expect(t, abs(clip_time(&a, l) - 0.75) < 1e-5, "reflected")
+  p := layer_params(&a, l, ClipParams)
   testing.expect_value(t, p.speed, 1) // turning around is state, not an input
   animator_update(&a, &rig, 0.25)
-  testing.expect(t, abs(clip_time(&a, 0) - 0.5) < 1e-5, "still going back")
+  testing.expect(t, abs(clip_time(&a, l) - 0.5) < 1e-5, "still going back")
 }
 
 @(test)
@@ -136,19 +138,19 @@ test_animator_layer_weights_blend :: proc(t: ^testing.T) {
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  l0 := layer_create(&a, &rig, ClipParams{clip = find_clip(&rig, "move"), speed = 1}, weight = 0.5)
-  l1 := layer_create(&a, &rig, ClipParams{clip = find_clip(&rig, "up"), speed = 1}, weight = 0.5)
-  testing.expect(t, l0 == 0 && l1 == 1)
+  l0 := layer_create(&a, &rig, ClipParams{clip = clip_find(&rig, "move"), speed = 1}, weight = 0.5)
+  l1 := layer_create(&a, &rig, ClipParams{clip = clip_find(&rig, "up"), speed = 1}, weight = 0.5)
+  testing.expect(t, l0.index == 0 && l1.index == 1)
   _, ok := layer_create(&a, &rig, ClipParams{clip = 9})
   testing.expect(t, !ok, "unknown clip")
   animator_update(&a, &rig, 0.5)
   testing.expectf(t, almost_equal_vec3(model_pos(&a, 0), {2.5, 2, 0}), "50/50 blend, got %v", model_pos(&a, 0))
-  testing.expect(t, layer_fade(&a, 1, 0))
-  testing.expect(t, !layer_fade(&a, 5, 0))
+  testing.expect(t, layer_fade(&a, l1, 0))
+  testing.expect(t, !layer_fade(&a, LayerHandle{5, 1}, 0))
   animator_update(&a, &rig, 0.25)
   testing.expectf(t, almost_equal_vec3(model_pos(&a, 0), {7.5, 0, 0}), "only move, got %v", model_pos(&a, 0))
   // switch the clip of layer 0 in place
-  layer_params(&a, 0, ClipParams).clip = find_clip(&rig, "up")
+  layer_params(&a, l0, ClipParams).clip = clip_find(&rig, "up")
   animator_update(&a, &rig, 0)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {0, 4, 0}))
 }
@@ -161,7 +163,7 @@ test_animator_layer_mask :: proc(t: ^testing.T) {
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  layer_create(&a, &rig, ClipParams{clip = find_clip(&rig, "wave"), speed = 1}, bones = []u32{find_bone(&rig.skeleton, "tip")})
+  layer_create(&a, &rig, ClipParams{clip = clip_find(&rig, "wave"), speed = 1}, bones = []u32{bone_find(&rig.skeleton, "tip")})
   _, bad := layer_create(&a, &rig, ClipParams{clip = 0}, bones = []u32{9})
   testing.expect(t, !bad, "bone out of range")
   animator_update(&a, &rig, 0.5)
@@ -182,16 +184,16 @@ test_animator_cross_fade :: proc(t: ^testing.T) {
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  play(&a, &rig, "up")
-  to := layer_create(&a, &rig, ClipParams{clip = find_clip(&rig, "move"), speed = 1}, weight = 0)
-  testing.expect(t, layer_fade(&a, 0, 0, 0.5) && layer_fade(&a, to, 1, 0.5))
+  from := play(&a, &rig, "up")
+  to := layer_create(&a, &rig, ClipParams{clip = clip_find(&rig, "move"), speed = 1}, weight = 0)
+  testing.expect(t, layer_fade(&a, from, 0, 0.5) && layer_fade(&a, to, 1, 0.5))
   animator_update(&a, &rig, 0.25)
-  testing.expect(t, abs(layer_weight(&a, 0) - 0.5) < 1e-5 && abs(layer_weight(&a, to) - 0.5) < 1e-5)
+  testing.expect(t, abs(layer_weight(&a, from) - 0.5) < 1e-5 && abs(layer_weight(&a, to) - 0.5) < 1e-5)
   testing.expectf(t, almost_equal_vec3(model_pos(&a, 0), {1.25, 2, 0}), "mid fade, got %v", model_pos(&a, 0))
   animator_update(&a, &rig, 0.3)
-  testing.expect(t, layer_weight(&a, 0) == 0 && layer_weight(&a, to) == 1)
+  testing.expect(t, layer_weight(&a, from) == 0 && layer_weight(&a, to) == 1)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {5.5, 0, 0}), "only target clip")
-  testing.expect_value(t, layer_weight(&a, 7), 0)
+  testing.expect_value(t, layer_weight(&a, LayerHandle{7, 1}), 0)
 }
 
 @(test)
@@ -204,7 +206,7 @@ test_animator_ik_local :: proc(t: ^testing.T) {
   defer animator_destroy(&a)
   target := [3]f32{1, 1, 0}
   idx, ok := layer_create(&a, &rig, IKParams{target = target, pole = {1, 0, 0}, pole_weight = 1}, bone_chain(&rig.skeleton, "root", "tip", context.temp_allocator))
-  testing.expect(t, ok && idx == 0)
+  testing.expect(t, ok && idx.index == 0)
   _, bad := layer_create(&a, &rig, IKParams{target = target}, []u32{2, 1, 0})
   testing.expect(t, !bad, "inverted chain rejected")
   _, bad2 := layer_create(&a, &rig, IKParams{target = target}, []u32{0})
@@ -221,12 +223,12 @@ test_animator_ik_local :: proc(t: ^testing.T) {
   // palette consistent with model
   testing.expect(t, matrix_almost_equal(a.palette[3], bone_matrix(&a, 3) * rig.skeleton.inverse_bind[3]))
   // weight 0 -> back to rest
-  testing.expect(t, layer_fade(&a, 0, 0))
+  testing.expect(t, layer_fade(&a, idx, 0))
   animator_update(&a, &rig, 0.016)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 2), {0, 2, 0}))
-  layer_fade(&a, 0, 1)
-  layer_params(&a, 0, IKParams).target = {-1, 1, 0}
-  testing.expect(t, layer_params(&a, 0, TailParams) == nil, "wrong kind")
+  layer_fade(&a, idx, 1)
+  layer_params(&a, idx, IKParams).target = {-1, 1, 0}
+  testing.expect(t, layer_params(&a, idx, TailParams) == nil, "wrong kind")
   animator_update(&a, &rig, 0.016)
   testing.expect(t, linalg.distance(model_pos(&a, 2), [3]f32{-1, 1, 0}) < 0.01)
 }
@@ -278,22 +280,24 @@ test_animator_destroy_and_clear_layers :: proc(t: ^testing.T) {
   animator_init(&a, &rig)
   defer animator_destroy(&a)
   layer_create(&a, &rig, ClipParams{clip = 0, speed = 1})
-  layer_create(&a, &rig, IKParams{target = {1, 1, 0}}, []u32{0, 1, 2})
+  ik := layer_create(&a, &rig, IKParams{target = {1, 1, 0}}, []u32{0, 1, 2})
   tail := layer_create(&a, &rig, TailParams{stiffness = 0.5, damping = 0.9}, []u32{1, 2, 3})
   testing.expect_value(t, len(a.layers), 3)
-  testing.expect(t, layer_destroy(&a, 1))
-  testing.expect(t, !layer_destroy(&a, 7))
-  testing.expect(t, !layer_destroy(&a, 1), "destroyed slot is empty")
-  testing.expect(t, !layer_fade(&a, 1, 0.5), "destroyed slot is invalid")
+  layer_destroy(&a, ik)
+  layer_destroy(&a, LayerHandle{7, 1}) // ignored
+  layer_destroy(&a, ik) // stale: ignored
+  testing.expect(t, !layer_fade(&a, ik, 0.5), "destroyed handle is stale")
   testing.expect_value(t, len(a.layers), 3)
   testing.expect(t, layer_params(&a, tail, TailParams) != nil, "later layers keep their handle")
   // the pools close the gap: the tail's bones follow the clip's (none)
   testing.expect_value(t, len(a.bones), 3)
-  testing.expect(t, slice.equal(a.bones[a.layers[tail].bones.start:][:3], []u32{1, 2, 3}))
-  testing.expect_value(t, layer_create(&a, &rig, ClipParams{clip = 1, speed = 1}), 1) // freed slot is reused
+  testing.expect(t, slice.equal(a.bones[a.layers[tail.index].bones.start:][:3], []u32{1, 2, 3}))
+  reused := layer_create(&a, &rig, ClipParams{clip = 1, speed = 1})
+  testing.expect(t, reused.index == ik.index && reused != ik, "freed slot is reused, old handle stays stale")
+  testing.expect(t, !layer_fade(&a, ik, 0.5), "old handle does not reach the new layer")
   testing.expect_value(t, len(a.layers), 3)
-  clear_layers(&a)
-  testing.expect_value(t, len(a.layers), 0)
+  layers_clear(&a)
+  testing.expect(t, layer_params(&a, tail, TailParams) == nil, "cleared handles are stale")
   testing.expect_value(t, len(a.state), 0)
   animator_update(&a, &rig, 0.1)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 3), {0, 3, 0}), "rest after clear")
@@ -311,12 +315,12 @@ test_animator_destroy_frees :: proc(t: ^testing.T) {
     a: Animator
     animator_init(&a, &rig)
     play(&a, &rig, "bend")
-    layer_create(&a, &rig, IKParams{target = {1, 1, 0}}, []u32{0, 1, 2})
+    ik := layer_create(&a, &rig, IKParams{target = {1, 1, 0}}, []u32{0, 1, 2})
     layer_create(&a, &rig, TailParams{stiffness = 0.5}, []u32{1, 2, 3})
     path := layer_create(&a, &rig, PathParams{}, []u32{0, 1, 2})
     path_points(&a, path, {{0, 0, 0}, {0, 1, 0}, {1, 2, 0}})
     path_points(&a, path, {{0, 0, 0}, {0, 1, 0}, {1, 2, 0}, {2, 2, 0}}, closed = true)
-    layer_destroy(&a, 1)
+    layer_destroy(&a, ik)
     animator_update(&a, &rig, 0.1)
     animator_destroy(&a)
     rig_destroy(&rig)
@@ -333,13 +337,13 @@ test_animator_tail_layer_smoke :: proc(t: ^testing.T) {
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  play(&a, &rig, "bend", .PING_PONG)
+  clip := play(&a, &rig, "bend", .PING_PONG)
   idx, ok := layer_create(&a, &rig, TailParams{stiffness = 0.5, damping = 0.9}, []u32{1, 2, 3})
-  testing.expect(t, ok && idx == 1)
+  testing.expect(t, ok && idx.index == 1)
   _, bad := layer_create(&a, &rig, TailParams{}, []u32{3})
   testing.expect(t, !bad, "one bone is no chain")
   layer_params(&a, idx, TailParams).damping = 0.8
-  testing.expect(t, layer_params(&a, 0, TailParams) == nil, "not a tail layer")
+  testing.expect(t, layer_params(&a, clip, TailParams) == nil, "not a tail layer")
   for i in 0 ..< 120 {
     root_world := linalg.matrix4_translate_f32({math.sin(f32(i) * 0.1) * 2, 0, 0})
     animator_update(&a, &rig, 1.0 / 60.0, root_world)

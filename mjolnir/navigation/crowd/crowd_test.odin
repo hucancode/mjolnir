@@ -274,17 +274,19 @@ test_crowd_lifecycle_add_remove :: proc(t: ^testing.T) {
 	params := default_agent_params()
 	a0, _ := agent_create(c, {0, 0, 0}, params)
 	a1, _ := agent_create(c, {1, 0, 0}, params)
-	testing.expectf(t, a0 == 0 && a1 == 1, "expected sequential slots, got %d %d", a0, a1)
+	testing.expectf(t, a0.index == 0 && a1.index == 1, "expected sequential slots, got %v %v", a0, a1)
 
 	ag, ag_ok := agent(c, a0)
 	testing.expect(t, ag_ok && ag.state != .INVALID, "agent must be active after add")
 
 	agent_destroy(c, a0)
-	testing.expect(t, c.agents[a0].state == .INVALID, "agent must be inactive after remove")
+	testing.expect(t, c.agents[a0.index].state == .INVALID, "agent must be inactive after remove")
 
 	// reuse slot
 	a2, _ := agent_create(c, {0, 0, 0}, params)
-	testing.expectf(t, a2 == a0, "slot should be recycled, got %d", a2)
+	testing.expectf(t, a2.index == a0.index, "slot should be recycled, got %v", a2)
+	_, stale := agent(c, a0)
+	testing.expect(t, !stale, "the old handle must not reach the recycled slot")
 }
 
 @(test)
@@ -313,11 +315,11 @@ test_crowd_request_move_target_state :: proc(t: ^testing.T) {
 	defer shutdown(c)
 	params := default_agent_params()
 	idx, _ := agent_create(c, {0, 0, 0}, params)
-	testing.expect(t, idx >= 0, "agent add")
+	testing.expect(t, idx != {}, "agent add")
 
 	// invalid index
 	testing.expect(t, !request_move_target(c, -1, 1, {0, 0, 0}), "negative idx rejected")
-	testing.expect(t, !request_move_target(c, int(idx), detour.INVALID_POLY_REF, {0, 0, 0}), "invalid ref rejected")
+	testing.expect(t, !request_move_target(c, int(idx.index), detour.INVALID_POLY_REF, {0, 0, 0}), "invalid ref rejected")
 
 	// valid request: pick any first poly via nearest poly query
 	filter: detour.Query_Filter
@@ -325,9 +327,9 @@ test_crowd_request_move_target_state :: proc(t: ^testing.T) {
 	half := [3]f32{2, 4, 2}
 	st, ref, _ := detour.find_nearest_poly(&c.nav_query, {3, 0, 3}, half, &filter)
 	if detour.status_succeeded(st) && ref != detour.INVALID_POLY_REF {
-		ok2 := request_move_target(c, int(idx), ref, {3, 0, 3})
+		ok2 := request_move_target(c, int(idx.index), ref, {3, 0, 3})
 		testing.expect(t, ok2, "valid request must succeed")
-		testing.expect(t, c.agents[idx].target_state == .Requesting, "state should be Requesting")
+		testing.expect(t, c.agents[idx.index].target_state == .Requesting, "state should be Requesting")
 	}
 }
 
@@ -343,21 +345,21 @@ test_crowd_update_advances_agent :: proc(t: ^testing.T) {
 
 	params := default_agent_params()
 	idx, _ := agent_create(c, {-5, 0, -5}, params)
-	testing.expect(t, idx >= 0, "agent add")
+	testing.expect(t, idx != {}, "agent add")
 
 	filter: detour.Query_Filter
 	detour.query_filter_init(&filter)
 	half := [3]f32{2, 4, 2}
 	st, ref, _ := detour.find_nearest_poly(&c.nav_query, {5, 0, 5}, half, &filter)
 	if !detour.status_succeeded(st) do return
-	request_move_target(c, int(idx), ref, {5, 0, 5})
+	request_move_target(c, int(idx.index), ref, {5, 0, 5})
 
-	start_pos := c.agents[idx].position
+	start_pos := c.agents[idx.index].position
 	// run several update ticks; path planning is sliced and may take several frames
 	for _ in 0 ..< 50 {
 		update(c, 0.1)
 	}
-	end_pos := c.agents[idx].position
+	end_pos := c.agents[idx.index].position
 	moved_sq := (end_pos.x - start_pos.x) * (end_pos.x - start_pos.x) +
 	            (end_pos.z - start_pos.z) * (end_pos.z - start_pos.z)
 	testing.expectf(t, moved_sq > 0.0001, "agent should have moved, dx2+dz2=%f", moved_sq)
@@ -486,6 +488,6 @@ test_crowd_move_to_reaches_goal :: proc(t: ^testing.T) {
 	idx, _ := agent_create(c, {0, 0, 0}, params)
 	testing.expect(t, move_to(c, idx, {5, 0, 5}), "move_to on the mesh must succeed")
 	for _ in 0 ..< 100 do update(c, 0.1)
-	d := c.agents[idx].position - {5, 0, 5}
-	testing.expectf(t, d.x * d.x + d.z * d.z < 1.0, "agent should reach the goal, at %v", c.agents[idx].position)
+	d := c.agents[idx.index].position - {5, 0, 5}
+	testing.expectf(t, d.x * d.x + d.z * d.z < 1.0, "agent should reach the goal, at %v", c.agents[idx.index].position)
 }

@@ -69,7 +69,7 @@ setup :: proc(app: ^App) -> bool {
   world.scale(&app.scene, ground, 20.0)
 
   // Sun — root of the rotating subtree
-  sun_mat := render.material_create(&app.renderer, base_color_factor = {1.0, 0.8, 0.2, 1.0}, emissive_value = 2.0)
+  sun_mat := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.8, 0.2, 1.0}, emissive_value = 2.0))
   sun_handle = world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(sun_handle.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.SPHERE], material = sun_mat, cast_shadow = true})
   world.scale(&app.scene, sun_handle, 1.2)

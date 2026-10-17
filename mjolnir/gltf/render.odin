@@ -105,15 +105,17 @@ load_material :: proc(
   if mat.has_emissive_strength do emissive_value *= mat.emissive_strength.emissive_strength
   handle = render.material_create(
     r,
-    .PBR,
-    tex[0],
-    tex[1],
-    tex[2],
-    tex[3],
-    metallic_value = metallic,
-    roughness_value = roughness,
-    emissive_value = emissive_value,
-    base_color_factor = base_color,
+    render.make_material(
+      .PBR,
+      tex[0],
+      tex[1],
+      tex[2],
+      tex[3],
+      metallic_value = metallic,
+      roughness_value = roughness,
+      emissive_value = emissive_value,
+      base_color_factor = base_color,
+    ),
   ) or_return
   cache[mat] = handle
   log.infof("Created material %v", handle)
@@ -146,7 +148,7 @@ load_geometry :: proc(gltf_mesh: ^cgltf.mesh, include_skinning: bool) -> render.
     }
   }
   // nil skinnings without include_skinning
-  return render.geometry_create(vertices[:], indices[:], skinnings[:])
+  return render.make_geometry(vertices[:], indices[:], skinnings[:])
 }
 
 @(private = "file")

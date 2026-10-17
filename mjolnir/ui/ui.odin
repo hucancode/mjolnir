@@ -1,10 +1,10 @@
 package ui
 
-import cont "../containers"
+import "../containers"
 import "core:strings"
 
 // NodeHandle identifies a UI node; stale after node_destroy.
-NodeHandle :: distinct cont.Handle
+NodeHandle :: distinct containers.Handle
 
 // Direction is the axis a node's flow children are placed along.
 Direction :: enum u8 {
@@ -71,7 +71,7 @@ Node :: struct {
   focusable:   bool,
   // content: one line of text, or wrapped lines when `wrap`
   text:        string, // owned; change it with set_text
-  font_size:   f32,
+  font_size:   f32, // pixels
   wrap:        bool,
 }
 
@@ -88,7 +88,7 @@ Line :: struct {
   width:      f32,
 }
 
-// UI is a node tree with its layout output and input state. Set up with init, free with destroy.
+// UI is a node tree with its layout output and input state. Set up with init, free with shutdown.
 UI :: struct {
   // shown nodes, back to front: what to draw, in order
   draw_order:   [dynamic]NodeHandle,
@@ -99,7 +99,7 @@ UI :: struct {
 UI_State :: struct {
   // indexed by NodeHandle.index; slots says which are live
   nodes:        []Node,
-  slots:        cont.Slots,
+  slots:        containers.Slots,
   next_order:   i32,
   rects:        [dynamic]Rect,
   clips:        [dynamic]Rect, // where the node is visible
@@ -120,15 +120,15 @@ UI_State :: struct {
 
 // init prepares `self` to hold up to `max_nodes` nodes.
 init :: proc(self: ^UI, max_nodes: u32 = 4096) {
-  cont.slots_init(&self.slots, max_nodes)
+  containers.slots_init(&self.slots, max_nodes)
   self.nodes = make([]Node, max_nodes)
 }
 
 // shutdown frees everything `self` owns.
 shutdown :: proc(self: ^UI) {
   c: u32
-  for i in cont.slots_next(&self.slots, &c) do delete(self.nodes[i].text)
-  cont.slots_destroy(&self.slots)
+  for i in containers.slots_next(&self.slots, &c) do delete(self.nodes[i].text)
+  containers.slots_destroy(&self.slots)
   delete(self.nodes)
   delete(self.rects)
   delete(self.clips)
@@ -148,8 +148,8 @@ shutdown :: proc(self: ^UI) {
 // node_create adds `n`; its text is copied and its order is the next one. Laid out by the
 // next layout.
 node_create :: proc(self: ^UI, n: Node) -> (handle: NodeHandle, ok: bool) #optional_ok {
-  index := cont.slots_alloc(&self.slots) or_return
-  handle = NodeHandle(cont.slots_handle(&self.slots, index))
+  index := containers.slots_alloc(&self.slots) or_return
+  handle = NodeHandle(containers.slots_handle(&self.slots, index))
   slot := &self.nodes[index]
   slot^ = n
   slot.text = strings.clone(n.text)
@@ -163,10 +163,10 @@ node_destroy :: proc(self: ^UI, handle: NodeHandle) {
   n, ok := lookup(self, handle)
   if !ok do return
   delete(n.text)
-  cont.slots_free(&self.slots, handle.index)
+  containers.slots_free(&self.slots, handle.index)
   c: u32
-  for i in cont.slots_next(&self.slots, &c) {
-    if self.nodes[i].parent == handle do node_destroy(self, NodeHandle(cont.slots_handle(&self.slots, i)))
+  for i in containers.slots_next(&self.slots, &c) {
+    if self.nodes[i].parent == handle do node_destroy(self, NodeHandle(containers.slots_handle(&self.slots, i)))
   }
 }
 
@@ -178,7 +178,7 @@ node :: proc(self: ^UI, handle: NodeHandle) -> (^Node, bool) #optional_ok {
 
 @(private)
 lookup :: #force_inline proc(self: ^UI, handle: NodeHandle) -> (^Node, bool) #optional_ok {
-  if !cont.slots_valid(&self.slots, handle) do return nil, false
+  if !containers.slots_valid(&self.slots, handle) do return nil, false
   return &self.nodes[handle.index], true
 }
 

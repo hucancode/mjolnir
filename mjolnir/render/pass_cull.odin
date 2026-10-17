@@ -1,6 +1,6 @@
 package render
 
-import cont "../containers"
+import "../containers"
 import "rhi"
 
 // Culling decides what each view draws and writes it as indirect draws.
@@ -139,7 +139,7 @@ pyramid_shape :: proc(extent: [2]u32) -> (half: [2]u32, mips: u32) {
 pyramids_bind :: proc(self: ^Renderer, f: u32) {
   when !BINDLESS do return
   c: u32
-  for i in cont.slots_next(&self.camera_slots, &c) {
+  for i in containers.slots_next(&self.camera_slots, &c) {
     slot := camera_slot(i) + f
     if self.pyramid_bound[slot] do continue
     self.pyramid_bound[slot] = true
@@ -215,14 +215,14 @@ draw_lists_clear :: proc(self: ^Renderer, cmd: rhi.CommandList, slot: u32) {
 @(private)
 cull_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   c: u32
-  for i in cont.slots_next(&self.camera_slots, &c) do draw_lists_clear(self, cmd, camera_next_slot(i, f))
+  for i in containers.slots_next(&self.camera_slots, &c) do draw_lists_clear(self, cmd, camera_next_slot(i, f))
   when !BINDLESS do if self.shadow_view_count > 0 do draw_lists_clear(self, cmd, SHADOW_DRAW_SLOT_BASE + f)
   dev.cmd_begin_compute(&self.gpu, cmd)
   defer dev.cmd_end_compute(&self.gpu, cmd)
   when BINDLESS {
     bound := false
     c = 0
-    for i in cont.slots_next(&self.camera_slots, &c) {
+    for i in containers.slots_next(&self.camera_slots, &c) {
       if !camera_ready(self, i) do continue
       if !bound {
         dev.cmd_bind_pipeline(&self.gpu, cmd, self.reduce_pipeline)
@@ -235,10 +235,10 @@ cull_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
     cull_compacted(self, cmd, f, CAMERA_VIEW_BASE + 1, self.camera_slots.high_water - 1)
   } else {
     c = 0
-    for i in cont.slots_next(&self.camera_slots, &c) do if camera_ready(self, i) do pyramid_build_groups(self, cmd, i, f)
+    for i in containers.slots_next(&self.camera_slots, &c) do if camera_ready(self, i) do pyramid_build_groups(self, cmd, i, f)
     if self.batch_high == 0 do return
     c = 0
-    for i in cont.slots_next(&self.camera_slots, &c) {
+    for i in containers.slots_next(&self.camera_slots, &c) {
       cull_batched(self, cmd, camera_next_slot(i, f), CAMERA_VIEW_BASE + i, 1, self.pyramids[camera_slot(i) + f])
     }
     if self.shadow_view_count > 0 do cull_batched(self, cmd, SHADOW_DRAW_SLOT_BASE + f, SHADOW_VIEW_BASE, self.shadow_view_count, 0)

@@ -1,6 +1,6 @@
 package world
 
-import cont "../containers"
+import "../containers"
 import "../geometry"
 import "core:math/linalg"
 import "core:slice"
@@ -51,7 +51,7 @@ World_State :: struct {
   // indexed by NodeHandle.index; slots says which are live
   nodes:           []Node,
   cache:           []Node_Cache,
-  slots:           cont.Slots,
+  slots:           containers.Slots,
   // the tree derived from Node.parent, rebuilt by build_tree: CSR child lists indexed
   // by node index, and every reachable node with parents before children
   children:        [dynamic]NodeHandle,
@@ -82,7 +82,7 @@ set_name :: proc(self: ^World, handle: NodeHandle, name: string) {
 
 @(private)
 lookup :: #force_inline proc(self: ^World, handle: NodeHandle) -> (^Node, bool) #optional_ok {
-  if !cont.slots_valid(&self.slots, handle) do return nil, false
+  if !containers.slots_valid(&self.slots, handle) do return nil, false
   return &self.nodes[handle.index], true
 }
 
@@ -90,7 +90,7 @@ lookup :: #force_inline proc(self: ^World, handle: NodeHandle) -> (^Node, bool) 
 // Children despawned since the last update may still be listed, as stale handles (node
 // rejects them).
 children :: proc(self: ^World, handle: NodeHandle) -> []NodeHandle {
-  if !cont.slots_valid(&self.slots, handle) do return nil
+  if !containers.slots_valid(&self.slots, handle) do return nil
   if self.tree_stale do build_tree(self)
   return children_of(self, handle.index)
 }
@@ -108,9 +108,9 @@ build_tree :: proc(self: ^World) {
   resize(&self.child_count, n)
   slice.zero(self.child_count[:])
   for i in 0 ..< u32(n) {
-    if i == self.root.index || !cont.slots_live(&self.slots, i) do continue
+    if i == self.root.index || !containers.slots_live(&self.slots, i) do continue
     p := self.nodes[i].parent
-    if cont.slots_valid(&self.slots, p) do self.child_count[p.index] += 1
+    if containers.slots_valid(&self.slots, p) do self.child_count[p.index] += 1
   }
   total: u32
   for count, i in self.child_count {
@@ -120,10 +120,10 @@ build_tree :: proc(self: ^World) {
   resize(&self.children, int(total))
   fill := make([]u32, n, context.temp_allocator)
   for i in 0 ..< u32(n) {
-    if i == self.root.index || !cont.slots_live(&self.slots, i) do continue
+    if i == self.root.index || !containers.slots_live(&self.slots, i) do continue
     p := self.nodes[i].parent
-    if !cont.slots_valid(&self.slots, p) do continue
-    self.children[self.child_first[p.index] + fill[p.index]] = NodeHandle(cont.slots_handle(&self.slots, i))
+    if !containers.slots_valid(&self.slots, p) do continue
+    self.children[self.child_first[p.index] + fill[p.index]] = NodeHandle(containers.slots_handle(&self.slots, i))
     fill[p.index] += 1
   }
   // depth first, so a subtree is contiguous
@@ -168,8 +168,8 @@ node_init :: proc(self: ^Node, name: string = "") {
 
 spawn :: node_create
 
-// node_create creates a node under `parent`, the world root by default; false when `parent` is
-// stale or no slot is free.
+// node_create (or its alias spawn) creates a node under `parent`, the world root by default;
+// false when `parent` is stale or no slot is free.
 node_create :: proc(
   self: ^World,
   position: [3]f32 = {0, 0, 0},
@@ -180,7 +180,7 @@ node_create :: proc(
   ok: bool,
 ) #optional_ok {
   parent := parent if parent != {} else self.root
-  if !cont.slots_valid(&self.slots, parent) do return
+  if !containers.slots_valid(&self.slots, parent) do return
   handle = alloc_node(self, name) or_return
   node := &self.nodes[handle.index]
   node.parent = parent
@@ -192,22 +192,22 @@ node_create :: proc(
 
 @(private = "file")
 alloc_node :: proc(self: ^World, name: string) -> (handle: NodeHandle, ok: bool) {
-  index := cont.slots_alloc(&self.slots) or_return
+  index := containers.slots_alloc(&self.slots) or_return
   node_init(&self.nodes[index], name)
   self.cache[index] = NODE_CACHE_INIT
-  return NodeHandle(cont.slots_handle(&self.slots, index)), true
+  return NodeHandle(containers.slots_handle(&self.slots, index)), true
 }
 
 // init prepares the world with its root node; false when no slot is free.
 init :: proc(self: ^World) -> bool {
-  cont.slots_init(&self.slots, MAX_NODES_IN_SCENE, RETIRE_GRACE)
+  containers.slots_init(&self.slots, MAX_NODES_IN_SCENE, RETIRE_GRACE)
   self.nodes = make([]Node, MAX_NODES_IN_SCENE)
   self.cache = make([]Node_Cache, MAX_NODES_IN_SCENE)
   self.root = alloc_node(self, "root") or_return
   self.nodes[self.root.index].parent = self.root
   self.tree_stale = true
   // the root outlives teardown
-  cont.slots_mark(&self.slots)
+  containers.slots_mark(&self.slots)
   return true
 }
 
@@ -217,7 +217,7 @@ update :: proc(self: ^World) {
   if self.tree_stale || len(self.pending_removed) > 0 do build_tree(self)
   for index in self.pending_removed do append(&self.feed, NodeChange{index = index, removed = true})
   clear(&self.pending_removed)
-  for r in cont.slots_tick(&self.slots) do self.nodes[r.index], self.cache[r.index] = {}, {}
+  for r in containers.slots_tick(&self.slots) do self.nodes[r.index], self.cache[r.index] = {}, {}
   traverse(self)
 }
 
@@ -230,7 +230,7 @@ changes :: proc(self: ^World) -> []NodeChange {
 
 // shutdown frees everything the world owns.
 shutdown :: proc(self: ^World) {
-  cont.slots_destroy(&self.slots)
+  containers.slots_destroy(&self.slots)
   delete(self.nodes)
   delete(self.cache)
   delete(self.children)
@@ -247,7 +247,7 @@ shutdown :: proc(self: ^World) {
 teardown :: proc(self: ^World) {
   slice.zero(self.nodes[self.slots.mark:self.slots.high_water])
   slice.zero(self.cache[self.slots.mark:self.slots.high_water])
-  cont.slots_rewind(&self.slots)
+  containers.slots_rewind(&self.slots)
   self.tree_stale = true
   clear(&self.pending_removed)
   clear(&self.feed)
@@ -255,7 +255,7 @@ teardown :: proc(self: ^World) {
 
 // node_destroy removes a node and its descendants; changes reports them after the next update.
 node_destroy :: proc(self: ^World, handle: NodeHandle) -> bool {
-  if handle == self.root || !cont.slots_valid(&self.slots, handle) do return false
+  if handle == self.root || !containers.slots_valid(&self.slots, handle) do return false
   // removals need no rebuild: the lists hold handles, and freed ones go stale
   if self.tree_stale do build_tree(self)
   despawn_subtree(self, handle)
@@ -265,10 +265,10 @@ node_destroy :: proc(self: ^World, handle: NodeHandle) -> bool {
 @(private)
 despawn_subtree :: proc(self: ^World, handle: NodeHandle) {
   for child in children_of(self, handle.index) {
-    if cont.slots_valid(&self.slots, child) do despawn_subtree(self, child)
+    if containers.slots_valid(&self.slots, child) do despawn_subtree(self, child)
   }
   append(&self.pending_removed, handle.index)
-  cont.slots_free(&self.slots, handle.index)
+  containers.slots_free(&self.slots, handle.index)
 }
 
 // Recompute world transforms of dirty subtrees, parents first, and record every node
@@ -351,7 +351,7 @@ set_local_matrix :: proc(self: ^World, handle: NodeHandle, m: matrix[4, 4]f32) {
 
 // world_matrix returns a node's world matrix as of the last update; identity when stale.
 world_matrix :: proc(self: ^World, handle: NodeHandle) -> matrix[4, 4]f32 {
-  if !cont.slots_valid(&self.slots, handle) do return linalg.MATRIX4F32_IDENTITY
+  if !containers.slots_valid(&self.slots, handle) do return linalg.MATRIX4F32_IDENTITY
   return self.cache[handle.index].world_matrix
 }
 
