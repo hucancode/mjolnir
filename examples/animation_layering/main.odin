@@ -35,7 +35,6 @@ walk_layer:   Maybe(anim.LayerHandle)
 run_layer:    Maybe(anim.LayerHandle)
 survey_layer: Maybe(anim.LayerHandle)
 ik_layer:     Maybe(anim.LayerHandle)
-survey_mask:  []bool
 
 walk_run_blend: mu.Real = 0.0
 auto_blend:     bool    = true
@@ -77,7 +76,6 @@ shutdown :: proc(app: ^App) {
   platform.shutdown(&app.window)
   free(app)
   gltf.destroy(&fox_scene)
-  delete(survey_mask)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -100,16 +98,20 @@ setup :: proc(app: ^App) -> bool {
   fox_handle = fox_scene.skinned[0].node
   rig = &fox_scene.rigs[fox_scene.skinned[0].rig]
   anim.animator_init(&animator, rig)
-  if l, ok := anim.clip_layer_create(&animator, rig, "Walk", weight = 1.0); ok do walk_layer = l
-  if l, ok := anim.clip_layer_create(&animator, rig, "Run",  weight = 0.0); ok do run_layer = l
-  if l, ok := anim.clip_layer_create(&animator, rig, "Survey", weight = 0.0, speed = 0.5); ok do survey_layer = l
-  // Survey drives only the spine and everything above it; legs keep walking.
-  if mask, ok := anim.bone_subtree_mask(&rig.skeleton, "b_Spine01_02"); ok {
-    survey_mask = mask
-    if l, ok := survey_layer.?; ok do anim.set_layer_mask(&animator, l, survey_mask)
+  if clip, ok := anim.find_clip(rig, "Walk"); ok {
+    if l, ok := anim.layer_create(&animator, rig, anim.ClipParams{clip = clip, speed = 1}); ok do walk_layer = l
   }
-  if bones, ok := anim.find_bones(&rig.skeleton, {"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}); ok {
-    if l, ok := anim.ik_layer_create(&animator, rig, bones, {f32(target_x), f32(target_y), f32(target_z)}, {0, 5, 2.5}, weight = 0.0, space = .WORLD); ok do ik_layer = l
+  if clip, ok := anim.find_clip(rig, "Run"); ok {
+    if l, ok := anim.layer_create(&animator, rig, anim.ClipParams{clip = clip, speed = 1}, weight = 0); ok do run_layer = l
+  }
+  // Survey drives only the spine and everything above it; legs keep walking.
+  if clip, ok := anim.find_clip(rig, "Survey"); ok {
+    upper := anim.bone_subtree(&rig.skeleton, "b_Spine01_02", context.temp_allocator)
+    if l, ok := anim.layer_create(&animator, rig, anim.ClipParams{clip = clip, speed = 0.5}, upper, weight = 0); ok do survey_layer = l
+  }
+  if bones, ok := anim.find_bones(&rig.skeleton, {"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}, context.temp_allocator); ok {
+    ik := anim.IKParams{target = {f32(target_x), f32(target_y), f32(target_z)}, pole = {0, 5, 2.5}, pole_weight = 1, space = .WORLD}
+    if l, ok := anim.layer_create(&animator, rig, ik, bones, weight = 0); ok do ik_layer = l
   }
   log.infof("Layers: walk=%v run=%v survey=%v ik=%v", walk_layer, run_layer, survey_layer, ik_layer)
 
@@ -153,14 +155,12 @@ animate :: proc(app: ^App, dt: f32) {
     walk_run_blend += mu.Real(blend_dir * dt * 0.5)
     if walk_run_blend >= 1.0 { walk_run_blend = 1.0; blend_dir = -1.0 }
     if walk_run_blend <= 0.0 { walk_run_blend = 0.0; blend_dir =  1.0 }
+    set_walk_run(0)
   }
-
-  if l, ok := walk_layer.?; ok do anim.set_layer_weight(&animator, l, 1.0 - f32(walk_run_blend))
-  if l, ok := run_layer.?; ok do anim.set_layer_weight(&animator, l, f32(walk_run_blend))
-  if l, ok := survey_layer.?; ok do anim.set_layer_weight(&animator, l, f32(survey_weight))
+  if l, ok := survey_layer.?; ok do anim.layer_fade(&animator, l, f32(survey_weight))
 
   if ik, ok := ik_layer.?; ok {
-    anim.set_layer_weight(&animator, ik, f32(ik_weight))
+    anim.layer_fade(&animator, ik, f32(ik_weight))
     if animate_target {
       t := app.time * f32(target_speed)
       r := f32(target_radius)
@@ -169,10 +169,16 @@ animate :: proc(app: ^App, dt: f32) {
       target_y = mu.Real(4.0 + math.sin(t * 2.0))
     }
     pos := [3]f32{f32(target_x), f32(target_y), f32(target_z)}
-    anim.set_ik_target(&animator, ik, pos, {0, 5, 0})
+    if p, ok := anim.layer_params(&animator, ik, anim.IKParams); ok do p.target, p.pole = pos, {0, 5, 0}
     if _, ok := world.node(&app.scene, target_cube); ok do world.translate(&app.scene, target_cube, pos)
   }
   anim.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, fox_handle))
+}
+
+// Weigh walk against run by walk_run_blend, fading over `duration` seconds.
+set_walk_run :: proc(duration: f32) {
+  if l, ok := walk_layer.?; ok do anim.layer_fade(&animator, l, 1.0 - f32(walk_run_blend), duration)
+  if l, ok := run_layer.?; ok do anim.layer_fade(&animator, l, f32(walk_run_blend), duration)
 }
 
 debug_ui :: proc(app: ^App) {
@@ -182,19 +188,17 @@ debug_ui :: proc(app: ^App) {
     mu.label(ctx, "Base layer (Walk <-> Run)")
     mu.checkbox(ctx, "Auto blend", &auto_blend)
     mu.label(ctx, fmt.tprintf("Blend: %.2f", walk_run_blend))
-    mu.slider(ctx, &walk_run_blend, 0.0, 1.0)
+    if .CHANGE in mu.slider(ctx, &walk_run_blend, 0.0, 1.0) {
+      auto_blend = false
+      set_walk_run(0)
+    }
     if .SUBMIT in mu.button(ctx, "Trigger transition") {
-      walk, has_walk := walk_layer.?
-      run, has_run := run_layer.?
-      if has_walk && has_run {
-        on_run = !on_run
-        name := on_run ? "Run" : "Walk"
-        from := on_run ? walk : run
-        to   := on_run ? run  : walk
-        anim.transition_to(&animator, rig, name, duration = TRANSITION_DURATION, from = from, to = to)
-        auto_blend = false
-        walk_run_blend = on_run ? 1.0 : 0.0
-      }
+      // cross-fade: one layer fades out while the other fades in from its start
+      on_run = !on_run
+      auto_blend = false
+      walk_run_blend = on_run ? 1.0 : 0.0
+      if l, ok := (run_layer if on_run else walk_layer).?; ok do anim.clip_seek(&animator, l, 0)
+      set_walk_run(TRANSITION_DURATION)
     }
     mu.label(ctx, "")
     mu.label(ctx, "Upper body (Survey)")

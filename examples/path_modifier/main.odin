@@ -90,12 +90,12 @@ rebuild_path :: proc(app: ^App) {
   regenerate_points()
   animation.destroy(&spline)
   spline = animation.spline_create_closed(path_buf[:])
-  for &a, i in animators do animation.set_path_params(&a, layer_indices[i], path = path_buf[:])
+  for &a, i in animators do animation.path_points(&a, layer_indices[i], path_buf[:], closed = true)
 }
 
 apply_runtime_params :: proc(app: ^App) {
   for &a, i in animators {
-    animation.set_path_params(&a, layer_indices[i], offset = f32(offset_val), length = f32(fit_len), speed = 0, loop = true)
+    if p, ok := animation.layer_params(&a, layer_indices[i], animation.PathParams); ok do p^ = {offset = f32(offset_val), length = f32(fit_len), loop = true}
   }
 }
 
@@ -126,10 +126,9 @@ setup :: proc(app: ^App) -> bool {
     rig := &snake.rigs[s.rig]
     a: animation.Animator
     animation.animator_init(&a, rig)
-    idx, _ := animation.path_layer_create(&a, rig, "root", 14,
-      path = path_buf[:], offset = f32(offset_val), length = f32(fit_len),
-      speed = 0, loop = true, closed = true, weight = 1.0,
-    )
+    chain, _ := animation.bone_chain_down(&rig.skeleton, "root", 14, context.temp_allocator)
+    idx, _ := animation.layer_create(&a, rig, animation.PathParams{offset = f32(offset_val), length = f32(fit_len), loop = true}, chain)
+    animation.path_points(&a, idx, path_buf[:], closed = true)
     append(&animators, a)
     append(&layer_indices, idx)
   }

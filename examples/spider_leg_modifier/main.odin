@@ -21,7 +21,7 @@ animator: animation.Animator
 animation_time: f32 = 0
 spider_root_node: world.NodeHandle
 spider_mesh_node: world.NodeHandle
-spider_leg_layer: Maybe(animation.LayerHandle)
+leg_layers: [6]Maybe(animation.LayerHandle)
 ground_plane: world.NodeHandle
 
 lift_frequency_default :: f32(1.5)
@@ -113,24 +113,21 @@ setup :: proc(app: ^App) -> bool {
 
   deg30 := f32(math.PI / 6.0)
   deg90 := f32(math.PI / 2.0)
-  legs: [6]animation.SpiderLegConfig
-  for &leg, i in legs {
+  // one leg layer per leg; the two tripod groups step half a cycle apart
+  limits := animation.bone_limits(&animator)
+  for i in 0 ..< 6 {
     offset, _ := animation.rest_offset(skel, leg_meta[i].root_name, leg_meta[i].tip_name)
+    bones, _ := animation.bone_chain(skel, leg_meta[i].root_name, leg_meta[i].tip_name, context.temp_allocator)
+    for b, k in bones do limits[b] = {{deg30, deg90, deg30} if k == 0 else {deg90, deg90, deg90}}
     in_group_a := slice.contains(GROUP_A[:], i)
-    leg = {
-      root           = leg_meta[i].root_name,
-      chain_length   = 6,
-      constraints    = animation.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90}),
+    leg := animation.LegParams {
       offset         = offset,
       lift_height    = f32(in_group_a ? lift_height_a : lift_height_b),
       lift_frequency = f32(lift_frequency_shared),
       lift_duration  = f32(in_group_a ? lift_duration_a : lift_duration_b),
       time_offset    = leg_meta[i].time_offset,
     }
-  }
-  if idx, ok := animation.spider_leg_layer_create(&animator, rig, legs[:], weight = 1.0); ok {
-    spider_leg_layer = idx
-    log.infof("Added spider leg modifiers for all 6 legs (layer %d)", idx)
+    if idx, ok := animation.layer_create(&animator, rig, leg, bones); ok do leg_layers[i] = idx
   }
 
   ground_plane = world.spawn(&app.scene)
@@ -141,12 +138,11 @@ setup :: proc(app: ^App) -> bool {
   return true
 }
 
-apply_group :: proc(app: ^App, layer: animation.LayerHandle, group: []int, lift_height, lift_duration, lift_frequency, time_offset: f32) {
-  for leg_index in group {
-    animation.set_spider_leg_params(&animator, layer, leg_index,
-      lift_height = lift_height, lift_frequency = lift_frequency,
-      lift_duration = lift_duration, time_offset = time_offset,
-    )
+apply_group :: proc(app: ^App, group: []int, lift_height, lift_duration, lift_frequency, time_offset: f32) {
+  for i in group {
+    layer := leg_layers[i].? or_continue
+    p := animation.layer_params(&animator, layer, animation.LegParams) or_continue
+    p.lift_height, p.lift_duration, p.lift_frequency, p.time_offset = lift_height, lift_duration, lift_frequency, time_offset
   }
 }
 
@@ -179,20 +175,15 @@ update :: proc(app: ^App, dt: f32) {
   }
   world.translate(&app.scene, spider_root_node, body_current_pos)
 
-  layer, has_layer := spider_leg_layer.?
-  if has_layer {
-    apply_group(app, layer, GROUP_A[:], f32(lift_height_a), f32(lift_duration_a), f32(lift_frequency_shared), 0.0)
-    apply_group(app, layer, GROUP_B[:], f32(lift_height_b), f32(lift_duration_b), f32(lift_frequency_shared), f32(phase_offset_b))
-  }
+  apply_group(app, GROUP_A[:], f32(lift_height_a), f32(lift_duration_a), f32(lift_frequency_shared), 0.0)
+  apply_group(app, GROUP_B[:], f32(lift_height_b), f32(lift_duration_b), f32(lift_frequency_shared), f32(phase_offset_b))
 
   if rig != nil do animation.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, spider_mesh_node))
 
   red := [4]f32{1, 0.2, 0.2, 1}
-  for i in 0 ..< 6 {
-    if !has_layer do break
-    target, ok := animation.spider_leg_target(&animator, layer, i)
-    if !ok do continue
-    render.debug_sphere(&app.renderer, target^, 0.2, red)
+  for l in leg_layers {
+    foot := animation.leg_foot(&animator, l.? or_continue) or_continue
+    render.debug_sphere(&app.renderer, foot, 0.2, red)
   }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

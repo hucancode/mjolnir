@@ -195,19 +195,24 @@ spline_build_arc_table :: proc(self: ^Spline($T), samples := 200) {
     arc_lengths = make([]f32, samples),
     times       = make([]f32, samples),
   }
-  t_start := slice.first(self.times)
-  t_range := slice.last(self.times) - t_start
-  prev_pos := spline_sample(self^, t_start)
-  total_length := f32(0)
-  for i in 0 ..< samples {
-    t := t_start + f32(i) * t_range / f32(samples - 1)
-    pos := spline_sample(self^, t)
-    if i > 0 do total_length += linalg.distance(pos, prev_pos)
-    table.arc_lengths[i] = total_length
-    table.times[i] = t
-    prev_pos = pos
-  }
+  arc_fill(self^, table.arc_lengths, table.times, slice.first(self.times), slice.last(self.times))
   self.arc_table = table
+}
+
+// Fill an arc-length table (one entry per sample) over spline times [t_start, t_end].
+@(private)
+arc_fill :: proc(spline: Spline($T), arc_lengths, times: []f32, t_start, t_end: f32) {
+  samples := len(arc_lengths)
+  prev := spline_sample(spline, t_start)
+  total := f32(0)
+  for i in 0 ..< samples {
+    t := t_start + f32(i) * (t_end - t_start) / f32(samples - 1)
+    pos := spline_sample(spline, t)
+    if i > 0 do total += linalg.distance(pos, prev)
+    arc_lengths[i] = total
+    times[i] = t
+    prev = pos
+  }
 }
 
 // spline_sample_uniform evaluates the spline at arc length s; without an arc table s is treated as time.
@@ -239,40 +244,34 @@ spline_arc_length :: proc(spline: Spline($T)) -> f32 {
   return slice.last(table.arc_lengths) if len(table.arc_lengths) > 0 else 0
 }
 
-// spline_build_closed builds a closed-loop Catmull-Rom spline through `base` (base[N-1] must
+// spline_create_closed builds a closed-loop Catmull-Rom spline through `base` (base[N-1] must
 // differ from base[0]). Ghost points around the seam keep tangents smooth; the arc table
 // covers t in [0, N], so spline_arc_length is exactly one loop.
 spline_create_closed :: proc(base: [][3]f32, samples := 200) -> Spline([3]f32) {
   n := len(base)
-  pts := make([][3]f32, n + 3)
-  ts := make([]f32, n + 3)
-  pts[0] = base[n - 1]
-  ts[0] = -1
-  for i in 0 ..< n {
-    pts[i + 1] = base[i]
-    ts[i + 1] = f32(i)
+  result := Spline([3]f32){points = make([][3]f32, n + 3), times = make([]f32, n + 3)}
+  closed_points(base, result.points, result.times)
+  table := Spline_Arc_Length_Table([3]f32) {
+    arc_lengths = make([]f32, samples),
+    times       = make([]f32, samples),
   }
-  pts[n + 1] = base[0]
-  ts[n + 1] = f32(n)
-  pts[n + 2] = base[1]
-  ts[n + 2] = f32(n + 1)
-  result := Spline([3]f32){points = pts, times = ts}
-
-  arc_lengths := make([]f32, samples)
-  arc_times := make([]f32, samples)
-  prev := spline_sample(result, 0)
-  total: f32 = 0
-  for i in 0 ..< samples {
-    t := f32(i) / f32(samples - 1) * f32(n)
-    pos := spline_sample(result, t)
-    if i > 0 do total += linalg.distance(pos, prev)
-    arc_lengths[i] = total
-    arc_times[i] = t
-    prev = pos
-  }
-  result.arc_table = Spline_Arc_Length_Table([3]f32) {
-    arc_lengths = arc_lengths,
-    times       = arc_times,
-  }
+  arc_fill(result, table.arc_lengths, table.times, 0, f32(n))
+  result.arc_table = table
   return result
+}
+
+// The control points (len(base) + 3) and times of a closed loop through `base`.
+@(private)
+closed_points :: proc(base: [][3]f32, points: [][3]f32, times: []f32) {
+  n := len(base)
+  points[0] = base[n - 1]
+  times[0] = -1
+  for i in 0 ..< n {
+    points[i + 1] = base[i]
+    times[i + 1] = f32(i)
+  }
+  points[n + 1] = base[0]
+  times[n + 1] = f32(n)
+  points[n + 2] = base[1]
+  times[n + 2] = f32(n + 1)
 }

@@ -184,27 +184,25 @@ bone_chain_down :: proc(
   return slice.clone(chain[:], allocator), true
 }
 
-// bone_mask returns a mask enabling the named bones.
-bone_mask :: proc(self: ^Skeleton, names: []string, allocator := context.allocator) -> []bool {
-  mask := make([]bool, bone_count(self), allocator)
-  for name in names do if idx, ok := find_bone(self, name); ok do mask[idx] = true
-  return mask
-}
-
-// bone_subtree_mask returns a mask enabling a bone and all its descendants.
-bone_subtree_mask :: proc(
+// bone_subtree returns a bone and all its descendants, parents first.
+bone_subtree :: proc(
   self: ^Skeleton,
   root_name: string,
   allocator := context.allocator,
 ) -> (
-  mask: []bool,
+  bones: []u32,
   ok: bool,
 ) #optional_ok {
   root := find_bone(self, root_name) or_return
-  mask = make([]bool, bone_count(self), allocator)
-  mask[root] = true
-  for i in self.order do if p := self.parents[i]; p >= 0 && mask[p] do mask[i] = true
-  return mask, true
+  inside := make([]bool, bone_count(self), context.temp_allocator)
+  inside[root] = true
+  out := make([dynamic]u32, 0, bone_count(self), allocator)
+  for i in self.order {
+    if p := self.parents[i]; i != root && (p < 0 || !inside[p]) do continue
+    inside[i] = true
+    append(&out, i)
+  }
+  return out[:], true
 }
 
 // rest_position returns the rest-pose position of a bone in skeleton space.

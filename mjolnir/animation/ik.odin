@@ -4,29 +4,6 @@ import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
-// IKBoneConstraint limits a bone; max_angle is (swing X, twist Y, swing Z) in radians
-// about bone-local axes (Y is forward). Negative = unconstrained, zero = locked.
-IKBoneConstraint :: struct {
-  max_angle: [3]f32,
-}
-
-// ik_constraints_uniform builds a chain of constraints: bone 0 (root) gets `root_max`, bones 1..N-1 get `rest_max`.
-// Caller owns the returned slice.
-ik_constraints_uniform :: proc(
-  chain_length: int,
-  root_max: [3]f32,
-  rest_max: [3]f32,
-  allocator := context.allocator,
-) -> []IKBoneConstraint {
-  out := make([]IKBoneConstraint, chain_length, allocator)
-  if chain_length == 0 do return out
-  out[0] = IKBoneConstraint{max_angle = root_max}
-  for i in 1 ..< chain_length {
-    out[i] = IKBoneConstraint{max_angle = rest_max}
-  }
-  return out
-}
-
 // IKTargetSpace is the space of IK target and pole values: LOCAL is skeleton space,
 // WORLD is converted each animator_update so the target stays fixed as the rig moves.
 IKTargetSpace :: enum {
@@ -34,19 +11,22 @@ IKTargetSpace :: enum {
   WORLD,
 }
 
-// IKTarget is the FABRIK solver input (supports N bones, minimum 2).
-IKTarget :: struct {
-  bone_indices:    []u32, // All bones in chain from root to end (min 2 bones)
-  bone_lengths:    []f32, // Cached bone lengths (len = bone_indices - 1)
-  constraints:     []IKBoneConstraint, // Optional per-bone constraints (nil or len = chain length)
-  target_position: [3]f32,
-  pole_vector:     [3]f32, // Point the chain's non-root bones twist their X axis toward; the bend plane comes from the FK pose
-  pole_weight:     f32, // Pole twist strength (0-1), ik_layer_create defaults to 1
-  max_iterations:  int,
-  tolerance:       f32, // Stop when end effector within this distance
-  weight:          f32, // Blend weight (0-1), 1 = full IK, 0 = pure FK
-  enabled:         bool,
-  space:           IKTargetSpace, // Space target_position and pole_vector live in
+// IKParams reaches a chain's last bone for `target`. Its layer's bones are the chain, root
+// first, each bone the parent of the next (bone_chain); joint limits come from bone_limits.
+IKParams :: struct {
+  target:      [3]f32,
+  pole:        [3]f32, // point the chain's non-root bones twist their X axis toward; the bend plane comes from the incoming pose
+  pole_weight: f32, // pole twist strength, 0-1
+  space:       IKTargetSpace, // space target and pole live in
+  iterations:  int, // 0 = 10
+  tolerance:   f32, // stop when the end is this close to target; 0 = 0.001
+}
+
+@(private)
+ik_apply :: proc(pose: Pose, bones: []u32, params: IKParams) {
+  target, pole := params.target, params.pole
+  if params.space == .WORLD do target, pole = to_model(pose, target), to_model(pose, pole)
+  ik_solve(pose, bones, target, pole, params.pole_weight, params.iterations, params.tolerance)
 }
 
 // Clamp `dir` so its angular deviation from `fk_rot`'s forward axis (qy)
@@ -139,27 +119,36 @@ safe_dir :: #force_inline proc(v, fallback: [3]f32) -> [3]f32 {
 // When progress stalls the forward pass clamps too (using the latest backward
 // pass's frames), so the chain can fold instead of sitting at a fixed point.
 //
-// `positions`/`rotations` hold the skeleton-space FK pose of every bone,
-// indexed by bone. The chain's entries are overwritten with the solved pose,
-// blended with the FK pose by `target.weight`.
-@(private)
-fabrik_solve :: proc(positions: [][3]f32, rotations: []quaternion128, target: IKTarget) {
-  if !target.enabled || target.weight <= 0.0 do return
-  chain_length := len(target.bone_indices)
+// ik_solve bends the chain `bones` (root first, each the parent of the next) so its last bone
+// reaches `target`, all in skeleton space, within the pose's joint limits. The chain keeps its
+// rest bone lengths; `pole` twists it (see IKParams). 0 iterations or tolerance = defaults.
+ik_solve :: proc(
+  pose: Pose,
+  bones: []u32,
+  target: [3]f32,
+  pole: [3]f32 = {},
+  pole_weight: f32 = 0,
+  iterations: int = 10,
+  tolerance: f32 = 0.001,
+) {
+  positions, rotations := pose.positions, pose.rotations
+  chain_length := len(bones)
   if chain_length < 2 do return
-  for idx in target.bone_indices {
-    if idx >= u32(len(positions)) || idx >= u32(len(rotations)) do return
+  for idx in bones do if int(idx) >= len(positions) do return
+  bone_lengths := make([]f32, chain_length - 1, context.temp_allocator)
+  for i in 1 ..< chain_length do bone_lengths[i - 1] = pose.lengths[bones[i]]
+  constraints := make([]JointLimit, chain_length, context.temp_allocator)
+  has_constraints := false
+  for b, i in bones {
+    constraints[i] = pose.limits[b] if int(b) < len(pose.limits) else JOINT_FREE
+    has_constraints ||= constraints[i] != JOINT_FREE
   }
-  bone_lengths := target.bone_lengths
-  if len(bone_lengths) != chain_length - 1 do return
-  constraints := target.constraints
-  has_constraints := constraints != nil && len(constraints) == chain_length
   joints := make([][3]f32, chain_length, context.temp_allocator)
   fk_positions := make([][3]f32, chain_length, context.temp_allocator)
   fk_rotations := make([]quaternion128, chain_length, context.temp_allocator)
   fk_dirs := make([][3]f32, chain_length - 1, context.temp_allocator)
   for i in 0 ..< chain_length {
-    bone_idx := target.bone_indices[i]
+    bone_idx := bones[i]
     joints[i] = positions[bone_idx]
     fk_positions[i] = positions[bone_idx]
     fk_rotations[i] = rotations[bone_idx]
@@ -170,7 +159,7 @@ fabrik_solve :: proc(positions: [][3]f32, rotations: []quaternion128, target: IK
     fk_dirs[i] = safe_dir(fk_positions[i + 1] - fk_positions[i], geometry.qy(fk_rotations[i]))
   }
   root_position := joints[0]
-  target_pos := target.target_position
+  target_pos := target
   total_length: f32 = 0
   for length in bone_lengths do total_length += length
   dist_to_target := linalg.distance(root_position, target_pos)
@@ -179,8 +168,8 @@ fabrik_solve :: proc(positions: [][3]f32, rotations: []quaternion128, target: IK
     // chain still curls toward the target.
     place_from_root(joints, target_pos, fk_dirs, fk_rotations, bone_lengths, constraints if has_constraints else nil, frames, aim = true)
   } else {
-    iterations := target.max_iterations > 0 ? target.max_iterations : 10
-    tolerance := target.tolerance > 0 ? target.tolerance : 0.001
+    iterations := iterations if iterations > 0 else 10
+    tolerance := tolerance if tolerance > 0 else 0.001
     // Constraining the forward pass lets a chain fold where the plain pass stalls,
     // but its frames lag one iteration; switch passes whenever progress stops
     // and keep the closest result.
@@ -213,16 +202,15 @@ fabrik_solve :: proc(positions: [][3]f32, rotations: []quaternion128, target: IK
   update_transforms_from_positions(
     positions,
     rotations,
-    target.bone_indices,
+    bones,
     joints,
     fk_positions,
     fk_dirs,
     fk_rotations,
-    target.pole_vector,
-    target.pole_weight,
+    pole,
+    clamp(pole_weight, 0, 1),
     constraints if has_constraints else nil,
   )
-  if target.weight < 1 do blend_with_fk(positions, rotations, target.bone_indices, fk_positions, fk_rotations, target.weight)
 }
 
 // Backward FABRIK pass: walk from the root placing each joint one bone length
@@ -238,7 +226,7 @@ place_from_root :: proc(
   fk_dirs: [][3]f32,
   fk_rotations: []quaternion128,
   bone_lengths: []f32,
-  constraints: []IKBoneConstraint,
+  constraints: []JointLimit,
   frames: []quaternion128,
   aim: bool,
 ) {
@@ -253,28 +241,6 @@ place_from_root :: proc(
     frames[i] = parent_swing * fk_rotations[i]
     joints[i + 1] = joints[i] + dir * bone_lengths[i]
     parent_swing = linalg.quaternion_between_two_vector3(fk_dirs[i], dir)
-  }
-}
-
-// Blend the solved chain toward its FK pose by `weight`: rotations slerp, and
-// positions are rebuilt from the root so bone lengths are kept.
-@(private = "file")
-blend_with_fk :: proc(
-  positions: [][3]f32,
-  rotations: []quaternion128,
-  bone_indices: []u32,
-  fk_positions: [][3]f32,
-  fk_rotations: []quaternion128,
-  weight: f32,
-) {
-  for b, i in bone_indices {
-    rotations[b] = linalg.quaternion_slerp(fk_rotations[i], rotations[b], weight)
-  }
-  positions[bone_indices[0]] = fk_positions[0]
-  for i in 1 ..< len(bone_indices) {
-    parent, b := bone_indices[i - 1], bone_indices[i]
-    delta := rotations[parent] * linalg.quaternion_inverse(fk_rotations[i - 1])
-    positions[b] = positions[parent] + geometry.qmv(delta, fk_positions[i] - fk_positions[i - 1])
   }
 }
 
@@ -293,7 +259,7 @@ update_transforms_from_positions :: proc(
   fk_rotations: []quaternion128,
   pole_vector: [3]f32,
   pole_weight: f32,
-  constraints: []IKBoneConstraint,
+  constraints: []JointLimit,
 ) {
   chain_length := len(bone_indices)
   has_pole := linalg.length2(pole_vector) > math.F32_EPSILON && pole_weight > 0

@@ -154,20 +154,18 @@ test_skeleton_bone_chain_down :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_skeleton_masks :: proc(t: ^testing.T) {
+test_skeleton_subtree :: proc(t: ^testing.T) {
   skel: Skeleton
   testing.expect(t, make_unsorted_skeleton(&skel))
   defer skeleton_destroy(&skel)
-  m := bone_mask(&skel, []string{"hip", "tail", "ghost"})
-  defer delete(m)
-  testing.expect(t, slice.equal(m, []bool{false, false, true, false, true}), "bone_mask")
-  sub, ok := bone_subtree_mask(&skel, "hip")
+  sub, ok := bone_subtree(&skel, "hip")
   defer delete(sub)
-  testing.expect(t, ok && slice.equal(sub, []bool{true, true, true, false, false}), "hip subtree")
-  all, ok2 := bone_subtree_mask(&skel, "root")
+  slice.sort(sub)
+  testing.expect(t, ok && slice.equal(sub, []u32{0, 1, 2}), "hip subtree")
+  all, ok2 := bone_subtree(&skel, "root")
   defer delete(all)
-  testing.expect(t, ok2 && slice.equal(all, []bool{true, true, true, true, true}), "root subtree")
-  _, ok3 := bone_subtree_mask(&skel, "ghost")
+  testing.expect(t, ok2 && len(all) == 5 && all[0] == 3, "root subtree, parents first")
+  _, ok3 := bone_subtree(&skel, "ghost")
   testing.expect(t, !ok3)
 }
 

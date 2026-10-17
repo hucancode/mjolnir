@@ -113,18 +113,14 @@ setup :: proc(app: ^App) -> bool {
       pole_pos = {root_world.x * 0.5, root_world.y + 10, root_world.z * 0.5}
     }
 
-    constraints := animation.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90})
-
-    bones, _ := animation.bone_chain(skel, leg_configs[i].root_name, leg_configs[i].tip_name)
-    idx, ok := animation.ik_layer_create(&animator, rig, bones,
-      leg_targets[i], pole_pos, weight = 1.0, constraints = constraints, space = .WORLD,
-    )
-    if !ok {
-      log.errorf("IK layer add failed leg %d", i)
-      delete(bones)
-      delete(constraints)
-    } else {
+    bones, _ := animation.bone_chain(skel, leg_configs[i].root_name, leg_configs[i].tip_name, context.temp_allocator)
+    // the hip swings 30 degrees, the other joints 90
+    for b, k in bones do animation.bone_limits(&animator)[b] = {{deg30, deg90, deg30} if k == 0 else {deg90, deg90, deg90}}
+    ik := animation.IKParams{target = leg_targets[i], pole = pole_pos, pole_weight = 1, space = .WORLD}
+    if idx, ok := animation.layer_create(&animator, rig, ik, bones); ok {
       leg_layers[i] = idx
+    } else {
+      log.errorf("IK layer add failed leg %d", i)
     }
   }
 
@@ -174,8 +170,8 @@ update :: proc(app: ^App, dt: f32) {
       target_pos.y += lift * math.max(math.sin(animation_time * spd * math.PI), 0)
     }
     if layer, ok := leg_layers[i].?; ok {
-      animation.set_ik_target(&animator, layer, target_pos, pole_pos)
-      animation.set_layer_weight(&animator, layer, f32(ik_weight))
+      if p, ok := animation.layer_params(&animator, layer, animation.IKParams); ok do p.target, p.pole = target_pos, pole_pos
+      animation.layer_fade(&animator, layer, f32(ik_weight))
     }
     if show_markers {
       render.debug_sphere(&app.renderer, target_pos, 0.5, {1, 0.2, 0.2, 1})

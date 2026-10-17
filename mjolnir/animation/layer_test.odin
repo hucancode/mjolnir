@@ -111,56 +111,18 @@ test_fk_playback_advance_zero_duration_noop :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_transition_cross_fades :: proc(t: ^testing.T) {
-	layers := []Layer{{weight = 1}, {weight = 0}}
-	tr := Transition{from_layer = 0, to_layer = 1, duration = 1, curve = .Linear, state = .ACTIVE}
-	transition_update(&tr, layers, 0.25)
-	testing.expect(t, tr.state == .ACTIVE)
-	testing.expectf(t, math.abs(layers[0].weight - 0.75) < 1e-5 && math.abs(layers[1].weight - 0.25) < 1e-5,
-		"weights at 25%%: %f %f", layers[0].weight, layers[1].weight)
-	transition_update(&tr, layers, 0.5)
-	testing.expect(t, math.abs(layers[1].weight - 0.75) < 1e-5, "75%")
-	transition_update(&tr, layers, 0.5)
-	testing.expect(t, tr.state == .COMPLETE, "complete")
-	testing.expect(t, layers[0].weight == 0 && layers[1].weight == 1, "final weights 0/1")
-	testing.expect(t, tr.elapsed == tr.duration, "elapsed clamped")
-	// further updates are no-ops
-	layers[0].weight = 0.5
-	transition_update(&tr, layers, 0.5)
-	testing.expect(t, layers[0].weight == 0.5, "complete transition does nothing")
-}
-
-@(test)
-test_transition_zero_duration_completes :: proc(t: ^testing.T) {
-	layers := []Layer{{weight = 1}, {weight = 0}}
-	tr := Transition{from_layer = 0, to_layer = 1, duration = 0, state = .ACTIVE}
-	transition_update(&tr, layers, 0)
-	testing.expect(t, tr.state == .COMPLETE)
-	testing.expect(t, layers[0].weight == 0 && layers[1].weight == 1)
-}
-
-@(test)
-test_transition_invalid_layer_resets :: proc(t: ^testing.T) {
-	layers := []Layer{{weight = 1}}
-	tr := Transition{from_layer = 0, to_layer = 3, duration = 1, state = .ACTIVE}
-	transition_update(&tr, layers, 0.1)
-	testing.expect(t, tr.state == .NONE)
-	testing.expect(t, layers[0].weight == 1)
-}
-
-@(test)
-test_ik_constraints_uniform :: proc(t: ^testing.T) {
-	cs := ik_constraints_uniform(4, [3]f32{1, 0, 1}, [3]f32{0.5, -1, 0.5})
-	defer delete(cs)
-	testing.expectf(t, len(cs) == 4, "len=4, got %d", len(cs))
-	testing.expect(t, cs[0].max_angle == [3]f32{1, 0, 1}, "root constraint")
-	testing.expect(t, cs[1].max_angle == [3]f32{0.5, -1, 0.5}, "rest constraint")
-	testing.expect(t, cs[3].max_angle == [3]f32{0.5, -1, 0.5}, "last is rest")
-
-	// zero chain returns empty slice
-	cs0 := ik_constraints_uniform(0, [3]f32{1, 1, 1}, [3]f32{0, 0, 0})
-	defer delete(cs0)
-	testing.expect(t, len(cs0) == 0, "empty chain")
+test_fade_moves_weight :: proc(t: ^testing.T) {
+	l := Layer{weight = 1, fade = {from = 1, to = 0, duration = 1, curve = .Linear}}
+	fade_advance(&l, 0.25)
+	testing.expectf(t, math.abs(l.weight - 0.75) < 1e-5, "25%%: %f", l.weight)
+	fade_advance(&l, 0.5)
+	testing.expect(t, math.abs(l.weight - 0.25) < 1e-5, "75%")
+	fade_advance(&l, 0.5)
+	testing.expect(t, l.weight == 0 && l.fade.duration == 0, "ends on its weight")
+	// a finished fade does nothing
+	l.weight = 0.5
+	fade_advance(&l, 0.5)
+	testing.expect(t, l.weight == 0.5)
 }
 
 @(test)

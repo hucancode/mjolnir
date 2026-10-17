@@ -11,16 +11,16 @@ Status :: enum {
   STOPPED,
 }
 
-// PlayMode selects what a ClipPlayer does when it reaches the end of its clip.
+// PlayMode selects what a clip does when it reaches its end.
 PlayMode :: enum {
   LOOP,
   ONCE,
   PING_PONG,
 }
 
-// ClipPlayer is the play head over one clip. A plain value: `ClipPlayer{speed = 1}` loops
-// from the start. ONCE clamps at the clip's end and stops; PING_PONG flips
-// speed at either end.
+// ClipPlayer is a play head over one clip, for animating outside an Animator
+// (clip_player_update). A plain value: `ClipPlayer{speed = 1}` loops from the start. ONCE
+// clamps at the clip's end and stops; PING_PONG flips speed at either end.
 ClipPlayer :: struct {
   time:   f32,
   speed:  f32,
@@ -53,50 +53,12 @@ playback_advance :: proc(self: ^ClipPlayer, duration, delta_time: f32) {
   }
 }
 
-// BlendMode selects how a layer combines with the pose accumulated from the layers before it.
+// BlendMode selects how a clip layer combines with the pose of the clip layers before it.
 BlendMode :: enum {
   REPLACE,  // Weighted average while total weight <= 1; beyond that the layer lerps over what is below it
   ADD,      // Adds the layer's offset from the rest pose, scaled by weight
   MULTIPLY, // Multiplies scale and composes rotation, scaled by weight (position ignored)
   OVERRIDE, // Replaces the accumulated pose (weight acts as a 0/1 gate at 0.5)
-}
-
-// TransitionState is the phase of a cross-fade.
-TransitionState :: enum {
-  NONE,     // No transition active
-  ACTIVE,   // Transition in progress
-  COMPLETE, // Transition finished
-}
-
-// Transition is a timed cross-fade between the weights of two layers.
-Transition :: struct {
-  from_layer: LayerHandle,
-  to_layer:   LayerHandle,
-  duration:   f32,  // Total transition time
-  elapsed:    f32,  // Time elapsed
-  curve:      ease.Ease, // Easing curve
-  state:      TransitionState,
-}
-
-// Advance a transition and cross-fade the two layer weights. Sets state to
-// COMPLETE on the tick it finishes (from = 0, to = 1).
-@(private)
-transition_update :: proc(self: ^Transition, layers: []Layer, delta_time: f32) {
-  if self.state != .ACTIVE do return
-  if int(self.from_layer) >= len(layers) || int(self.to_layer) >= len(layers) {
-    self.state = .NONE
-    return
-  }
-  self.elapsed += delta_time
-  t: f32 = 1
-  if self.duration > 0 && self.elapsed < self.duration {
-    t = ease.ease(self.curve, self.elapsed / self.duration)
-  } else {
-    self.elapsed = self.duration
-    self.state = .COMPLETE
-  }
-  layers[self.from_layer].weight = 1 - t
-  layers[self.to_layer].weight = t
 }
 
 // Blend one bone's sample `s` (weight `w`) into the accumulated local pose `acc`, whose
@@ -132,29 +94,81 @@ blend_sample :: proc(acc: ^TRS, acc_w: ^f32, s, rest: TRS, w: f32, mode: BlendMo
   }
 }
 
-// FKLayer plays one clip of the rig (index into Rig.clips).
-FKLayer :: struct {
-  clip:         ClipHandle,
-  using player: ClipPlayer,
-}
-
-// LayerData is what a Layer plays: a clip, an IK chain, or a procedural modifier.
-LayerData :: union {
-  FKLayer,
-  IKTarget,
-  ProceduralLayer,
-}
-
-// LayerHandle identifies a layer of an Animator (clip_layer_create and the other *_layer_create).
+// LayerHandle identifies a layer of an Animator (layer_create).
 LayerHandle :: distinct u32
 
 // ClipHandle identifies a clip of a Rig (find_clip).
 ClipHandle :: distinct u32
 
-// Layer is one weighted, optionally bone-masked source of pose data in an Animator.
-Layer :: struct {
-  weight:     f32,           // Blend weight (0.0 to 1.0)
+// LayerParams is what a layer does: play a clip, or edit the pose with an IK chain, a tail
+// spring, a path, a stepping leg or your own CustomApply. Its fields are inputs only: edit
+// them any time through layer_params.
+LayerParams :: union {
+  ClipParams,
+  IKParams,
+  TailParams,
+  PathParams,
+  LegParams,
+  CustomParams,
+}
+
+// ClipParams plays one clip of the rig. Its layer's bones are the bones it animates (none =
+// all), blended into the clip layers before it by blend_mode.
+ClipParams :: struct {
+  clip:       ClipHandle,
+  speed:      f32, // 1 = authored speed; negative plays backwards
+  mode:       PlayMode,
   blend_mode: BlendMode,
-  bone_mask:  Maybe([]bool), // nil = all bones; owned by the caller
-  data:       LayerData,
+}
+
+// CustomApply edits `pose` for a custom layer: `bones` are the layer's bones and `state` its
+// own floats (zero at creation, kept between updates). Edit the pose at full strength; the
+// animator blends the result by the layer's weight and moves the bones' descendants after.
+// `fresh` is true on the layer's first update.
+CustomApply :: #type proc(pose: Pose, bones: []u32, state: []f32, values: [8]f32, delta_time: f32, fresh: bool)
+
+// CustomParams runs your own procedural algorithm as a layer. `values` are its inputs;
+// `state` is how many floats of persistent state it keeps (fixed at layer_create).
+CustomParams :: struct {
+  apply:  CustomApply,
+  values: [8]f32,
+  state:  u32,
+}
+
+// A range of one of the Animator's pools.
+@(private)
+Range :: struct {
+  start, count: u32,
+}
+
+// A weight change over time; duration 0 = none.
+@(private)
+Fade :: struct {
+  from, to, elapsed, duration: f32,
+  curve:                       ease.Ease,
+}
+
+// One slot of the layer stack; params == nil marks a free slot.
+@(private)
+Layer :: struct {
+  weight:   f32,
+  fade:     Fade,
+  priority: i32,
+  bones:    Range, // into Animator.bones
+  state:    Range, // into Animator.state, the kind's own floats
+  fresh:    bool, // not updated yet
+  params:   LayerParams,
+}
+
+@(private)
+fade_advance :: proc(self: ^Layer, delta_time: f32) {
+  f := &self.fade
+  if f.duration <= 0 do return
+  f.elapsed += delta_time
+  if f.elapsed >= f.duration {
+    self.weight = f.to
+    f^ = {}
+    return
+  }
+  self.weight = linalg.lerp(f.from, f.to, ease.ease(f.curve, f.elapsed / f.duration))
 }

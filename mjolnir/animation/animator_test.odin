@@ -5,6 +5,7 @@ package animation
 import "core:math"
 import "core:math/linalg"
 import "core:mem"
+import "core:slice"
 import "core:testing"
 
 // 4-bone chain along +Y: root(0,0,0) -> mid(0,1,0) -> tip(0,2,0) -> end(0,3,0).
@@ -100,13 +101,31 @@ test_animator_once_holds_last_pose :: proc(t: ^testing.T) {
   animator_update(&a, &rig, 0.75)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {7.5, 0, 0}))
   animator_update(&a, &rig, 2)
-  fk := a.layers[0].data.(FKLayer)
-  testing.expect_value(t, fk.status, Status.STOPPED)
-  testing.expect_value(t, fk.time, 1)
+  testing.expect_value(t, clip_time(&a, 0), 1)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {10, 0, 0}))
   animator_update(&a, &rig, 1)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {10, 0, 0}), "holds last pose")
   testing.expect(t, almost_equal_vec3(model_pos(&a, 2), {10, 2, 0}))
+  testing.expect(t, clip_seek(&a, 0, 0.25))
+  animator_update(&a, &rig, 0.25)
+  testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {5, 0, 0}), "seek plays again")
+}
+
+@(test)
+test_animator_ping_pong_keeps_speed :: proc(t: ^testing.T) {
+  rig: Rig
+  testing.expect(t, make_test_rig(&rig))
+  defer rig_destroy(&rig)
+  a: Animator
+  animator_init(&a, &rig)
+  defer animator_destroy(&a)
+  play(&a, &rig, "move", .PING_PONG)
+  animator_update(&a, &rig, 1.25)
+  testing.expect(t, abs(clip_time(&a, 0) - 0.75) < 1e-5, "reflected")
+  p := layer_params(&a, 0, ClipParams)
+  testing.expect_value(t, p.speed, 1) // turning around is state, not an input
+  animator_update(&a, &rig, 0.25)
+  testing.expect(t, abs(clip_time(&a, 0) - 0.5) < 1e-5, "still going back")
 }
 
 @(test)
@@ -117,20 +136,21 @@ test_animator_layer_weights_blend :: proc(t: ^testing.T) {
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  l0 := clip_layer_create(&a, &rig, "move", 0.5)
-  l1 := clip_layer_create(&a, &rig, "up", 0.5)
+  l0 := layer_create(&a, &rig, ClipParams{clip = find_clip(&rig, "move"), speed = 1}, weight = 0.5)
+  l1 := layer_create(&a, &rig, ClipParams{clip = find_clip(&rig, "up"), speed = 1}, weight = 0.5)
   testing.expect(t, l0 == 0 && l1 == 1)
-  _, ok := clip_layer_create(&a, &rig, "ghost")
-  testing.expect(t, !ok)
+  _, ok := layer_create(&a, &rig, ClipParams{clip = 9})
+  testing.expect(t, !ok, "unknown clip")
   animator_update(&a, &rig, 0.5)
   testing.expectf(t, almost_equal_vec3(model_pos(&a, 0), {2.5, 2, 0}), "50/50 blend, got %v", model_pos(&a, 0))
-  testing.expect(t, set_layer_weight(&a, 1, 0))
-  testing.expect(t, !set_layer_weight(&a, 5, 0))
+  testing.expect(t, layer_fade(&a, 1, 0))
+  testing.expect(t, !layer_fade(&a, 5, 0))
   animator_update(&a, &rig, 0.25)
   testing.expectf(t, almost_equal_vec3(model_pos(&a, 0), {7.5, 0, 0}), "only move, got %v", model_pos(&a, 0))
-  // replace layer at index 0
-  testing.expect(t, clip_layer_create(&a, &rig, "up", 1, replace = LayerHandle(0)) == 0)
-  testing.expect_value(t, len(a.layers), 2)
+  // switch the clip of layer 0 in place
+  layer_params(&a, 0, ClipParams).clip = find_clip(&rig, "up")
+  animator_update(&a, &rig, 0)
+  testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {0, 4, 0}))
 }
 
 @(test)
@@ -141,11 +161,9 @@ test_animator_layer_mask :: proc(t: ^testing.T) {
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  play(&a, &rig, "wave")
-  mask := bone_mask(&rig.skeleton, []string{"tip"})
-  defer delete(mask)
-  testing.expect(t, set_layer_mask(&a, 0, mask))
-  testing.expect(t, !set_layer_mask(&a, 3, mask))
+  layer_create(&a, &rig, ClipParams{clip = find_clip(&rig, "wave"), speed = 1}, bones = []u32{find_bone(&rig.skeleton, "tip")})
+  _, bad := layer_create(&a, &rig, ClipParams{clip = 0}, bones = []u32{9})
+  testing.expect(t, !bad, "bone out of range")
   animator_update(&a, &rig, 0.5)
   id := linalg.QUATERNIONF32_IDENTITY
   q45 := linalg.quaternion_angle_axis_f32(math.PI / 4, {0, 0, 1})
@@ -157,7 +175,7 @@ test_animator_layer_mask :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_animator_transition_to :: proc(t: ^testing.T) {
+test_animator_cross_fade :: proc(t: ^testing.T) {
   rig: Rig
   testing.expect(t, make_test_rig(&rig))
   defer rig_destroy(&rig)
@@ -165,33 +183,15 @@ test_animator_transition_to :: proc(t: ^testing.T) {
   animator_init(&a, &rig)
   defer animator_destroy(&a)
   play(&a, &rig, "up")
-  testing.expect(t, !transition_to(&a, &rig, "ghost", 1))
-  testing.expect(t, transition_to(&a, &rig, "move", 0.5))
-  testing.expect_value(t, len(a.layers), 2)
-  testing.expect_value(t, a.transition.state, TransitionState.ACTIVE)
+  to := layer_create(&a, &rig, ClipParams{clip = find_clip(&rig, "move"), speed = 1}, weight = 0)
+  testing.expect(t, layer_fade(&a, 0, 0, 0.5) && layer_fade(&a, to, 1, 0.5))
   animator_update(&a, &rig, 0.25)
-  testing.expect(t, abs(a.layers[0].weight - 0.5) < 1e-5 && abs(a.layers[1].weight - 0.5) < 1e-5)
-  testing.expect_value(t, a.transition.state, TransitionState.ACTIVE)
+  testing.expect(t, abs(layer_weight(&a, 0) - 0.5) < 1e-5 && abs(layer_weight(&a, to) - 0.5) < 1e-5)
   testing.expectf(t, almost_equal_vec3(model_pos(&a, 0), {1.25, 2, 0}), "mid fade, got %v", model_pos(&a, 0))
   animator_update(&a, &rig, 0.3)
-  testing.expect_value(t, a.transition.state, TransitionState.COMPLETE)
-  testing.expect(t, a.layers[0].weight == 0 && a.layers[1].weight == 1)
+  testing.expect(t, layer_weight(&a, 0) == 0 && layer_weight(&a, to) == 1)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {5.5, 0, 0}), "only target clip")
-}
-
-@(test)
-test_animator_transition_to_creates_layers :: proc(t: ^testing.T) {
-  rig: Rig
-  testing.expect(t, make_test_rig(&rig))
-  defer rig_destroy(&rig)
-  a: Animator
-  animator_init(&a, &rig)
-  defer animator_destroy(&a)
-  testing.expect(t, transition_to(&a, &rig, "move", 0, from = 0, to = 2))
-  testing.expect_value(t, len(a.layers), 3)
-  animator_update(&a, &rig, 0.5)
-  testing.expect_value(t, a.transition.state, TransitionState.COMPLETE)
-  testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {5, 0, 0}))
+  testing.expect_value(t, layer_weight(&a, 7), 0)
 }
 
 @(test)
@@ -203,11 +203,11 @@ test_animator_ik_local :: proc(t: ^testing.T) {
   animator_init(&a, &rig)
   defer animator_destroy(&a)
   target := [3]f32{1, 1, 0}
-  idx, ok := ik_layer_create(&a, &rig, bone_chain(&rig.skeleton, "root", "tip"), target, {1, 0, 0})
+  idx, ok := layer_create(&a, &rig, IKParams{target = target, pole = {1, 0, 0}, pole_weight = 1}, bone_chain(&rig.skeleton, "root", "tip", context.temp_allocator))
   testing.expect(t, ok && idx == 0)
-  _, bad := ik_layer_create(&a, &rig, bone_chain(&rig.skeleton, "tip", "root"), target, {})
+  _, bad := layer_create(&a, &rig, IKParams{target = target}, []u32{2, 1, 0})
   testing.expect(t, !bad, "inverted chain rejected")
-  _, bad2 := ik_layer_create(&a, &rig, []u32{0}, target, {})
+  _, bad2 := layer_create(&a, &rig, IKParams{target = target}, []u32{0})
   testing.expect(t, !bad2, "single-bone chain rejected")
   animator_update(&a, &rig, 0.016)
   tip := model_pos(&a, 2)
@@ -220,12 +220,13 @@ test_animator_ik_local :: proc(t: ^testing.T) {
   testing.expect(t, abs(linalg.distance(model_pos(&a, 3), tip) - 1) < 1e-3)
   // palette consistent with model
   testing.expect(t, matrix_almost_equal(a.palette[3], bone_matrix(&a, 3) * rig.skeleton.inverse_bind[3]))
-  // disable -> back to rest
-  testing.expect(t, set_ik_enabled(&a, 0, false))
+  // weight 0 -> back to rest
+  testing.expect(t, layer_fade(&a, 0, 0))
   animator_update(&a, &rig, 0.016)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 2), {0, 2, 0}))
-  testing.expect(t, set_ik_enabled(&a, 0, true))
-  testing.expect(t, set_ik_target(&a, 0, {-1, 1, 0}, {}))
+  layer_fade(&a, 0, 1)
+  layer_params(&a, 0, IKParams).target = {-1, 1, 0}
+  testing.expect(t, layer_params(&a, 0, TailParams) == nil, "wrong kind")
   animator_update(&a, &rig, 0.016)
   testing.expect(t, linalg.distance(model_pos(&a, 2), [3]f32{-1, 1, 0}) < 0.01)
 }
@@ -242,9 +243,9 @@ test_animator_ik_world_matches_local :: proc(t: ^testing.T) {
   defer animator_destroy(&world)
   offset := [3]f32{5, -2, 3}
   root_world := linalg.matrix4_translate_f32(offset)
-  chain := bone_chain(&rig.skeleton, "root", "tip")
-  ik_layer_create(&local, &rig, chain, {1, 1, 0}, {1, 0, 0})
-  ik_layer_create(&world, &rig, bone_chain(&rig.skeleton, "root", "tip"), [3]f32{1, 1, 0} + offset, [3]f32{1, 0, 0} + offset, space = .WORLD)
+  chain := bone_chain(&rig.skeleton, "root", "tip", context.temp_allocator)
+  layer_create(&local, &rig, IKParams{target = {1, 1, 0}, pole = {1, 0, 0}, pole_weight = 1}, chain)
+  layer_create(&world, &rig, IKParams{target = [3]f32{1, 1, 0} + offset, pole = [3]f32{1, 0, 0} + offset, pole_weight = 1, space = .WORLD}, chain)
   animator_update(&local, &rig, 0.016)
   animator_update(&world, &rig, 0.016, root_world)
   for i in 0 ..< 4 {
@@ -262,37 +263,38 @@ test_animator_ik_over_clip :: proc(t: ^testing.T) {
   animator_init(&a, &rig)
   defer animator_destroy(&a)
   play(&a, &rig, "move")
-  ik_layer_create(&a, &rig, bone_chain(&rig.skeleton, "root", "tip"), {6, 1, 0}, {})
+  layer_create(&a, &rig, IKParams{target = {6, 1, 0}}, bone_chain(&rig.skeleton, "root", "tip", context.temp_allocator))
   animator_update(&a, &rig, 0.5)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 0), {5, 0, 0}), "FK root")
   testing.expect(t, linalg.distance(model_pos(&a, 2), [3]f32{6, 1, 0}) < 0.01, "IK on top of FK")
 }
 
 @(test)
-test_animator_remove_and_clear_layers :: proc(t: ^testing.T) {
+test_animator_destroy_and_clear_layers :: proc(t: ^testing.T) {
   rig: Rig
   testing.expect(t, make_test_rig(&rig))
   defer rig_destroy(&rig)
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  clip_layer_create(&a, &rig, "move")
-  ik_layer_create(&a, &rig, bone_chain(&rig.skeleton, "root", "tip"), {1, 1, 0}, {})
-  tail_layer_create(&a, &rig, "mid", 3)
+  layer_create(&a, &rig, ClipParams{clip = 0, speed = 1})
+  layer_create(&a, &rig, IKParams{target = {1, 1, 0}}, []u32{0, 1, 2})
+  tail := layer_create(&a, &rig, TailParams{stiffness = 0.5, damping = 0.9}, []u32{1, 2, 3})
   testing.expect_value(t, len(a.layers), 3)
   testing.expect(t, layer_destroy(&a, 1))
   testing.expect(t, !layer_destroy(&a, 7))
-  testing.expect(t, !layer_destroy(&a, 1), "removed slot is empty")
-  testing.expect(t, !set_layer_weight(&a, 1, 0.5), "removed slot is invalid")
+  testing.expect(t, !layer_destroy(&a, 1), "destroyed slot is empty")
+  testing.expect(t, !layer_fade(&a, 1, 0.5), "destroyed slot is invalid")
   testing.expect_value(t, len(a.layers), 3)
-  _, is_proc := a.layers[2].data.(ProceduralLayer)
-  testing.expect(t, is_proc, "later layers keep their index")
-  testing.expect_value(t, clip_layer_create(&a, &rig, "up"), 1) // freed slot is reused
+  testing.expect(t, layer_params(&a, tail, TailParams) != nil, "later layers keep their handle")
+  // the pools close the gap: the tail's bones follow the clip's (none)
+  testing.expect_value(t, len(a.bones), 3)
+  testing.expect(t, slice.equal(a.bones[a.layers[tail].bones.start:][:3], []u32{1, 2, 3}))
+  testing.expect_value(t, layer_create(&a, &rig, ClipParams{clip = 1, speed = 1}), 1) // freed slot is reused
   testing.expect_value(t, len(a.layers), 3)
-  transition_to(&a, &rig, "up", 1)
   clear_layers(&a)
   testing.expect_value(t, len(a.layers), 0)
-  testing.expect_value(t, a.transition.state, TransitionState.NONE)
+  testing.expect_value(t, len(a.state), 0)
   animator_update(&a, &rig, 0.1)
   testing.expect(t, almost_equal_vec3(model_pos(&a, 3), {0, 3, 0}), "rest after clear")
 }
@@ -309,11 +311,11 @@ test_animator_destroy_frees :: proc(t: ^testing.T) {
     a: Animator
     animator_init(&a, &rig)
     play(&a, &rig, "bend")
-    ik_layer_create(&a, &rig, bone_chain(&rig.skeleton, "root", "tip"), {1, 1, 0}, {}, constraints = ik_constraints_uniform(3, {1, -1, 1}, {1, -1, 1}))
-    tail_layer_create(&a, &rig, "mid", 3)
-    path := [][3]f32{{0, 0, 0}, {0, 1, 0}, {1, 2, 0}}
-    path_layer_create(&a, &rig, "root", 3, path)
-    clip_layer_create(&a, &rig, "move", replace = LayerHandle(0)) // replace frees old layer
+    layer_create(&a, &rig, IKParams{target = {1, 1, 0}}, []u32{0, 1, 2})
+    layer_create(&a, &rig, TailParams{stiffness = 0.5}, []u32{1, 2, 3})
+    path := layer_create(&a, &rig, PathParams{}, []u32{0, 1, 2})
+    path_points(&a, path, {{0, 0, 0}, {0, 1, 0}, {1, 2, 0}})
+    path_points(&a, path, {{0, 0, 0}, {0, 1, 0}, {1, 2, 0}, {2, 2, 0}}, closed = true)
     layer_destroy(&a, 1)
     animator_update(&a, &rig, 0.1)
     animator_destroy(&a)
@@ -332,12 +334,12 @@ test_animator_tail_layer_smoke :: proc(t: ^testing.T) {
   animator_init(&a, &rig)
   defer animator_destroy(&a)
   play(&a, &rig, "bend", .PING_PONG)
-  idx, ok := tail_layer_create(&a, &rig, "mid", 3)
+  idx, ok := layer_create(&a, &rig, TailParams{stiffness = 0.5, damping = 0.9}, []u32{1, 2, 3})
   testing.expect(t, ok && idx == 1)
-  _, bad := tail_layer_create(&a, &rig, "end", 3)
-  testing.expect(t, !bad, "leaf has no chain")
-  testing.expect(t, set_tail_params(&a, idx, damping = f32(0.8)))
-  testing.expect(t, !set_tail_params(&a, 0, damping = f32(0.8)), "not a tail layer")
+  _, bad := layer_create(&a, &rig, TailParams{}, []u32{3})
+  testing.expect(t, !bad, "one bone is no chain")
+  layer_params(&a, idx, TailParams).damping = 0.8
+  testing.expect(t, layer_params(&a, 0, TailParams) == nil, "not a tail layer")
   for i in 0 ..< 120 {
     root_world := linalg.matrix4_translate_f32({math.sin(f32(i) * 0.1) * 2, 0, 0})
     animator_update(&a, &rig, 1.0 / 60.0, root_world)
@@ -349,26 +351,6 @@ test_animator_tail_layer_smoke :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_animator_ik_layer_validation :: proc(t: ^testing.T) {
-  rig: Rig
-  testing.expect(t, make_test_rig(&rig))
-  defer rig_destroy(&rig)
-  a: Animator
-  animator_init(&a, &rig)
-  defer animator_destroy(&a)
-  // root -> tip skips "mid": not a parent chain
-  _, skip := ik_layer_create(&a, &rig, []u32{0, 2}, {0, 2, 0}, {})
-  testing.expect(t, !skip, "non-parent chain rejected")
-  // constraint count must match the bone count
-  bad_cons := []IKBoneConstraint{{}, {}}
-  _, mismatch := ik_layer_create(&a, &rig, []u32{0, 1, 2}, {0, 2, 0}, {}, constraints = bad_cons)
-  testing.expect(t, !mismatch, "constraint length mismatch rejected")
-  idx, ok := ik_layer_create(&a, &rig, bone_chain(&rig.skeleton, "root", "tip"), {1, 1, 0}, {1, 0, 0})
-  testing.expect(t, ok)
-  testing.expect_value(t, a.layers[idx].data.(IKTarget).pole_weight, 1)
-}
-
-@(test)
 test_animator_ik_layer_weight_blends :: proc(t: ^testing.T) {
   rig: Rig
   testing.expect(t, make_test_rig(&rig))
@@ -376,10 +358,10 @@ test_animator_ik_layer_weight_blends :: proc(t: ^testing.T) {
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  idx := ik_layer_create(&a, &rig, bone_chain(&rig.skeleton, "root", "tip"), {1.5, 0.5, 0}, {})
+  idx := layer_create(&a, &rig, IKParams{target = {1.5, 0.5, 0}}, []u32{0, 1, 2})
   animator_update(&a, &rig, 0.016)
   full := a.positions[2]
-  set_layer_weight(&a, idx, 0.5)
+  layer_fade(&a, idx, 0.5)
   animator_update(&a, &rig, 0.016)
   half := a.positions[2]
   testing.expectf(t, linalg.distance(half, full) > 0.05 && linalg.distance(half, [3]f32{0, 2, 0}) > 0.05, "half weight lands between FK and IK: half %v full %v", half, full)
@@ -396,15 +378,66 @@ test_animator_tail_weight_zero_keeps_state :: proc(t: ^testing.T) {
   a: Animator
   animator_init(&a, &rig)
   defer animator_destroy(&a)
-  idx := tail_layer_create(&a, &rig, "root", 4)
+  idx := layer_create(&a, &rig, TailParams{stiffness = 0.5, damping = 0.9}, []u32{0, 1, 2, 3})
   world := linalg.MATRIX4F32_IDENTITY
   for _ in 0 ..< 60 do animator_update(&a, &rig, 1.0 / 60, world)
   // Hold the layer at weight 0 while the body moves away, then settle.
-  set_layer_weight(&a, idx, 0)
+  layer_fade(&a, idx, 0)
   world = linalg.matrix4_translate_f32({20, 0, 0})
   for _ in 0 ..< 120 do animator_update(&a, &rig, 1.0 / 60, world)
   testing.expectf(t, almost_equal_vec3(a.positions[3], {0, 3, 0}), "weight 0 leaves FK pose, got %v", a.positions[3])
-  set_layer_weight(&a, idx, 1)
+  layer_fade(&a, idx, 1)
   animator_update(&a, &rig, 1.0 / 60, world)
   testing.expectf(t, linalg.distance(a.positions[3], [3]f32{0, 3, 0}) < 0.1, "no whip when re-enabled, tip %v", a.positions[3])
+}
+
+// Moves its bone to (9, 9, 9).
+@(private = "file")
+pin :: proc(pose: Pose, bones: []u32, state: []f32, values: [8]f32, dt: f32, fresh: bool) {
+  pose.positions[bones[0]] = {9, 9, 9}
+}
+
+// Pose-editing layers run by priority: whichever of a custom layer and an IK layer on the
+// same bone runs last decides where it ends up.
+@(test)
+test_animator_priority_orders_layers :: proc(t: ^testing.T) {
+  rig: Rig
+  testing.expect(t, make_test_rig(&rig))
+  defer rig_destroy(&rig)
+  pose_after :: proc(rig: ^Rig, custom_priority: i32) -> [3]f32 {
+    a: Animator
+    animator_init(&a, rig)
+    defer animator_destroy(&a)
+    layer_create(&a, rig, IKParams{target = {1.5, 0.5, 0}}, []u32{0, 1, 2})
+    layer_create(&a, rig, CustomParams{apply = pin}, []u32{2}, priority = custom_priority)
+    animator_update(&a, rig, 0.016)
+    return a.positions[2]
+  }
+  testing.expect(t, almost_equal_vec3(pose_after(&rig, 300), {9, 9, 9}), "custom after IK wins")
+  testing.expect(t, linalg.distance(pose_after(&rig, 100), [3]f32{1.5, 0.5, 0}) < 0.01, "IK after custom wins")
+}
+
+// A custom layer keeps its own state and is blended by its weight like a built-in.
+@(test)
+test_animator_custom_layer :: proc(t: ^testing.T) {
+  rig: Rig
+  testing.expect(t, make_test_rig(&rig))
+  defer rig_destroy(&rig)
+  a: Animator
+  animator_init(&a, &rig)
+  defer animator_destroy(&a)
+  // lifts the bone by values[0] per update, counting updates in its state
+  lift :: proc(pose: Pose, bones: []u32, state: []f32, values: [8]f32, dt: f32, fresh: bool) {
+    if fresh do state[0] = 0
+    state[0] += 1
+    pose.positions[bones[0]].y += values[0] * state[0]
+  }
+  h := layer_create(&a, &rig, CustomParams{apply = lift, values = {1, 0, 0, 0, 0, 0, 0, 0}, state = 1}, []u32{3}, weight = 0.5)
+  animator_update(&a, &rig, 0.016)
+  testing.expect(t, almost_equal_vec3(a.positions[3], {0, 3.5, 0}), "half of +1")
+  animator_update(&a, &rig, 0.016)
+  testing.expect(t, almost_equal_vec3(a.positions[3], {0, 4, 0}), "half of +2: state kept")
+  layer_params(&a, h, CustomParams).values[0] = 2
+  animator_update(&a, &rig, 0.016)
+  testing.expect(t, almost_equal_vec3(a.positions[3], {0, 6, 0}), "half of +6")
 }

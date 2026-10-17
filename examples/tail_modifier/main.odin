@@ -19,7 +19,7 @@ animator: anim.Animator
 snake_child_node: world.NodeHandle
 tail_layer: Maybe(anim.LayerHandle)
 
-propagation_speed: mu.Real = 0.3
+stiffness: mu.Real = 0.3
 damping: mu.Real = 0.7
 stretch_enabled: bool = false
 
@@ -96,11 +96,9 @@ setup :: proc(app: ^App) -> bool {
   snake_child_node = scene.skinned[0].node
   rig = &scene.rigs[scene.skinned[0].rig]
   anim.animator_init(&animator, rig)
-  if idx, layer_ok := anim.tail_layer_create(&animator, rig, "root", 10,
-    propagation_speed = f32(propagation_speed),
-    damping = f32(damping),
-    weight = 1.0,
-  ); layer_ok {
+  // the whole body, head to tail tip
+  chain, _ := anim.bone_chain_down(&rig.skeleton, HEAD_BONE, u32(anim.bone_count(&rig.skeleton)), context.temp_allocator)
+  if idx, layer_ok := anim.layer_create(&animator, rig, anim.TailParams{stiffness = f32(stiffness), damping = f32(damping)}, chain); layer_ok {
     tail_layer = idx
     log.infof("Added tail modifier to node (layer %d)", idx)
   }
@@ -130,11 +128,9 @@ update :: proc(app: ^App, dt: f32) {
     handle_drag(app)
   }
   if layer, ok := tail_layer.?; ok {
-    anim.set_tail_params(&animator, layer,
-      propagation_speed = f32(propagation_speed),
-      damping = f32(damping),
-      stretch = stretch_enabled,
-    )
+    if p, ok := anim.layer_params(&animator, layer, anim.TailParams); ok {
+      p^ = {stiffness = f32(stiffness), damping = f32(damping), stretch = stretch_enabled}
+    }
   }
   if rig != nil do anim.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, snake_child_node))
   world.update(&app.scene)
@@ -194,7 +190,7 @@ frame :: proc(app: ^App) -> bool {
     } else {
       mu.label(ctx, "Right-drag in the scene to move the head")
     }
-    mu.label(ctx, "Propagation speed"); mu.slider(ctx, &propagation_speed, 0.0, 1.0)
+    mu.label(ctx, "Stiffness"); mu.slider(ctx, &stiffness, 0.0, 1.0)
     mu.label(ctx, "Damping"); mu.slider(ctx, &damping, 0.0, 1.0)
     mu.checkbox(ctx, "Stretch", &stretch_enabled)
   }
