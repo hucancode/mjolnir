@@ -1,6 +1,8 @@
 // The vertex shader and bindings of every post-process effect (texture group POST). An effect
 // file follows with its fs_main and its Effect struct: the active PostprocessEffect variant's
-// fields, at offset 32 of the uniforms.
+// fields, at offset 32 of the uniforms, in the Odin struct's order (a vec3f takes 16 bytes
+// unless an f32 follows it: prefer vec4f and scalars). u.time is render's clock and
+// post_resolution() the image size.
 
 @group(1) @binding(0) var input_texture: texture_2d<f32>;
 // the previous pass's input (bloom V composites over the scene as it entered bloom H)
@@ -19,10 +21,16 @@ struct PostPush {
     original_image: u32,
     // this pass of the effect
     pass_index: u32,
-    _pad0: u32,
+    // render's clock in seconds
+    time: f32,
     effect: Effect,
 }
 @group(2) @binding(0) var<uniform> u: PostPush;
+
+// The image size in pixels.
+fn post_resolution() -> vec2f {
+    return vec2f(textureDimensions(input_texture));
+}
 
 // View depth from the depth image, between the camera's clip planes.
 fn linearize_depth(depth: f32) -> f32 {

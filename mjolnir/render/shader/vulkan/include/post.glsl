@@ -1,7 +1,9 @@
 // The interface of a user post-process fragment shader (render.post_shader_create): the
 // fullscreen uv, the color output, the bindless textures and the push block. Define
 // POST_PARAMS, the fields of the shader's params as render.make_custom_effect packs them, before
-// including this:
+// including this. They follow std430: a vec3 takes 16 bytes unless a float follows it, so prefer
+// vec4s and scalars, in the same order as the Odin struct. `time` is render's clock and
+// post_resolution() the image size:
 //
 //     #version 450
 //     #define POST_PARAMS vec3 tint; float strength;
@@ -40,13 +42,19 @@ layout(push_constant) uniform PostPush {
     uint original_image_index;
     // this pass of the effect, 0 .. passes - 1
     uint pass_index;
-    uint _post_pad;
+    // render's clock in seconds
+    float time;
     // offset 32: the effect's params
     POST_PARAMS
 };
 
 vec4 sample_texture(uint index, uint sampler_index, vec2 uv) {
     return texture(sampler2D(textures[nonuniformEXT(index)], samplers[sampler_index]), uv);
+}
+
+// The image size in pixels.
+vec2 post_resolution() {
+    return vec2(textureSize(sampler2D(textures[nonuniformEXT(input_image_index)], samplers[SAMPLER_LINEAR_CLAMP]), 0));
 }
 
 // The previous pass's output at uv.

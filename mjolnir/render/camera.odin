@@ -359,7 +359,8 @@ View :: struct {
   draw_list:       u32,
   // draws per list
   list_capacity:   u32,
-  _:               u32,
+  // render's clock in seconds (render.update)
+  time:            f32,
 }
 #assert(size_of(View) == 448)
 

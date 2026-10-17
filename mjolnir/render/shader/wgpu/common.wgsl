@@ -54,7 +54,8 @@ struct View {
     layer: u32,
     draw_list: u32,
     list_capacity: u32,
-    _pad0: u32,
+    // render's clock in seconds
+    time: f32,
 }
 
 struct Node {
@@ -97,6 +98,8 @@ struct Material {
     frame_rows: u32,
     frame_index: u32,
     material_type: u32,
+    // a .CUSTOM shader's own values
+    params: array<vec4f, 2>,
 }
 
 struct Light {

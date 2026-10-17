@@ -10,7 +10,6 @@ import "rhi"
 @(private = "file")
 DebugLinePush :: struct {
   camera_index: u32,
-  time:         f32,
 }
 
 @(private)
@@ -43,7 +42,7 @@ debug_line_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) 
   dev.cmd_begin_pass(&r.gpu, cmd, {colors = colors[:], depth = rhi.DepthTarget{texture = r.camera_targets[cam].attachments[.DEPTH][f], load = .LOAD, read_only = true}})
   // the shader skips segments past their expiry
   sync.mutex_lock(&r.debug_mutex)
-  push := DebugLinePush{cam, r.debug_time}
+  push := DebugLinePush{cam}
   sync.mutex_unlock(&r.debug_mutex)
   pipeline_bind(r, cmd, r.debug_line_pipelines[0], .DEBUG_LINE, f, &push, .NONE)
   for count, ring in counts {

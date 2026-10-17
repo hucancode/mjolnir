@@ -2,7 +2,9 @@
 // common.wgsl and mesh.wgsl, which declare the scene buffers (views, nodes, materials), the
 // uniforms `u` (u.camera_index) and VertexOut; the user source follows this and declares
 // `fs_main(in: VertexOut) -> @location(0) vec4f`. A custom material is drawn in the forward
-// pass over the lit image, depth-tested without writing depth.
+// pass over the lit image, depth-tested without writing depth. Read your own values from
+// node_material(in).params (render.Material.params), the time from views[u.camera_index].time
+// and the image size from views[u.camera_index].extent.
 
 // the drawn material's textures; a slot without one samples white
 @group(1) @binding(0) var albedo_texture: texture_2d<f32>;

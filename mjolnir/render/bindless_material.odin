@@ -30,7 +30,7 @@ Material :: struct {
   metallic_value:           f32,
   roughness_value:          f32,
   emissive_value:           f32,
-  // .CUSTOM: the user shader drawing it; for it the other fields are the shader's to read
+  // .CUSTOM: the user shader drawing it
   shader:                   MaterialShader,
   base_color_factor:        [4]f32,
   // .SPRITE: sheet size in cells and the cell shown, row-major
@@ -38,8 +38,10 @@ Material :: struct {
   frame_rows:               u32,
   frame_index:              u32,
   type:                     MaterialType,
+  // .CUSTOM: the shader's own values, read as m.params[i] (built-in types ignore them)
+  params:                   [2][4]f32,
 }
-#assert(size_of(Material) == 64)
+#assert(size_of(Material) == 96)
 
 // A pointer to a material in the table the next frame draws from: edit it in
 // place. The pointer is valid until the next frame; edits from another
@@ -53,7 +55,7 @@ material :: proc(r: ^Renderer, h: MaterialHandle) -> (^Material, bool) #optional
 // material_create creates a material; it lives until material_destroy or teardown. type
 // picks how it draws: .SPRITE shows a frame_columns x frame_rows sheet cell of albedo_texture
 // on a camera-facing QUAD_XY; .CUSTOM is drawn by shader (material_shader_create), which reads
-// the other fields as it likes.
+// params (its own values) and any other field.
 material_create :: proc(
   self: ^Renderer,
   type: MaterialType = .PBR,
@@ -68,6 +70,7 @@ material_create :: proc(
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
   shader: MaterialShader = 0,
+  params: [2][4]f32 = {},
 ) -> (
   handle: MaterialHandle,
   ok: bool,
@@ -87,6 +90,7 @@ material_create :: proc(
     frame_columns            = max(frame_columns, 1),
     frame_rows               = max(frame_rows, 1),
     shader                   = shader,
+    params                   = params,
   }
   return handle, true
 }

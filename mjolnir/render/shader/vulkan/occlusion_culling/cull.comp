@@ -51,6 +51,7 @@ struct Material {
     uint frame_rows;
     uint frame_index;
     uint type; // MaterialType
+    vec4 params[2]; // a .CUSTOM shader's own values
 };
 
 struct View {
@@ -73,7 +74,7 @@ struct View {
     uint layer;
     uint draw_list; // bindless draw lists the view appends to
     uint list_capacity; // draws per list
-    uint _pad0;
+    float time; // render's clock in seconds
 };
 
 struct DrawCommand {

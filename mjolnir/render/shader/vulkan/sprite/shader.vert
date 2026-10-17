@@ -26,7 +26,7 @@ struct View {
     uint layer;
     uint draw_list; // bindless draw lists the view appends to
     uint list_capacity; // draws per list
-    uint _pad0;
+    float time; // render's clock in seconds
 };
 
 layout(set = 0, binding = 0) readonly buffer ViewBuffer {
@@ -46,7 +46,8 @@ struct Material {
     uint frame_columns;
     uint frame_rows;
     uint frame_index;
-    uint _pad0;
+    uint type; // MaterialType
+    vec4 params[2]; // a .CUSTOM shader's own values
 };
 
 layout(set = 0, binding = 3) readonly buffer MaterialBuffer {

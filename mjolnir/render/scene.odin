@@ -94,7 +94,8 @@ Renderer_State :: struct {
   debug_lines:            [2][dynamic]DebugLineSegment,
   // segments each ring has taken in total (debug_line.odin)
   debug_filled:           [2]u64,
-  debug_time:             f32,
+  // seconds render.update has advanced; shaders read it as View.time and PostPush.time
+  time:                   f32,
   debug_mutex:            sync.Mutex,
   shadow_casters:         [MAX_SHADOW_MAPS]Caster,
   // per pyramid slot: the depth pyramid camera_slot(c) + frame of camera c
@@ -458,7 +459,7 @@ tick_resource_pools :: proc(self: ^Renderer) {
 // simulates everything accumulated since the previous one.
 update :: proc(self: ^Renderer, delta_time: f32) {
   sync.mutex_lock(&self.debug_mutex)
-  self.debug_time += delta_time
+  self.time += delta_time
   sync.mutex_unlock(&self.debug_mutex)
   if delta_time <= 0 do return
   guard(self)
@@ -1046,6 +1047,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
         layer           = v - SHADOW_VIEW_BASE,
         draw_list       = SHADOW_DRAW_SLOT_BASE + frame_index,
         list_capacity   = SHADOW_LIST_CAPACITY,
+        time            = self.time,
       }
     }
   }
@@ -1113,6 +1115,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       // frame N builds pyramid N from N-1's depth and culls into N+1's lists
       draw_list           = camera_next_slot(i, frame_index),
       list_capacity       = CAMERA_LIST_CAPACITY,
+      time                = self.time,
     }
     for a in AttachmentType do v.attachments[a] = u32(targets.attachments[a][frame_index])
   }

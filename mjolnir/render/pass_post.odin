@@ -26,7 +26,8 @@ PostPush :: struct {
   original_image_index: u32,
   // this pass of the effect
   pass:                 u32,
-  _:                    u32,
+  // render's clock in seconds
+  time:                 f32,
   effect:               PostprocessEffect,
 }
 #assert(offset_of(PostPush, effect) == 32)
@@ -190,6 +191,7 @@ post_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
       input_image_index    = u32(p.input),
       original_image_index = u32(p.original),
       pass                 = p.pass,
+      time                 = r.time,
       effect               = p.effect,
     }
     pipeline := r.post_pipelines[int(is_last)][reflect.get_union_variant_raw_tag(p.effect)]

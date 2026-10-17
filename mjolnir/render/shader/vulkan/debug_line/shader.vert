@@ -22,7 +22,7 @@ struct View {
     uint layer;
     uint draw_list; // bindless draw lists the view appends to
     uint list_capacity; // draws per list
-    uint _pad0;
+    float time; // render's clock in seconds
 };
 
 layout(set = 0, binding = 0) readonly buffer ViewBuffer {
@@ -43,13 +43,13 @@ layout(set = 0, binding = 12) readonly buffer DebugLines {
 
 layout(push_constant) uniform DebugLinePush {
     uint camera_index;
-    float time; // render clock; a segment past its expiry is skipped
 };
 
 void main() {
     // vertex 2i is segment i's a end, 2i + 1 its b end
     DebugLineSegment s = segments[gl_VertexIndex >> 1];
-    if (s.expiry < time) {
+    // a segment past its expiry on the render clock is skipped
+    if (s.expiry < views[camera_index].time) {
         // both ends outside the clip volume: nothing is drawn
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
         outColor = vec4(0.0);

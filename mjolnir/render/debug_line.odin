@@ -27,7 +27,7 @@ debug_line_add :: proc(self: ^Renderer, life: f32, bypass_depth: bool, segs: ..D
   // one-frame segments (life <= 0) are stamped at flush, once the clock for the frame that
   // draws them is known; update may advance it between this call and that frame
   expiry: f32 = -1
-  if life > 0 do expiry = self.debug_time + life
+  if life > 0 do expiry = self.time + life
   for seg in segs {
     s := seg
     s.expiry = expiry
@@ -45,7 +45,7 @@ flush_debug_lines :: proc(self: ^Renderer) {
   for &inbox, ring in self.debug_lines {
     for seg in inbox {
       seg := seg
-      if seg.expiry < 0 do seg.expiry = self.debug_time
+      if seg.expiry < 0 do seg.expiry = self.time
       i := ring * DEBUG_RING + int(self.debug_filled[ring] % DEBUG_RING)
       table[i] = seg
       mark_dirty(self, .DEBUG_LINES, i)

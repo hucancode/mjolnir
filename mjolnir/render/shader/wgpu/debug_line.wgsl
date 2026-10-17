@@ -15,7 +15,6 @@ struct DebugLineSegment {
 
 struct DebugLinePush {
     camera_index: u32,
-    time: f32,
 }
 @group(2) @binding(0) var<uniform> u: DebugLinePush;
 
@@ -28,7 +27,7 @@ struct VertexOut {
 fn vs_main(@builtin(vertex_index) i: u32) -> VertexOut {
     let s = segments[i >> 1u];
     var out: VertexOut;
-    if (s.expiry < u.time) {
+    if (s.expiry < views[u.camera_index].time) {
         out.clip = CLIP_DISCARD;
         return out;
     }

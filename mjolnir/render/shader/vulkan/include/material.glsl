@@ -1,13 +1,16 @@
 // The interface of a user material fragment shader (render.material_shader_create): the
 // mesh vertex stage's outputs, the color output, the scene buffers it reads and the
 // bindless textures. A custom material is drawn in the forward pass over the lit image,
-// depth-tested without writing depth.
+// depth-tested without writing depth. Read your own values from node_material().params
+// (render.Material.params), the time from camera_view().time and the image size from
+// camera_view().extent.
 //
 //     #version 450
 //     #include "material.glsl"
 //     void main() {
 //         Material m = node_material();
-//         out_color = m.base_color_factor * max(dot(normalize(in_normal), vec3(0, 1, 0)), 0.0);
+//         float pulse = 0.5 + 0.5 * sin(camera_view().time * m.params[0].x);
+//         out_color = m.base_color_factor * pulse;
 //     }
 //
 // Compile with glslc -I <this directory>.
@@ -32,6 +35,7 @@ struct View {
     vec2 extent;
     float near;
     float far;
+    // the rest is render's own; don't rely on it
     uint attachments[6];
     uint pyramid;
     uint occlusion_mask;
@@ -42,10 +46,10 @@ struct View {
     uint layer;
     uint draw_list;
     uint list_capacity;
-    uint _view_pad;
+    float time; // render's clock in seconds
 };
 
-// render.Material; for a custom material every field but `type` and `shader` is the shader's
+// render.Material: a custom material reads params, and any other field it likes
 struct Material {
     uint albedo_index;
     uint metallic_roughness_index;
@@ -59,7 +63,8 @@ struct Material {
     uint frame_columns;
     uint frame_rows;
     uint frame_index;
-    uint type;
+    uint type; // MaterialType
+    vec4 params[2]; // a .CUSTOM shader's own values
 };
 
 struct Node {
