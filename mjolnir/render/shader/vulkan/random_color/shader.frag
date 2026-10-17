@@ -3,7 +3,7 @@
 layout(location = 0) out vec4 outColor;
 layout(location = 5) flat in uint node_index;
 
-struct MaterialData {
+struct Material {
     uint albedo_index;
     uint metallic_roughness_index;
     uint normal_index;
@@ -20,10 +20,10 @@ struct MaterialData {
 };
 
 layout(set = 0, binding = 3) readonly buffer MaterialBuffer {
-    MaterialData materials[];
+    Material materials[];
 };
 
-struct NodeData {
+struct Node {
     mat4 world_matrix;
     uint material_id;
     uint mesh_id;
@@ -34,10 +34,10 @@ struct NodeData {
 };
 
 layout(set = 0, binding = 1) readonly buffer NodeBuffer {
-    NodeData nodes[];
+    Node nodes[];
 };
 
-layout(push_constant) uniform PushConstants {
+layout(push_constant) uniform MeshPush {
     uint camera_index;
 };
 
@@ -55,8 +55,8 @@ vec3 hsv_to_rgb(vec3 hsv) {
 }
 
 void main() {
-    NodeData node = nodes[node_index];
-    MaterialData material = materials[node.material_id];
+    Node node = nodes[node_index];
+    Material material = materials[node.material_id];
 
     uint seed = uint(gl_PrimitiveID) ^ (node_index * 2654435761u);
     float h = hash(seed);

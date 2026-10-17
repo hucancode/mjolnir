@@ -5,8 +5,9 @@
 //   it over after init returns), shutdown ends it. setup / teardown bracket a map: teardown frees
 //   every camera, mesh, material and texture made since setup in one go; what the application
 //   made before setup lives on.
-//   resources: mesh_create, material_create, texture_create / texture_load,
-//   camera_create, environment_map_load; each lives until its *_destroy or teardown.
+//   resources: mesh_create, material_create, texture_create / texture_load, light_create,
+//   emitter_create, forcefield_create, camera_create, environment_map_load; each lives until
+//   its *_destroy or teardown. light, emitter, forcefield and material edit one in place.
 //   scene: a slot (a world node's index) draws what attach gives it, a mesh, light, emitter or
 //   force field. stage_transforms feeds it world.changes each tick, stage_bones a skin palette.
 //   each tick: update advances time; stage_overlay gives the frame's 2D overlay (ui, debugui);

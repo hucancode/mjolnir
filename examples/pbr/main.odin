@@ -80,7 +80,7 @@ setup :: proc(app: ^App) -> bool {
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   dir_light = world.spawn(&app.scene, {4, 6, 4})
-  render.attach(&app.renderer, dir_light.index, render.make_directional_light({1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false))
+  render.attach(&app.renderer, dir_light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false)))
   swap_model(app, 0)
   return true
 }
@@ -119,9 +119,8 @@ update :: proc(app: ^App, dt: f32) {
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  if l, ok := render.attachment(&app.renderer, dir_light.index, render.Light); ok {
+  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, dir_light.index, render.LightHandle)); ok {
     l.color[3] = f32(dir_intensity)
-    render.attach(&app.renderer, dir_light.index, l)
   }
   app.renderer.ibl_intensity = f32(ibl_intensity)
   app.renderer.skybox_intensity = skybox_on ? 1 : 0

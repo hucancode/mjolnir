@@ -18,13 +18,15 @@ struct Particle {
     texture_index: u32,
 }
 
-// 20 bytes, as render packs it
 struct ForceField {
     tangent_strength: f32,
     strength: f32,
     area_of_effect: f32,
-    node_index: u32,
-    enabled: u32,
+}
+
+struct ForceFieldPlacement {
+    forcefield: u32,
+    node: u32,
 }
 
 // the indirect draw (vertex count, instance count, first vertex, first instance), then the
@@ -38,27 +40,29 @@ struct Alive {
 @group(0) @binding(1) var<storage, read> forcefields: array<ForceField>;
 @group(0) @binding(2) var<storage, read_write> particles: array<Particle>;
 @group(0) @binding(3) var<storage, read_write> alive: Alive;
+@group(0) @binding(4) var<storage, read> placements: array<ForceFieldPlacement>;
 
-struct Params {
-    emitter_count: u32,
-    forcefield_count: u32,
+struct ParticleSystemParams {
+    emitter_placement_count: u32,
+    forcefield_placement_count: u32,
     delta_time: f32,
     frame_counter: u32,
     emit_total: u32,
     emit_cursor: u32,
 }
-@group(2) @binding(0) var<uniform> u: Params;
+@group(2) @binding(0) var<uniform> u: ParticleSystemParams;
 
 // Advance live particle i; returns whether it is still alive.
 fn simulate(i: u32) -> bool {
     let p = particles[i].position;
     var v = particles[i].velocity;
-    let n = min(u.forcefield_count, MAX_FORCE_FIELDS);
+    let n = min(u.forcefield_placement_count, MAX_FORCE_FIELDS);
     for (var f = 0u; f < n; f++) {
-        let ff = forcefields[f];
-        // unused slots are zero: disabled, area_of_effect 0
-        if (ff.enabled == 0u || ff.area_of_effect <= 0.0 || ff.node_index == 0u) { continue; }
-        let ff_pos = nodes[ff.node_index].world_matrix[3].xyz;
+        let placed = placements[f];
+        // free rows and destroyed force fields are zero: area_of_effect 0
+        let ff = forcefields[placed.forcefield];
+        if (ff.area_of_effect <= 0.0 || placed.node == 0u) { continue; }
+        let ff_pos = nodes[placed.node].world_matrix[3].xyz;
         let dist = length(p - ff_pos);
         if (dist > ff.area_of_effect) { continue; }
         let effect = 1.0 - clamp(dist / ff.area_of_effect, 0.0, 1.0);

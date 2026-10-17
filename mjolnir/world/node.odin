@@ -2,28 +2,18 @@ package world
 
 import "core:math/linalg"
 
-// Transform is a node's local position, rotation and scale; update derives its matrices
-// (world_matrix reads them).
+// Transform is a node's local position, rotation and scale; update derives its world
+// matrix (world_matrix reads it).
 Transform :: struct {
-  position:     [3]f32,
-  rotation:     quaternion128,
-  scale:        [3]f32,
-  using _: Transform_Cache,
-}
-
-@(private)
-Transform_Cache :: struct {
-  is_dirty:     bool,
-  local_matrix: matrix[4, 4]f32,
-  world_matrix: matrix[4, 4]f32,
+  position: [3]f32,
+  rotation: quaternion128,
+  scale:    [3]f32,
 }
 
 @(private)
 TRANSFORM_IDENTITY :: Transform {
-  rotation     = linalg.QUATERNIONF32_IDENTITY,
-  scale        = {1, 1, 1},
-  local_matrix = linalg.MATRIX4F32_IDENTITY,
-  world_matrix = linalg.MATRIX4F32_IDENTITY,
+  rotation = linalg.QUATERNIONF32_IDENTITY,
+  scale    = {1, 1, 1},
 }
 
 // translate sets a node's local position, from x/y/z or a vector.
@@ -44,7 +34,7 @@ translate_by :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
   node := lookup(world, handle)
   if node == nil do return
   node.transform.position += v
-  node.transform.is_dirty = true
+  world.cache[handle.index].is_dirty = true
 }
 
 // rotate_by composes a rotation onto a node's local rotation, from a quaternion or angle (and axis, default Y).
@@ -69,7 +59,7 @@ translate_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
   node := lookup(world, handle)
   if node == nil do return
   node.transform.position = v
-  node.transform.is_dirty = true
+  world.cache[handle.index].is_dirty = true
 }
 
 @(private = "file")
@@ -77,7 +67,7 @@ rotate_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128) {
   node := lookup(world, handle)
   if node == nil do return
   node.transform.rotation = q
-  node.transform.is_dirty = true
+  world.cache[handle.index].is_dirty = true
 }
 
 @(private = "file")
@@ -95,7 +85,7 @@ rotate_by_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128
   node := lookup(world, handle)
   if node == nil do return
   node.transform.rotation *= q
-  node.transform.is_dirty = true
+  world.cache[handle.index].is_dirty = true
 }
 
 @(private = "file")
@@ -118,7 +108,7 @@ scale_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
   node := lookup(world, handle)
   if node == nil do return
   node.transform.scale = v
-  node.transform.is_dirty = true
+  world.cache[handle.index].is_dirty = true
 }
 
 // scale_xyz sets a node's local scale per axis (unset axes are 1).
@@ -139,5 +129,5 @@ set_local :: proc(
   node.transform.position = position
   node.transform.rotation = rotation
   node.transform.scale = scale
-  node.transform.is_dirty = true
+  world.cache[handle.index].is_dirty = true
 }

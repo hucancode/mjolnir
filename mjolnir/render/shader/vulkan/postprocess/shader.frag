@@ -12,7 +12,7 @@ const uint SAMPLER_LINEAR_REPEAT = 3u;
 layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
 
-layout(push_constant) uniform PostProcessPushConstant {
+layout(push_constant) uniform PostPush {
     float camera_near;
     float camera_far;
     uint normal_texture_index;

@@ -10,7 +10,7 @@
 const vec3 SUN_DIRECTION = normalize(vec3(-0.4, 0.8, 0.45));
 
 void main() {
-    MaterialData m = node_material();
+    Material m = node_material();
     vec3 albedo = (sample_texture(m.albedo_index, in_uv) * m.base_color_factor).rgb;
     vec3 n = normalize(in_normal);
     vec3 v = normalize(camera_view().position.xyz - in_position);

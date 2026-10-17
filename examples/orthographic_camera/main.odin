@@ -72,9 +72,9 @@ setup :: proc(app: ^App) -> bool {
   spawn_primitive(app, .QUAD_XZ, .GRAY, {0, 0, 0}, 6.0, cast_shadow = false)
 
   point := world.spawn(&app.scene, {3, 8, 3})
-  render.attach(&app.renderer, point.index, render.make_point_light({1.0, 0.95, 0.8, 1.0}, 25.0, false))
+  render.attach(&app.renderer, point.index, render.light_create(&app.renderer, render.make_point_light({1.0, 0.95, 0.8, 1.0}, 25.0, false)))
   sun := world.spawn(&app.scene, {-6, 10, -4})
-  render.attach(&app.renderer, sun.index, render.make_directional_light({1.0, 0.95, 0.9, 4.0}, 15.0, true))
+  render.attach(&app.renderer, sun.index, render.light_create(&app.renderer, render.make_directional_light({1.0, 0.95, 0.9, 4.0}, 15.0, true)))
 
   cam := render.main_camera(&app.renderer)
   render.camera_set_orthographic(cam, f32(ortho_width), f32(ortho_height))

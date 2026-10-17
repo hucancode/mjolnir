@@ -25,8 +25,7 @@ SHADOW_RANKED_CASTERS :: 12
 SHADOW_GRACE_FRAMES :: 30
 #assert(SHADOW_RANKED_CASTERS <= MAX_SHADOW_MAPS)
 
-// A handle is the index of its resource in the resource's array, GPU table
-// and (textures) bindless array. 0 is none: index 0 is never handed out.
+// MeshHandle identifies a mesh. Like every render handle, 0 is none.
 MeshHandle :: distinct u32
 // MaterialHandle identifies a material.
 MaterialHandle :: distinct u32
@@ -61,8 +60,6 @@ Renderer_State :: struct {
   node_count:             u32,
   // the skinning dispatch covers skinned vertices below this
   skinned_vertex_count:   u32,
-  // this frame's lights are sorted by type, each type one range of the light table
-  light_count:            [LightType]u32,
   shadow_view_count:      u32,
   environment_map:        TextureHandle,
   brdf_lut:               TextureHandle,
@@ -71,15 +68,16 @@ Renderer_State :: struct {
   particle_params:        ParticleSystemParams,
   mesh_slots:             cont.Slots,
   material_slots:         cont.Slots,
+  // lights, emitters and force fields: their tables' rows
+  light_slots:            cont.Slots,
   emitter_slots:          cont.Slots,
   forcefield_slots:       cont.Slots,
-  // each light and the slot it shines from (bound_at)
-  lights:                 []struct {
-    node_index: u32,
-    light:      Light,
-  },
-  light_slots:            cont.Slots,
+  // where they are attached: the rows of the *_PLACEMENTS tables
+  light_placement_slots:      cont.Slots,
+  emitter_placement_slots:    cont.Slots,
+  forcefield_placement_slots: cont.Slots,
   cameras:                []Camera,
+  camera_targets:         []CameraTargets,
   camera_slots:           cont.Slots,
   // pass i writes slot i % POST_PROCESS_RING; its input and original are the two slots before
   post_process_ring:      [FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
@@ -231,16 +229,18 @@ init_resources :: proc(self: ^Renderer) -> bool {
     lists, capacity := draw_list_shape(self, shadow = true)
     draw_list_create(self, SHADOW_DRAW_SLOT_BASE + frame, lists, capacity) or_return
   }
-  // Attachments have no handle to go stale and each frame reads its own copy of the
-  // table, so no grace. Index 0 is never handed out and the ambient light takes it, so
-  // every light fits the frame's table.
-  cont.slots_init(&self.emitter_slots, MAX_EMITTERS)
-  cont.slots_init(&self.forcefield_slots, MAX_FORCE_FIELDS)
-  cont.slots_init(&self.light_slots, MAX_LIGHTS)
+  cont.slots_init(&self.light_slots, MAX_LIGHTS, RETIRE_GRACE)
+  cont.slots_init(&self.emitter_slots, MAX_EMITTERS, RETIRE_GRACE)
+  cont.slots_init(&self.forcefield_slots, MAX_FORCE_FIELDS, RETIRE_GRACE)
+  // placements have no handle to go stale and each frame reads its own copy of the
+  // table, so no grace
+  cont.slots_init(&self.light_placement_slots, MAX_LIGHTS)
+  cont.slots_init(&self.emitter_placement_slots, MAX_EMITTERS)
+  cont.slots_init(&self.forcefield_placement_slots, MAX_FORCE_FIELDS)
   cont.slab_init(&self.bone_matrix_slab, BONE_SLAB_CONFIG)
   cont.slab_init(&self.skin_slab, SKIN_SLAB_CONFIG)
-  self.lights = make(type_of(self.lights), MAX_LIGHTS)
   self.cameras = make([]Camera, MAX_ACTIVE_CAMERAS)
+  self.camera_targets = make([]CameraTargets, MAX_ACTIVE_CAMERAS)
   init_builtin_materials(self)
   init_builtin_meshes(self)
   ambient_init(self) or_return
@@ -271,12 +271,16 @@ mark_resources :: proc(self: ^Renderer) {
   cont.slots_mark(&self.mesh_slots)
   for &slab in self.mesh_slabs do cont.slab_mark(&slab)
   cont.slots_mark(&self.material_slots)
+  cont.slots_mark(&self.light_slots)
+  cont.slots_mark(&self.emitter_slots)
+  cont.slots_mark(&self.forcefield_slots)
   cont.slots_mark(&self.texture_slots)
   cont.slots_mark(&self.camera_slots)
 }
 
 // teardown ends a map in one go, waiting for the GPU: every slot forgets its attachment
-// and bone palette, and every camera, mesh, material and texture made since the last setup
+// and bone palette, and every camera, mesh, material, light, emitter, force field and
+// texture made since the last setup
 // (or init) is freed, the environment map too if it is one of them. What came before stays:
 // what init made (builtin meshes and materials, the main camera, render targets, pipelines)
 // and what the application made before setup. Handles to freed resources are stale.
@@ -300,7 +304,7 @@ teardown :: proc(self: ^Renderer) {
   for &slab in self.mesh_slabs do cont.slab_rewind(&slab)
   clear_entry(self, .MATERIALS, self.material_slots.mark, self.material_slots.high_water - self.material_slots.mark)
   cont.slots_rewind(&self.material_slots)
-  slice.zero(write_table(self, .NODES, NodeData)[:self.node_count])
+  slice.zero(write_table(self, .NODES, Node)[:self.node_count])
   mark_dirty(self, .NODES, 0, int(self.node_count))
   self.node_count = 0
   when !BINDLESS do batches_reset(self)
@@ -308,11 +312,16 @@ teardown :: proc(self: ^Renderer) {
   cont.slab_rewind(&self.skin_slab)
   clear_entry(self, .SKIN_OWNERS, 0, self.skinned_vertex_count)
   self.skinned_vertex_count = 0
-  cont.slots_rewind(&self.light_slots)
-  clear_entry(self, .EMITTERS, 0, self.emitter_slots.high_water)
-  cont.slots_rewind(&self.emitter_slots)
-  clear_entry(self, .FORCEFIELDS, 0, self.forcefield_slots.high_water)
-  cont.slots_rewind(&self.forcefield_slots)
+  rewind :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table) {
+    clear_entry(self, table, slots.mark, slots.high_water - slots.mark)
+    cont.slots_rewind(slots)
+  }
+  rewind(self, &self.light_slots, .LIGHTS)
+  rewind(self, &self.emitter_slots, .EMITTERS)
+  rewind(self, &self.forcefield_slots, .FORCEFIELDS)
+  rewind(self, &self.light_placement_slots, .LIGHT_PLACEMENTS)
+  rewind(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS)
+  rewind(self, &self.forcefield_placement_slots, .FORCEFIELD_PLACEMENTS)
   self.shadow_casters = {}
 }
 
@@ -346,13 +355,16 @@ shutdown :: proc(self: ^Renderer) {
   cont.slots_destroy(&self.camera_slots)
   cont.slots_destroy(&self.mesh_slots)
   cont.slots_destroy(&self.material_slots)
+  cont.slots_destroy(&self.light_slots)
   cont.slots_destroy(&self.emitter_slots)
   cont.slots_destroy(&self.forcefield_slots)
-  cont.slots_destroy(&self.light_slots)
+  cont.slots_destroy(&self.light_placement_slots)
+  cont.slots_destroy(&self.emitter_placement_slots)
+  cont.slots_destroy(&self.forcefield_placement_slots)
   cont.slots_destroy(&self.texture_slots)
   cont.slots_destroy(&self.target_slots)
   delete(self.cameras)
-  delete(self.lights)
+  delete(self.camera_targets)
 }
 
 // Cameras that matched the old extent follow the new one.
@@ -363,7 +375,7 @@ recreate_swapchain :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale:
   extent := dev.extent(&self.gpu)
   c: u32
   for i in cont.slots_next(&self.camera_slots, &c) {
-    if self.cameras[i].extent != old do continue
+    if self.camera_targets[i].extent != old do continue
     camera_resize(self, CameraHandle(i), extent.x, extent.y) or_return
   }
   post_process_release_images(self)
@@ -474,7 +486,7 @@ SHADOW_CASTER_FLAGS :: NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
 // attachment_data_index is the first entry of the slot's bone table range and
 // skin_vertex_base the first of its skinned vertices (pass_skin.odin).
 @(private)
-NodeData :: struct #packed {
+Node :: struct #packed {
   world_matrix:          matrix[4, 4]f32,
   material_id:           u32,
   mesh_id:               u32,
@@ -483,7 +495,7 @@ NodeData :: struct #packed {
   skin_vertex_base:      u32,
   _:                     [3]u32,
 }
-#assert(size_of(NodeData) == 96)
+#assert(size_of(Node) == 96)
 
 // MeshAttachment draws mesh handle with material from a slot's transform.
 MeshAttachment :: struct {
@@ -492,22 +504,22 @@ MeshAttachment :: struct {
   cast_shadow: bool,
 }
 
-// What a slot draws. A Light shines from the slot's transform; an Emitter spawns
-// particles from it and a ForceField is centered on it.
+// What a slot draws: a mesh, or a light, emitter or force field (*_create) placed at the
+// slot's transform. One light, emitter or force field may be attached at many slots.
 Attachment :: union {
-  Light,
   MeshAttachment,
-  Emitter,
-  ForceField,
+  LightHandle,
+  EmitterHandle,
+  ForceFieldHandle,
 }
 
 // Grows the slot range to cover `slot`; slots past it are already empty (zero). Caller
 // holds the render mutex and marks what it changes.
 @(private)
-slot_node :: proc(self: ^Renderer, slot: u32) -> ^NodeData {
+slot_node :: proc(self: ^Renderer, slot: u32) -> ^Node {
   assert(slot < MAX_NODES_IN_SCENE, "slot exceeds MAX_NODES_IN_SCENE")
   self.node_count = max(self.node_count, slot + 1)
-  return &write_table(self, .NODES, NodeData)[slot]
+  return &write_table(self, .NODES, Node)[slot]
 }
 
 // stage_transforms applies a change feed: sets each slot's world matrix and visibility,
@@ -528,36 +540,65 @@ stage_transforms :: proc(self: ^Renderer, changes: []$T) {
   }
 }
 
-// Lights, emitters and force fields are tables of entries bound to a slot by node_index,
-// at most one entry per slot. The live entry of `table` bound to `slot`.
+// A placement table holds at most one row per slot. The live row of `table` placed at `slot`.
 @(private = "file")
-bound_at :: proc(slots: ^cont.Slots, table: []$T, slot: u32) -> (index: u32, ok: bool) {
+placed_at :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, $T: typeid, slot: u32) -> (index: u32, ok: bool) {
+  rows := write_table(self, table, T)
   c: u32
-  for i in cont.slots_next(slots, &c) do if table[i].node_index == slot do return i, true
+  for i in cont.slots_next(slots, &c) do if rows[i].node == slot do return i, true
   return
 }
 
-// Takes a free entry of `table` for `entry`, bound to `slot`.
+// Takes a placement row of `table` for `row`.
 @(private = "file")
-bind :: proc(slots: ^cont.Slots, table: []$T, slot: u32, entry: T) -> (index: u32, ok: bool) {
-  index = cont.slots_alloc(slots) or_return
-  table[index] = entry
-  table[index].node_index = slot
-  return index, true
+place :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, row: $T) -> bool {
+  i := cont.slots_alloc(slots) or_return
+  write_table(self, table, T)[i] = row
+  mark_dirty(self, table, int(i))
+  return true
+}
+
+// Frees the slot's placement row of `table`, if any.
+@(private = "file")
+unplace :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, $T: typeid, slot: u32) {
+  i := placed_at(self, slots, table, T, slot) or_else 0
+  if i == 0 do return
+  cont.slots_free(slots, i)
+  clear_entry(self, table, i)
 }
 
 // Drops the slot's light, emitter and force field. Caller holds the render mutex.
 @(private = "file")
 unbind :: proc(self: ^Renderer, slot: u32) {
-  if i, ok := bound_at(&self.light_slots, self.lights, slot); ok do cont.slots_free(&self.light_slots, i)
-  if i, ok := bound_at(&self.emitter_slots, write_table(self, .EMITTERS, Emitter), slot); ok {
-    cont.slots_free(&self.emitter_slots, i)
-    clear_entry(self, .EMITTERS, i)
-  }
-  if i, ok := bound_at(&self.forcefield_slots, write_table(self, .FORCEFIELDS, ForceField), slot); ok {
-    cont.slots_free(&self.forcefield_slots, i)
-    clear_entry(self, .FORCEFIELDS, i)
-  }
+  unplace(self, &self.light_placement_slots, .LIGHT_PLACEMENTS, LightPlacement, slot)
+  unplace(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS, EmitterPlacement, slot)
+  unplace(self, &self.forcefield_placement_slots, .FORCEFIELD_PLACEMENTS, ForceFieldPlacement, slot)
+}
+
+// Stores `value` in a free row of `table`; the row is the resource's handle.
+@(private)
+resource_create :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, value: $T) -> (index: u32, ok: bool) {
+  guard(self)
+  index = cont.slots_alloc(slots) or_return
+  write_table(self, table, T)[index] = value
+  mark_dirty(self, table, int(index))
+  return index, true
+}
+
+// The row of a live handle, to edit in place: valid until the next frame, as render.material's.
+@(private)
+resource :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, $T: typeid, index: u32) -> (^T, bool) {
+  if !cont.slots_live(slots, index) do return nil, false
+  mark_dirty(self, table, int(index))
+  return &write_table(self, table, T)[index], true
+}
+
+// Frees a row; what still refers to it reads zeros.
+@(private)
+resource_destroy :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, index: u32) {
+  guard(self)
+  if !cont.slots_free(slots, index) do return
+  clear_entry(self, table, index)
 }
 
 // Forget everything drawn at a slot; meshes and materials are shared and stay.
@@ -568,7 +609,7 @@ stage_slot_removal :: proc(self: ^Renderer, slot: u32) {
   if slot >= self.node_count do return
   release_bones(self, slot)
   batch_leave(self, slot)
-  write_table(self, .NODES, NodeData)[slot] = {}
+  write_table(self, .NODES, Node)[slot] = {}
   mark_dirty(self, .NODES, int(slot))
 }
 
@@ -591,7 +632,7 @@ skin_own :: proc(self: ^Renderer, base, owner: u32) {
 // Drops the slot's bone palette and skinned vertices. Caller holds the render mutex.
 @(private = "file")
 release_bones :: proc(self: ^Renderer, slot: u32) {
-  node := &write_table(self, .NODES, NodeData)[slot]
+  node := &write_table(self, .NODES, Node)[slot]
   if .SKINNED not_in node.flags do return
   cont.slab_free(&self.bone_matrix_slab, node.attachment_data_index)
   skin_own(self, node.skin_vertex_base, 0)
@@ -603,7 +644,7 @@ release_bones :: proc(self: ^Renderer, slot: u32) {
 
 // whether the slot's skinned vertex range holds mesh_id's vertices
 @(private = "file")
-skin_fits :: proc(self: ^Renderer, node: NodeData, mesh_id: u32) -> bool {
+skin_fits :: proc(self: ^Renderer, node: Node, mesh_id: u32) -> bool {
   vertex_count := write_table(self, .MESHES, MeshData)[mesh_id].vertex_count
   return cont.slab_block_size(&self.skin_slab, node.skin_vertex_base) >= vertex_count
 }
@@ -657,22 +698,26 @@ attach :: proc(self: ^Renderer, slot: u32, attachment: Attachment) {
     node.mesh_id, node.material_id = u32(a.handle), u32(a.material)
     batch_join(self, slot, node.mesh_id, node.material_id)
     if a.cast_shadow do node.flags += {.CASTS_SHADOW}
-  case Light:
-    if i, ok := cont.slots_alloc(&self.light_slots); ok do self.lights[i] = {slot, a}
-    else do log.warnf("No room for more than %d lights; the light is dropped", MAX_LIGHTS - 1)
-  case Emitter:
-    if i, ok := bind(&self.emitter_slots, write_table(self, .EMITTERS, Emitter), slot, a); ok do mark_dirty(self, .EMITTERS, int(i))
-    else do log.warnf("No room for more than %d emitters; the emitter is dropped", MAX_EMITTERS - 1)
-  case ForceField:
-    if i, ok := bind(&self.forcefield_slots, write_table(self, .FORCEFIELDS, ForceField), slot, a); ok do mark_dirty(self, .FORCEFIELDS, int(i))
-    else do log.warnf("No room for more than %d force fields; the force field is dropped", MAX_FORCE_FIELDS - 1)
+  case LightHandle:
+    if !place(self, &self.light_placement_slots, .LIGHT_PLACEMENTS, LightPlacement{light = a, node = slot}) {
+      log.warnf("No room for more than %d placed lights; the light is dropped", MAX_LIGHTS - 1)
+    }
+  case EmitterHandle:
+    if !place(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS, EmitterPlacement{emitter = a, node = slot}) {
+      log.warnf("No room for more than %d placed emitters; the emitter is dropped", MAX_EMITTERS - 1)
+    }
+  case ForceFieldHandle:
+    if !place(self, &self.forcefield_placement_slots, .FORCEFIELD_PLACEMENTS, ForceFieldPlacement{forcefield = a, node = slot}) {
+      log.warnf("No room for more than %d placed force fields; the force field is dropped", MAX_FORCE_FIELDS - 1)
+    }
   }
   if !skinned_mesh(self, node.mesh_id) || !skin_fits(self, node^, node.mesh_id) do release_bones(self, slot)
   mark_dirty(self, .NODES, int(slot))
 }
 
-// attachment returns a copy of the attachment of type T at slot, e.g. attachment(r, slot, MeshAttachment).
-// Edit it and pass it back to attach.
+// attachment returns the attachment of type T at slot, e.g. attachment(r, slot, LightHandle).
+// Edit a light, emitter or force field through its handle (light, emitter, forcefield); a
+// MeshAttachment is a copy to pass back to attach.
 attachment :: proc(
   self: ^Renderer,
   slot: u32,
@@ -684,18 +729,18 @@ attachment :: proc(
   guard(self)
   when T == MeshAttachment {
     if slot >= self.node_count do return
-    node := write_table(self, .NODES, NodeData)[slot]
+    node := write_table(self, .NODES, Node)[slot]
     if node.mesh_id == 0 do return
     return {MeshHandle(node.mesh_id), MaterialHandle(node.material_id), .CASTS_SHADOW in node.flags}, true
-  } else when T == Light {
-    i := bound_at(&self.light_slots, self.lights, slot) or_return
-    return self.lights[i].light, true
-  } else when T == Emitter {
-    emitters := write_table(self, .EMITTERS, Emitter)
-    return emitters[bound_at(&self.emitter_slots, emitters, slot) or_return], true
-  } else when T == ForceField {
-    forcefields := write_table(self, .FORCEFIELDS, ForceField)
-    return forcefields[bound_at(&self.forcefield_slots, forcefields, slot) or_return], true
+  } else when T == LightHandle {
+    i := placed_at(self, &self.light_placement_slots, .LIGHT_PLACEMENTS, LightPlacement, slot) or_return
+    return write_table(self, .LIGHT_PLACEMENTS, LightPlacement)[i].light, true
+  } else when T == EmitterHandle {
+    i := placed_at(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS, EmitterPlacement, slot) or_return
+    return write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[i].emitter, true
+  } else when T == ForceFieldHandle {
+    i := placed_at(self, &self.forcefield_placement_slots, .FORCEFIELD_PLACEMENTS, ForceFieldPlacement, slot) or_return
+    return write_table(self, .FORCEFIELD_PLACEMENTS, ForceFieldPlacement)[i].forcefield, true
   }
   return
 }
@@ -703,49 +748,75 @@ attachment :: proc(
 // SPOT_LIGHT_INNER_RATIO is the default ratio of a spot light's full-intensity cone to its falloff cone.
 SPOT_LIGHT_INNER_RATIO :: f32(0.75)
 
-// Light is stored as the lighting shaders read it. Attached to a slot it shines from the
-// slot's transform along its forward axis; render fills position, direction, shadow_map
-// and shadow_texel each frame. Point lights ignore direction and angles; a directional
-// light's shadow map covers radius in front of the main camera.
-Light :: struct {
-  color:        [4]f32, // RGB + intensity
-  position:     [3]f32,
-  // range of a point or spot light; shadow distance of a directional light
-  // from the main camera
-  radius:       f32,
-  direction:    [3]f32, // normalized
-  angle_inner:  f32, // spot cone angles
-  angle_outer:  f32,
-  // view table index of the shadow map's first face, 0 when the light got none this frame
-  shadow_map:         u32,
-  // world size of a shadow texel per unit of view depth, for point and spot
-  shadow_texel:       f32,
-  // the shaders' last u32, which they don't read
+// Light shines from every slot it is attached to, along the slot's forward axis
+// (make_*_light fill one; light_create stores it). Point lights ignore the angles.
+Light :: struct #align(16) {
+  color:              [4]f32, // RGB + intensity
+  // range of a point or spot light; shadow distance of a directional light from the main camera
+  radius:             f32,
+  angle_inner:        f32, // spot cone angles
+  angle_outer:        f32,
   type:               LightType,
-  // the light competes for a shadow map; shadow_map tells whether it got one
-  should_cast_shadow: b16,
+  // the light competes for a shadow map
+  should_cast_shadow: b32,
 }
-#assert(size_of(Light) == 64)
+#assert(size_of(Light) == 48)
 
-// make_point_light returns an omnidirectional Light for attach.
+// LightHandle identifies a light (light_create).
+LightHandle :: distinct u32
+
+// Where a light is attached. shadow_map is the view of the placement's first shadow face
+// this frame, 0 when it got none (collect_lights).
+@(private)
+LightPlacement :: struct {
+  light:      LightHandle,
+  node:       u32,
+  shadow_map: u32,
+}
+
+// light_create stores `l`; attach places it at slots. It lives until light_destroy or teardown.
+light_create :: proc(r: ^Renderer, l: Light) -> (handle: LightHandle, ok: bool) #optional_ok {
+  i := resource_create(r, &r.light_slots, .LIGHTS, l) or_return
+  return LightHandle(i), true
+}
+
+// light returns the light of `h`, to edit in place; every slot it is attached to follows.
+light :: proc(r: ^Renderer, h: LightHandle) -> (^Light, bool) #optional_ok {
+  return resource(r, &r.light_slots, .LIGHTS, Light, u32(h))
+}
+
+// light_destroy frees the light; slots it stays attached to shine nothing.
+light_destroy :: proc(r: ^Renderer, h: LightHandle) {
+  resource_destroy(r, &r.light_slots, .LIGHTS, u32(h))
+}
+
+// Where a light at a node's transform sits and shines: its translation and normalized forward
+// (+Z) axis. The lighting shaders read a placed light the same way.
+@(private)
+light_pose :: proc(world_matrix: matrix[4, 4]f32) -> (position, direction: [3]f32) {
+  forward := world_matrix[2].xyz
+  return world_matrix[3].xyz, linalg.normalize(forward) if linalg.dot(forward, forward) > 1e-6 else {0, -1, 0}
+}
+
+// make_point_light returns an omnidirectional Light for light_create.
 make_point_light :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   cast_shadow: bool = true,
 ) -> Light {
-  return {type = .POINT, color = color, radius = radius, should_cast_shadow = b16(cast_shadow)}
+  return {type = .POINT, color = color, radius = radius, should_cast_shadow = b32(cast_shadow)}
 }
 
-// make_directional_light returns a sun-like Light for attach; shadow_radius is its shadow distance.
+// make_directional_light returns a sun-like Light for light_create; shadow_radius is its shadow distance.
 make_directional_light :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   shadow_radius: f32 = 10.0,
   cast_shadow: bool = false,
 ) -> Light {
-  return {type = .DIRECTIONAL, color = color, radius = shadow_radius, should_cast_shadow = b16(cast_shadow)}
+  return {type = .DIRECTIONAL, color = color, radius = shadow_radius, should_cast_shadow = b32(cast_shadow)}
 }
 
-// make_spot_light returns a cone Light of the given half angle for attach.
+// make_spot_light returns a cone Light of the given half angle for light_create.
 make_spot_light :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
@@ -758,7 +829,7 @@ make_spot_light :: proc(
     radius      = radius,
     angle_inner = angle * SPOT_LIGHT_INNER_RATIO,
     angle_outer = angle,
-    should_cast_shadow = b16(cast_shadow),
+    should_cast_shadow = b32(cast_shadow),
   }
 }
 
@@ -775,7 +846,6 @@ SHADOW_FACE_COUNT := [LightType]u32 {
   .POINT       = len(CUBE_FACES),
   .SPOT        = 1,
   .DIRECTIONAL = SHADOW_CASCADES,
-  .AMBIENT     = 0,
 }
 
 // (forward, up) per face, in the order the lighting shader's shadowFace picks them
@@ -792,8 +862,8 @@ CUBE_FACES := [6][2][3]f32 {
 // A shadow-casting light this frame, or the holder of a shadow map.
 @(private)
 Caster :: struct {
-  light:       int, // index into the frame's lights
-  owner:       u32, // light slot + 1; 0 for a free map
+  light:       int, // light placement row
+  owner:       u32, // light placement row + 1; 0 for a free map
   score:       f32,
   // frame serial when the owner last ranked in the top SHADOW_RANKED_CASTERS
   last_ranked: u64,
@@ -829,29 +899,6 @@ select_shadow_casters :: proc(casters: []Caster, maps: ^[MAX_SHADOW_MAPS]Caster,
   return
 }
 
-@(private)
-place_light :: proc(l: Light, world_matrix: matrix[4, 4]f32) -> Light {
-  l := l
-  forward := world_matrix[2].xyz
-  l.position = world_matrix[3].xyz
-  l.direction = linalg.normalize(forward) if linalg.dot(forward, forward) > 1e-6 else {0, -1, 0}
-  // set by collect_lights for the lights picked to cast this frame
-  l.shadow_map = 0
-  perspective_texel :: proc(fovy: f32) -> f32 {return 2 * math.tan(0.5 * max(fovy, 0.001)) / SHADOW_MAP_SIZE}
-  switch l.type {
-  case .POINT:
-    l.shadow_texel = perspective_texel(math.PI * 0.5)
-  case .SPOT:
-    l.shadow_texel = perspective_texel(l.angle_outer * 2)
-  case .DIRECTIONAL:
-    // radius: shadow distance from the main camera; the shader reads each
-    // cascade's texel size from its projection
-    l.radius = max(l.radius, 0.5)
-  case .AMBIENT:
-  }
-  return l
-}
-
 @(private = "file")
 light_look :: proc(position, direction: [3]f32) -> matrix[4, 4]f32 {
   up := [3]f32{0, 0, 1} if math.abs(direction.y) > 0.95 else {0, 1, 0}
@@ -859,7 +906,7 @@ light_look :: proc(position, direction: [3]f32) -> matrix[4, 4]f32 {
 }
 
 @(private)
-shadow_face_matrices :: proc(l: Light, face: int, camera: ^ViewGPU) -> (view, projection: matrix[4, 4]f32) {
+shadow_face_matrices :: proc(l: Light, position, direction: [3]f32, face: int, camera: ^View) -> (view, projection: matrix[4, 4]f32) {
   perspective :: proc(fovy, radius: f32) -> matrix[4, 4]f32 {
     near :: 0.1
     return geom.make_perspective_matrix(max(fovy, 0.001), 1.0, near, max(near + 0.1, radius))
@@ -867,12 +914,11 @@ shadow_face_matrices :: proc(l: Light, face: int, camera: ^ViewGPU) -> (view, pr
   switch l.type {
   case .POINT:
     rotation := linalg.matrix4_look_at([3]f32{}, CUBE_FACES[face][0], CUBE_FACES[face][1])
-    return rotation * linalg.matrix4_translate(-l.position), perspective(math.PI * 0.5, l.radius)
+    return rotation * linalg.matrix4_translate(-position), perspective(math.PI * 0.5, l.radius)
   case .SPOT:
-    return light_look(l.position, l.direction), perspective(l.angle_outer * 2, l.radius)
+    return light_look(position, direction), perspective(l.angle_outer * 2, l.radius)
   case .DIRECTIONAL:
-    return cascade_matrices(l, face, camera)
-  case .AMBIENT:
+    return cascade_matrices(l, direction, face, camera)
   }
   return
 }
@@ -880,9 +926,9 @@ shadow_face_matrices :: proc(l: Light, face: int, camera: ^ViewGPU) -> (view, pr
 // Orthographic box around the bounding sphere of the cascade's camera-frustum slice: the
 // sphere keeps the size fixed as the camera turns, texel snapping holds edges still as it moves.
 @(private = "file")
-cascade_matrices :: proc(l: Light, cascade: int, camera: ^ViewGPU) -> (view, projection: matrix[4, 4]f32) {
+cascade_matrices :: proc(l: Light, direction: [3]f32, cascade: int, camera: ^View) -> (view, projection: matrix[4, 4]f32) {
   near := camera.near
-  far := max(min(l.radius, camera.far), near + 0.01)
+  far := max(min(directional_shadow_radius(l), camera.far), near + 0.01)
   split :: proc(near, far: f32, i: int) -> f32 {
     t := f32(i) / SHADOW_CASCADES
     return math.lerp(near + (far - near) * t, near * math.pow(far / near, t), f32(SHADOW_CASCADE_LOG_WEIGHT))
@@ -908,7 +954,7 @@ cascade_matrices :: proc(l: Light, cascade: int, camera: ^ViewGPU) -> (view, pro
   // rounded up, so float noise can't change the texel size
   r = math.ceil(r * 16) / 16
   texel := 2 * r / SHADOW_MAP_SIZE
-  rotation := light_look({}, l.direction)
+  rotation := light_look({}, direction)
   c := (rotation * [4]f32{center.x, center.y, center.z, 1}).xyz
   c.xy = linalg.floor(c.xy / texel) * texel
   // the eye sits r towards the light from the center, the box 2r deep
@@ -916,57 +962,48 @@ cascade_matrices :: proc(l: Light, cascade: int, camera: ^ViewGPU) -> (view, pro
   return view, geom.make_ortho_matrix(-r, r, -r, r, 0, 2 * r)
 }
 
-// Stable counting sort by type, so each type is one range the lighting shader walks;
-// then the lights picked to cast (any nonzero shadow_map) get consecutive shadow views in
-// dst order (view i renders atlas layer i).
+// How far in front of the main camera a directional light's shadow map reaches.
+@(private = "file")
+directional_shadow_radius :: proc(l: Light) -> f32 {
+  return max(l.radius, 0.5)
+}
+
+// The picked placements get consecutive shadow views in table order (view i renders atlas
+// layer i), the rest none.
 @(private)
-pack_lights :: proc(lights, dst: []Light) -> (count: [LightType]u32, layers: u32) {
-  for &l in lights do count[l.type] += 1
-  first: [LightType]u32
-  next: u32
-  for type in LightType {
-    first[type] = next
-    next += count[type]
-  }
-  for &l in lights {
-    dst[first[l.type]] = l
-    first[l.type] += 1
-  }
-  for &l in dst[:len(lights)] {
-    if l.shadow_map == 0 do continue
-    l.shadow_map = SHADOW_VIEW_BASE + layers
-    layers += SHADOW_FACE_COUNT[l.type]
+assign_shadow_views :: proc(placements: []LightPlacement, lights: []Light, picked: []bool) -> (layers: u32) {
+  for &p, i in placements {
+    p.shadow_map = 0
+    if !picked[i] do continue
+    p.shadow_map = SHADOW_VIEW_BASE + layers
+    layers += SHADOW_FACE_COUNT[lights[p.light].type]
   }
   return
 }
 
-// Ambient light first, then the attached lights (light_slots leaves index 0 for it).
-// Directional lights cast shadows only with a main camera to fit to. Caller holds the
+// Picks this frame's shadow casters among the visible placed lights and writes their shadow
+// views. Directional lights cast shadows only with a main camera to fit to. Caller holds the
 // render mutex.
 @(private)
 collect_lights :: proc(self: ^Renderer, frame_index: u32) {
-  lights: [MAX_LIGHTS]Light
-  lights[0] = {type = .AMBIENT, color = {1, 1, 1, self.ibl_intensity}}
-  n := 1
-  views := write_table(self, .VIEWS, ViewGPU)
+  views := write_table(self, .VIEWS, View)
   cameras := views[CAMERA_VIEW_BASE:][:self.camera_slots.high_water]
   casters: [MAX_LIGHTS]Caster
   caster_count := 0
   _, has_eye := main_camera(self)
   eye := &views[CAMERA_VIEW_BASE + u32(self.main_camera)]
-  nodes := write_table(self, .NODES, NodeData)
-  cursor: u32
-  for i in cont.slots_next(&self.light_slots, &cursor) {
-    slot, light := self.lights[i].node_index, self.lights[i].light
-    if .VISIBLE not_in nodes[slot].flags do continue
-    lights[n] = place_light(light, nodes[slot].world_matrix)
-    n += 1
-    if !light.should_cast_shadow do continue
+  nodes := write_table(self, .NODES, Node)
+  lights := write_table(self, .LIGHTS, Light)
+  placements := write_table(self, .LIGHT_PLACEMENTS, LightPlacement)[:self.light_placement_slots.high_water]
+  for p, i in placements {
+    if p.light == 0 do continue
+    light := lights[p.light]
+    if !light.should_cast_shadow || .VISIBLE not_in nodes[p.node].flags do continue
     if light.type == .DIRECTIONAL && !has_eye do continue
     // a spot light reuses the point light's sphere: loose but simple
-    l := &lights[n - 1]
-    bounds := [4]f32{l.position.x, l.position.y, l.position.z, l.radius}
-    if l.type == .DIRECTIONAL do bounds.xyz = eye.position.xyz
+    position, _ := light_pose(nodes[p.node].world_matrix)
+    bounds := [4]f32{position.x, position.y, position.z, light.radius}
+    if light.type == .DIRECTIONAL do bounds = {eye.position.x, eye.position.y, eye.position.z, directional_shadow_radius(light)}
     // -1: no camera sees the light
     score: f32 = -1
     for &v in cameras {
@@ -975,28 +1012,29 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
       score = max(score, shadow_score(bounds, light.color.a, v.position.xyz))
     }
     if score < 0 do continue
-    casters[caster_count] = {light = n - 1, owner = u32(slot) + 1, score = score}
+    casters[caster_count] = {light = i, owner = u32(i) + 1, score = score}
     caster_count += 1
   }
   slice.sort_by(casters[:caster_count], proc(a, b: Caster) -> bool {return a.score > b.score})
   maps := &self.shadow_casters
   selected := select_shadow_casters(casters[:caster_count], maps, dev.frame_serial(&self.gpu))
-  // any nonzero view marks the pick; pack_lights assigns the real one
-  for c in maps[:selected] do lights[c.light].shadow_map = 1
-  dst := write_table(self, .LIGHTS, Light)
-  self.light_count, self.shadow_view_count = pack_lights(lights[:n], dst)
-  mark_dirty(self, .LIGHTS, 0, n)
+  picked: [MAX_LIGHTS]bool
+  for c in maps[:selected] do picked[c.light] = true
+  self.shadow_view_count = assign_shadow_views(placements, lights, picked[:len(placements)])
+  mark_dirty(self, .LIGHT_PLACEMENTS, 0, len(placements))
   mark_dirty(self, .VIEWS, SHADOW_VIEW_BASE, int(self.shadow_view_count))
-  for &l in dst[:n] {
-    if l.shadow_map == 0 do continue
-    for f in 0 ..< SHADOW_FACE_COUNT[l.type] {
-      v := l.shadow_map + f
-      view, projection := shadow_face_matrices(l, int(f), eye)
+  for p in placements {
+    if p.shadow_map == 0 do continue
+    light := lights[p.light]
+    position, direction := light_pose(nodes[p.node].world_matrix)
+    for f in 0 ..< SHADOW_FACE_COUNT[light.type] {
+      v := p.shadow_map + f
+      view, projection := shadow_face_matrices(light, position, direction, int(f), eye)
       view_projection := projection * view
       planes := geom.make_frustum(view_projection).planes
       // casters between a directional light and its cascade's box still
       // shadow it (the shadow pipeline clamps their depth)
-      if l.type == .DIRECTIONAL do planes[4] = {0, 0, 0, 1}
+      if light.type == .DIRECTIONAL do planes[4] = {0, 0, 0, 1}
       views[v] = {
         view            = view,
         projection      = projection,
@@ -1013,39 +1051,38 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   }
 }
 
-// Emitters take consecutive ranges of the frame's new particles, which take consecutive
-// ring slots after the previous frame's. An emitter emits what floor(rate * particle_time)
-// grew by, so it carries no fraction from frame to frame.
+// Emitter placements take consecutive ranges of the frame's new particles, which take
+// consecutive ring slots after the previous frame's. A placement emits what
+// floor(rate * particle_time) grew by, so it carries no fraction from frame to frame.
 @(private = "file")
 flush_particles :: proc(self: ^Renderer) {
-  emitters := write_table(self, .EMITTERS, Emitter)[:self.emitter_slots.high_water]
+  emitters := write_table(self, .EMITTERS, Emitter)
+  placements := write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[:self.emitter_placement_slots.high_water]
   p := &self.particle_params
   p.emit_cursor = (p.emit_cursor + p.emit_total) % MAX_PARTICLES
   t0 := self.particle_time
   t1 := t0 + f64(p.delta_time)
   self.particle_time = t1
   total: u32
-  for &em in emitters {
-    emit: u32
-    if em.enabled {
-      rate := f64(max(em.emission_rate, 0))
-      emit = u32(u64(rate * t1) - u64(rate * t0))
-    }
-    em.emit_first = total
+  for &pl in placements {
+    // a free row reads emitter 0, whose rate is 0
+    rate := f64(max(emitters[pl.emitter].emission_rate, 0))
+    emit := u32(u64(rate * t1) - u64(rate * t0))
+    pl.emit_first = total
     total += emit
   }
-  mark_dirty(self, .EMITTERS, 0, len(emitters))
+  mark_dirty(self, .EMITTER_PLACEMENTS, 0, len(placements))
   // a ring slot takes at most one new particle per frame
   p.emit_total = min(total, MAX_PARTICLES)
-  p.emitter_count = u32(len(emitters))
-  p.forcefield_count = self.forcefield_slots.high_water
+  p.emitter_placement_count = u32(len(placements))
+  p.forcefield_placement_count = self.forcefield_placement_slots.high_water
   p.frame_counter += 1
 }
 
 // Writes the camera views, in slot order.
 @(private = "file")
 flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
-  views := write_table(self, .VIEWS, ViewGPU)
+  views := write_table(self, .VIEWS, View)
   // a slot without a camera keeps an empty view that draws no type
   slot_count := self.camera_slots.high_water
   slice.zero(views[CAMERA_VIEW_BASE:][:slot_count])
@@ -1053,9 +1090,9 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
   all_types := u32(1 << len(MaterialType) - 1)
   c: u32
   for i in cont.slots_next(&self.camera_slots, &c) {
-    cam := &self.cameras[i]
+    cam, targets := &self.cameras[i], &self.camera_targets[i]
     view := camera_view_matrix(cam)
-    projection := camera_projection_matrix(cam)
+    projection := camera_projection_matrix(cam, targets.extent)
     view_projection := projection * view
     v := &views[CAMERA_VIEW_BASE + i]
     v^ = {
@@ -1065,7 +1102,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       inv_view_projection = linalg.inverse(view_projection),
       planes              = geom.make_frustum(view_projection).planes,
       position            = {cam.position.x, cam.position.y, cam.position.z, 1},
-      extent              = {f32(cam.extent[0]), f32(cam.extent[1])},
+      extent              = {f32(targets.extent[0]), f32(targets.extent[1])},
       near                = cam.near,
       far                 = cam.far,
       pyramid             = u32(self.pyramids[camera_slot(i) + frame_index]),
@@ -1077,7 +1114,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       draw_list           = camera_next_slot(i, frame_index),
       list_capacity       = CAMERA_LIST_CAPACITY,
     }
-    for a in AttachmentType do v.attachments[a] = u32(cam.attachments[a][frame_index])
+    for a in AttachmentType do v.attachments[a] = u32(targets.attachments[a][frame_index])
   }
 }
 
@@ -1091,7 +1128,7 @@ flush :: proc(self: ^Renderer, frame_index: u32) {
   flush_debug_lines(self)
   batches_flush(self)
   // cull dispatches cover the slots up to the last one holding anything
-  nodes := write_table(self, .NODES, NodeData)
+  nodes := write_table(self, .NODES, Node)
   for self.node_count > 0 && nodes[self.node_count - 1] == {} do self.node_count -= 1
   overlay_flush(self)
 }

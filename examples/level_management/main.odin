@@ -93,7 +93,7 @@ build_level :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {half + 4, half + 6, half * 2.4}, {0, half - 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-6, 14, 6})
-  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.96, 0.9, 1}, 8.0))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.96, 0.9, 1}, 8.0)))
 
   // Ground uses BUILTIN mesh + material: stays put through every destroy button.
   ground := world.spawn(&app.scene, {0, -1, 0})

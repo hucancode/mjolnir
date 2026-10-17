@@ -69,7 +69,7 @@ setup :: proc(app: ^App) -> bool {
     append(&app.animators, a)
   }
   light := world.spawn(&app.scene)
-  render.attach(&app.renderer, light.index, render.make_directional_light())
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light()))
   return true
 }
 

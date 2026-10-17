@@ -455,14 +455,14 @@ setup :: proc(app: ^App) -> bool {
           spawn(
             app,
             parent = lights_root_handle,
-            attachment = render.Light{
+            attachment = render.light_create(&app.renderer, render.Light{
               type        = .SPOT,
               color       = color,
               radius      = 14.0,
               angle_inner = math.PI * 0.25 * 0.8,
               angle_outer = math.PI * 0.25,
               should_cast_shadow = true,
-            },
+            }),
           ) or_continue
           world.translate(
             &app.scene,
@@ -482,7 +482,7 @@ setup :: proc(app: ^App) -> bool {
           spawn(
             app,
             parent = lights_root_handle,
-            attachment = render.Light{type = .POINT, color = color, radius = 14.0, should_cast_shadow = true},
+            attachment = render.light_create(&app.renderer, render.Light{type = .POINT, color = color, radius = 14.0, should_cast_shadow = true}),
           ) or_continue
           world.translate(
             &app.scene,
@@ -506,7 +506,7 @@ setup :: proc(app: ^App) -> bool {
       }
     }
     when ENABLE_DIRECTIONAL_LIGHT {
-      dir_light_handle, _ := spawn(app, attachment = render.make_directional_light(color = {0.2, 0.5, 0.9, 3.0}, shadow_radius = 20, cast_shadow = true))
+      dir_light_handle, _ := spawn(app, attachment = render.light_create(&app.renderer, render.make_directional_light(color = {0.2, 0.5, 0.9, 3.0}, shadow_radius = 20, cast_shadow = true)))
       world.rotate(&app.scene, dir_light_handle, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
     }
   }
@@ -547,7 +547,7 @@ setup :: proc(app: ^App) -> bool {
       spawn(
         app,
         parent = psys_handle1,
-        attachment = render.make_emitter(
+        attachment = render.emitter_create(&app.renderer, render.make_emitter(
           texture_handle = goldstar_texture_handle,
           emission_rate = 70,
           particle_lifetime = 2.0,
@@ -560,7 +560,7 @@ setup :: proc(app: ^App) -> bool {
           size_end = 100.0,
           weight = 0.1,
           weight_spread = 0.05,
-        ),
+        )),
       )
     }
     psys_handle2 := world.spawn(&app.scene, {2.0, 1.9, 0.3})
@@ -568,7 +568,7 @@ setup :: proc(app: ^App) -> bool {
       spawn(
         app,
         parent = psys_handle2,
-        attachment = render.make_emitter(
+        attachment = render.emitter_create(&app.renderer, render.make_emitter(
           texture_handle = black_circle_texture_handle,
           emission_rate = 70,
           particle_lifetime = 3.0,
@@ -581,18 +581,18 @@ setup :: proc(app: ^App) -> bool {
           size_end = 175.0,
           weight = 0.1,
           weight_spread = 0.3,
-        ),
+        )),
       )
     }
     forcefield_root_handle := world.spawn(&app.scene, {0, 4, 0})
     add_node_clip(app, forcefield_root_handle, spin_clip("forcefield_rotation", 8, {0, math.PI * 0.5, math.PI, math.PI * 1.5, math.PI * 2}, .LINEAR))
     forcefield_handle := world.spawn(&app.scene, parent = forcefield_root_handle)
     world.translate(&app.scene, forcefield_handle, 3.0, 0.0, 0.0)
-    render.attach(&app.renderer, forcefield_handle.index, render.make_forcefield(
+    render.attach(&app.renderer, forcefield_handle.index, render.forcefield_create(&app.renderer, render.make_forcefield(
       tangent_strength = 2.0,
       strength = 20.0,
       area_of_effect = 5.0,
-    ))
+    )))
     handle := spawn(
       app,
       parent = forcefield_handle,

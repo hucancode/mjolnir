@@ -92,7 +92,7 @@ setup :: proc(app: ^App) -> bool {
   q1 := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
   q2 := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
   sun_light = world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, sun_light.index, render.make_directional_light({1, 0.97, 0.92, f32(sun_intensity)}, 12.0))
+  render.attach(&app.renderer, sun_light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, f32(sun_intensity)}, 12.0)))
   world.rotate(&app.scene, sun_light, q2 * q1)
   return true
 }
@@ -130,9 +130,8 @@ update :: proc(app: ^App, dt: f32) {
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  if l, ok := render.attachment(&app.renderer, sun_light.index, render.Light); ok {
+  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, sun_light.index, render.LightHandle)); ok {
     l.color[3] = f32(sun_intensity)
-    render.attach(&app.renderer, sun_light.index, l)
   }
   app.renderer.ibl_intensity = f32(ibl_intensity)
   app.renderer.skybox_intensity = skybox_on ? 1 : 0

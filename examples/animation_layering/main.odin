@@ -117,7 +117,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, target_cube.index, render.primitive(&app.renderer, .CUBE, .RED, cast_shadow = false))
   world.scale(&app.scene, target_cube, 0.25)
   light := world.spawn(&app.scene)
-  render.attach(&app.renderer, light.index, render.make_directional_light({1, 1, 1, 1}, 10.0, true))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 1, 1, 1}, 10.0, true)))
   return true
 }
 

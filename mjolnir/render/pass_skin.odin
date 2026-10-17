@@ -3,7 +3,7 @@ package render
 import "rhi"
 
 // Skinning: one dispatch a frame deforms every visible skinned node's mesh by its bone palette
-// into the node's range of skinned vertices (NodeData.skin_vertex_base), which every vertex
+// into the node's range of skinned vertices (Node.skin_vertex_base), which every vertex
 // shader drawing the node reads in place of the mesh's: the G-buffer, forward and every shadow
 // view share one skinning. A thread per skinned vertex finds its node in Table.SKIN_OWNERS.
 
@@ -26,8 +26,14 @@ skin_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
   if count == 0 do return
   barrier(r, cmd, .DRAW_TO_SKIN)
   dev.cmd_begin_compute(&r.gpu, cmd)
-  pipeline_bind(r, cmd, r.skin_pipeline, .SKIN, f, &count, .NONE)
+  push := SkinPush{count}
+  pipeline_bind(r, cmd, r.skin_pipeline, .SKIN, f, &push, .NONE)
   dev.cmd_dispatch(&r.gpu, cmd, (count + SKIN_GROUP_SIZE - 1) / SKIN_GROUP_SIZE, 1, 1)
   dev.cmd_end_compute(&r.gpu, cmd)
   barrier(r, cmd, .SKIN_TO_DRAW)
+}
+
+@(private = "file")
+SkinPush :: struct {
+  vertex_count: u32,
 }

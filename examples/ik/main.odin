@@ -132,7 +132,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, ground_plane.index, render.primitive(&app.renderer, .CUBE, .GRAY))
   world.scale(&app.scene, ground_plane, [3]f32{40, 0.2, 40})
   light := world.spawn(&app.scene)
-  render.attach(&app.renderer, light.index, render.make_directional_light({1, 1, 1, 1}, 10.0))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 1, 1, 1}, 10.0)))
   return true
 }
 

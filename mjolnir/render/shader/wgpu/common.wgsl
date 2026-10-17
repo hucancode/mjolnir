@@ -71,7 +71,7 @@ struct Node {
     _pad2: u32,
 }
 
-struct Mesh {
+struct MeshData {
     aabb_min: vec3f,
     index_count: u32,
     aabb_max: vec3f,
@@ -102,19 +102,22 @@ struct Material {
 struct Light {
     // rgb, a = intensity
     color: vec4f,
-    position: vec3f,
     radius: f32,
-    direction: vec3f,
     angle_inner: f32,
     angle_outer: f32,
-    // view index of the first shadow face, 0 for none
-    shadow_map: u32,
-    // world size of a shadow texel per unit of view depth, for point and spot
-    shadow_texel: f32,
-    _pad0: u32,
+    light_type: u32,
+    should_cast_shadow: u32,
 }
 
-struct Skinning {
+// Where a light is attached.
+struct LightPlacement {
+    light: u32,
+    node: u32,
+    // view index of the first shadow face, 0 for none
+    shadow_map: u32,
+}
+
+struct SkinningData {
     joints: vec4u,
     weights: vec4f,
 }

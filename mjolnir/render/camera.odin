@@ -40,7 +40,7 @@ camera_next_slot :: #force_inline proc "contextless" (camera, f: u32) -> u32 {
 // Camera c's draw lists and pyramid hold data: until then the camera draws nothing.
 @(private)
 camera_ready :: proc(self: ^Renderer, c: u32) -> bool {
-  return dev.frame_serial(&self.gpu) >= self.cameras[c].ready_serial
+  return dev.frame_serial(&self.gpu) >= self.camera_targets[c].ready_serial
 }
 @(private)
 SHADOW_DRAW_SLOT_BASE :: MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
@@ -62,18 +62,23 @@ draw_list_shape :: proc(self: ^Renderer, shadow: bool) -> (lists, capacity: u32)
   }
 }
 
-// Camera is a view into the scene: pose and projection, plus the images it renders into
-// (camera_attachment).
+// Camera is a view into the scene: pose and projection. Its images are camera_attachment's,
+// its size camera_resize's.
 Camera :: struct {
-  position:                     [3]f32,
-  rotation:                     quaternion128,
-  projection:                   CameraProjection,
+  position:   [3]f32,
+  rotation:   quaternion128,
+  projection: CameraProjection,
   // clip planes, shared by both projections
-  near, far:                    f32,
-  extent:                       [2]u32, // width, height
-  attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]TextureHandle,
+  near, far:  f32,
+}
+
+// What render keeps per camera beside the Camera: the images it renders into, at extent.
+@(private)
+CameraTargets :: struct {
+  extent:       [2]u32, // width, height
+  attachments:  [AttachmentType][FRAMES_IN_FLIGHT]TextureHandle,
   // first serial whose compute work may read depth and pyramids; until then no occlusion, no lists
-  ready_serial:                 u64,
+  ready_serial: u64,
 }
 
 @(private)
@@ -87,12 +92,12 @@ camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
 }
 
 @(private)
-camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
+camera_projection_matrix :: proc(camera: ^Camera, extent: [2]u32) -> matrix[4, 4]f32 {
   switch proj in camera.projection {
   case PerspectiveProjection:
     return geom.make_perspective_matrix(
       proj.fov,
-      f32(camera.extent[0]) / f32(max(camera.extent[1], 1)),
+      f32(extent[0]) / f32(max(extent[1], 1)),
       camera.near,
       camera.far,
     )
@@ -223,9 +228,10 @@ camera_set_orthographic :: proc(
 // window coordinates as input.State reports them (the DPI scale is applied here).
 cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (ray: geom.Ray, ok: bool) {
   cam := main_camera(self) or_return
+  extent := self.camera_targets[self.main_camera].extent
   p := cursor * self.dpi_scale
-  ndc := 2 * p / [2]f32{f32(cam.extent[0]), f32(cam.extent[1])} - 1
-  ray_eye := linalg.matrix4_inverse(camera_projection_matrix(cam)) * [4]f32{ndc.x, ndc.y, -1, 1}
+  ndc := 2 * p / [2]f32{f32(extent[0]), f32(extent[1])} - 1
+  ray_eye := linalg.matrix4_inverse(camera_projection_matrix(cam, extent)) * [4]f32{ndc.x, ndc.y, -1, 1}
   ray_eye = {ray_eye.x, ray_eye.y, -1, 0}
   dir := linalg.normalize((linalg.matrix4_inverse(camera_view_matrix(cam)) * ray_eye).xyz)
   return {origin = cam.position, direction = dir}, true
@@ -259,9 +265,8 @@ camera_create :: proc(
 ) #optional_ok {
   handle = CameraHandle(cont.slots_alloc(&self.camera_slots) or_return)
   cam := &self.cameras[handle]
-  cam^ = {
-    extent = {width, height},
-  }
+  cam^ = {}
+  self.camera_targets[handle] = {extent = {width, height}}
   camera_set_perspective(cam, fov, near_plane, far_plane)
   camera_look_at(cam, position, target)
   // the lists' size does not depend on the camera's extent
@@ -301,10 +306,10 @@ camera_attachment :: proc(
   texture: TextureHandle,
   ok: bool,
 ) #optional_ok {
-  cam := camera(self, handle) or_return
+  camera(self, handle) or_return
   f := current_frame(self)
   if previous_frame do f = (f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
-  return cam.attachments[attachment_type][f], true
+  return self.camera_targets[handle].attachments[attachment_type][f], true
 }
 
 // camera_resize resizes a camera's render targets; a perspective projection follows the new aspect ratio.
@@ -313,9 +318,10 @@ camera_resize :: proc(
   handle: CameraHandle,
   width, height: u32,
 ) -> bool {
-  cam := camera(self, handle) or_return
-  if cam.extent == {width, height} do return true
-  cam.extent = {width, height}
+  camera(self, handle) or_return
+  targets := &self.camera_targets[handle]
+  if targets.extent == {width, height} do return true
+  targets.extent = {width, height}
   destroy_targets(self, u32(handle))
   create_targets(self, u32(handle)) or_return
   log.infof("Camera resized to %dx%d", width, height)
@@ -326,7 +332,7 @@ camera_resize :: proc(
 // type * list_stride of `draw_list`: cameras keep one list per material type (stride 1);
 // shadow views share one list (stride 0) and tell draws apart by instance_tag.
 @(private)
-ViewGPU :: struct {
+View :: struct {
   view:                matrix[4, 4]f32,
   projection:          matrix[4, 4]f32,
   view_projection:     matrix[4, 4]f32,
@@ -355,21 +361,21 @@ ViewGPU :: struct {
   list_capacity:   u32,
   _:               u32,
 }
-#assert(size_of(ViewGPU) == 448)
+#assert(size_of(View) == 448)
 
 // A camera's attachments and depth pyramids, one set per frame in flight (pyramid_shape).
 @(private)
 create_targets :: proc(self: ^Renderer, index: u32) -> bool {
-  camera := &self.cameras[index]
+  targets := &self.camera_targets[index]
   attachments := ATTACHMENTS
   for a in AttachmentType {
     desc := attachments[a]
-    desc.extent = camera.extent
+    desc.extent = targets.extent
     for frame in 0 ..< FRAMES_IN_FLIGHT {
-      camera.attachments[a][frame] = allocate_texture(self, desc, target = true) or_return
+      targets.attachments[a][frame] = allocate_texture(self, desc, target = true) or_return
     }
   }
-  half, mips := pyramid_shape(camera.extent)
+  half, mips := pyramid_shape(targets.extent)
   pyramid := TextureDesc {
     extent     = half,
     format     = .R32F,
@@ -383,15 +389,15 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
     // its storage views enter the bindless array at the slot's next frame (pyramids_bind)
     self.pyramid_bound[slot] = false
   }
-  camera.ready_serial = dev.frame_serial(&self.gpu) + 1
+  targets.ready_serial = dev.frame_serial(&self.gpu) + 1
   return true
 }
 
 @(private)
 destroy_targets :: proc(self: ^Renderer, index: u32) {
-  camera := &self.cameras[index]
-  for frames in camera.attachments do for handle in frames do texture_destroy(self, handle)
-  camera.attachments = {}
+  targets := &self.camera_targets[index]
+  for frames in targets.attachments do for handle in frames do texture_destroy(self, handle)
+  targets.attachments = {}
   cull_groups_clear(self)
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     slot := camera_slot(index) + frame

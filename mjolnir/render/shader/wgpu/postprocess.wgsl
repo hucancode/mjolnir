@@ -8,7 +8,7 @@
 @group(1) @binding(2) var normal_texture: texture_2d<f32>;
 @group(1) @binding(3) var depth_texture: texture_depth_2d;
 
-struct PostUniforms {
+struct PostPush {
     // camera clip planes, for effects that linearize depth (fog, dof, outline)
     camera_near: f32,
     camera_far: f32,
@@ -22,7 +22,7 @@ struct PostUniforms {
     _pad0: u32,
     effect: Effect,
 }
-@group(2) @binding(0) var<uniform> u: PostUniforms;
+@group(2) @binding(0) var<uniform> u: PostPush;
 
 // View depth from the depth image, between the camera's clip planes.
 fn linearize_depth(depth: f32) -> f32 {

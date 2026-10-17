@@ -2,11 +2,11 @@
 #extension GL_EXT_nonuniform_qualifier : require
 
 // Deferred lighting, tiled: a group shades a TILE x TILE tile of the camera's image. It finds
-// the tile's depth range, lists the point and spot lights whose sphere meets the tile's box,
-// then each invocation shades its pixel once: image-based ambient and emissive, every
-// directional light, the listed lights. The background gets the skybox, or black. Lights are
-// sorted by type (scene.odin pack_lights): light_count gives each type's range, the ambient
-// light last.
+// the tile's depth range and walks the light placements once, listing the visible placed
+// lights that reach the tile: every directional light, the point and spot lights whose sphere
+// meets the tile's box. Then each invocation shades its pixel once: image-based ambient and
+// emissive, then the listed lights. The background gets the skybox, or black. A placed light
+// is a Light at a node's transform (scene.odin light_pose).
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
@@ -35,15 +35,30 @@ layout(set = 1, binding = 2, rgba16f) writeonly uniform image2D lit_images[];
 
 struct Light {
     vec4 color;
-    vec3 position;
     float radius;
-    vec3 direction;
     float angle_inner;
     float angle_outer;
-    uint shadow_map; // view index of the first shadow face
-    float shadow_texel; // world size of a shadow texel; per unit of view depth for point and spot
-    uint _pad0;
+    uint type;
+    uint should_cast_shadow;
 };
+
+struct LightPlacement {
+    uint light;
+    uint node;
+    uint shadow_map; // view index of the first shadow face, 0 for none
+};
+
+struct Node {
+    mat4 world_matrix;
+    uint material_id;
+    uint mesh_id;
+    uint attachment_data_index;
+    uint flags;
+    uint skin_vertex_base;
+    uint _node_pad[3];
+};
+
+const uint NODE_VISIBLE = 1u;
 
 // View.attachments indices (AttachmentType)
 const uint ATTACHMENT_NORMAL = 1u;
@@ -79,11 +94,19 @@ layout(set = 0, binding = 0) readonly buffer ViewBuffer {
     View views[];
 };
 
+layout(set = 0, binding = 1) readonly buffer NodeBuffer {
+    Node nodes[];
+};
+
 layout(set = 0, binding = 10) readonly buffer LightBuffer {
     Light lights[];
 };
 
-layout(push_constant) uniform PushConstant {
+layout(set = 0, binding = 18) readonly buffer LightPlacementBuffer {
+    LightPlacement placements[];
+};
+
+layout(push_constant) uniform LightingPush {
     uint camera_index;
     uint irradiance_index;
     uint prefilter_index;
@@ -92,7 +115,10 @@ layout(push_constant) uniform PushConstant {
     float skybox_intensity;
     float skybox_blur;
     uint output_index; // storage image the camera's lit image is bound at
-    uvec4 light_count; // by LightType: point, spot, directional, ambient
+    uint light_count; // rows of the placement table
+    float ibl_intensity;
+    uint _pad0;
+    uint _pad1;
 };
 
 shared uint tile_min_bits;
@@ -141,10 +167,21 @@ vec3 geometricNormal(View camera, ivec2 pixel, vec3 fragPos, float depth, vec3 f
     return dot(n, camera.position.xyz - fragPos) < 0.0 ? -n : n;
 }
 
+// Where a placed light sits and shines: its node's translation and normalized forward (+Z)
+// axis, as scene.odin light_pose.
+vec3 lightPosition(LightPlacement p) {
+    return nodes[p.node].world_matrix[3].xyz;
+}
+
+vec3 lightForward(LightPlacement p) {
+    vec3 forward = nodes[p.node].world_matrix[2].xyz;
+    return dot(forward, forward) > 1e-6 ? normalize(forward) : vec3(0.0, -1.0, 0.0);
+}
+
 // Direction from the fragment towards the light.
-vec3 lightDirection(Light light, uint type, vec3 fragPos) {
-    if (type == LIGHT_DIRECTIONAL) return -light.direction;
-    return normalize(light.position - fragPos);
+vec3 lightDirection(LightPlacement p, vec3 fragPos) {
+    if (lights[p.light].type == LIGHT_DIRECTIONAL) return -lightForward(p);
+    return normalize(lightPosition(p) - fragPos);
 }
 
 // Light reaching a fragment: 1 when lit, SHADOW_FLOOR when fully occluded.
@@ -164,12 +201,13 @@ float shadowMapSize() {
 // axis of the light-to-p direction (+X, -X, +Y, -Y, +Z, -Z) for a point light,
 // the finest cascade whose box holds p, with room for the filter, for a directional
 // light (NO_FACE beyond the last), the only face otherwise.
-uint shadowFace(Light light, uint type, vec3 p) {
+uint shadowFace(LightPlacement placed, vec3 p) {
+    uint type = lights[placed.light].type;
     if (type == LIGHT_DIRECTIONAL) {
         // the normal offset moves p up to SHADOW_FILTER_RADIUS + 0.5 texels
         float edge = 1.0 - 2.0 * (2.0 * SHADOW_FILTER_RADIUS + 0.5) / shadowMapSize();
         for (uint c = 0u; c < SHADOW_CASCADES; c++) {
-            vec4 s = views[light.shadow_map + c].view_projection * vec4(p, 1.0);
+            vec4 s = views[placed.shadow_map + c].view_projection * vec4(p, 1.0);
             // a cascade's box is no deeper than wide: with the light along
             // the view, far points project into the near cascades too
             if (abs(s.x) < edge && abs(s.y) < edge && s.z > 0.0 && s.z < 1.0) return c;
@@ -177,7 +215,7 @@ uint shadowFace(Light light, uint type, vec3 p) {
         return NO_FACE;
     }
     if (type != LIGHT_POINT) return 0u;
-    vec3 d = p - light.position;
+    vec3 d = p - lightPosition(placed);
     vec3 a = abs(d);
     if (a.x >= a.y && a.x >= a.z) return d.x >= 0.0 ? 0u : 1u;
     if (a.y >= a.z) return d.y >= 0.0 ? 2u : 3u;
@@ -186,14 +224,18 @@ uint shadowFace(Light light, uint type, vec3 p) {
 
 // World size of a shadow texel of `view` at fragPos: constant for an
 // orthographic map, read from its projection, growing with view depth for a
-// perspective one.
-float shadowTexel(Light light, uint type, vec3 fragPos, View view) {
-    vec3 d = fragPos - light.position;
-    if (type == LIGHT_POINT) {
+// perspective one (a point light's cube faces span 90 degrees, a spot light's map its cone).
+float shadowTexel(LightPlacement placed, vec3 fragPos, View view) {
+    Light light = lights[placed.light];
+    vec3 d = fragPos - lightPosition(placed);
+    if (light.type == LIGHT_POINT) {
         vec3 a = abs(d);
-        return light.shadow_texel * max(a.x, max(a.y, a.z));
+        return 2.0 * tan(0.25 * PI) / shadowMapSize() * max(a.x, max(a.y, a.z));
     }
-    if (type == LIGHT_SPOT) return light.shadow_texel * max(dot(d, light.direction), 0.0);
+    if (light.type == LIGHT_SPOT) {
+        float per_depth = 2.0 * tan(0.5 * max(light.angle_outer * 2.0, 0.001)) / shadowMapSize();
+        return per_depth * max(dot(d, lightForward(placed)), 0.0);
+    }
     return 2.0 / (view.projection[0][0] * shadowMapSize());
 }
 
@@ -203,8 +245,9 @@ float shadowTexel(Light light, uint type, vec3 fragPos, View view) {
 // so the filter's texels all lie in front of it. The face's view projects it
 // into its atlas layer, rendered with an unflipped viewport (clip y = -1 is
 // texel row 0).
-float calculateShadow(Light light, uint type, vec3 fragPos, vec3 n, vec3 L) {
-    if (light.shadow_map == 0u) return 1.0; // no shadow map
+float calculateShadow(LightPlacement placed, vec3 fragPos, vec3 n, vec3 L) {
+    if (placed.shadow_map == 0u) return 1.0; // no shadow map
+    uint type = lights[placed.light].type;
     float cosTheta = clamp(dot(n, L), 0.0, 1.0);
     float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
     float offset = 0.5 + SHADOW_FILTER_RADIUS * sinTheta;
@@ -212,15 +255,15 @@ float calculateShadow(Light light, uint type, vec3 fragPos, vec3 n, vec3 L) {
     uint face;
     if (type == LIGHT_DIRECTIONAL) {
         // the cascade sets the texel size, so pick it before the offset
-        face = shadowFace(light, type, p);
+        face = shadowFace(placed, p);
         if (face == NO_FACE) return 1.0;
-        p += n * (offset * shadowTexel(light, type, p, views[light.shadow_map + face]));
+        p += n * (offset * shadowTexel(placed, p, views[placed.shadow_map + face]));
     } else {
         // the texel size doesn't depend on the face; the offset may cross one
-        p += n * (offset * shadowTexel(light, type, p, views[light.shadow_map]));
-        face = shadowFace(light, type, p);
+        p += n * (offset * shadowTexel(placed, p, views[placed.shadow_map]));
+        face = shadowFace(placed, p);
     }
-    View view = views[light.shadow_map + face];
+    View view = views[placed.shadow_map + face];
     vec4 lightSpacePos = view.view_projection * vec4(p, 1.0);
     vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
     shadowCoord.xy = shadowCoord.xy * 0.5 + 0.5;
@@ -241,14 +284,15 @@ float calculateShadow(Light light, uint type, vec3 fragPos, vec3 n, vec3 L) {
     return mix(SHADOW_FLOOR, 1.0, lit / 9.0);
 }
 
-float attenuation(Light light, uint type, vec3 fragPos) {
-    if (type == LIGHT_DIRECTIONAL) return 1.0;
-    if (type == LIGHT_POINT) {
-        float norm_dist = length(light.position - fragPos) / max(0.01, light.radius);
+float attenuation(LightPlacement placed, vec3 fragPos) {
+    Light light = lights[placed.light];
+    if (light.type == LIGHT_DIRECTIONAL) return 1.0;
+    if (light.type == LIGHT_POINT) {
+        float norm_dist = length(lightPosition(placed) - fragPos) / max(0.01, light.radius);
         return light.radius * (1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0));
     }
-    vec3 tipToFrag = fragPos - light.position;
-    vec3 cone_axis = light.direction;
+    vec3 tipToFrag = fragPos - lightPosition(placed);
+    vec3 cone_axis = lightForward(placed);
     float distance_along_axis = dot(tipToFrag, cone_axis);
     float radial_distance = length(tipToFrag - distance_along_axis * cone_axis);
     float cone_radius_at_height = distance_along_axis * tan(light.angle_outer);
@@ -272,11 +316,12 @@ struct Surface {
 };
 
 // Cook-Torrance BRDF of one light, shadowed.
-vec3 directLight(Light light, uint type, Surface s) {
-    vec3 L = lightDirection(light, type, s.position);
+vec3 directLight(LightPlacement placed, Surface s) {
+    Light light = lights[placed.light];
+    vec3 L = lightDirection(placed, s.position);
     // facing away or out of reach, the BRDF is zero: skip the shadow lookup
     if (dot(s.normal, L) <= 0.0) return vec3(0.0);
-    float atten = attenuation(light, type, s.position);
+    float atten = attenuation(placed, s.position);
     if (atten <= 0.0) return vec3(0.0);
     vec3 F0 = mix(vec3(0.04), s.albedo, s.metallic);
     vec3 light_col = light.color.rgb * light.color.a;
@@ -296,7 +341,7 @@ vec3 directLight(Light light, uint type, Surface s) {
     vec3 kS = clamp(F, 0.0, 1.0);
     vec3 kD = (vec3(1.0) - kS) * (1.0 - s.metallic);
     vec3 direct = (kD * s.albedo / PI + spec) * light_col * NdotL * atten;
-    return direct * calculateShadow(light, type, s.position, s.geometric, L);
+    return direct * calculateShadow(placed, s.position, s.geometric, L);
 }
 
 float prefilterMaxLod() {
@@ -369,10 +414,10 @@ void main() {
     }
     barrier();
 
-    // the point and spot lights whose sphere meets the tile's box
+    // the visible placed lights reaching the tile: directional ones, and point and spot ones
+    // whose sphere meets the tile's box
     float depth_min = uintBitsToFloat(tile_min_bits);
     float depth_max = uintBitsToFloat(tile_max_bits);
-    uint local_lights = light_count.x + light_count.y;
     if (depth_min <= depth_max) {
         vec2 tile_lo = vec2(gl_WorkGroupID.xy * TILE) / camera.extent;
         vec2 tile_hi = vec2(min(ivec2((gl_WorkGroupID.xy + 1u) * TILE), extent)) / camera.extent;
@@ -384,8 +429,11 @@ void main() {
             lo = min(lo, p);
             hi = max(hi, p);
         }
-        for (uint i = gl_LocalInvocationIndex; i < local_lights; i += TILE * TILE) {
-            if (sphereMeetsBox(lights[i].position, lights[i].radius, lo, hi)) {
+        for (uint i = gl_LocalInvocationIndex; i < light_count; i += TILE * TILE) {
+            LightPlacement p = placements[i];
+            if (p.light == 0u || (nodes[p.node].flags & NODE_VISIBLE) == 0u) continue;
+            Light light = lights[p.light];
+            if (light.type == LIGHT_DIRECTIONAL || sphereMeetsBox(lightPosition(p), light.radius, lo, hi)) {
                 tile_lights[atomicAdd(tile_light_count, 1u)] = i;
             }
         }
@@ -412,17 +460,11 @@ void main() {
     s.metallic = clamp(mr.r, 0.0, 1.0);
     s.geometric = geometricNormal(camera, pixel, s.position, depth, s.normal);
 
-    uint first_directional = local_lights;
-    uint ambient = first_directional + light_count.z;
     vec3 color = attachment(camera, ATTACHMENT_EMISSIVE, pixel).rgb;
-    if (light_count.w > 0u) color += ambientLight(lights[ambient].color.a, raw_normal, s, mr.g);
+    color += ambientLight(ibl_intensity, raw_normal, s, mr.g);
     s.roughness = clamp(mr.g, 0.08, 1.0);
-    for (uint i = first_directional; i < ambient; i++) {
-        color += directLight(lights[i], LIGHT_DIRECTIONAL, s);
-    }
     for (uint i = 0u; i < tile_light_count; i++) {
-        uint index = tile_lights[i];
-        color += directLight(lights[index], index < light_count.x ? LIGHT_POINT : LIGHT_SPOT, s);
+        color += directLight(placements[tile_lights[i]], s);
     }
     imageStore(lit_images[output_index], pixel, vec4(color, 1.0));
 }

@@ -263,7 +263,7 @@ body_create :: proc(
 
 // body_destroy frees the body behind handle; a stale handle is ignored.
 body_destroy :: proc(self: ^World, handle: BodyHandle) {
-  body := body(self, handle) or_else nil
+  body := lookup(self, handle) or_else nil
   if body == nil do return
   if body.moving && !body.is_sensor {
     self.dynamic_bvh_stale += 1
@@ -272,8 +272,23 @@ body_destroy :: proc(self: ^World, handle: BodyHandle) {
   cont.slots_free(&self.body_slots, handle.index)
 }
 
-// body returns the body behind handle, or false if the handle is stale.
-body :: #force_inline proc(self: ^World, handle: BodyHandle) -> (ret: ^Body, ok: bool) #optional_ok {
+// body returns a copy of the body behind handle, or false if the handle is stale. step
+// moves it; change its state with set_pose, set_velocity, apply_force or apply_impulse,
+// and its tuning through body_params.
+body :: proc(self: ^World, handle: BodyHandle) -> (ret: Body, ok: bool) #optional_ok {
+  b := lookup(self, handle) or_return
+  return b^, true
+}
+
+// body_params returns the tuning of the body behind handle, to edit in place; step only
+// reads it.
+body_params :: proc(self: ^World, handle: BodyHandle) -> (ret: ^BodyParams, ok: bool) #optional_ok {
+  b := lookup(self, handle) or_return
+  return &b.params, true
+}
+
+@(private)
+lookup :: #force_inline proc(self: ^World, handle: BodyHandle) -> (ret: ^Body, ok: bool) #optional_ok {
   if !cont.slots_valid(&self.body_slots, handle) do return nil, false
   return &self.bodies[handle.index], true
 }
@@ -310,7 +325,7 @@ start_moving :: proc(self: ^World, body: ^Body) {
 
 // set_pose teleports the body and wakes it. A static body becomes kinematic.
 set_pose :: proc(self: ^World, handle: BodyHandle, position: [3]f32, rotation: quaternion128) {
-  body, ok := body(self, handle)
+  body, ok := lookup(self, handle)
   if !ok do return
   start_moving(self, body)
   body.position = position
@@ -322,7 +337,7 @@ set_pose :: proc(self: ^World, handle: BodyHandle, position: [3]f32, rotation: q
 
 // set_collider replaces the body's collider and resets the inertia to the new shape at the current mass.
 set_collider :: proc(self: ^World, handle: BodyHandle, collider: Collider) {
-  body, ok := body(self, handle)
+  body, ok := lookup(self, handle)
   if !ok do return
   body.collider = collider
   update_inertia(body)
@@ -334,7 +349,7 @@ set_collider :: proc(self: ^World, handle: BodyHandle, collider: Collider) {
 // set_mass makes the body dynamic for mass > 0, or kinematic for mass = 0.
 // Recomputes the inertia from the collider. Ignored for sensors.
 set_mass :: proc(self: ^World, handle: BodyHandle, mass: f32) {
-  body, ok := body(self, handle)
+  body, ok := lookup(self, handle)
   if !ok do return
   if body.is_sensor do return
   start_moving(self, body)
@@ -348,7 +363,7 @@ set_mass :: proc(self: ^World, handle: BodyHandle, mass: f32) {
 
 // set_velocity sets the body's velocity and wakes it. A static body becomes kinematic.
 set_velocity :: proc(self: ^World, handle: BodyHandle, velocity: [3]f32) {
-  body, ok := body(self, handle)
+  body, ok := lookup(self, handle)
   if !ok do return
   start_moving(self, body)
   body.velocity = velocity
@@ -357,7 +372,7 @@ set_velocity :: proc(self: ^World, handle: BodyHandle, velocity: [3]f32) {
 
 // set_angular_velocity sets the body's angular velocity and wakes it, like set_velocity.
 set_angular_velocity :: proc(self: ^World, handle: BodyHandle, angular_velocity: [3]f32) {
-  body, ok := body(self, handle)
+  body, ok := lookup(self, handle)
   if !ok do return
   start_moving(self, body)
   body.angular_velocity = angular_velocity
@@ -367,7 +382,7 @@ set_angular_velocity :: proc(self: ^World, handle: BodyHandle, angular_velocity:
 // apply_force holds the force for the next `step`, cleared after it. Only dynamic
 // bodies respond.
 apply_force :: proc(self: ^World, handle: BodyHandle, force: [3]f32) {
-  body, ok := body(self, handle)
+  body, ok := lookup(self, handle)
   if !ok do return
   if !is_dynamic(body) do return
   body.force += force
@@ -376,7 +391,7 @@ apply_force :: proc(self: ^World, handle: BodyHandle, force: [3]f32) {
 
 // apply_impulse changes a dynamic body's velocity by impulse / mass and wakes it.
 apply_impulse :: proc(self: ^World, handle: BodyHandle, impulse: [3]f32) {
-  body, ok := body(self, handle)
+  body, ok := lookup(self, handle)
   if !ok do return
   if !is_dynamic(body) do return
   body.velocity += impulse * body.inv_mass
@@ -536,7 +551,7 @@ step_sensors :: proc(self: ^World) {
       clear(&candidates)
       geometry.bvh_query_aabb(bvh, sensor.cached_aabb, &candidates)
       for candidate in candidates {
-        body := body(self, candidate.handle) or_continue
+        body := lookup(self, candidate.handle) or_continue
         _, hit := collide_bodies(sensor, body)
         if hit do append(&self.sensor_overlaps, SensorOverlap{sensor_handle, candidate.handle})
       }

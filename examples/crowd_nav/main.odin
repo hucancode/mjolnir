@@ -77,7 +77,7 @@ setup :: proc(app: ^App) -> bool {
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {15, 25, 15})
-  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.97, 0.92, 1}, 10.0, true))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 1}, 10.0, true)))
   build_scene(app)
   build_navmesh(app)
   visualize_navmesh(app)
@@ -248,7 +248,8 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 // The agent's next steering corners along its corridor.
-draw_agent_corners :: proc(app: ^App, ag: ^crowd.Agent, color: [4]f32) {
+draw_agent_corners :: proc(app: ^App, ag: crowd.Agent, color: [4]f32) {
+  ag := ag
   lift := [3]f32{0, 0.15, 0}
   prev := ag.npos + lift
   for p in ag.corner_verts[:ag.ncorners] {

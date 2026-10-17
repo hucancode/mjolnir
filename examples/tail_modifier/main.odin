@@ -106,7 +106,7 @@ setup :: proc(app: ^App) -> bool {
   }
   head_bone, head_found = anim.find_bone(&rig.skeleton, HEAD_BONE)
   light := world.spawn(&app.scene, {-4, 10, 6})
-  render.attach(&app.renderer, light.index, render.make_point_light({0.6, 0.7, 1.0, 1.5}, 15.0, false))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_point_light({0.6, 0.7, 1.0, 1.5}, 15.0, false)))
   return true
 }
 

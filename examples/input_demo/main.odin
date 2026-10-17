@@ -71,7 +71,7 @@ setup :: proc(app: ^App) -> bool {
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   light_handle = world.spawn(&app.scene, {4, 8, 4})
-  render.attach(&app.renderer, light_handle.index, render.make_directional_light({1, 0.97, 0.92, f32(light_intensity)}, 15.0, true))
+  render.attach(&app.renderer, light_handle.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, f32(light_intensity)}, 15.0, true)))
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
@@ -150,9 +150,8 @@ update :: proc(app: ^App, dt: f32) {
   }
   world.translate(&app.scene, cube_handle, cube_pos)
   world.rotate(&app.scene, cube_handle, cube_yaw)
-  if l, ok := render.attachment(&app.renderer, light_handle.index, render.Light); ok {
+  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, light_handle.index, render.LightHandle)); ok {
     l.color[3] = f32(light_intensity)
-    render.attach(&app.renderer, light_handle.index, l)
   }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

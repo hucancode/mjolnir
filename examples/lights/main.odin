@@ -115,7 +115,7 @@ setup :: proc(app: ^App) -> bool {
 
   dir_light = world.spawn(&app.scene, {6, 10, 6})
   world.rotate(&app.scene, dir_light, linalg.quaternion_between_two_vector3_f32({0, 0, 1}, linalg.normalize([3]f32{-6, -10, -6})))
-  render.attach(&app.renderer, dir_light.index, render.make_directional_light(color = {1, 1, 1, f32(dir_intensity)}, shadow_radius = 12.0, cast_shadow = true))
+  render.attach(&app.renderer, dir_light.index, render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1, f32(dir_intensity)}, shadow_radius = 12.0, cast_shadow = true)))
 
   // Glowing marker so each light's position is visible.
   marker_material = render.material_create(&app.renderer, emissive_value = 4.0)
@@ -154,9 +154,9 @@ spawn_light :: proc(app: ^App, kind: LightKind) {
   l.node = node
   switch kind {
   case .POINT:
-    render.attach(&app.renderer, node.index, render.make_point_light(radius = f32(point_radius)))
+    render.attach(&app.renderer, node.index, render.light_create(&app.renderer, render.make_point_light(radius = f32(point_radius))))
   case .SPOT:
-    render.attach(&app.renderer, node.index, render.make_spot_light(radius = f32(spot_radius), angle = math.to_radians(f32(spot_outer_deg))))
+    render.attach(&app.renderer, node.index, render.light_create(&app.renderer, render.make_spot_light(radius = f32(spot_radius), angle = math.to_radians(f32(spot_outer_deg)))))
   }
   // A slot holds one attachment, so the marker mesh lives on a child node.
   marker := world.spawn(&app.scene, parent = node)
@@ -191,30 +191,27 @@ light_position :: proc(l: MovingLight) -> [3]f32 {
 }
 
 apply_light_settings :: proc(app: ^App) {
-  if l, ok := render.attachment(&app.renderer, dir_light.index, render.Light); ok {
+  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, dir_light.index, render.LightHandle)); ok {
     world.set_visible(&app.scene, dir_light, dir_enabled)
     l.color = {1, 1, 1, f32(dir_intensity)}
-    render.attach(&app.renderer, dir_light.index, l)
   }
   for ml in lights {
     color := [4]f32{ml.color.r, ml.color.g, ml.color.b, 0}
     switch ml.kind {
     case .POINT:
-      l := render.attachment(&app.renderer, ml.node.index, render.Light) or_continue
+      l := render.light(&app.renderer, render.attachment(&app.renderer, ml.node.index, render.LightHandle)) or_continue
       world.set_visible(&app.scene, ml.node, point_enabled)
       l.color = color
       l.color.a = f32(point_intensity)
       l.radius = f32(point_radius)
-      render.attach(&app.renderer, ml.node.index, l)
     case .SPOT:
-      l := render.attachment(&app.renderer, ml.node.index, render.Light) or_continue
+      l := render.light(&app.renderer, render.attachment(&app.renderer, ml.node.index, render.LightHandle)) or_continue
       world.set_visible(&app.scene, ml.node, spot_enabled)
       l.color = color
       l.color.a = f32(spot_intensity)
       l.radius = f32(spot_radius)
       l.angle_outer = math.to_radians(f32(spot_outer_deg))
       l.angle_inner = l.angle_outer * render.SPOT_LIGHT_INNER_RATIO
-      render.attach(&app.renderer, ml.node.index, l)
     }
   }
 }

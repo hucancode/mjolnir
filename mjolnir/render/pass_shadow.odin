@@ -114,15 +114,15 @@ shadow_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
     barrier_discard(r, cmd, textures[:])
     if views == 0 do return
     dev.cmd_begin_pass(&r.gpu, cmd, {depth = rhi.DepthTarget{texture = atlas, load = .CLEAR, clear = 1, store = true}})
-    view := u32(SHADOW_VIEW_BASE)
-    pipeline_bind(r, cmd, r.shadow_pipeline, .SHADOW, f, &view, .NONE)
+    push := ShadowPush{SHADOW_VIEW_BASE}
+    pipeline_bind(r, cmd, r.shadow_pipeline, .SHADOW, f, &push, .NONE)
     mesh_buffers_bind(r, cmd)
     for v in 0 ..< views {
       tile := shadow_tile(v, r.atlas_layers[f])
       dev.cmd_set_viewport(&r.gpu, cmd, tile.x, tile.y, tile.z, tile.w)
       dev.cmd_set_scissor(&r.gpu, cmd, tile.x, tile.y, tile.z, tile.w)
-      view = u32(SHADOW_VIEW_BASE) + v
-      dev.cmd_push(&r.gpu, cmd, &view, size_of(view))
+      push.view_index = SHADOW_VIEW_BASE + v
+      dev.cmd_push(&r.gpu, cmd, &push, size_of(push))
       draw_list_draw(r, cmd, draw_list, v, types[:], pipelines[:], f, false)
     }
     dev.cmd_end_pass(&r.gpu, cmd)
@@ -134,4 +134,10 @@ shadow_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
 mesh_buffers_bind :: proc(r: ^Renderer, cmd: rhi.CommandList) {
   dev.cmd_bind_vertex(&r.gpu, cmd, 0, mesh_buffer(r, .VERTEX), 0)
   dev.cmd_bind_index(&r.gpu, cmd, mesh_buffer(r, .INDEX), 0)
+}
+
+// The shadow view a batched shadow draw renders (the bindless path reads it per draw).
+@(private = "file")
+ShadowPush :: struct {
+  view_index: u32,
 }

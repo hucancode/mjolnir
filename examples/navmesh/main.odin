@@ -134,7 +134,7 @@ create_agent :: proc(app: ^App) {
   mh := render.mesh_create(&app.renderer, agent_geom)
   mat := render.material_create(&app.renderer, metallic_value = 0.3, roughness_value = 0.6, emissive_value = 0.3)
   agent_handle = spawn_mesh(app, mh, mat, agent_pos + {0, 1, 0})
-  world.node(&app.scene, agent_handle).name = "agent"
+  world.set_name(&app.scene, agent_handle, "agent")
 }
 
 setup_navigation_mesh :: proc(app: ^App) {
@@ -154,9 +154,9 @@ visualize_navmesh :: proc(app: ^App) {
   navmesh_geom := render.from_triangles(positions, indices)
   log.infof("Built navmesh visualization geometry: %d vertices, %d indices", len(navmesh_geom.vertices), len(navmesh_geom.indices))
   m, m_ok := render.mesh_create(&app.renderer, navmesh_geom)
-  if !m_ok { log.error("Failed to node_create navmesh visualization mesh"); return }
+  if !m_ok { log.error("Failed to create navmesh visualization mesh"); return }
   mat, mat_ok := render.material_create(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {1.0, 0.8, 0.3, 0.3})
-  if !mat_ok { log.error("Failed to node_create navmesh material"); return }
+  if !mat_ok { log.error("Failed to create navmesh material"); return }
   navmesh_node_handle = spawn_mesh(app, m, mat)
 }
 

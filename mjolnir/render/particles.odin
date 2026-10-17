@@ -13,46 +13,89 @@ particles_reset :: proc(r: ^Renderer) -> bool {
   return particles_gpu_reset(r)
 }
 
-// Emitter is stored as the emit shader reads it; #align(16) keeps the array stride equal to
-// std430's. Attached to a slot it spawns particles from the slot's transform.
+// Emitter spawns particles from every slot it is attached to: emission_rate per second (0
+// pauses it), each living particle_lifetime seconds and blending from the *_start values to the
+// *_end ones. make_emitter fills the defaults; emitter_create stores one.
 Emitter :: struct #align(16) {
   initial_velocity:  [3]f32,
-  size_start:        f32,
+  velocity_spread:   f32,
   color_start:       [4]f32,
   color_end:         [4]f32,
-  particle_lifetime: f32,
   position_spread:   f32,
-  velocity_spread:   f32,
-  // first of this emitter's particles among the frame's new particles;
-  // render writes it every frame
-  emit_first:        u32,
+  size_start:        f32,
   size_end:          f32,
+  particle_lifetime: f32,
   weight:            f32,
   weight_spread:     f32,
-  // bindless texture of the particles, NO_TEXTURE for none
-  texture_index:     TextureHandle,
-  // transform slot the particles spawn from; attach sets it
-  node_index:        u32,
-  // particles per second while enabled
+  // particles per second
   emission_rate:     f32,
-  enabled:           b32,
-  _:                 f32,
+  // the particles' texture, NO_TEXTURE for none
+  texture_index:     TextureHandle,
 }
-#assert(size_of(Emitter) == 96)
+#assert(size_of(Emitter) == 80)
 
-// ForceField is stored as the simulation reads it. Attached to a slot it is centered on
-// the slot's transform.
+// EmitterHandle identifies an emitter (emitter_create).
+EmitterHandle :: distinct u32
+
+// Where an emitter is attached. The emit pass reads the frame's new particles in placement
+// order: placement i takes [emit_first, the next placement's emit_first).
+@(private)
+EmitterPlacement :: struct {
+  emitter:    EmitterHandle,
+  node:       u32,
+  emit_first: u32,
+}
+
+// ForceField pulls particles toward every slot it is attached to (push them with a negative
+// strength) within area_of_effect (0 pauses it), and swirls them by tangent_strength.
 ForceField :: struct {
   tangent_strength: f32,
   strength:         f32,
   area_of_effect:   f32,
-  // transform slot the field is centered on; attach sets it
-  node_index:       u32,
-  enabled:          b32,
 }
-#assert(size_of(ForceField) == 20)
 
-// make_emitter returns an enabled Emitter for attach.
+// ForceFieldHandle identifies a force field (forcefield_create).
+ForceFieldHandle :: distinct u32
+
+@(private)
+ForceFieldPlacement :: struct {
+  forcefield: ForceFieldHandle,
+  node:       u32,
+}
+
+// emitter_create stores `e`; attach places it at slots. It lives until emitter_destroy or teardown.
+emitter_create :: proc(r: ^Renderer, e: Emitter) -> (handle: EmitterHandle, ok: bool) #optional_ok {
+  i := resource_create(r, &r.emitter_slots, .EMITTERS, e) or_return
+  return EmitterHandle(i), true
+}
+
+// emitter returns the emitter of `h`, to edit in place; every slot it is attached to follows.
+emitter :: proc(r: ^Renderer, h: EmitterHandle) -> (^Emitter, bool) #optional_ok {
+  return resource(r, &r.emitter_slots, .EMITTERS, Emitter, u32(h))
+}
+
+// emitter_destroy frees the emitter; slots it stays attached to emit nothing.
+emitter_destroy :: proc(r: ^Renderer, h: EmitterHandle) {
+  resource_destroy(r, &r.emitter_slots, .EMITTERS, u32(h))
+}
+
+// forcefield_create stores `f`; attach places it at slots. It lives until forcefield_destroy or teardown.
+forcefield_create :: proc(r: ^Renderer, f: ForceField) -> (handle: ForceFieldHandle, ok: bool) #optional_ok {
+  i := resource_create(r, &r.forcefield_slots, .FORCEFIELDS, f) or_return
+  return ForceFieldHandle(i), true
+}
+
+// forcefield returns the force field of `h`, to edit in place.
+forcefield :: proc(r: ^Renderer, h: ForceFieldHandle) -> (^ForceField, bool) #optional_ok {
+  return resource(r, &r.forcefield_slots, .FORCEFIELDS, ForceField, u32(h))
+}
+
+// forcefield_destroy frees the force field; slots it stays attached to pull nothing.
+forcefield_destroy :: proc(r: ^Renderer, h: ForceFieldHandle) {
+  resource_destroy(r, &r.forcefield_slots, .FORCEFIELDS, u32(h))
+}
+
+// make_emitter returns an Emitter for emitter_create.
 make_emitter :: proc(
   texture_handle: TextureHandle = 0,
   emission_rate: f32 = 50.0,
@@ -80,11 +123,10 @@ make_emitter :: proc(
     weight            = weight,
     weight_spread     = weight_spread,
     texture_index     = texture_handle,
-    enabled           = true,
   }
 }
 
-// make_forcefield returns an enabled ForceField for attach.
+// make_forcefield returns a ForceField for forcefield_create.
 make_forcefield :: proc(
   area_of_effect: f32 = 5.0,
   strength: f32 = 1.0,
@@ -94,6 +136,5 @@ make_forcefield :: proc(
     tangent_strength = tangent_strength,
     strength         = strength,
     area_of_effect   = area_of_effect,
-    enabled          = true,
   }
 }

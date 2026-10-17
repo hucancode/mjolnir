@@ -21,8 +21,7 @@ when RENDER_BACKEND == "vulkan" {
   WindowHandle :: wgpu.WindowHandle
 }
 
-// What render takes from rhi's vocabulary. TextureHandle identifies a bindless texture;
-// NO_TEXTURE is none.
+// TextureHandle identifies a texture; NO_TEXTURE is none.
 TextureHandle :: rhi.TextureHandle
 TextureFormat :: rhi.TextureFormat
 // BlendMode and CullMode configure a material shader (material_shader_create).

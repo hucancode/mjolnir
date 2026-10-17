@@ -3,15 +3,15 @@
 
 @group(0) @binding(0) var<storage, read> views: array<View>;
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
-@group(0) @binding(2) var<storage, read> meshes: array<Mesh>;
+@group(0) @binding(2) var<storage, read> meshes: array<MeshData>;
 @group(0) @binding(3) var<storage, read> materials: array<Material>;
 // what the skinning pass wrote (skin.wgsl)
 @group(0) @binding(4) var<storage, read> skinned: array<SkinnedVertex>;
 
-struct MeshUniforms {
+struct MeshPush {
     camera_index: u32,
 }
-@group(2) @binding(0) var<uniform> u: MeshUniforms;
+@group(2) @binding(0) var<uniform> u: MeshPush;
 
 struct VertexIn {
     @builtin(vertex_index) vertex_index: u32,

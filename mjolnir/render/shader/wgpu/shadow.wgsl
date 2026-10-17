@@ -3,13 +3,13 @@
 
 @group(0) @binding(0) var<storage, read> views: array<View>;
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
-@group(0) @binding(2) var<storage, read> meshes: array<Mesh>;
+@group(0) @binding(2) var<storage, read> meshes: array<MeshData>;
 @group(0) @binding(3) var<storage, read> skinned: array<SkinnedVertex>;
 
-struct ShadowUniforms {
+struct ShadowPush {
     view_index: u32,
 }
-@group(2) @binding(0) var<uniform> u: ShadowUniforms;
+@group(2) @binding(0) var<uniform> u: ShadowPush;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32, @location(0) position: vec3f, @location(5) node_index: u32) -> @builtin(position) vec4f {

@@ -85,7 +85,7 @@ setup :: proc(app: ^App) -> bool {
   }
 
   light := world.spawn(&app.scene, {2, 6, 4})
-  render.attach(&app.renderer, light.index, render.make_directional_light(color = {1, 1, 1, 1}, shadow_radius = 8))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1, 1}, shadow_radius = 8)))
   return true
 }
 

@@ -29,7 +29,7 @@ layout(set = 0, binding = 0) readonly buffer ViewBuffer {
     View views[];
 };
 
-struct Segment {
+struct DebugLineSegment {
     vec3 a;
     float expiry;
     vec3 b;
@@ -38,17 +38,17 @@ struct Segment {
 };
 
 layout(set = 0, binding = 12) readonly buffer DebugLines {
-    Segment segments[];
+    DebugLineSegment segments[];
 };
 
-layout(push_constant) uniform PushConstants {
+layout(push_constant) uniform DebugLinePush {
     uint camera_index;
     float time; // render clock; a segment past its expiry is skipped
 };
 
 void main() {
     // vertex 2i is segment i's a end, 2i + 1 its b end
-    Segment s = segments[gl_VertexIndex >> 1];
+    DebugLineSegment s = segments[gl_VertexIndex >> 1];
     if (s.expiry < time) {
         // both ends outside the clip volume: nothing is drawn
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);

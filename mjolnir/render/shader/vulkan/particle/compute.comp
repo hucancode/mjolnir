@@ -20,17 +20,20 @@ struct ForceField {
     float tangent_strength;
     float strength;
     float area_of_effect;
-    uint node_index;
-    uint enabled;
+};
+
+struct ForceFieldPlacement {
+    uint forcefield;
+    uint node;
 };
 
 layout(set = 0, binding = 8) buffer ParticleBuffer {
     Particle particles[];
 };
 
-layout(push_constant) uniform Params {
-    uint emitter_count;
-    uint forcefield_count;
+layout(push_constant) uniform ParticleSystemParams {
+    uint emitter_placement_count;
+    uint forcefield_placement_count;
     float delta_time;
     uint frame_counter;
     uint emit_total;
@@ -50,7 +53,11 @@ layout(set = 0, binding = 7) readonly buffer ForceFieldBuffer {
     ForceField forcefields[];
 };
 
-struct NodeData {
+layout(set = 0, binding = 20) readonly buffer ForceFieldPlacementBuffer {
+    ForceFieldPlacement placements[];
+};
+
+struct Node {
     mat4 world_matrix;
     uint material_id;
     uint mesh_id;
@@ -61,7 +68,7 @@ struct NodeData {
 };
 
 layout(set = 0, binding = 1) readonly buffer NodeDataBuffer {
-    NodeData nodes[];
+    Node nodes[];
 };
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
@@ -72,12 +79,13 @@ const vec3 GRAVITY = vec3(0.0, -9.8, 0.0);
 bool simulate(uint i) {
     vec3 p = particles[i].position;
     vec3 v = particles[i].velocity;
-    uint n = min(forcefield_count, MAX_FORCE_FIELDS);
+    uint n = min(forcefield_placement_count, MAX_FORCE_FIELDS);
     for (uint f = 0; f < n; ++f) {
-        ForceField ff = forcefields[f];
-        // Unused slots are zero: disabled, area_of_effect 0
-        if (ff.enabled == 0u || ff.area_of_effect <= 0.0 || ff.node_index == 0u) continue;
-        vec3 ff_pos = nodes[ff.node_index].world_matrix[3].xyz;
+        ForceFieldPlacement placed = placements[f];
+        // free rows and destroyed force fields are zero: area_of_effect 0
+        ForceField ff = forcefields[placed.forcefield];
+        if (ff.area_of_effect <= 0.0 || placed.node == 0u) continue;
+        vec3 ff_pos = nodes[placed.node].world_matrix[3].xyz;
         vec3 to_particle = p - ff_pos;
         float dist = length(to_particle);
         if (dist > ff.area_of_effect) continue;

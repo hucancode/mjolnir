@@ -107,7 +107,7 @@ particles_draw :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, camera_index:
   textures: [MAX_PARTICLE_TEXTURES]TextureHandle
   when !BINDLESS {
     n := 0
-    emitters := write_table(r, .EMITTERS, Emitter)[:r.particle_params.emitter_count]
+    emitters := write_table(r, .EMITTERS, Emitter)[:r.emitter_slots.high_water]
     outer: for &em in emitters {
       if em.texture_index == 0 || n == MAX_PARTICLE_TEXTURES do continue
       for t in textures[:n] do if t == em.texture_index do continue outer

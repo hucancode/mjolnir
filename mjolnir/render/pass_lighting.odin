@@ -4,8 +4,9 @@ import "rhi"
 
 // Deferred lighting: one compute dispatch per camera reads the G-buffer and writes the
 // camera's lit image (FINAL_IMAGE) whole, a group per LIGHTING_TILE square tile. Each group
-// lists the point and spot lights reaching its tile, so a pixel reads the G-buffer once
-// however many lights cover it (shader/vulkan/lighting/lighting.comp, shader/wgpu/lighting.wgsl).
+// walks the light placements once and lists the visible lights reaching its tile (every
+// directional one, the point and spot ones whose sphere meets it), so a pixel reads the
+// G-buffer once however many lights cover it (shader/vulkan/lighting/lighting.comp, shader/wgpu/lighting.wgsl).
 // The image is a storage image: bindless at LIT_STORAGE_BASE + the camera's pyramid slot
 // (pyramids_bind), or a group-3 bind group per image (WebGPU).
 
@@ -27,11 +28,11 @@ LightingPush :: struct {
   skybox_intensity: f32,
   skybox_blur:      f32,
   output_index:     u32,
-  // lights are sorted by type: each type's range of the light table
-  light_count:      [LightType]u32,
+  // rows of the light placement table
+  light_count:      u32,
+  ibl_intensity:    f32,
+  _:                [2]u32,
 }
-// a uniform vec4u in WebGPU
-#assert(offset_of(LightingPush, light_count) % 16 == 0)
 
 @(private)
 lighting_init :: proc(r: ^Renderer) -> bool {
@@ -51,7 +52,7 @@ lighting_init :: proc(r: ^Renderer) -> bool {
 
 @(private)
 lighting_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
-  attachments := &r.cameras[cam].attachments
+  attachments := &r.camera_targets[cam].attachments
   group: rhi.BindGroup
   when !BINDLESS {
     output := attachments[.FINAL_IMAGE][f]
@@ -74,7 +75,8 @@ lighting_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
     skybox_intensity = r.skybox_intensity,
     skybox_blur      = r.skybox_blur,
     output_index     = LIT_STORAGE_BASE + camera_slot(cam) + f,
-    light_count      = r.light_count,
+    light_count      = r.light_placement_slots.high_water,
+    ibl_intensity    = r.ibl_intensity,
   }
   dev.cmd_begin_compute(&r.gpu, cmd)
   defer dev.cmd_end_compute(&r.gpu, cmd)
@@ -98,6 +100,6 @@ lighting_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
     r.environment_map,
   )
   if group != 0 do dev.cmd_bind_group(&r.gpu, cmd, 3, group)
-  groups := (r.cameras[cam].extent + LIGHTING_TILE - 1) / LIGHTING_TILE
+  groups := (r.camera_targets[cam].extent + LIGHTING_TILE - 1) / LIGHTING_TILE
   dev.cmd_dispatch(&r.gpu, cmd, groups.x, groups.y, 1)
 }

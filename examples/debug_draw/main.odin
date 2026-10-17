@@ -45,7 +45,7 @@ setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   light := world.spawn(&app.scene, {10, 18, 10})
-  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.97, 0.92, 2.0}, 60.0, false))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 2.0}, 60.0, false)))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
 
   tiny := world.spawn(&app.scene, {0, -0.5, 0})

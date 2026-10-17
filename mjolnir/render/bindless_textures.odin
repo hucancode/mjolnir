@@ -63,7 +63,7 @@ texture_create :: proc(
 }
 
 // texture_load decodes an encoded image (png, jpg, hdr, ...) held in memory
-// into a bindless 2D texture. RGBA32F decodes it as linear HDR.
+// into a 2D texture. RGBA32F decodes it as linear HDR.
 texture_load :: proc(
   r: ^Renderer,
   data: []u8,

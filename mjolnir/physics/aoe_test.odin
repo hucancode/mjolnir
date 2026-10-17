@@ -172,8 +172,8 @@ test_physics_kill_y :: proc(t: ^testing.T) {
     }
   }
   testing.expectf(t, kills == 1, "kills = %d", kills)
-  _, alive := body(&phys, falling)
+  _, alive := lookup(&phys, falling)
   testing.expect(t, !alive, "Fallen body should be destroyed")
-  _, floor_alive := body(&phys, floor)
+  _, floor_alive := lookup(&phys, floor)
   testing.expect(t, floor_alive, "Static bodies below KILL_Y stay")
 }

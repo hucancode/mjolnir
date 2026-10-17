@@ -58,7 +58,7 @@ setup :: proc(app: ^App) -> bool {
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   light := world.spawn(&app.scene, {10, 18, 10})
-  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.97, 0.92, 3.0}, 10.0, false))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 3.0}, 10.0, false)))
   world.rotate(&app.scene, light, 1.5707963, [3]f32{1, 0, 0})
 
   display_material = render.material_create(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1})

@@ -32,7 +32,7 @@ struct View {
 layout(set = 0, binding = 0) readonly buffer ViewBuffer {
     View views[];
 };
-struct NodeData {
+struct Node {
     mat4 world_matrix;
     uint material_id;
     uint mesh_id;
@@ -43,7 +43,7 @@ struct NodeData {
 };
 
 layout(set = 0, binding = 1) readonly buffer NodeBuffer {
-    NodeData nodes[];
+    Node nodes[];
 };
 
 const uint NODE_FLAG_SKINNED = 1u << 2; // the node holds a bone range
@@ -74,7 +74,7 @@ layout(set = 0, binding = 16) readonly buffer SkinnedVertexBuffer {
     SkinnedVertex skinned[];
 };
 
-layout(push_constant) uniform PushConstants {
+layout(push_constant) uniform MeshPush {
     uint camera_index;
 };
 
@@ -88,7 +88,7 @@ layout(location = 5) flat out uint outNodeIndex;
 void main() {
     View camera = views[camera_index];
     uint node_index = uint(gl_InstanceIndex);
-    NodeData node = nodes[node_index];
+    Node node = nodes[node_index];
     mat4 world = node.world_matrix;
     MeshData mesh = meshes[node.mesh_id];
 

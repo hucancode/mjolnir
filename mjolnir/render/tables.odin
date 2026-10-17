@@ -56,8 +56,8 @@ TABLES := [Table]struct {
   stride:   int,
   capacity: int,
 } {
-  .VIEWS = {size_of(ViewGPU), MAX_VIEWS},
-  .NODES = {size_of(NodeData), MAX_NODES_IN_SCENE},
+  .VIEWS = {size_of(View), MAX_VIEWS},
+  .NODES = {size_of(Node), MAX_NODES_IN_SCENE},
   .MESHES = {size_of(MeshData), MAX_MESHES},
   .MATERIALS = {size_of(Material), MAX_MATERIALS},
   .BONES = {size_of(matrix[4, 4]f32), BONE_CAPACITY},
@@ -68,6 +68,9 @@ TABLES := [Table]struct {
   .BATCHES = {size_of(Batch), MAX_BATCHES},
   .NODE_BATCH = {size_of(u32), MAX_NODES_IN_SCENE},
   .SKIN_OWNERS = {size_of(u32), SKIN_CAPACITY},
+  .LIGHT_PLACEMENTS = {size_of(LightPlacement), MAX_LIGHTS},
+  .EMITTER_PLACEMENTS = {size_of(EmitterPlacement), MAX_EMITTERS},
+  .FORCEFIELD_PLACEMENTS = {size_of(ForceFieldPlacement), MAX_FORCE_FIELDS},
 }
 
 // The frame in flight frame records next: it picks this frame's copy of per-frame resources.

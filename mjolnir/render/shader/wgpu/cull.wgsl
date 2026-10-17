@@ -6,12 +6,12 @@
 
 @group(0) @binding(0) var<storage, read> views: array<View>;
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
-@group(0) @binding(2) var<storage, read> meshes: array<Mesh>;
+@group(0) @binding(2) var<storage, read> meshes: array<MeshData>;
 @group(0) @binding(3) var<storage, read> materials: array<Material>;
 @group(0) @binding(4) var<storage, read> batches: array<Batch>;
 @group(0) @binding(5) var<storage, read> node_batch: array<u32>;
 
-struct CullUniforms {
+struct BatchPush {
     node_count: u32,
     first_view: u32,
     // words
@@ -23,7 +23,7 @@ struct CullUniforms {
     // 1: a draw's first instance is where its batch's instances start (indirect first instance)
     first_instance: u32,
 }
-@group(2) @binding(0) var<uniform> u: CullUniforms;
+@group(2) @binding(0) var<uniform> u: BatchPush;
 
 @group(3) @binding(0) var<storage, read_write> list: array<atomic<u32>>;
 @group(3) @binding(1) var pyramid: texture_2d<f32>;

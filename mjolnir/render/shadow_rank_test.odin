@@ -88,25 +88,22 @@ test_shadow_selection_grace_limited :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_shadow_layers_packed_by_type :: proc(t: ^testing.T) {
-	lights := [?]Light {
-		{type = .SPOT, shadow_map = 1},
-		{type = .POINT},
-		{type = .DIRECTIONAL, shadow_map = 1},
-		{type = .POINT, shadow_map = 1},
+test_shadow_views_in_placement_order :: proc(t: ^testing.T) {
+	// light handle i is row i; row 0 is none
+	lights := [?]Light{{}, {type = .SPOT}, {type = .POINT}, {type = .DIRECTIONAL}}
+	placements := [?]LightPlacement {
+		{light = 1, shadow_map = 9}, // a stale view from the previous frame is cleared
+		{light = 2},
+		{light = 3},
+		{light = 2},
 	}
-	dst: [len(lights)]Light
-	count, layers := pack_lights(lights[:], dst[:])
-	testing.expect_value(t, count, [LightType]u32{.POINT = 2, .SPOT = 1, .DIRECTIONAL = 1, .AMBIENT = 0})
-	testing.expect_value(t, dst[0].type, LightType.POINT)
-	testing.expect_value(t, dst[2].type, LightType.SPOT)
-	testing.expect_value(t, dst[3].type, LightType.DIRECTIONAL)
-	// stable: the unshadowed point light stays ahead of the shadowed one
-	testing.expect_value(t, dst[0].shadow_map, 0)
-	// one shadow view per face: the point light's six, the spot light's one,
-	// then the directional light's cascades
-	testing.expect_value(t, dst[1].shadow_map, SHADOW_VIEW_BASE + 0)
-	testing.expect_value(t, dst[2].shadow_map, SHADOW_VIEW_BASE + 6)
-	testing.expect_value(t, dst[3].shadow_map, SHADOW_VIEW_BASE + 7)
-	testing.expect_value(t, layers, 7 + SHADOW_CASCADES)
+	picked := [?]bool{true, false, true, true}
+	layers := assign_shadow_views(placements[:], lights[:], picked[:])
+	// one shadow view per face, in table order: the spot light's one, the directional
+	// light's cascades, then the point light's six
+	testing.expect_value(t, placements[0].shadow_map, SHADOW_VIEW_BASE + 0)
+	testing.expect_value(t, placements[1].shadow_map, 0)
+	testing.expect_value(t, placements[2].shadow_map, SHADOW_VIEW_BASE + 1)
+	testing.expect_value(t, placements[3].shadow_map, SHADOW_VIEW_BASE + 1 + SHADOW_CASCADES)
+	testing.expect_value(t, layers, 1 + SHADOW_CASCADES + 6)
 }

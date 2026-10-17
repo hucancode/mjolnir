@@ -20,8 +20,8 @@ Color :: enum {
   MAGENTA,
 }
 
-// A material, stored as the shaders read it. A texture of 0 (NO_TEXTURE)
-// leaves that texture out.
+// Material is how a mesh surface looks. A texture of 0 (NO_TEXTURE) leaves that texture out;
+// type picks which fields matter (see material_create).
 Material :: struct {
   albedo_texture:             TextureHandle,
   metallic_roughness_texture: TextureHandle,

@@ -51,7 +51,7 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
   on_ground := 0
   for handle, i in body_handles {
     // Fell off the ground edge and was killed below KILL_Y
-    body := body(&physics_world, handle) or_continue
+    body := lookup(&physics_world, handle) or_continue
     // Outside ground bounds — no ground underneath, expected to fall
     if body.position.x < -GROUND_HALF ||
        body.position.x > GROUND_HALF ||
@@ -85,7 +85,7 @@ test_resting_body_falls_asleep :: proc(t: ^testing.T) {
   for _ in 0 ..< 120 {
     step(&physics_world, 1.0 / 60.0)
   }
-  body := body(&physics_world, handle)
+  body := lookup(&physics_world, handle)
   testing.expect(t, body.is_sleeping, "box resting on the ground should be asleep after 2s")
 }
 
@@ -118,7 +118,7 @@ test_parallel_pile_settles :: proc(t: ^testing.T) {
   testing.expect(t, max_contacts >= SOLVER_PARALLEL_THRESHOLD)
   max_speed: f32
   for handle in handles {
-    body := body(&physics_world, handle) or_continue
+    body := lookup(&physics_world, handle) or_continue
     max_speed = max(max_speed, linalg.length(body.velocity))
   }
   testing.expectf(t, max_speed < 2.0, "pile still churning: max speed %v m/s", max_speed)

@@ -131,7 +131,7 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {16, 14, 16}, {0, 1.5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-6, 14, 6})
-  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.96, 0.9, 1}, 6.0, true))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.96, 0.9, 1}, 6.0, true)))
   spawn_scene(app)
   return true
 }

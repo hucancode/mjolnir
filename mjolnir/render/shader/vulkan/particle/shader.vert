@@ -61,7 +61,7 @@ layout(set = 0, binding = 9) readonly buffer AliveBuffer {
     uint alive[];
 };
 
-layout(push_constant) uniform ParticlePushConstants {
+layout(push_constant) uniform ParticleDrawPush {
     uint camera_index;
 } push;
 

@@ -40,7 +40,7 @@ debug_line_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) 
   counts := [2]u32{u32(min(r.debug_filled[0], DEBUG_RING)), u32(min(r.debug_filled[1], DEBUG_RING))}
   if counts == {} do return
   colors := [1]rhi.ColorTarget{{texture = BACKBUFFER, load = .LOAD}}
-  dev.cmd_begin_pass(&r.gpu, cmd, {colors = colors[:], depth = rhi.DepthTarget{texture = r.cameras[cam].attachments[.DEPTH][f], load = .LOAD, read_only = true}})
+  dev.cmd_begin_pass(&r.gpu, cmd, {colors = colors[:], depth = rhi.DepthTarget{texture = r.camera_targets[cam].attachments[.DEPTH][f], load = .LOAD, read_only = true}})
   // the shader skips segments past their expiry
   sync.mutex_lock(&r.debug_mutex)
   push := DebugLinePush{cam, r.debug_time}

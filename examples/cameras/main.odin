@@ -70,7 +70,7 @@ setup :: proc(app: ^App) -> bool {
     app.orbit.yaw, app.orbit.pitch, app.orbit.distance = render.camera_orbit_state(cam)
   }
   sun := world.spawn(&app.scene, {6, 12, 6})
-  render.attach(&app.renderer, sun.index, render.make_directional_light(color = {1, 0.97, 0.92, 1}, shadow_radius = 6.0, cast_shadow = true))
+  render.attach(&app.renderer, sun.index, render.light_create(&app.renderer, render.make_directional_light(color = {1, 0.97, 0.92, 1}, shadow_radius = 6.0, cast_shadow = true)))
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)

@@ -142,7 +142,7 @@ post_passes :: proc(r: ^Renderer, f: u32, cam: u32) -> []PostPass {
   copy_only := [1]PostprocessEffect{nil}
   if len(effects) == 0 do effects = copy_only[:]
   passes := make([dynamic]PostPass, 0, 2 * len(effects), context.temp_allocator)
-  input := r.cameras[cam].attachments[.FINAL_IMAGE][f]
+  input := r.camera_targets[cam].attachments[.FINAL_IMAGE][f]
   original := input
   for effect in effects {
     pass_count: u32 = 1
@@ -165,7 +165,7 @@ post_passes :: proc(r: ^Renderer, f: u32, cam: u32) -> []PostPass {
 // Every pass but the last writes a texture; the last writes the backbuffer.
 @(private)
 post_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
-  camera := &r.cameras[cam]
+  camera, targets := &r.cameras[cam], &r.camera_targets[cam]
   passes := post_passes(r, f, cam)
   outputs := make([dynamic]TextureHandle, 0, len(passes), context.temp_allocator)
   outer: for &p, i in passes {
@@ -173,7 +173,7 @@ post_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
     for q in passes[:i] do if q.output == p.output do continue outer
     append(&outputs, p.output)
   }
-  normal, depth := camera.attachments[.NORMAL][f], camera.attachments[.DEPTH][f]
+  normal, depth := targets.attachments[.NORMAL][f], targets.attachments[.DEPTH][f]
   for &p, i in passes {
     if i == 0 do barrier_discard(r, cmd, outputs[:])
     else do barrier(r, cmd, .POST_PASS)

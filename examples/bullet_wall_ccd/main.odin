@@ -83,7 +83,7 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {-14, 8, 14}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-5, 12, 5})
-  render.attach(&app.renderer, light.index, render.make_directional_light({1, 0.95, 0.9, 1}, 6.0, true))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.95, 0.9, 1}, 6.0, true)))
 
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
   ground := world.spawn(&app.scene, {0, -0.5, 0})
@@ -109,11 +109,11 @@ setup :: proc(app: ^App) -> bool {
   bullet_visual := world.spawn(&app.scene, parent = bullet_node)
   render.attach(&app.renderer, bullet_visual.index, render.primitive(&app.renderer, .SPHERE, .CYAN))
   world.scale_xyz(&app.scene, bullet_visual, BULLET_RADIUS, BULLET_RADIUS, BULLET_RADIUS)
-  body := physics.body(&phys, bullet_body)
-  body.linear_damping = 0
-  body.angular_damping = 0
-  body.restitution = 0.1
-  body.friction = 0.2
+  params := physics.body_params(&phys, bullet_body)
+  params.linear_damping = 0
+  params.angular_damping = 0
+  params.restitution = 0.1
+  params.friction = 0.2
   return true
 }
 

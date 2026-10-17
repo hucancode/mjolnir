@@ -1,6 +1,6 @@
 #version 450
 
-layout(push_constant) uniform PushConstants {
+layout(push_constant) uniform OverlayPush {
     mat4 projection;
     uint texture_id;
 };

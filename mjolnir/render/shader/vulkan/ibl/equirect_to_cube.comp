@@ -14,7 +14,7 @@ layout(set = 1, binding = 1) uniform sampler samplers[];
 // aliases the depth pyramid's storage images
 layout(set = 1, binding = 2, rgba16f) writeonly uniform image2DArray storage_cubes[];
 
-layout(push_constant) uniform Push {
+layout(push_constant) uniform PrecomputePush {
     uint src;          // source texture
     uint dst;          // destination storage image: one cube level as 6 layers
     uint face_size;    // edge length of the destination level

@@ -110,7 +110,7 @@ setup :: proc(app: ^App) -> bool {
   if len(textures) > 0 && int(selected_tex_index) >= len(textures) do selected_tex_index = 0
 
   emitter_node = world.spawn(&app.scene, {0, 2, 0})
-  render.attach(&app.renderer, emitter_node.index, render.make_emitter())
+  render.attach(&app.renderer, emitter_node.index, render.emitter_create(&app.renderer, render.make_emitter()))
   return true
 }
 
@@ -141,10 +141,10 @@ update :: proc(app: ^App, dt: f32) {
   if len(textures) > 0 && int(selected_tex_index) < len(textures) {
     tex = textures[selected_tex_index].handle
   }
-  if em, ok := render.attachment(&app.renderer, emitter_node.index, render.Emitter); ok {
+  if em, ok := render.emitter(&app.renderer, render.attachment(&app.renderer, emitter_node.index, render.EmitterHandle)); ok {
     em.texture_index     = tex
-    em.enabled           = b32(enabled)
-    em.emission_rate     = f32(emission_rate)
+    // a zero rate pauses the emitter
+    em.emission_rate     = f32(emission_rate) if enabled else 0
     em.particle_lifetime = f32(lifetime)
     em.size_start        = f32(size_start)
     em.size_end          = f32(size_end)
@@ -155,7 +155,6 @@ update :: proc(app: ^App, dt: f32) {
     em.velocity_spread   = f32(velocity_spread)
     em.color_start       = color_start
     em.color_end         = color_end
-    render.attach(&app.renderer, emitter_node.index, em)
   }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

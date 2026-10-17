@@ -15,7 +15,7 @@ const uint MAX_MIPS = 16u;
 const uint TILE = 32u; // mip 0 texels per tile side
 const uint TILE_MIPS = 6u; // mips 0..5 come from the tile
 
-layout(push_constant) uniform PushConstants {
+layout(push_constant) uniform DepthReducePush {
     uint depth_index; // bindless depth image
     uint mip_count;
     uint group_count;

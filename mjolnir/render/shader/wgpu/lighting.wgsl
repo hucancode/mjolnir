@@ -1,9 +1,10 @@
 // Deferred lighting, tiled (scene group LIGHTING, texture group LIGHTING, group 3 the lit
 // image): a group shades a TILE x TILE tile of the camera's image. It finds the tile's depth
-// range, lists the point and spot lights whose sphere meets the tile's box, then each
-// invocation shades its pixel once: image-based ambient and emissive, every directional light,
-// the listed lights. The background gets the skybox, or black. Lights are sorted by type
-// (scene.odin pack_lights): u.light_count gives each type's range, the ambient light last.
+// range and walks the light placements once, listing the visible placed lights that reach the
+// tile: every directional light, the point and spot lights whose sphere meets the tile's box.
+// Then each invocation shades its pixel once: image-based ambient and emissive, then the
+// listed lights. The background gets the skybox, or black. A placed light is a Light at a
+// node's transform (scene.odin light_pose).
 
 const TILE: u32 = 16u;
 const MAX_LIGHTS: u32 = 256u;
@@ -13,6 +14,10 @@ const SHADOW_MAP_SIZE: f32 = 512.0;
 
 @group(0) @binding(0) var<storage, read> views: array<View>;
 @group(0) @binding(1) var<storage, read> lights: array<Light>;
+@group(0) @binding(2) var<storage, read> nodes: array<Node>;
+@group(0) @binding(3) var<storage, read> placements: array<LightPlacement>;
+
+const NODE_VISIBLE: u32 = 1u;
 
 @group(1) @binding(0) var normal_texture: texture_2d<f32>;
 @group(1) @binding(1) var albedo_texture: texture_2d<f32>;
@@ -25,7 +30,7 @@ const SHADOW_MAP_SIZE: f32 = 512.0;
 @group(1) @binding(8) var brdf_lut: texture_2d<f32>;
 @group(1) @binding(9) var environment_map: texture_2d<f32>;
 
-struct LightingUniforms {
+struct LightingPush {
     camera_index: u32,
     // texture handles; a bindless shader indexes with them, here only whether there is one
     irradiance: u32,
@@ -36,10 +41,13 @@ struct LightingUniforms {
     skybox_blur: f32,
     // the bindless storage image of the lit image; group 3 holds it here
     output_index: u32,
-    // by LightType: point, spot, directional, ambient
-    light_count: vec4u,
+    // rows of the placement table
+    light_count: u32,
+    ibl_intensity: f32,
+    _pad0: u32,
+    _pad1: u32,
 }
-@group(2) @binding(0) var<uniform> u: LightingUniforms;
+@group(2) @binding(0) var<uniform> u: LightingPush;
 
 @group(3) @binding(0) var output_image: texture_storage_2d<rgba16float, write>;
 
@@ -95,24 +103,36 @@ fn geometric_normal(camera: View, pixel: vec2i, frag_pos: vec3f, depth: f32, fal
     return select(n, -n, dot(n, camera.position.xyz - frag_pos) < 0.0);
 }
 
+// Where a placed light sits and shines: its node's translation and normalized forward (+Z)
+// axis, as scene.odin light_pose.
+fn light_position(p: LightPlacement) -> vec3f {
+    return nodes[p.node].world_matrix[3].xyz;
+}
+
+fn light_forward(p: LightPlacement) -> vec3f {
+    let forward = nodes[p.node].world_matrix[2].xyz;
+    return select(vec3f(0.0, -1.0, 0.0), normalize(forward), dot(forward, forward) > 1e-6);
+}
+
 // Direction from the fragment towards the light.
-fn light_direction(light: Light, light_type: u32, frag_pos: vec3f) -> vec3f {
-    if (light_type == LIGHT_DIRECTIONAL) {
-        return -light.direction;
+fn light_direction(placed: LightPlacement, frag_pos: vec3f) -> vec3f {
+    if (lights[placed.light].light_type == LIGHT_DIRECTIONAL) {
+        return -light_forward(placed);
     }
-    return normalize(light.position - frag_pos);
+    return normalize(light_position(placed) - frag_pos);
 }
 
 // The shadow face seen from the light towards p: the cube face on the major axis of the
 // light-to-p direction (+X, -X, +Y, -Y, +Z, -Z) for a point light, the finest cascade whose
 // box holds p, with room for the filter, for a directional light (NO_FACE beyond the last),
 // the only face otherwise.
-fn shadow_face(light: Light, light_type: u32, p: vec3f) -> u32 {
+fn shadow_face(placed: LightPlacement, p: vec3f) -> u32 {
+    let light_type = lights[placed.light].light_type;
     if (light_type == LIGHT_DIRECTIONAL) {
         // the normal offset moves p up to SHADOW_FILTER_RADIUS + 0.5 texels
         let edge = 1.0 - 2.0 * (2.0 * SHADOW_FILTER_RADIUS + 0.5) / SHADOW_MAP_SIZE;
         for (var c = 0u; c < SHADOW_CASCADES; c++) {
-            let s = views[light.shadow_map + c].view_projection * vec4f(p, 1.0);
+            let s = views[placed.shadow_map + c].view_projection * vec4f(p, 1.0);
             // a cascade's box is no deeper than wide: with the light along the view, far
             // points project into the near cascades too
             if (abs(s.x) < edge && abs(s.y) < edge && s.z > 0.0 && s.z < 1.0) {
@@ -124,7 +144,7 @@ fn shadow_face(light: Light, light_type: u32, p: vec3f) -> u32 {
     if (light_type != LIGHT_POINT) {
         return 0u;
     }
-    let d = p - light.position;
+    let d = p - light_position(placed);
     let a = abs(d);
     if (a.x >= a.y && a.x >= a.z) {
         return select(1u, 0u, d.x >= 0.0);
@@ -136,15 +156,18 @@ fn shadow_face(light: Light, light_type: u32, p: vec3f) -> u32 {
 }
 
 // World size of a shadow texel of `view` at frag_pos: constant for an orthographic map, read
-// from its projection, growing with view depth for a perspective one.
-fn shadow_texel(light: Light, light_type: u32, frag_pos: vec3f, view: View) -> f32 {
-    let d = frag_pos - light.position;
-    if (light_type == LIGHT_POINT) {
+// from its projection, growing with view depth for a perspective one (a point light's cube
+// faces span 90 degrees, a spot light's map its cone).
+fn shadow_texel(placed: LightPlacement, frag_pos: vec3f, view: View) -> f32 {
+    let light = lights[placed.light];
+    let d = frag_pos - light_position(placed);
+    if (light.light_type == LIGHT_POINT) {
         let a = abs(d);
-        return light.shadow_texel * max(a.x, max(a.y, a.z));
+        return 2.0 * tan(0.25 * PI) / SHADOW_MAP_SIZE * max(a.x, max(a.y, a.z));
     }
-    if (light_type == LIGHT_SPOT) {
-        return light.shadow_texel * max(dot(d, light.direction), 0.0);
+    if (light.light_type == LIGHT_SPOT) {
+        let per_depth = 2.0 * tan(0.5 * max(light.angle_outer * 2.0, 0.001)) / SHADOW_MAP_SIZE;
+        return per_depth * max(dot(d, light_forward(placed)), 0.0);
     }
     return 2.0 / (view.projection[0][0] * SHADOW_MAP_SIZE);
 }
@@ -154,10 +177,11 @@ fn shadow_texel(light: Light, light_type: u32, frag_pos: vec3f, view: View) -> f
 // surface turns from the light direction l, so the filter's texels all lie in front of it.
 // The face's view projects it into its atlas tile (clip y = -1 is texel row 0); taps are
 // clamped to the tile, as an array layer's edge would clamp them.
-fn calculate_shadow(light: Light, light_type: u32, frag_pos: vec3f, n: vec3f, l: vec3f) -> f32 {
-    if (light.shadow_map == 0u) {
+fn calculate_shadow(placed: LightPlacement, frag_pos: vec3f, n: vec3f, l: vec3f) -> f32 {
+    if (placed.shadow_map == 0u) {
         return 1.0;
     }
+    let light_type = lights[placed.light].light_type;
     let cos_theta = clamp(dot(n, l), 0.0, 1.0);
     let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
     let offset = 0.5 + SHADOW_FILTER_RADIUS * sin_theta;
@@ -165,17 +189,17 @@ fn calculate_shadow(light: Light, light_type: u32, frag_pos: vec3f, n: vec3f, l:
     var face: u32;
     if (light_type == LIGHT_DIRECTIONAL) {
         // the cascade sets the texel size, so pick it before the offset
-        face = shadow_face(light, light_type, p);
+        face = shadow_face(placed, p);
         if (face == NO_FACE) {
             return 1.0;
         }
-        p += n * (offset * shadow_texel(light, light_type, p, views[light.shadow_map + face]));
+        p += n * (offset * shadow_texel(placed, p, views[placed.shadow_map + face]));
     } else {
         // the texel size doesn't depend on the face; the offset may cross one
-        p += n * (offset * shadow_texel(light, light_type, p, views[light.shadow_map]));
-        face = shadow_face(light, light_type, p);
+        p += n * (offset * shadow_texel(placed, p, views[placed.shadow_map]));
+        face = shadow_face(placed, p);
     }
-    let view = views[light.shadow_map + face];
+    let view = views[placed.shadow_map + face];
     let light_space = view.view_projection * vec4f(p, 1.0);
     let coord = light_space.xyz / light_space.w;
     let uv = coord.xy * 0.5 + 0.5;
@@ -198,16 +222,17 @@ fn calculate_shadow(light: Light, light_type: u32, frag_pos: vec3f, n: vec3f, l:
     return mix(SHADOW_FLOOR, 1.0, lit / 9.0);
 }
 
-fn attenuation(light: Light, light_type: u32, frag_pos: vec3f) -> f32 {
-    if (light_type == LIGHT_DIRECTIONAL) {
+fn attenuation(placed: LightPlacement, frag_pos: vec3f) -> f32 {
+    let light = lights[placed.light];
+    if (light.light_type == LIGHT_DIRECTIONAL) {
         return 1.0;
     }
-    if (light_type == LIGHT_POINT) {
-        let norm_dist = length(light.position - frag_pos) / max(0.01, light.radius);
+    if (light.light_type == LIGHT_POINT) {
+        let norm_dist = length(light_position(placed) - frag_pos) / max(0.01, light.radius);
         return light.radius * (1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0));
     }
-    let tip_to_frag = frag_pos - light.position;
-    let axis = light.direction;
+    let tip_to_frag = frag_pos - light_position(placed);
+    let axis = light_forward(placed);
     let along = dot(tip_to_frag, axis);
     let radial = length(tip_to_frag - along * axis);
     let cone_radius = along * tan(light.angle_outer);
@@ -233,13 +258,14 @@ struct Surface {
 }
 
 // Cook-Torrance BRDF of one light, shadowed.
-fn direct_light(light: Light, light_type: u32, s: Surface) -> vec3f {
-    let l = light_direction(light, light_type, s.position);
+fn direct_light(placed: LightPlacement, s: Surface) -> vec3f {
+    let light = lights[placed.light];
+    let l = light_direction(placed, s.position);
     // facing away or out of reach, the BRDF is zero: skip the shadow lookup
     if (dot(s.normal, l) <= 0.0) {
         return vec3f(0.0);
     }
-    let atten = attenuation(light, light_type, s.position);
+    let atten = attenuation(placed, s.position);
     if (atten <= 0.0) {
         return vec3f(0.0);
     }
@@ -261,7 +287,7 @@ fn direct_light(light: Light, light_type: u32, s: Surface) -> vec3f {
     let ks = clamp(f, vec3f(0.0), vec3f(1.0));
     let kd = (vec3f(1.0) - ks) * (1.0 - s.metallic);
     let direct = (kd * s.albedo / PI + spec) * light_color * n_dot_l * atten;
-    return direct * calculate_shadow(light, light_type, s.position, s.geometric, l);
+    return direct * calculate_shadow(placed, s.position, s.geometric, l);
 }
 
 fn prefilter_max_lod() -> f32 {
@@ -327,10 +353,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) group:
     }
     workgroupBarrier();
 
-    // the point and spot lights whose sphere meets the tile's box
+    // the visible placed lights reaching the tile: directional ones, and point and spot ones
+    // whose sphere meets the tile's box
     let depth_min = bitcast<f32>(atomicLoad(&tile_min_bits));
     let depth_max = bitcast<f32>(atomicLoad(&tile_max_bits));
-    let local_lights = u.light_count.x + u.light_count.y;
     if (depth_min <= depth_max) {
         let tile_lo = vec2f(group.xy * TILE) / camera.extent;
         let tile_hi = vec2f(min(vec2i((group.xy + 1u) * TILE), extent)) / camera.extent;
@@ -342,8 +368,13 @@ fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) group:
             lo = min(lo, p);
             hi = max(hi, p);
         }
-        for (var i = local; i < local_lights; i += TILE * TILE) {
-            if (sphere_meets_box(lights[i].position, lights[i].radius, lo, hi)) {
+        for (var i = local; i < u.light_count; i += TILE * TILE) {
+            let p = placements[i];
+            if (p.light == 0u || (nodes[p.node].flags & NODE_VISIBLE) == 0u) {
+                continue;
+            }
+            let light = lights[p.light];
+            if (light.light_type == LIGHT_DIRECTIONAL || sphere_meets_box(light_position(p), light.radius, lo, hi)) {
                 tile_lights[atomicAdd(&tile_light_count, 1u)] = i;
             }
         }
@@ -375,19 +406,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) group:
     s.metallic = clamp(mr.r, 0.0, 1.0);
     s.geometric = geometric_normal(camera, pixel, s.position, depth, s.normal);
 
-    let first_directional = local_lights;
-    let ambient = first_directional + u.light_count.z;
     var color = textureLoad(emissive_texture, pixel, 0).rgb;
-    if (u.light_count.w > 0u) {
-        color += ambient_light(lights[ambient].color.a, raw_normal, s, mr.g);
-    }
+    color += ambient_light(u.ibl_intensity, raw_normal, s, mr.g);
     s.roughness = clamp(mr.g, 0.08, 1.0);
-    for (var i = first_directional; i < ambient; i++) {
-        color += direct_light(lights[i], LIGHT_DIRECTIONAL, s);
-    }
     for (var i = 0u; i < listed; i++) {
-        let index = tile_lights[i];
-        color += direct_light(lights[index], select(LIGHT_SPOT, LIGHT_POINT, index < u.light_count.x), s);
+        color += direct_light(placements[tile_lights[i]], s);
     }
     textureStore(output_image, pixel, vec4f(color, 1.0));
 }

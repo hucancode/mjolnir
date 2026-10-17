@@ -4,7 +4,7 @@
 layout(binding = 0, set = 1) uniform texture2D textures[];
 layout(binding = 1, set = 1) uniform sampler samplers[];
 
-layout(push_constant) uniform PushConstants {
+layout(push_constant) uniform OverlayPush {
     mat4 projection;
     uint texture_id;
 };

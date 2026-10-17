@@ -4,11 +4,11 @@
 // vertex, first instance. With first_instance a draw starts at its batch's instances, so
 // one instance stream binding serves every batch.
 
-@group(0) @binding(2) var<storage, read> meshes: array<Mesh>;
+@group(0) @binding(2) var<storage, read> meshes: array<MeshData>;
 @group(0) @binding(3) var<storage, read> materials: array<Material>;
 @group(0) @binding(4) var<storage, read> batches: array<Batch>;
 
-struct CullUniforms {
+struct BatchPush {
     node_count: u32,
     first_view: u32,
     instance_stride: u32,
@@ -19,7 +19,7 @@ struct CullUniforms {
     // 1: a draw's first instance is where its batch's instances start (indirect first instance)
     first_instance: u32,
 }
-@group(2) @binding(0) var<uniform> u: CullUniforms;
+@group(2) @binding(0) var<uniform> u: BatchPush;
 
 @group(3) @binding(0) var<storage, read_write> list: array<atomic<u32>>;
 

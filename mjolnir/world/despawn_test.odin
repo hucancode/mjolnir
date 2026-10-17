@@ -16,7 +16,7 @@ test_despawn_single_node :: proc(t: ^testing.T) {
   testing.expectf(t, ok, "failed to spawn node")
 
   // Verify node exists
-  n := node(&w, node_handle)
+  n := lookup(&w, node_handle)
   testing.expectf(t, n != nil, "node should exist after spawning")
 
   // Despawn the node
@@ -24,7 +24,7 @@ test_despawn_single_node :: proc(t: ^testing.T) {
   testing.expectf(t, despawn_ok, "despawn should succeed")
 
   // Verify node no longer exists
-  node_after := node(&w, node_handle)
+  node_after := lookup(&w, node_handle)
   testing.expectf(
     t,
     node_after == nil,
@@ -52,7 +52,7 @@ test_despawn_node_with_children :: proc(t: ^testing.T) {
   testing.expectf(t, child3_ok, "failed to spawn child3")
 
   // Verify all nodes exist
-  parent := node(&w, parent_handle)
+  parent := lookup(&w, parent_handle)
   testing.expectf(t, parent != nil, "parent should exist")
   testing.expectf(
     t,
@@ -68,10 +68,10 @@ test_despawn_node_with_children :: proc(t: ^testing.T) {
   testing.expectf(t, despawn_ok, "despawn should succeed")
 
   // Verify all nodes are freed
-  parent_after := node(&w, parent_handle)
-  child1_after := node(&w, child1_handle)
-  child2_after := node(&w, child2_handle)
-  child3_after := node(&w, child3_handle)
+  parent_after := lookup(&w, parent_handle)
+  child1_after := lookup(&w, child1_handle)
+  child2_after := lookup(&w, child2_handle)
+  child3_after := lookup(&w, child3_handle)
 
   testing.expectf(t, parent_after == nil, "parent should be freed")
   testing.expectf(t, child1_after == nil, "child1 should be freed")
@@ -115,27 +115,27 @@ test_despawn_hierarchy :: proc(t: ^testing.T) {
   // Verify entire subtree is freed
   testing.expectf(
     t,
-    node(&w, parent_handle) == nil,
+    lookup(&w, parent_handle) == nil,
     "parent should be freed",
   )
   testing.expectf(
     t,
-    node(&w, child1_handle) == nil,
+    lookup(&w, child1_handle) == nil,
     "child1 should be freed",
   )
   testing.expectf(
     t,
-    node(&w, child2_handle) == nil,
+    lookup(&w, child2_handle) == nil,
     "child2 should be freed",
   )
   testing.expectf(
     t,
-    node(&w, grandchild1_handle) == nil,
+    lookup(&w, grandchild1_handle) == nil,
     "grandchild1 should be freed",
   )
   testing.expectf(
     t,
-    node(&w, grandchild2_handle) == nil,
+    lookup(&w, grandchild2_handle) == nil,
     "grandchild2 should be freed",
   )
 }
@@ -169,12 +169,12 @@ test_despawn_detaches_from_parent :: proc(t: ^testing.T) {
   // Verify child1 is freed but parent and child2 still exist
   testing.expectf(
     t,
-    node(&w, child1_handle) == nil,
+    lookup(&w, child1_handle) == nil,
     "child1 should be freed",
   )
 
-  parent_after := node(&w, parent_handle)
-  child2_after := node(&w, child2_handle)
+  parent_after := lookup(&w, parent_handle)
+  child2_after := lookup(&w, child2_handle)
   testing.expectf(t, parent_after != nil, "parent should still exist")
   testing.expectf(t, child2_after != nil, "child2 should still exist")
 
@@ -207,7 +207,7 @@ test_despawn_reports_removed_node :: proc(t: ^testing.T) {
   for n in changes(&w) do changed |= n.index == node_handle.index && !n.removed
   testing.expectf(t, changed, "spawned node should be in the change feed")
   testing.expectf(t, despawn(&w, node_handle), "despawn should succeed")
-  testing.expectf(t, node(&w, node_handle) == nil, "node should be freed immediately")
+  testing.expectf(t, lookup(&w, node_handle) == nil, "node should be freed immediately")
   update(&w)
   removed := false
   for n in changes(&w) do removed |= n.index == node_handle.index && n.removed
@@ -227,8 +227,8 @@ test_teardown_keeps_root :: proc(t: ^testing.T) {
   update(&w)
   teardown(&w)
   _, root_ok := node(&w, w.root)
-  _, parent_ok := node(&w, parent)
-  _, child_ok := node(&w, child)
+  _, parent_ok := lookup(&w, parent)
+  _, child_ok := lookup(&w, child)
   testing.expect(t, root_ok && !parent_ok && !child_ok)
   testing.expect_value(t, node_count(&w), 1)
   testing.expect_value(t, len(children(&w, w.root)), 0)

@@ -79,7 +79,7 @@ spawn_field :: proc(
   s: FFState
   s.parent = world.spawn(&app.scene, {0, 2, 0})
   s.ff_node = world.spawn(&app.scene, {offset_x, 0, 0}, parent = s.parent)
-  render.attach(&app.renderer, s.ff_node.index, render.make_forcefield(area_of_effect = area, strength = strength, tangent_strength = tangent))
+  render.attach(&app.renderer, s.ff_node.index, render.forcefield_create(&app.renderer, render.make_forcefield(area_of_effect = area, strength = strength, tangent_strength = tangent)))
   s.color = color
   s.enabled = true
   s.strength = mu.Real(strength)
@@ -116,7 +116,7 @@ setup :: proc(app: ^App) -> bool {
       weight_spread     = 0.0,
     )
     n := world.spawn(&app.scene, {0, 2, 0})
-    render.attach(&app.renderer, n.index, em)
+    render.attach(&app.renderer, n.index, render.emitter_create(&app.renderer, em))
   }
 
   // Repulsion field — blue marker
@@ -125,18 +125,17 @@ setup :: proc(app: ^App) -> bool {
   attract = spawn_field(app, 3.5, 12.0, -5.0, 4.0, {0.2, 1.0, 0.4, 1}, 0.7, -1.0)
 
   light := world.spawn(&app.scene, {3, 6, 3})
-  render.attach(&app.renderer, light.index, render.make_directional_light(color = {1, 1, 1, 1}, shadow_radius = 10))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1, 1}, shadow_radius = 10)))
   return true
 }
 
 apply_ff :: proc(app: ^App, s: ^FFState) {
-  ff, ok := render.attachment(&app.renderer, s.ff_node.index, render.ForceField)
+  ff, ok := render.forcefield(&app.renderer, render.attachment(&app.renderer, s.ff_node.index, render.ForceFieldHandle))
   if !ok do return
   ff.strength         = f32(s.strength)
   ff.tangent_strength = f32(s.tangent_strength)
-  ff.area_of_effect   = f32(s.area_of_effect)
-  ff.enabled          = b32(s.enabled)
-  render.attach(&app.renderer, s.ff_node.index, ff)
+  // a zero area pauses the field
+  ff.area_of_effect   = f32(s.area_of_effect) if s.enabled else 0
 }
 
 draw_ff_marker :: proc(app: ^App, s: ^FFState) {

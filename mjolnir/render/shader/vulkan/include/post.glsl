@@ -1,6 +1,6 @@
 // The interface of a user post-process fragment shader (render.post_shader_create): the
 // fullscreen uv, the color output, the bindless textures and the push block. Define
-// POST_PARAMS, the fields of the shader's params as render.custom_effect packs them, before
+// POST_PARAMS, the fields of the shader's params as render.make_custom_effect packs them, before
 // including this:
 //
 //     #version 450

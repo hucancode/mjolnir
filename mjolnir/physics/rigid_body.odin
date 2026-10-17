@@ -13,19 +13,25 @@ import "core:math/linalg"
 Body :: struct {
   user:                 cont.Handle, // caller-owned link back, e.g. the scene node this body drives
   is_sensor:            bool,
-  moving:               bool, // read-only: integrated and kept in the dynamic BVH
-  enable_rotation:      bool,
+  moving:               bool, // integrated and kept in the dynamic BVH
   is_sleeping:          bool,
   position:             [3]f32,
   rotation:             quaternion128,
   collider:             Collider,
-  restitution:          f32,
-  friction:             f32,
   velocity:             [3]f32,
   angular_velocity:     [3]f32,
-  linear_damping:       f32,
-  angular_damping:      f32,
+  using params:         BodyParams,
   using _: Body_State,
+}
+
+// BodyParams is how a body responds; the application tunes it (body_params) and step
+// only reads it.
+BodyParams :: struct {
+  restitution:     f32,
+  friction:        f32,
+  linear_damping:  f32,
+  angular_damping: f32,
+  enable_rotation: bool,
 }
 
 @(private)

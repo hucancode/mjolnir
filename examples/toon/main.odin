@@ -62,7 +62,7 @@ setup :: proc(app: ^App) -> bool {
   ok: bool
   app.toon, ok = render.material_shader_create(&app.renderer, toon_spirv, toon_wgsl, blend = .NONE)
   if !ok {
-    log.error("Failed to node_create the toon shader")
+    log.error("Failed to create the toon shader")
     return true
   }
 
@@ -83,7 +83,7 @@ setup :: proc(app: ^App) -> bool {
   spawn_mesh(app, meshes[.SPHERE], pbr, {0, 1.0, -3.0})
 
   sun := world.spawn(&app.scene, {-3, 8, 6})
-  render.attach(&app.renderer, sun.index, render.make_directional_light(color = {1.0, 0.95, 0.9, 3}, shadow_radius = 8.0, cast_shadow = true))
+  render.attach(&app.renderer, sun.index, render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9, 3}, shadow_radius = 8.0, cast_shadow = true)))
   return true
 }
 

@@ -96,13 +96,11 @@ MaterialType :: enum u32 {
 @(private)
 FIRST_FORWARD_TYPE :: MaterialType.TRANSPARENT
 
-// LightType selects the light branch of the lighting shaders.
-// AMBIENT is the environment light (image-based lighting, emissive, skybox), one per frame.
-LightType :: enum u16 {
+// LightType selects how a Light shines. The environment's light is Renderer.ibl_intensity.
+LightType :: enum u32 {
   POINT,
   SPOT,
   DIRECTIONAL,
-  AMBIENT,
 }
 
 // Vertex is the mesh vertex format.
@@ -149,6 +147,10 @@ Table :: enum {
   NODE_BATCH,
   // per skinned vertex, the slot whose range holds it + 1; 0 is free (pass_skin.odin)
   SKIN_OWNERS,
+  // where each light, emitter and force field is attached: a resource handle and a slot
+  LIGHT_PLACEMENTS,
+  EMITTER_PLACEMENTS,
+  FORCEFIELD_PLACEMENTS,
 }
 
 // SkinnedVertex is a vertex the skinning pass wrote, read by vertex shaders in place of the
@@ -189,8 +191,7 @@ MeshFlag :: enum u32 {
 @(private)
 MeshFlagSet :: bit_set[MeshFlag;u32]
 
-// GrayscaleEffect desaturates the image. Effect structs are pushed verbatim, so their layout
-// must match each shader's push block.
+// GrayscaleEffect desaturates the image: luminance from weights, mixed in by strength.
 GrayscaleEffect :: struct {
   weights:  [3]f32, // zero = Rec. 601 luma
   strength: f32,
@@ -274,8 +275,9 @@ PostprocessEffect :: union {
 
 @(private)
 ParticleSystemParams :: struct {
-  emitter_count:    u32,
-  forcefield_count: u32,
+  // rows of the emitter and force field placement tables
+  emitter_placement_count:    u32,
+  forcefield_placement_count: u32,
   delta_time:       f32,
   frame_counter:    u32,
   // new particles this frame, all emitters together

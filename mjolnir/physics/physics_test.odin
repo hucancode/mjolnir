@@ -20,7 +20,7 @@ test_physics_world_gravity_application :: proc(t: ^testing.T) {
   defer shutdown(&physics_world)
   body_handle, body_ok := body_create(&physics_world, {}, linalg.QUATERNIONF32_IDENTITY, SphereCollider{radius = 1.0}, mass = 2.0)
   testing.expect(t, body_ok, "Body creation should succeed")
-  body, get_ok := body(&physics_world, body_handle)
+  body, get_ok := lookup(&physics_world, body_handle)
   testing.expect(t, get_ok, "Body retrieval should succeed")
   initial_velocity := body.velocity.y
   dt := f32(0.016)
@@ -40,8 +40,8 @@ test_physics_world_two_body_collision :: proc(t: ^testing.T) {
   defer shutdown(&physics_world)
   body_a_handle, _ := body_create(&physics_world, {}, linalg.QUATERNIONF32_IDENTITY, SphereCollider{radius = 1.0}, mass = 1.0)
   body_b_handle, _ := body_create(&physics_world, {1.5, 0, 0}, linalg.QUATERNIONF32_IDENTITY, SphereCollider{radius = 1.0}, mass = 1.0)
-  body_a, _ := body(&physics_world, body_a_handle)
-  body_b, _ := body(&physics_world, body_b_handle)
+  body_a, _ := lookup(&physics_world, body_a_handle)
+  body_b, _ := lookup(&physics_world, body_b_handle)
   body_a.velocity = {10, 0, 0}
   body_b.velocity = {-10, 0, 0}
   dt := f32(0.016)
@@ -70,7 +70,7 @@ test_physics_world_static_body_collision :: proc(t: ^testing.T) {
   defer shutdown(&physics_world)
   body_static_handle, _ := body_create(&physics_world, collider = SphereCollider{radius = 1.0})
   body_dynamic_handle, _ := body_create(&physics_world, {1.5, 0, 0}, linalg.QUATERNIONF32_IDENTITY, SphereCollider{radius = 1.0}, mass = 1.0)
-  body_dynamic, _ := body(&physics_world, body_dynamic_handle)
+  body_dynamic, _ := lookup(&physics_world, body_dynamic_handle)
   body_dynamic.velocity = {-10, 0, 0}
   dt := f32(0.016)
   step(&physics_world, dt)
@@ -126,7 +126,7 @@ test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
   defer shutdown(&physics_world)
   body_bullet_handle, _ := body_create(&physics_world, {-5, 0, 0}, linalg.QUATERNIONF32_IDENTITY, SphereCollider{radius = 0.1}, mass = 0.1)
   body_create(&physics_world, collider = BoxCollider{half_extents = {0.5, 5, 5}})
-  body_bullet := body(&physics_world, body_bullet_handle)
+  body_bullet := lookup(&physics_world, body_bullet_handle)
   body_bullet.velocity = {100, 0, 0}
   dt := f32(0.016)
   step(&physics_world, dt)
@@ -148,7 +148,7 @@ test_physics_world_angular_integration :: proc(t: ^testing.T) {
   init(&physics_world, {0, 0, 0}, thread_count = 1)
   defer shutdown(&physics_world)
   body_handle, _ := body_create(&physics_world, mass = 1.0)
-  body, _ := body(&physics_world, body_handle)
+  body, _ := lookup(&physics_world, body_handle)
   set_collider(&physics_world, body_handle, SphereCollider{radius = 1.0})
   body.angular_velocity = {0, math.PI, 0}
   initial_rotation := body.rotation
@@ -559,7 +559,7 @@ test_torque_induces_angular_velocity :: proc(t: ^testing.T) {
   init(&world, {0, 0, 0}, thread_count = 1)
   defer shutdown(&world)
   handle := body_create(&world, collider = BoxCollider{half_extents = {1, 1, 1}}, mass = 1.0)
-  body := body(&world, handle)
+  body := lookup(&world, handle)
   body.torque = {0, 10, 0}
   step(&world, 0.016)
   testing.expect(
@@ -598,7 +598,7 @@ test_rotation_integration_updates_orientation :: proc(t: ^testing.T) {
   init(&physics_world, {0, 0, 0}, thread_count = 1)
   defer shutdown(&physics_world)
   body_handle, _ := body_create(&physics_world, mass = 1.0)
-  body, _ := body(&physics_world, body_handle)
+  body, _ := lookup(&physics_world, body_handle)
   set_collider(&physics_world, body_handle, BoxCollider{half_extents = {1, 1, 1}})
   body.angular_velocity = {0, 1, 0}
   initial_quat := body.rotation
@@ -623,7 +623,7 @@ test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
   defer shutdown(&physics_world)
   body_a_handle := body_create(&physics_world, {}, linalg.QUATERNIONF32_IDENTITY, SphereCollider{radius = 1.0}, mass = 1.0)
   body_create(&physics_world, {0.5, 0.5, 0}, linalg.QUATERNIONF32_IDENTITY, SphereCollider{radius = 1.0}, mass = 1.0)
-  body_a := body(&physics_world, body_a_handle)
+  body_a := lookup(&physics_world, body_a_handle)
   body_a.velocity = {10, 0, 0}
   dt := f32(0.016)
   step(&physics_world, dt)
@@ -704,11 +704,11 @@ test_integration_box_stack_stability :: proc(t: ^testing.T) {
   defer shutdown(&physics_world)
   body_create(&physics_world, position = {0, -0.5, 0}, collider = BoxCollider{half_extents = {5, 0.5, 5}})
   body_1_h, _ := body_create(&physics_world, {0, 0.5, 0}, linalg.QUATERNIONF32_IDENTITY, BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 10.0)
-  body_1, _ := body(&physics_world, body_1_h)
+  body_1, _ := lookup(&physics_world, body_1_h)
   body_2_h, _ := body_create(&physics_world, {0, 1.5, 0}, linalg.QUATERNIONF32_IDENTITY, BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 10.0)
-  body_2, _ := body(&physics_world, body_2_h)
+  body_2, _ := lookup(&physics_world, body_2_h)
   body_3_h, _ := body_create(&physics_world, {0, 2.5, 0}, linalg.QUATERNIONF32_IDENTITY, BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 10.0)
-  body_3, _ := body(&physics_world, body_3_h)
+  body_3, _ := lookup(&physics_world, body_3_h)
   dt := f32(0.016)
   for i in 0 ..< 120 {
     step(&physics_world, dt)
@@ -772,7 +772,7 @@ test_disable_rotation_prevents_angular_velocity :: proc(t: ^testing.T) {
   init(&world, {0, 0, 0}, thread_count = 1)
   defer shutdown(&world)
   handle := body_create(&world, collider = BoxCollider{half_extents = {1, 1, 1}}, mass = 1.0)
-  body := body(&world, handle)
+  body := lookup(&world, handle)
   body.enable_rotation = false
   update_world_inertia(body)
   body.torque = {0, 10, 0}
@@ -792,7 +792,7 @@ test_disable_rotation_prevents_quaternion_update :: proc(t: ^testing.T) {
   init(&physics_world, {0, 0, 0}, thread_count = 1)
   defer shutdown(&physics_world)
   body_handle, _ := body_create(&physics_world, mass = 1.0)
-  body, _ := body(&physics_world, body_handle)
+  body, _ := lookup(&physics_world, body_handle)
   set_collider(&physics_world, body_handle, BoxCollider{half_extents = {1, 1, 1}})
   body.enable_rotation = false
   body.angular_velocity = {0, 5, 0}
@@ -956,7 +956,7 @@ test_rotated_body_with_offset_collision :: proc(t: ^testing.T) {
   defer shutdown(&physics_world)
   body_create(&physics_world, position = {0, -0.5, 0}, collider = BoxCollider{half_extents = {10, 0.5, 10}})
   box_handle, _ := body_create(&physics_world, {0, 2, 0}, linalg.QUATERNIONF32_IDENTITY, BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 1.0)
-  box, _ := body(&physics_world, box_handle)
+  box, _ := lookup(&physics_world, box_handle)
   box.rotation = linalg.quaternion_angle_axis(
     math.PI / 4.0,
     linalg.VECTOR3F32_Z_AXIS,
@@ -996,12 +996,12 @@ test_kinematic_body_pushes_dynamic :: proc(t: ^testing.T) {
   defer shutdown(&w)
   pusher := body_create(&w, {0, 0, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}})
   box := body_create(&w, {1.2, 0, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 1.0)
-  testing.expect(t, !body(&w, pusher).moving, "Infinite-mass body starts static")
+  testing.expect(t, !lookup(&w, pusher).moving, "Infinite-mass body starts static")
   set_velocity(&w, pusher, {2, 0, 0})
-  testing.expect(t, body(&w, pusher).moving, "set_velocity turns it kinematic")
+  testing.expect(t, lookup(&w, pusher).moving, "set_velocity turns it kinematic")
   for _ in 0 ..< 60 do step(&w, 1.0 / 60.0)
-  p := body(&w, pusher)
-  b := body(&w, box)
+  p := lookup(&w, pusher)
+  b := lookup(&w, box)
   testing.expectf(t, abs(p.position.x - 2) < 0.05, "kinematic moved to %v", p.position)
   testing.expectf(t, abs(p.velocity.x - 2) < 1e-4, "kinematic velocity kept: %v", p.velocity)
   testing.expectf(t, b.position.x > p.position.x + 0.9, "box pushed ahead: box %v pusher %v", b.position, p.position)
@@ -1016,8 +1016,8 @@ test_physics_teardown_reuse :: proc(t: ^testing.T) {
   ball := body_create(&w, {0, 1, 0}, collider = SphereCollider{radius = 0.5}, mass = 1)
   for _ in 0 ..< 30 do step(&w, 1.0 / 60)
   teardown(&w)
-  _, ground_live := body(&w, ground)
-  _, ball_live := body(&w, ball)
+  _, ground_live := lookup(&w, ground)
+  _, ball_live := lookup(&w, ball)
   testing.expect(t, !ground_live && !ball_live)
   testing.expect_value(t, len(w.contacts), 0)
   // the next map: no stale BVH entry or contact survives
@@ -1025,6 +1025,6 @@ test_physics_teardown_reuse :: proc(t: ^testing.T) {
   next := body_create(&w, {0, 5, 0}, collider = SphereCollider{radius = 0.5}, mass = 1)
   step(&w, 1.0 / 60)
   testing.expect_value(t, len(w.contacts), 0)
-  body, ok := body(&w, next)
+  body, ok := lookup(&w, next)
   testing.expect(t, ok && body.velocity.y < 0)
 }

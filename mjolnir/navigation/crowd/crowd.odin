@@ -119,12 +119,13 @@ Agent_Internal :: struct {
 // Crowd simulates many agents navigating one shared NavMesh.
 Crowd :: struct {
 	max_agents:                int,
-	agents:                    []Agent,
 	using _: Crowd_State,
 }
 
 @(private)
 Crowd_State :: struct {
+	// indexed by agent index; update moves them (agent reads a copy)
+	agents:                    []Agent,
 	active_agents:             []^Agent,
 	path_queue:                ^Path_Queue,
 	obstacle_query_params:     [DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS]Obstacle_Avoidance_Params,
@@ -672,10 +673,17 @@ add_neighbour :: proc(idx: int, dist: f32, neis: []Neighbour, nneis: int, max_ne
 	return min(nneis + 1, max_neis)
 }
 
-// agent returns agent slot idx; false if idx is out of range.
-agent :: proc(crowd: ^Crowd, idx: int) -> (^Agent, bool) #optional_ok {
-	if idx < 0 || idx >= crowd.max_agents do return nil, false
-	return &crowd.agents[idx], true
+// agent returns a copy of agent slot idx; false if idx is out of range. update moves it;
+// give it a goal with move_to and tune it through agent_params.
+agent :: proc(crowd: ^Crowd, idx: int) -> (ag: Agent, ok: bool) #optional_ok {
+	if idx < 0 || idx >= crowd.max_agents do return
+	return crowd.agents[idx], true
+}
+
+// agent_params returns agent idx's parameters, to edit in place; update only reads them.
+agent_params :: proc(crowd: ^Crowd, idx: int) -> (params: ^AgentParams, ok: bool) #optional_ok {
+	if idx < 0 || idx >= crowd.max_agents do return
+	return &crowd.agents[idx].params, true
 }
 
 // filter returns the query filter agents use for query_filter_type i; false if out of range.

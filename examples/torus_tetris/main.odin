@@ -131,7 +131,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, floor.index, render.MeshAttachment{handle = ground, material = dark_mat, cast_shadow = false})
   world.scale(&app.scene, floor, RADIUS * 6.0)
   spot := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, spot.index, render.make_spot_light({1, 1, 1, 1}, 12.0, math.PI * 0.35, true))
+  render.attach(&app.renderer, spot.index, render.light_create(&app.renderer, render.make_spot_light({1, 1, 1, 1}, 12.0, math.PI * 0.35, true)))
   world.rotate(&app.scene, spot, math.PI * 0.55, {1, 0, 0})
   render.camera_look_at(render.main_camera(&app.renderer), {0, 14, 14}, {0, 8, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))

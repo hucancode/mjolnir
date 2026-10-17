@@ -93,7 +93,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
   light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, light.index, render.make_point_light({1, 1, 1, 1}, 20.0, true))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_point_light({1, 1, 1, 1}, 20.0, true)))
   return true
 }
 

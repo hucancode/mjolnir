@@ -4,10 +4,10 @@
 
 @group(1) @binding(0) var batch_texture: texture_2d<f32>;
 
-struct OverlayUniforms {
+struct OverlayPush {
     projection: mat4x4f,
 }
-@group(2) @binding(0) var<uniform> u: OverlayUniforms;
+@group(2) @binding(0) var<uniform> u: OverlayPush;
 
 struct VertexOut {
     @builtin(position) clip: vec4f,

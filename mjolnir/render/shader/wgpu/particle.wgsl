@@ -29,7 +29,7 @@ struct Particle {
 @group(1) @binding(6) var texture6: texture_2d<f32>;
 @group(1) @binding(7) var texture7: texture_2d<f32>;
 
-struct ParticleDrawUniforms {
+struct ParticleDrawPush {
     camera_index: u32,
     _pad0: u32,
     _pad1: u32,
@@ -37,7 +37,7 @@ struct ParticleDrawUniforms {
     // the texture handle each slot of the group holds
     textures: array<vec4u, 2>,
 }
-@group(2) @binding(0) var<uniform> u: ParticleDrawUniforms;
+@group(2) @binding(0) var<uniform> u: ParticleDrawPush;
 
 struct VertexOut {
     @builtin(position) clip: vec4f,

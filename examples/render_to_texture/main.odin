@@ -76,7 +76,7 @@ setup :: proc(app: ^App) -> bool {
   spinner_handle = spawn_primitive(app, .CUBE, .YELLOW, {0, 1.8, 0}, 0.4)
 
   light := world.spawn(&app.scene, {0, 3, 1.5})
-  render.attach(&app.renderer, light.index, render.make_point_light({1.0, 0.6, 0.3, 1.0}, 12.0, false))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_point_light({1.0, 0.6, 0.3, 1.0}, 12.0, false)))
 
   rtt_camera_handle = render.camera_create(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
   rtt_material_handle = render.material_create(&app.renderer)

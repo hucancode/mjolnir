@@ -273,8 +273,8 @@ test_crowd_lifecycle_add_remove :: proc(t: ^testing.T) {
 	a1, _ := agent_add(c, {1, 0, 0}, params)
 	testing.expectf(t, a0 == 0 && a1 == 1, "expected sequential slots, got %d %d", a0, a1)
 
-	ag := agent(c, a0)
-	testing.expect(t, ag != nil && ag.active, "agent must be active after add")
+	ag, ag_ok := agent(c, a0)
+	testing.expect(t, ag_ok && ag.active, "agent must be active after add")
 
 	agent_remove(c, a0)
 	testing.expect(t, !c.agents[a0].active, "agent must be inactive after remove")

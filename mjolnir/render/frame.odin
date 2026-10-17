@@ -124,7 +124,7 @@ scope_end :: proc(r: ^Renderer, cmd: rhi.CommandList, name: string) {
   dev.cmd_label_end(&r.gpu, cmd)
 }
 
-// gpu_timings is the GPU time of each pass of a frame a few frames back, in the order they
+// gpu_timings is the GPU time of each pass of a recent frame, in the order they
 // began; empty where the device cannot time them. Valid until the next frame.
 gpu_timings :: proc(r: ^Renderer) -> []Timing {
   if !dev.ready(&r.gpu) do return nil
@@ -138,7 +138,7 @@ camera_passes :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
   if r.camera_slots.count == 0 do return
   discards := make([dynamic]TextureHandle, context.temp_allocator)
   c: u32
-  for i in cont.slots_next(&r.camera_slots, &c) do for a in AttachmentType do append(&discards, r.cameras[i].attachments[a][f])
+  for i in cont.slots_next(&r.camera_slots, &c) do for a in AttachmentType do append(&discards, r.camera_targets[i].attachments[a][f])
   // render-to-texture: a material may sample last frame's lit image
   barrier_discard(r, cmd, discards[:], .CULL_TO_INDIRECT, .COLOR_TO_SAMPLE)
   {

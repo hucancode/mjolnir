@@ -6,7 +6,7 @@
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-struct NodeData {
+struct Node {
     mat4 world_matrix;
     uint material_id;
     uint mesh_id;
@@ -27,7 +27,7 @@ struct MeshData {
     uint vertex_count;
 };
 
-struct VertexSkinningData {
+struct SkinningData {
     uvec4 joints;
     vec4 weights;
 };
@@ -42,7 +42,7 @@ const uint NODE_FLAG_VISIBLE = 1u << 0;
 const uint NODE_FLAG_SKINNED = 1u << 2;
 
 layout(set = 0, binding = 1) readonly buffer NodeBuffer {
-    NodeData nodes[];
+    Node nodes[];
 };
 
 layout(set = 0, binding = 2) readonly buffer MeshBuffer {
@@ -54,7 +54,7 @@ layout(set = 0, binding = 4) readonly buffer BoneMatrices {
 };
 
 layout(set = 0, binding = 5) readonly buffer VertexSkinningBuffer {
-    VertexSkinningData vertex_skinning[];
+    SkinningData vertex_skinning[];
 };
 
 // slot + 1 per skinned vertex, 0 for none
@@ -71,7 +71,7 @@ layout(set = 0, binding = 17) readonly buffer VertexBuffer {
     float vertices[];
 };
 
-layout(push_constant) uniform PushConstants {
+layout(push_constant) uniform SkinPush {
     uint vertex_count;
 };
 
@@ -80,7 +80,7 @@ void main() {
     if (v >= vertex_count) return;
     uint owner = owners[v];
     if (owner == 0u) return;
-    NodeData node = nodes[owner - 1u];
+    Node node = nodes[owner - 1u];
     if ((node.flags & (NODE_FLAG_VISIBLE | NODE_FLAG_SKINNED)) != (NODE_FLAG_VISIBLE | NODE_FLAG_SKINNED)) return;
     MeshData mesh = meshes[node.mesh_id];
     uint local_index = v - node.skin_vertex_base;
@@ -91,7 +91,7 @@ void main() {
     vec3 normal = vec3(vertices[base + 3u], vertices[base + 4u], vertices[base + 5u]);
     vec4 tangent = vec4(vertices[base + 12u], vertices[base + 13u], vertices[base + 14u], vertices[base + 15u]);
 
-    VertexSkinningData skin = vertex_skinning[mesh.vertex_skinning_offset + local_index];
+    SkinningData skin = vertex_skinning[mesh.vertex_skinning_offset + local_index];
     uvec4 joints = skin.joints + uvec4(node.attachment_data_index);
     mat4 skin_matrix =
         skin.weights.x * bones[joints.x] +

@@ -33,7 +33,7 @@ layout(set = 0, binding = 0) readonly buffer ViewBuffer {
     View views[];
 };
 
-struct MaterialData {
+struct Material {
     uint albedo_index;
     uint metallic_roughness_index;
     uint normal_index;
@@ -50,10 +50,10 @@ struct MaterialData {
 };
 
 layout(set = 0, binding = 3) readonly buffer MaterialBuffer {
-    MaterialData materials[];
+    Material materials[];
 };
 
-struct NodeData {
+struct Node {
     mat4 world_matrix;
     uint material_id;
     uint mesh_id;
@@ -64,10 +64,10 @@ struct NodeData {
 };
 
 layout(set = 0, binding = 1) readonly buffer NodeBuffer {
-    NodeData nodes[];
+    Node nodes[];
 };
 
-layout(push_constant) uniform PushConstants {
+layout(push_constant) uniform MeshPush {
     uint camera_index;
 };
 
@@ -79,9 +79,9 @@ layout(location = 3) flat out uint outTextureIndex;
 void main() {
     View camera = views[camera_index];
     uint node_index = uint(gl_InstanceIndex);
-    NodeData node = nodes[node_index];
+    Node node = nodes[node_index];
     mat4 world = node.world_matrix;
-    MaterialData sprite = materials[node.material_id];
+    Material sprite = materials[node.material_id];
     vec3 camera_right = vec3(camera.view[0][0], camera.view[1][0], camera.view[2][0]);
     vec3 camera_up = vec3(camera.view[0][1], camera.view[1][1], camera.view[2][1]);
     // Extract position from world matrix

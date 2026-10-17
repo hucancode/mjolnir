@@ -4,7 +4,7 @@
 
 @group(3) @binding(1) var destination: texture_storage_2d_array<rgba16float, write>;
 
-struct PrecomputeUniforms {
+struct PrecomputePush {
     // bindless indices; here source and destination are bound as a group
     source_index: u32,
     destination_index: u32,
@@ -15,7 +15,7 @@ struct PrecomputeUniforms {
     // GGX samples per texel (prefilter)
     sample_count: u32,
 }
-@group(2) @binding(0) var<uniform> u: PrecomputeUniforms;
+@group(2) @binding(0) var<uniform> u: PrecomputePush;
 
 // Direction through texel uv in [-1, 1] of cube face `face` (+X, -X, +Y, -Y, +Z, -Z).
 fn face_dir(face: u32, uv: vec2f) -> vec3f {

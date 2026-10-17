@@ -18,40 +18,49 @@ struct Particle {
 
 struct Emitter {
   vec3 initial_velocity;
-  float size_start;
+  float velocity_spread;
   vec4 color_start;
   vec4 color_end;
-  float particle_lifetime;
   float position_spread;
-  float velocity_spread;
-  uint emit_first;
+  float size_start;
   float size_end;
+  float particle_lifetime;
   float weight;
   float weight_spread;
+  float emission_rate; // read by render, which counts each frame's new particles
   uint texture_index;
-  uint node_index;
-  float emission_rate; // CPU side only
-  uint enabled; // CPU side only
 };
 
-layout(set = 0, binding = 6) buffer EmitterBuffer {
+// Where an emitter is attached; placement i emits the frame's new particles
+// [emit_first, the next placement's emit_first).
+struct EmitterPlacement {
+  uint emitter;
+  uint node;
+  uint emit_first;
+};
+
+layout(set = 0, binding = 6) readonly buffer EmitterBuffer {
     Emitter emitters[];
+};
+
+layout(set = 0, binding = 19) readonly buffer EmitterPlacementBuffer {
+    EmitterPlacement placements[];
 };
 
 layout(set = 0, binding = 8) buffer ParticleBuffer {
     Particle particles[];
 };
 
-layout(push_constant) uniform Params {
-    uint emitter_count;
-    uint forcefield_count;
+layout(push_constant) uniform ParticleSystemParams {
+    uint emitter_placement_count;
+    uint forcefield_placement_count;
     float delta_time;
     uint frame_counter;
     uint emit_total; // new particles this frame
     uint emit_cursor; // ring slot of the first one
 };
 
-struct NodeData {
+struct Node {
     mat4 world_matrix;
     uint material_id;
     uint mesh_id;
@@ -62,7 +71,7 @@ struct NodeData {
 };
 
 layout(set = 0, binding = 1) readonly buffer WorldMatrixBuffer {
-    NodeData nodes[];
+    Node nodes[];
 };
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
@@ -98,15 +107,15 @@ vec3 random_in_sphere(float radius, uint seed) {
     );
 }
 
-// The emitter whose range [emit_first, next emitter's emit_first) holds new
-// particle `id`: the last emitter with emit_first <= id. Emitters with no new
+// The placement whose range [emit_first, next placement's emit_first) holds new
+// particle `id`: the last placement with emit_first <= id. Placements with no new
 // particles share their successor's emit_first and are never picked.
-uint find_emitter(uint id) {
+uint find_placement(uint id) {
     uint lo = 0u;
-    uint hi = emitter_count;
+    uint hi = emitter_placement_count;
     while (lo < hi) {
         uint mid = (lo + hi) / 2u;
-        if (emitters[mid].emit_first <= id) lo = mid + 1u;
+        if (placements[mid].emit_first <= id) lo = mid + 1u;
         else hi = mid;
     }
     return lo - 1u;
@@ -117,17 +126,17 @@ uint find_emitter(uint id) {
 void main() {
     uint id = gl_GlobalInvocationID.x;
     if (id >= emit_total) return;
-    uint emitter_idx = find_emitter(id);
-    Emitter emitter = emitters[emitter_idx];
-    if (emitter.node_index == 0u) return; // unattached
+    uint placement_idx = find_placement(id);
+    EmitterPlacement placed = placements[placement_idx];
+    Emitter emitter = emitters[placed.emitter];
     uint idx = (emit_cursor + id) % uint(MAX_PARTICLES);
-    // Varies across frames, emitters and particles: without frame_counter
+    // Varies across frames, placements and particles: without frame_counter
     // low-rate emitters would spawn at the same point every frame.
     uint seed = pcg_hash(idx
                          ^ (frame_counter * 2654435761u)
-                         ^ (emitter_idx * 374761393u)
-                         ^ ((id - emitter.emit_first) * 2246822519u));
-    mat4 world = nodes[emitter.node_index].world_matrix;
+                         ^ (placement_idx * 374761393u)
+                         ^ ((id - placed.emit_first) * 2246822519u));
+    mat4 world = nodes[placed.node].world_matrix;
     mat3 world_rotation = mat3(world);
     // Position: emitter position + random spread (local spread rotated into world space)
     vec3 pos_spread = random_in_sphere(emitter.position_spread, seed);

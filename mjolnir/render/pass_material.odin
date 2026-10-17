@@ -116,7 +116,7 @@ material_init :: proc(r: ^Renderer) -> bool {
 // lists (Vulkan; WebGPU culls the frame it draws).
 @(private)
 material_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32, pass: MaterialPass) {
-  attachments := &r.cameras[cam].attachments
+  attachments := &r.camera_targets[cam].attachments
   targets := MATERIAL_PASS_TARGETS[pass]
   colors := make([]rhi.ColorTarget, len(targets), context.temp_allocator)
   load: rhi.LoadOp = .CLEAR if pass == .GBUFFER else .LOAD
@@ -136,8 +136,8 @@ material_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32, pa
       append(&pipelines, p)
     }
   }
-  camera_index := cam
-  pipeline_bind(r, cmd, pipelines[0], .MESH, f, &camera_index, .MATERIAL)
+  push := MeshPush{cam}
+  pipeline_bind(r, cmd, pipelines[0], .MESH, f, &push, .MATERIAL)
   when BINDLESS {
     ready, slot := camera_ready(r, cam), camera_slot(cam) + f
   } else {
@@ -148,4 +148,10 @@ material_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32, pa
     draw_list_draw(r, cmd, slot, 0, keys[:], pipelines[:], f)
   }
   dev.cmd_end_pass(&r.gpu, cmd)
+}
+
+// What every mesh draw reads besides the scene: the camera it draws for.
+@(private = "file")
+MeshPush :: struct {
+  camera_index: u32,
 }

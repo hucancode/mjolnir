@@ -2,9 +2,9 @@
 // end. A segment past its expiry is moved outside the clip volume.
 
 @group(0) @binding(0) var<storage, read> views: array<View>;
-@group(0) @binding(1) var<storage, read> segments: array<Segment>;
+@group(0) @binding(1) var<storage, read> segments: array<DebugLineSegment>;
 
-struct Segment {
+struct DebugLineSegment {
     a: vec3f,
     // render clock time the segment stops drawing after
     expiry: f32,
@@ -13,11 +13,11 @@ struct Segment {
     color: vec4f,
 }
 
-struct DebugLineUniforms {
+struct DebugLinePush {
     camera_index: u32,
     time: f32,
 }
-@group(2) @binding(0) var<uniform> u: DebugLineUniforms;
+@group(2) @binding(0) var<uniform> u: DebugLinePush;
 
 struct VertexOut {
     @builtin(position) clip: vec4f,

@@ -149,7 +149,7 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {30, 25, 30}, {0, 5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {0, 20, 0})
-  render.attach(&app.renderer, light.index, render.make_spot_light({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25))
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_spot_light({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25)))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   return true
 }

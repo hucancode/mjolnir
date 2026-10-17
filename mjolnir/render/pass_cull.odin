@@ -26,8 +26,9 @@ DRAW_LIST_HEADER :: 8
 // custom material shader in the room the header leaves.
 @(private)
 DRAW_LISTS :: DRAW_LIST_HEADER
-MAX_MATERIAL_SHADERS :: DRAW_LISTS - int(MaterialType.CUSTOM)
-#assert(MAX_MATERIAL_SHADERS >= 1)
+// MAX_MATERIAL_SHADERS is how many material shaders (material_shader_create) exist at once.
+MAX_MATERIAL_SHADERS :: 3
+#assert(int(MaterialType.CUSTOM) + MAX_MATERIAL_SHADERS == DRAW_LISTS)
 // Mip 0 texels a depth pyramid group reduces per side (depth_reduce.comp).
 @(private = "file")
 PYRAMID_TILE :: 32
@@ -81,7 +82,7 @@ DepthReducePush :: struct {
   slot:        u32,
 }
 
-// Batched cull and draw writing: the same words as cull.wgsl's CullUniforms.
+// Batched cull and draw writing (cull.wgsl, cull_draws.wgsl).
 @(private = "file")
 BatchPush :: struct {
   node_count:      u32,
@@ -142,11 +143,11 @@ pyramids_bind :: proc(r: ^Renderer, f: u32) {
     slot := camera_slot(i) + f
     if r.pyramid_bound[slot] do continue
     r.pyramid_bound[slot] = true
-    _, mips := pyramid_shape(r.cameras[i].extent)
+    _, mips := pyramid_shape(r.camera_targets[i].extent)
     for mip in 0 ..< mips {
       dev.bindless_write(&r.gpu, .STORAGE_IMAGES, slot * MAX_DEPTH_MIPS + mip, rhi.TextureView{r.pyramids[slot], i32(mip)})
     }
-    dev.bindless_write(&r.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + slot, rhi.TextureView{r.cameras[i].attachments[.FINAL_IMAGE][f], 0})
+    dev.bindless_write(&r.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + slot, rhi.TextureView{r.camera_targets[i].attachments[.FINAL_IMAGE][f], 0})
   }
 }
 
@@ -259,8 +260,8 @@ cull_compacted :: proc(r: ^Renderer, cmd: rhi.CommandList, f, first_view, view_c
 pyramid_build_bindless :: proc(r: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
   slot := camera_slot(c) + f
   if !r.pyramid_bound[slot] do return
-  extent, mips := pyramid_shape(r.cameras[c].extent)
-  prev_depth := r.cameras[c].attachments[.DEPTH][(f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT]
+  extent, mips := pyramid_shape(r.camera_targets[c].extent)
+  prev_depth := r.camera_targets[c].attachments[.DEPTH][(f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT]
   groups := [2]u32{(extent.x + PYRAMID_TILE - 1) / PYRAMID_TILE, (extent.y + PYRAMID_TILE - 1) / PYRAMID_TILE}
   push := DepthReducePush{u32(prev_depth), mips, groups.x * groups.y, slot}
   dev.cmd_push(&r.gpu, cmd, &push, size_of(push))
@@ -272,8 +273,8 @@ pyramid_build_bindless :: proc(r: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
 pyramid_build_groups :: proc(r: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
   slot := camera_slot(c) + f
   pyramid := r.pyramids[slot]
-  prev_depth := r.cameras[c].attachments[.DEPTH][(f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT]
-  extent, mips := pyramid_shape(r.cameras[c].extent)
+  prev_depth := r.camera_targets[c].attachments[.DEPTH][(f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT]
+  extent, mips := pyramid_shape(r.camera_targets[c].extent)
   for mip in 0 ..< mips {
     key := ReduceKey{slot, mip, prev_depth if mip == 0 else 0}
     group, cached := r.reduce_groups[key]
@@ -425,8 +426,8 @@ draw_count_record :: proc(r: ^Renderer, cmd: rhi.CommandList, slot, f: u32) {
   dev.cmd_copy_buffer(&r.gpu, cmd, r.draw_lists[slot].buffer, 0, r.draw_count_readback[f], 0, size_of(u32))
 }
 
-// draw_count is how many opaque draws the main camera's culling kept, a few frames back
-// (WebGPU) or in the last finished frame (Vulkan): a statistic to show.
+// draw_count is how many opaque draws the main camera's culling kept in a recent frame:
+// a statistic to show.
 draw_count :: proc(self: ^Renderer) -> u32 {
   if _, ok := main_camera(self); !ok do return 0
   value: [size_of(u32)]u8

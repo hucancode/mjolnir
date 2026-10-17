@@ -9,7 +9,7 @@ const uint SAMPLER_LINEAR_REPEAT = 3u;
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform PostProcessPushConstant {
+layout(push_constant) uniform PostPush {
     float camera_near;
     float camera_far;
     uint normal_texture_index;

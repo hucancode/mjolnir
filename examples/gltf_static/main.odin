@@ -48,7 +48,7 @@ setup :: proc(app: ^App) -> bool {
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   app.gltf = gltf.load(&app.scene, &app.renderer, #load("../../assets/Duck.glb"))
   light := world.spawn(&app.scene)
-  render.attach(&app.renderer, light.index, render.make_directional_light())
+  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light()))
   return true
 }
 

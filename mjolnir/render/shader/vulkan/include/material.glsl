@@ -6,7 +6,7 @@
 //     #version 450
 //     #include "material.glsl"
 //     void main() {
-//         MaterialData m = node_material();
+//         Material m = node_material();
 //         out_color = m.base_color_factor * max(dot(normalize(in_normal), vec3(0, 1, 0)), 0.0);
 //     }
 //
@@ -46,7 +46,7 @@ struct View {
 };
 
 // render.Material; for a custom material every field but `type` and `shader` is the shader's
-struct MaterialData {
+struct Material {
     uint albedo_index;
     uint metallic_roughness_index;
     uint normal_index;
@@ -62,7 +62,7 @@ struct MaterialData {
     uint type;
 };
 
-struct NodeData {
+struct Node {
     mat4 world_matrix;
     uint material_id;
     uint mesh_id;
@@ -77,17 +77,17 @@ layout(set = 0, binding = 0) readonly buffer ViewBuffer {
 };
 
 layout(set = 0, binding = 1) readonly buffer NodeBuffer {
-    NodeData nodes[];
+    Node nodes[];
 };
 
 layout(set = 0, binding = 3) readonly buffer MaterialBuffer {
-    MaterialData materials[];
+    Material materials[];
 };
 
 layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
 
-layout(push_constant) uniform MaterialPush {
+layout(push_constant) uniform MeshPush {
     uint camera_index;
 };
 
@@ -102,7 +102,7 @@ layout(location = 5) flat in uint in_node_index;
 layout(location = 0) out vec4 out_color;
 
 // The material of the drawn node.
-MaterialData node_material() {
+Material node_material() {
     return materials[nodes[in_node_index].material_id];
 }
 

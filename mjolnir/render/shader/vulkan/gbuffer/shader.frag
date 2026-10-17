@@ -9,7 +9,7 @@ const uint SAMPLER_LINEAR_REPEAT = 3u;
 // texture index of a material slot without a texture
 const uint NO_TEXTURE = 0u;
 
-struct MaterialData {
+struct Material {
     uint albedo_index;
     uint metallic_roughness_index;
     uint normal_index;
@@ -30,10 +30,10 @@ layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
 
 layout(set = 0, binding = 3) readonly buffer MaterialBuffer {
-    MaterialData materials[];
+    Material materials[];
 };
 
-struct NodeData {
+struct Node {
     mat4 world_matrix;
     uint material_id;
     uint mesh_id;
@@ -44,10 +44,10 @@ struct NodeData {
 };
 
 layout(set = 0, binding = 1) readonly buffer NodeBuffer {
-    NodeData nodes[];
+    Node nodes[];
 };
 
-layout(push_constant) uniform PushConstants {
+layout(push_constant) uniform MeshPush {
     uint camera_index;
 };
 
@@ -64,8 +64,8 @@ layout(location = 2) out vec4 outMetallicRoughness;
 layout(location = 3) out vec4 outEmissive;
 
 void main() {
-    NodeData node = nodes[node_index];
-    MaterialData material = materials[node.material_id];
+    Node node = nodes[node_index];
+    Material material = materials[node.material_id];
     bool has_normal = material.normal_index != NO_TEXTURE;
     bool has_albedo = material.albedo_index != NO_TEXTURE;
     bool has_mr = material.metallic_roughness_index != NO_TEXTURE;

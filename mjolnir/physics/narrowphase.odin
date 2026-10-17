@@ -914,8 +914,8 @@ collide_bodies :: #force_inline proc(body_a, body_b: ^Body, margin: f32 = 0) -> 
 @(private)
 narrowphase_pair :: proc(world: ^World, handle_a, handle_b: BodyHandle, out: ^[dynamic]Contact) {
   handle_a, handle_b := handle_a, handle_b
-  body_a := body(world, handle_a) or_else nil
-  body_b := body(world, handle_b) or_else nil
+  body_a := lookup(world, handle_a) or_else nil
+  body_b := lookup(world, handle_b) or_else nil
   if body_a == nil || body_b == nil do return
   if !is_dynamic(body_a) {
     if !is_dynamic(body_b) do return

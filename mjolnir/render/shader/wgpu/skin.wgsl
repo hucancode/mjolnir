@@ -4,19 +4,19 @@
 // skipped.
 
 @group(0) @binding(0) var<storage, read> nodes: array<Node>;
-@group(0) @binding(1) var<storage, read> meshes: array<Mesh>;
+@group(0) @binding(1) var<storage, read> meshes: array<MeshData>;
 @group(0) @binding(2) var<storage, read> bones: array<mat4x4f>;
-@group(0) @binding(3) var<storage, read> skinning: array<Skinning>;
+@group(0) @binding(3) var<storage, read> skinning: array<SkinningData>;
 // Vertex as 16 floats: position 0..3, normal 3..6, color 6..10, uv 10..12, tangent 12..16
 @group(0) @binding(4) var<storage, read> vertices: array<f32>;
 // slot + 1 per skinned vertex, 0 for none
 @group(0) @binding(5) var<storage, read> owners: array<u32>;
 @group(0) @binding(6) var<storage, read_write> skinned: array<SkinnedVertex>;
 
-struct SkinUniforms {
+struct SkinPush {
     vertex_count: u32,
 }
-@group(2) @binding(0) var<uniform> u: SkinUniforms;
+@group(2) @binding(0) var<uniform> u: SkinPush;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3u) {

@@ -7,10 +7,10 @@
 
 @group(1) @binding(0) var albedo_texture: texture_2d<f32>;
 
-struct MeshUniforms {
+struct MeshPush {
     camera_index: u32,
 }
-@group(2) @binding(0) var<uniform> u: MeshUniforms;
+@group(2) @binding(0) var<uniform> u: MeshPush;
 
 struct VertexOut {
     @builtin(position) clip: vec4f,
