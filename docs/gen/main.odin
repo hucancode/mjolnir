@@ -38,11 +38,10 @@ Example :: struct {
 	wasm:   bool, // a WebGPU build exists at live/<name>.wasm
 }
 
-// raw symbol straight out of `odin doc`, before filtering
+// raw symbol straight out of `odin doc`, its doc still in lines
 Raw_Sym :: struct {
-	sig:  string,
-	file: string,
-	doc:  [dynamic]string,
+	sig: string,
+	doc: [dynamic]string,
 }
 
 Raw_Section :: struct {
@@ -75,33 +74,6 @@ write :: proc(path, content: string) {
 	}
 }
 
-is_test_file :: proc(f: string) -> bool {
-	return strings.has_prefix(f, "test_") || strings.has_prefix(f, "bench_")
-}
-
-is_ident :: proc(c: u8) -> bool {
-	return c == '_' || c == '$' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-}
-
-leading_ident :: proc(s: string) -> string {
-	i := 0
-	for i < len(s) && is_ident(s[i]) {i += 1}
-	return s[:i]
-}
-
-// names declared at file scope: `name :: ...` or `name := ...` at column 0
-decl_names :: proc(path: string, into: ^map[string]struct{}) {
-	text := read(path)
-	for line in strings.split_lines_iterator(&text) {
-		name := leading_ident(line)
-		if len(name) == 0 || (name[0] >= '0' && name[0] <= '9') {continue}
-		rest := strings.trim_left_space(line[len(name):])
-		if strings.has_prefix(rest, "::") || strings.has_prefix(rest, ":=") {
-			into[name] = {}
-		}
-	}
-}
-
 // `odin doc` output is tab-indented: 1 tab = package doc / section header, 2 = symbol, 3+ = symbol doc
 parse_doc :: proc(text: string) -> (doc: [dynamic]string, sections: [dynamic]Raw_Section) {
 	cur := -1
@@ -128,16 +100,10 @@ parse_doc :: proc(text: string) -> (doc: [dynamic]string, sections: [dynamic]Raw
 			if cur < 0 {append(&doc, body)}
 		case cur >= 0 && tabs == 2:
 			s := Raw_Sym{sig = body}
-			// trailing "/* pkg:file.odin!offset */"
+			// drop the trailing "/* pkg:file.odin!offset */"
 			if strings.has_suffix(body, " */") {
 				if i := strings.last_index(body, "/* "); i >= 0 {
-					loc := body[i + 3:len(body) - 3]
-					if c := strings.index_byte(loc, ':'); c >= 0 {
-						if b := strings.index_byte(loc, '!'); b > c {
-							s.file = loc[c + 1:b]
-							s.sig = strings.trim_right_space(body[:i])
-						}
-					}
+					s.sig = strings.trim_right_space(body[:i])
 				}
 			}
 			append(&sections[cur].syms, s)
@@ -166,25 +132,37 @@ package_dirs :: proc() -> []string {
 	return dirs[:]
 }
 
-load_pkg :: proc(path: string) -> Pkg {
-	infos, err := os.read_all_directory_by_path(path, context.allocator)
-	if err != nil {die("cannot list %s: %v", path, err)}
-
-	// names declared only in test/bench files are hidden from the reference
-	test_names, real_names: map[string]struct{}
-	for fi in infos {
-		if !strings.has_suffix(fi.name, ".odin") {continue}
-		decl_names(fi.fullpath, is_test_file(fi.name) ? &test_names : &real_names)
+// definitions in the left-out GPU layer, by qualified name ("rhi.BlendMode" -> "enum {...}")
+internal_defs :: proc() -> map[string]string {
+	defs: map[string]string
+	for path in INTERNAL {
+		_, raw := parse_doc(run("odin", "doc", path))
+		pkg := filepath.base(path)
+		for r in raw {
+			for s in r.syms {
+				if i := strings.index(s.sig, " :: "); i >= 0 {
+					defs[strings.concatenate({pkg, ".", s.sig[:i]})] = s.sig[i + 4:]
+				}
+			}
+		}
 	}
-	for n in real_names {delete_key(&test_names, n)}
+	return defs
+}
 
+// `defs` resolves aliases of the GPU layer (render's `BlendMode :: rhi.BlendMode`), which the
+// reference leaves out, to their definitions
+load_pkg :: proc(path: string, defs: map[string]string) -> Pkg {
+	// test files are #+private, so `odin doc` leaves their symbols out
 	doc, raw := parse_doc(run("odin", "doc", path))
 	sections: [dynamic]Section
 	for r in raw {
 		syms: [dynamic]Sym
 		for s in r.syms {
-			if is_test_file(s.file) || leading_ident(s.sig) in test_names {continue}
-			append(&syms, Sym{sig = s.sig, doc = strings.join(s.doc[:], "\n")})
+			sig := s.sig
+			if i := strings.index(sig, " :: "); i >= 0 {
+				if def, ok := defs[sig[i + 4:]]; ok {sig = strings.concatenate({sig[:i + 4], def})}
+			}
+			append(&syms, Sym{sig = sig, doc = strings.join(s.doc[:], "\n")})
 		}
 		if len(syms) > 0 {append(&sections, Section{name = r.name, syms = syms[:]})}
 	}
@@ -238,7 +216,8 @@ main :: proc() {
 	}
 
 	pkgs: [dynamic]Pkg
-	for d in package_dirs() {append(&pkgs, load_pkg(d))}
+	defs := internal_defs()
+	for d in package_dirs() {append(&pkgs, load_pkg(d, defs))}
 	emit(strings.concatenate({out, "/api.js"}), "API", pkgs[:])
 	examples := load_examples()
 	emit(strings.concatenate({out, "/examples.js"}), "EXAMPLES", examples)

@@ -1,0 +1,350 @@
+#+build !js
+#+private
+package bake
+
+import "../detour"
+import "../recast"
+import "core:math"
+import "core:math/linalg"
+import "core:testing"
+
+@(private = "file")
+create_navmesh :: proc(
+  pmesh: ^recast.Poly_Mesh,
+  dmesh: ^recast.Poly_Mesh_Detail,
+  walkable_height: f32,
+  walkable_radius: f32,
+  walkable_climb: f32,
+) -> (
+  nav_mesh: ^detour.Nav_Mesh,
+  ok: bool,
+) {
+  params := Create_Nav_Mesh_Data_Params {
+    poly_mesh        = pmesh,
+    poly_mesh_detail = dmesh,
+    walkable_height  = walkable_height,
+    walkable_radius  = walkable_radius,
+    walkable_climb   = walkable_climb,
+  }
+  nav_data, data_status := create_nav_mesh_data(&params)
+  if !detour.status_succeeded(data_status) do return nil, false
+  nav_mesh = new(detour.Nav_Mesh)
+  mesh_params := detour.Nav_Mesh_Params {
+    orig        = pmesh.bmin,
+    tile_width  = (pmesh.bmax - pmesh.bmin).x,
+    tile_height = (pmesh.bmax - pmesh.bmin).z,
+    max_tiles   = 1,
+    max_polys   = 1024,
+  }
+  init_status := detour.nav_mesh_init(nav_mesh, &mesh_params)
+  if !detour.status_succeeded(init_status) {
+    free(nav_mesh)
+    return nil, false
+  }
+  _, add_status := detour.nav_mesh_add_tile(
+    nav_mesh,
+    nav_data,
+    detour.DT_TILE_FREE_DATA,
+  )
+  if !detour.status_succeeded(add_status) {
+    detour.nav_mesh_destroy(nav_mesh)
+    free(nav_mesh)
+    return nil, false
+  }
+  return nav_mesh, true
+}
+
+@(private = "file")
+find_path_points :: proc(
+  query: ^detour.Nav_Mesh_Query,
+  start_pos: [3]f32,
+  end_pos: [3]f32,
+  filter: ^detour.Query_Filter,
+  path: [][3]f32,
+) -> (
+  path_count: int,
+  status: detour.Status,
+) {
+  if len(path) == 0 do return 0, {.Buffer_Too_Small}
+  half_extents := [3]f32{5.0, 5.0, 5.0}
+  start_status, start_ref, start_nearest := detour.find_nearest_poly(
+    query,
+    start_pos,
+    half_extents,
+    filter,
+  )
+  if !detour.status_succeeded(start_status) || start_ref == detour.INVALID_POLY_REF do return 0, start_status
+  end_status, end_ref, end_nearest := detour.find_nearest_poly(
+    query,
+    end_pos,
+    half_extents,
+    filter,
+  )
+  if !detour.status_succeeded(end_status) || end_ref == detour.INVALID_POLY_REF do return 0, end_status
+  if start_ref == end_ref {
+    path[0] = start_nearest
+    if linalg.length2(end_nearest - start_nearest) > math.F32_EPSILON {
+      path[1] = end_nearest
+      return 2, {.Success}
+    }
+    return 1, {.Success}
+  }
+  poly_path := make([]detour.Poly_Ref, len(path))
+  defer delete(poly_path)
+  path_status, poly_path_count := detour.find_path(
+    query,
+    start_ref,
+    end_ref,
+    start_nearest,
+    end_nearest,
+    filter,
+    poly_path,
+    i32(len(path)),
+  )
+  if !detour.status_succeeded(path_status) || poly_path_count == 0 do return 0, path_status
+  straight_path := make([]detour.Straight_Path_Point, len(path))
+  defer delete(straight_path)
+  straight_path_flags := make([]u8, len(path))
+  defer delete(straight_path_flags)
+  straight_path_refs := make([]detour.Poly_Ref, len(path))
+  defer delete(straight_path_refs)
+  straight_status, straight_path_count := detour.find_straight_path(
+    query,
+    start_nearest,
+    end_nearest,
+    poly_path[:poly_path_count],
+    poly_path_count,
+    straight_path,
+    straight_path_flags,
+    straight_path_refs,
+    i32(len(path)),
+    0,
+  )
+  if !detour.status_succeeded(straight_status) do return 0, straight_status
+  path_count = 0
+  last_pos := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}
+  for i in 0 ..< int(straight_path_count) {
+    pos := straight_path[i].pos
+    if linalg.length2(pos - last_pos) > math.F32_EPSILON {
+      path[path_count] = pos
+      path_count += 1
+      last_pos = pos
+    }
+  }
+  return path_count, {.Success}
+}
+
+@(test)
+test_navmesh_file_serialization :: proc(t: ^testing.T) {
+  vertices := [][3]f32{{-5, 0, -5}, {5, 0, -5}, {5, 0, 5}, {-5, 0, 5}}
+  indices := []i32{0, 1, 2, 0, 2, 3}
+  areas := []u8{recast.RC_WALKABLE_AREA, recast.RC_WALKABLE_AREA}
+  pmesh, dmesh, build_ok := build_test_mesh(vertices, indices, areas)
+  testing.expect(t, build_ok, "Failed to build test mesh")
+  defer {
+    recast.destroy_poly_mesh(pmesh)
+    recast.destroy_poly_mesh_detail(dmesh)
+  }
+  nav_mesh, create_ok := create_navmesh(pmesh, dmesh, 2.0, 0.6, 0.9)
+  testing.expect(t, create_ok, "Failed to create navigation mesh")
+  defer {
+    detour.nav_mesh_destroy(nav_mesh)
+    free(nav_mesh)
+  }
+  data := detour.save_navmesh(nav_mesh)
+  defer delete(data)
+  loaded_nav_mesh, load_ok := detour.load_navmesh(data)
+  testing.expect(t, load_ok, "Failed to load navigation mesh")
+  testing.expect(
+    t,
+    loaded_nav_mesh != nil,
+    "Loaded navigation mesh should not be nil",
+  )
+  defer {
+    detour.nav_mesh_destroy(loaded_nav_mesh)
+    free(loaded_nav_mesh)
+  }
+  testing.expect(
+    t,
+    nav_mesh.params.max_tiles == loaded_nav_mesh.params.max_tiles,
+    "Max tiles should match",
+  )
+  testing.expect(
+    t,
+    nav_mesh.params.max_polys == loaded_nav_mesh.params.max_polys,
+    "Max polys should match",
+  )
+  original_tile_count := count_valid_tiles(nav_mesh)
+  loaded_tile_count := count_valid_tiles(loaded_nav_mesh)
+  testing.expect(
+    t,
+    original_tile_count == loaded_tile_count,
+    "Tile counts should match",
+  )
+  testing.expect(t, loaded_tile_count > 0, "Should have at least one tile")
+}
+
+@(test)
+test_bake_and_load_workflow :: proc(t: ^testing.T) {
+  vertices := [][3]f32 {
+    {-8, 0, -8},
+    {8, 0, -8},
+    {8, 0, 8},
+    {-8, 0, 8},
+    // Add a raised platform
+    {-2, 1, -2},
+    {2, 1, -2},
+    {2, 1, 2},
+    {-2, 1, 2},
+  }
+  indices := []i32 {
+    // Floor
+    0,
+    1,
+    2,
+    0,
+    2,
+    3,
+    // Platform
+    4,
+    5,
+    6,
+    4,
+    6,
+    7,
+  }
+  areas := []u8 {
+    recast.RC_WALKABLE_AREA,
+    recast.RC_WALKABLE_AREA,
+    recast.RC_WALKABLE_AREA,
+    recast.RC_WALKABLE_AREA,
+  }
+  pmesh, dmesh, build_ok := build_test_mesh(vertices, indices, areas)
+  testing.expect(t, build_ok, "Failed to build test mesh")
+  defer {
+    recast.destroy_poly_mesh(pmesh)
+    recast.destroy_poly_mesh_detail(dmesh)
+  }
+  baked, bake_ok := bake_navmesh(pmesh, dmesh, 2.0, 0.6, 0.9)
+  testing.expect(t, bake_ok, "Failed to bake navigation mesh")
+  defer delete(baked)
+  nav_mesh, query, runtime_ok := detour.load_navmesh_for_runtime(baked)
+  testing.expect(t, runtime_ok, "Failed to load navigation mesh for runtime")
+  testing.expect(
+    t,
+    nav_mesh != nil && query != nil,
+    "Navigation mesh and query should not be nil",
+  )
+  defer {
+    detour.nav_mesh_query_destroy(query)
+    free(query)
+    detour.nav_mesh_destroy(nav_mesh)
+    free(nav_mesh)
+  }
+  start_pos := [3]f32{-6, 0.1, -6}
+  end_pos := [3]f32{6, 0.1, 6}
+  path := make([][3]f32, 32)
+  defer delete(path)
+  filter: detour.Query_Filter
+  detour.query_filter_init(&filter)
+  path_count, path_status := find_path_points(
+    query,
+    start_pos,
+    end_pos,
+    &filter,
+    path,
+  )
+  testing.expect(
+    t,
+    detour.status_succeeded(path_status),
+    "Pathfinding should succeed",
+  )
+  testing.expect(t, path_count > 0, "Should find a path")
+}
+
+build_test_mesh :: proc(
+  vertices: [][3]f32,
+  indices: []i32,
+  areas: []u8,
+) -> (
+  ^recast.Poly_Mesh,
+  ^recast.Poly_Mesh_Detail,
+  bool,
+) {
+  cfg: recast.Config
+  cfg.bmin, cfg.bmax = recast.calc_bounds(vertices)
+  cfg.cs = 0.3
+  cfg.ch = 0.2
+  cfg.walkable_slope = math.PI * 0.25
+  cfg.walkable_height = 10
+  cfg.walkable_climb = 4
+  cfg.walkable_radius = 2
+  cfg.max_edge_len = 12
+  cfg.max_simplification_error = 1.3
+  cfg.min_region_area = 8
+  cfg.merge_region_area = 20
+  cfg.max_verts_per_poly = 6
+  cfg.detail_sample_dist = 6.0
+  cfg.detail_sample_max_error = 1.0
+  cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
+  hf := recast.create_heightfield(
+    cfg.width,
+    cfg.height,
+    cfg.bmin,
+    cfg.bmax,
+    cfg.cs,
+    cfg.ch,
+  )
+  if hf == nil do return nil, nil, false
+  defer recast.destroy_heightfield(hf)
+  if !recast.rasterize_triangles(vertices, indices, areas, hf, cfg.walkable_climb) do return nil, nil, false
+  recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
+  recast.filter_ledge_spans(
+    int(cfg.walkable_height),
+    int(cfg.walkable_climb),
+    hf,
+  )
+  recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
+  chf := recast.create_compact_heightfield(
+    cfg.walkable_height,
+    cfg.walkable_climb,
+    hf,
+  )
+  if chf == nil do return nil, nil, false
+  defer recast.destroy_compact_heightfield(chf)
+  recast.erode_walkable_area(cfg.walkable_radius, chf)
+  recast.build_distance_field(chf)
+  recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
+  cset := recast.create_contour_set(
+    chf,
+    cfg.max_simplification_error,
+    cfg.max_edge_len,
+  )
+  if cset == nil do return nil, nil, false
+  defer recast.destroy_contour_set(cset)
+  pmesh := recast.create_poly_mesh(cset, cfg.max_verts_per_poly)
+  if pmesh == nil do return nil, nil, false
+  dmesh := recast.create_poly_mesh_detail(
+    pmesh,
+    chf,
+    cfg.detail_sample_dist,
+    cfg.detail_sample_max_error,
+  )
+  if dmesh == nil {
+    recast.destroy_poly_mesh(pmesh)
+    return nil, nil, false
+  }
+  return pmesh, dmesh, true
+}
+
+// Helper function to count valid tiles in a navigation mesh
+count_valid_tiles :: proc(nav_mesh: ^detour.Nav_Mesh) -> int {
+  count := 0
+  for i in 0 ..< nav_mesh.max_tiles {
+    tile := &nav_mesh.tiles[i]
+    if tile.header != nil && len(tile.data) > 0 {
+      count += 1
+    }
+  }
+  return count
+}
