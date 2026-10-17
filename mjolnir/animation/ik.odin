@@ -41,7 +41,7 @@ IKTarget :: struct {
   constraints:     []IKBoneConstraint, // Optional per-bone constraints (nil or len = chain length)
   target_position: [3]f32,
   pole_vector:     [3]f32, // Point the chain's non-root bones twist their X axis toward; the bend plane comes from the FK pose
-  pole_weight:     f32, // Pole twist strength (0-1), add_ik_layer defaults to 1
+  pole_weight:     f32, // Pole twist strength (0-1), ik_layer_create defaults to 1
   max_iterations:  int,
   tolerance:       f32, // Stop when end effector within this distance
   weight:          f32, // Blend weight (0-1), 1 = full IK, 0 = pure FK

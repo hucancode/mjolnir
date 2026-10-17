@@ -15,43 +15,43 @@ NavMesh :: struct {
 }
 
 // destroy frees the mesh, its query and the tile data.
-destroy :: proc(nav: ^NavMesh) {
-  detour.nav_mesh_query_destroy(&nav.query)
-  detour.nav_mesh_destroy(&nav.detour_mesh)
-  nav^ = {}
+destroy :: proc(self: ^NavMesh) {
+  detour.nav_mesh_query_destroy(&self.query)
+  detour.nav_mesh_destroy(&self.detour_mesh)
+  self^ = {}
 }
 
 // save encodes the mesh tiles in the detour .navmesh format, in memory the caller frees
 // (platform.write_file stores it).
-save :: proc(nav: ^NavMesh, allocator := context.allocator) -> []u8 {
-  return detour.save_navmesh(&nav.detour_mesh, allocator)
+save :: proc(self: ^NavMesh, allocator := context.allocator) -> []u8 {
+  return detour.save_navmesh(&self.detour_mesh, allocator)
 }
 
-// load decodes a mesh encoded by save or baked by navigation/bake, replacing any previous mesh.
-load :: proc(nav: ^NavMesh, data: []u8, max_query_nodes: i32 = 2048) -> bool {
+// init decodes a mesh encoded by save or baked by navigation/bake, replacing any previous mesh.
+init :: proc(self: ^NavMesh, data: []u8, max_query_nodes: i32 = 2048) -> bool {
   mesh := detour.load_navmesh(data) or_return
-  destroy(nav)
-  nav.detour_mesh = mesh^
+  destroy(self)
+  self.detour_mesh = mesh^
   free(mesh)
-  if status := detour.nav_mesh_query_init(&nav.query, &nav.detour_mesh, max_query_nodes); !detour.status_succeeded(status) {
+  if status := detour.nav_mesh_query_init(&self.query, &self.detour_mesh, max_query_nodes); !detour.status_succeeded(status) {
     log.errorf("Failed to initialize navigation mesh query: %v", status)
-    destroy(nav)
+    destroy(self)
     return false
   }
-  detour.query_filter_init(&nav.filter)
+  detour.query_filter_init(&self.filter)
   return true
 }
 
 // nearest_point returns the closest mesh point within extents of position.
 nearest_point :: proc(
-  nav: ^NavMesh,
+  self: ^NavMesh,
   position: [3]f32,
   extents: [3]f32 = {2, 4, 2},
 ) -> (
   point: [3]f32,
   ok: bool,
 ) {
-  status, ref, pos := detour.find_nearest_poly(&nav.query, position, extents, &nav.filter)
+  status, ref, pos := detour.find_nearest_poly(&self.query, position, extents, &self.filter)
   if !detour.status_succeeded(status) || ref == detour.INVALID_POLY_REF do return {}, false
   return pos, true
 }
@@ -59,7 +59,7 @@ nearest_point :: proc(
 // raycast returns the nearest point where ray.origin + t * ray.direction (0 < t < max_t) hits
 // the mesh surface. Tests the detail triangles of every polygon.
 raycast :: proc(
-  nav: ^NavMesh,
+  self: ^NavMesh,
   ray: geometry.Ray,
   max_t: f32 = math.F32_MAX,
 ) -> (
@@ -68,8 +68,8 @@ raycast :: proc(
 ) {
   origin, dir := ray.origin, ray.direction
   best := max_t
-  for i in 0 ..< nav.detour_mesh.max_tiles {
-    tile := &nav.detour_mesh.tiles[i]
+  for i in 0 ..< self.detour_mesh.max_tiles {
+    tile := &self.detour_mesh.tiles[i]
     if tile.header == nil do continue
     for poly_idx in 0 ..< int(tile.header.poly_count) {
       poly := &tile.polys[poly_idx]
@@ -129,7 +129,7 @@ ray_triangle :: proc "contextless" (origin, dir, v0, v1, v2: [3]f32) -> (t: f32,
 // find_path returns straight-line waypoints from start to end; both ends snap to the mesh
 // within `extents`. The caller deletes the path.
 find_path :: proc(
-  nav: ^NavMesh,
+  self: ^NavMesh,
   start, end: [3]f32,
   max_path_length: i32 = 256,
   extents: [3]f32 = {2, 4, 2},
@@ -138,27 +138,27 @@ find_path :: proc(
   path: [][3]f32,
   ok: bool,
 ) #optional_ok {
-  status, start_ref, start_pos := detour.find_nearest_poly(&nav.query, start, extents, &nav.filter)
+  status, start_ref, start_pos := detour.find_nearest_poly(&self.query, start, extents, &self.filter)
   if !detour.status_succeeded(status) || start_ref == detour.INVALID_POLY_REF do return nil, false
   end_ref: detour.Poly_Ref
   end_pos: [3]f32
-  status, end_ref, end_pos = detour.find_nearest_poly(&nav.query, end, extents, &nav.filter)
+  status, end_ref, end_pos = detour.find_nearest_poly(&self.query, end, extents, &self.filter)
   if !detour.status_succeeded(status) || end_ref == detour.INVALID_POLY_REF do return nil, false
   polys := make([]detour.Poly_Ref, max_path_length, context.temp_allocator)
   path_status, poly_count := detour.find_path(
-    &nav.query,
+    &self.query,
     start_ref,
     end_ref,
     start_pos,
     end_pos,
-    &nav.filter,
+    &self.filter,
     polys,
     max_path_length,
   )
   if !detour.status_succeeded(path_status) || poly_count == 0 do return nil, false
   straight := make([]detour.Straight_Path_Point, max_path_length, context.temp_allocator)
   straight_status, count := detour.find_straight_path(
-    &nav.query,
+    &self.query,
     start_pos,
     end_pos,
     polys[:poly_count],
@@ -178,7 +178,7 @@ find_path :: proc(
 // debug_triangles returns the triangulated mesh polygons for debug drawing. Caller deletes
 // both slices.
 debug_triangles :: proc(
-  nav: ^NavMesh,
+  self: ^NavMesh,
   allocator := context.allocator,
 ) -> (
   positions: [][3]f32,
@@ -186,8 +186,8 @@ debug_triangles :: proc(
 ) {
   verts := make([dynamic][3]f32, 0, 4096, allocator)
   tris := make([dynamic]u32, 0, 16384, allocator)
-  for i in 0 ..< nav.detour_mesh.max_tiles {
-    tile := &nav.detour_mesh.tiles[i]
+  for i in 0 ..< self.detour_mesh.max_tiles {
+    tile := &self.detour_mesh.tiles[i]
     if tile.header == nil do continue
     base := u32(len(verts))
     for v in 0 ..< tile.header.vert_count do append(&verts, tile.verts[v])

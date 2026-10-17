@@ -63,10 +63,10 @@ setup :: proc(app: ^App) -> bool {
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 6.0)
 
-  tex, tex_ok := render.texture_load(&app.renderer, #load("../../assets/Warrior_Sheet-Effect.png"))
+  tex, tex_ok := render.texture_create(&app.renderer, #load("../../assets/Warrior_Sheet-Effect.png"))
   if !tex_ok {
     log.error("failed to load warrior sheet")
     return true
@@ -76,8 +76,8 @@ setup :: proc(app: ^App) -> bool {
   for x, mode in xs {
     sprite := render.material_create(&app.renderer, .SPRITE, albedo_texture = tex, frame_columns = 6, frame_rows = 17) or_continue
     node := world.spawn(&app.scene, {x, 1.5, 0}) or_continue
-    render.attach(&app.renderer, node.index, render.MeshAttachment {
-      handle   = app.renderer.builtin_meshes[.QUAD_XY],
+    render.attach(&app.renderer, render.SlotHandle(node.index), render.MeshAttachment {
+      mesh   = app.renderer.builtin_meshes[.QUAD_XY],
       material = sprite,
     })
     sprites[mode] = sprite
@@ -85,7 +85,7 @@ setup :: proc(app: ^App) -> bool {
   }
 
   light := world.spawn(&app.scene, {2, 6, 4})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1, 1}, shadow_radius = 8)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1, 1}, shadow_radius = 8)))
   return true
 }
 

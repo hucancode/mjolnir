@@ -21,10 +21,10 @@ rig_destroy :: proc(self: ^Rig) {
   self^ = {}
 }
 
-// find_clip returns the index of the clip named name.
-find_clip :: proc(self: ^Rig, name: string) -> (index: int, ok: bool) #optional_ok {
-  for c, i in self.clips do if c.name == name do return i, true
-  return -1, false
+// find_clip returns the clip named name.
+find_clip :: proc(self: ^Rig, name: string) -> (clip: ClipHandle, ok: bool) #optional_ok {
+  for c, i in self.clips do if c.name == name do return ClipHandle(i), true
+  return 0, false
 }
 
 // Animator is the per-instance animation state of one skeleton. Owns its layer stack and the
@@ -70,14 +70,14 @@ animator_init :: proc(self: ^Animator, rig: ^Rig) -> bool {
 
 // animator_destroy frees the animator's layers and pose storage.
 animator_destroy :: proc(self: ^Animator) {
-  for &l in self.layers do layer_destroy(&l)
+  for &l in self.layers do layer_free(&l)
   delete(self.layers)
   if len(self.palette) > 0 do mem.free(raw_data(self.palette))
   self^ = {}
 }
 
 @(private)
-layer_destroy :: proc(self: ^Layer) {
+layer_free :: proc(self: ^Layer) {
   switch &d in self.data {
   case FKLayer:
   case IKTarget:
@@ -155,7 +155,7 @@ animator_update :: proc(
   transition_update(&self.transition, self.layers[:], delta_time)
   for &layer in self.layers {
     fk := (&layer.data.(FKLayer)) or_continue
-    if fk.clip < 0 || fk.clip >= len(rig.clips) do continue
+    if int(fk.clip) >= len(rig.clips) do continue
     playback_advance(fk, rig.clips[fk.clip].duration, delta_time)
   }
   copy(self.local, skel.rest)
@@ -163,7 +163,7 @@ animator_update :: proc(
   for &layer in self.layers {
     if layer.weight <= 0 do continue
     fk := layer.data.(FKLayer) or_continue
-    if fk.clip < 0 || fk.clip >= len(rig.clips) do continue
+    if int(fk.clip) >= len(rig.clips) do continue
     clip := &rig.clips[fk.clip]
     mask, has_mask := layer.bone_mask.?
     for i in 0 ..< n {
@@ -245,62 +245,62 @@ bone_segments :: proc(
 
 // ---------- layer stack ----------
 
-// Store `layer` at `index`; out of range, in the first empty slot or appended.
+// Store `layer` in place of `replace` if it is a layer, else in the first empty slot or appended.
 @(private)
-put_layer :: proc(self: ^Animator, layer: Layer, index: int) -> int {
-  if index >= 0 && index < len(self.layers) {
-    layer_destroy(&self.layers[index])
-    self.layers[index] = layer
-    return index
+put_layer :: proc(self: ^Animator, layer: Layer, replace: Maybe(LayerHandle)) -> LayerHandle {
+  if r, ok := replace.?; ok && int(r) < len(self.layers) {
+    layer_free(&self.layers[r])
+    self.layers[r] = layer
+    return r
   }
   for &l, i in self.layers do if l.data == nil {
     l = layer
-    return i
+    return LayerHandle(i)
   }
   append(&self.layers, layer)
-  return len(self.layers) - 1
+  return LayerHandle(len(self.layers) - 1)
 }
 
 @(private)
-valid_layer :: #force_inline proc(self: ^Animator, index: int) -> bool {
-  return index >= 0 && index < len(self.layers) && self.layers[index].data != nil
+valid_layer :: #force_inline proc(self: ^Animator, layer: LayerHandle) -> bool {
+  return int(layer) < len(self.layers) && self.layers[layer].data != nil
 }
 
 // play plays clip `name` on layer 0, replacing whatever was there.
 play :: proc(self: ^Animator, rig: ^Rig, name: string, mode: PlayMode = .LOOP, speed: f32 = 1) -> bool {
-  _, ok := add_clip_layer(self, rig, name, 1, mode, speed, 0)
+  _, ok := clip_layer_create(self, rig, name, 1, mode, speed, LayerHandle(0))
   return ok
 }
 
-// add_clip_layer adds (or replaces at `layer_index`) a layer playing clip `name`. A layer
-// index stays valid until remove_layer or clear_layers; a removed index may be handed out again.
-add_clip_layer :: proc(
+// clip_layer_create adds a layer playing clip `name`, or puts it in place of layer `replace`. A
+// LayerHandle stays valid until layer_destroy or clear_layers; a freed one may be handed out again.
+clip_layer_create :: proc(
   self: ^Animator,
   rig: ^Rig,
   name: string,
   weight: f32 = 1,
   mode: PlayMode = .LOOP,
   speed: f32 = 1,
-  layer_index: int = -1,
+  replace: Maybe(LayerHandle) = nil,
   blend_mode: BlendMode = .REPLACE,
 ) -> (
-  index: int,
+  handle: LayerHandle,
   ok: bool,
 ) #optional_ok {
   clip := find_clip(rig, name) or_return
-  return put_clip_layer(self, clip, weight, mode, speed, layer_index, blend_mode), true
+  return put_clip_layer(self, clip, weight, mode, speed, replace, blend_mode), true
 }
 
 @(private)
 put_clip_layer :: proc(
   self: ^Animator,
-  clip: int,
+  clip: ClipHandle,
   weight: f32 = 1,
   mode: PlayMode = .LOOP,
   speed: f32 = 1,
-  layer_index: int = -1,
+  replace: Maybe(LayerHandle) = nil,
   blend_mode: BlendMode = .REPLACE,
-) -> int {
+) -> LayerHandle {
   return put_layer(
     self,
     Layer {
@@ -308,36 +308,36 @@ put_clip_layer :: proc(
       blend_mode = blend_mode,
       data = FKLayer{clip = clip, player = {mode = mode, speed = speed}},
     },
-    layer_index,
+    replace,
   )
 }
 
-// remove_layer destroys the layer at index, leaving the other indices as they are; false if
+// layer_destroy destroys the layer at index, leaving the other indices as they are; false if
 // index is invalid.
-remove_layer :: proc(self: ^Animator, index: int) -> bool {
-  if !valid_layer(self, index) do return false
-  layer_destroy(&self.layers[index])
+layer_destroy :: proc(self: ^Animator, layer: LayerHandle) -> bool {
+  if !valid_layer(self, layer) do return false
+  layer_free(&self.layers[layer])
   return true
 }
 
 // clear_layers destroys every layer and cancels any transition.
 clear_layers :: proc(self: ^Animator) {
-  for &l in self.layers do layer_destroy(&l)
+  for &l in self.layers do layer_free(&l)
   clear(&self.layers)
   self.transition = {}
 }
 
 // set_layer_weight sets the blend weight of the layer at index, clamped to [0, 1].
-set_layer_weight :: proc(self: ^Animator, index: int, weight: f32) -> bool {
-  if !valid_layer(self, index) do return false
-  self.layers[index].weight = clamp(weight, 0, 1)
+set_layer_weight :: proc(self: ^Animator, layer: LayerHandle, weight: f32) -> bool {
+  if !valid_layer(self, layer) do return false
+  self.layers[layer].weight = clamp(weight, 0, 1)
   return true
 }
 
 // set_layer_mask restricts the layer to the bones enabled in `mask`, which is borrowed and must outlive the layer.
-set_layer_mask :: proc(self: ^Animator, index: int, mask: []bool) -> bool {
-  if !valid_layer(self, index) do return false
-  self.layers[index].bone_mask = mask
+set_layer_mask :: proc(self: ^Animator, layer: LayerHandle, mask: []bool) -> bool {
+  if !valid_layer(self, layer) do return false
+  self.layers[layer].bone_mask = mask
   return true
 }
 
@@ -348,15 +348,15 @@ transition_to :: proc(
   rig: ^Rig,
   name: string,
   duration: f32,
-  from: int = 0,
-  to: int = 1,
+  from: LayerHandle = 0,
+  to: LayerHandle = 1,
   curve: ease.Ease = .Linear,
   blend_mode: BlendMode = .REPLACE,
   mode: PlayMode = .LOOP,
   speed: f32 = 1,
 ) -> bool {
   clip := find_clip(rig, name) or_return
-  for len(self.layers) <= max(from, to) do append(&self.layers, Layer{})
+  for len(self.layers) <= int(max(from, to)) do append(&self.layers, Layer{})
   put_clip_layer(self, clip, 0, mode, speed, to, blend_mode)
   self.transition = {
     from_layer = from,
@@ -370,11 +370,11 @@ transition_to :: proc(
 
 // ---------- IK ----------
 
-// add_ik_layer adds an IK layer over `bones` (root first, each bone the parent of the next, as
+// ik_layer_create adds an IK layer over `bones` (root first, each bone the parent of the next, as
 // bone_chain returns; ownership transfers to the layer, or stays with the caller on failure). `constraints` is nil or one per bone.
 // LOCAL targets are in skeleton space; WORLD targets are in world space and
 // converted with `root_world` on every update. The layer weight blends FK (0) to IK (1).
-add_ik_layer :: proc(
+ik_layer_create :: proc(
   self: ^Animator,
   rig: ^Rig,
   bones: []u32,
@@ -382,19 +382,19 @@ add_ik_layer :: proc(
   weight: f32 = 1,
   max_iterations: int = 10,
   tolerance: f32 = 0.001,
-  layer_index: int = -1,
+  replace: Maybe(LayerHandle) = nil,
   constraints: []IKBoneConstraint = nil,
   space: IKTargetSpace = .LOCAL,
   pole_weight: f32 = 1,
 ) -> (
-  index: int,
+  handle: LayerHandle,
   ok: bool,
 ) #optional_ok {
   skel := &rig.skeleton
-  if len(bones) < 2 do return -1, false
-  if constraints != nil && len(constraints) != len(bones) do return -1, false
-  for b in bones do if int(b) >= bone_count(skel) do return -1, false
-  for i in 1 ..< len(bones) do if skel.parents[bones[i]] != i32(bones[i - 1]) do return -1, false
+  if len(bones) < 2 do return 0, false
+  if constraints != nil && len(constraints) != len(bones) do return 0, false
+  for b in bones do if int(b) >= bone_count(skel) do return 0, false
+  for i in 1 ..< len(bones) do if skel.parents[bones[i]] != i32(bones[i - 1]) do return 0, false
   lengths := make([]f32, len(bones) - 1)
   for i in 0 ..< len(bones) - 1 do lengths[i] = skel.lengths[bones[i + 1]]
   layer := Layer {
@@ -413,22 +413,22 @@ add_ik_layer :: proc(
       space = space,
     },
   }
-  return put_layer(self, layer, layer_index), true
+  return put_layer(self, layer, replace), true
 }
 
 // set_ik_target sets target and pole in the space the layer was created with.
-set_ik_target :: proc(self: ^Animator, index: int, target, pole: [3]f32) -> bool {
-  if !valid_layer(self, index) do return false
-  ik := (&self.layers[index].data.(IKTarget)) or_return
+set_ik_target :: proc(self: ^Animator, layer: LayerHandle, target, pole: [3]f32) -> bool {
+  if !valid_layer(self, layer) do return false
+  ik := (&self.layers[layer].data.(IKTarget)) or_return
   ik.target_position = target
   ik.pole_vector = pole
   return true
 }
 
 // set_ik_enabled switches the IK layer at index on or off; false if it is not an IK layer.
-set_ik_enabled :: proc(self: ^Animator, index: int, enabled: bool) -> bool {
-  if !valid_layer(self, index) do return false
-  ik := (&self.layers[index].data.(IKTarget)) or_return
+set_ik_enabled :: proc(self: ^Animator, layer: LayerHandle, enabled: bool) -> bool {
+  if !valid_layer(self, layer) do return false
+  ik := (&self.layers[layer].data.(IKTarget)) or_return
   ik.enabled = enabled
   return true
 }
@@ -436,14 +436,14 @@ set_ik_enabled :: proc(self: ^Animator, index: int, enabled: bool) -> bool {
 // ---------- procedural modifiers ----------
 
 @(private)
-modifier :: proc(self: ^Animator, index: int, $T: typeid) -> (m: ^T, ok: bool) {
-  if !valid_layer(self, index) do return nil, false
-  p := (&self.layers[index].data.(ProceduralLayer)) or_return
+modifier :: proc(self: ^Animator, layer: LayerHandle, $T: typeid) -> (m: ^T, ok: bool) {
+  if !valid_layer(self, layer) do return nil, false
+  p := (&self.layers[layer].data.(ProceduralLayer)) or_return
   return &p.modifier.(T)
 }
 
-// add_tail_layer adds a spring-driven tail over length bones starting at root_bone.
-add_tail_layer :: proc(
+// tail_layer_create adds a spring-driven tail over length bones starting at root_bone.
+tail_layer_create :: proc(
   self: ^Animator,
   rig: ^Rig,
   root_bone: string,
@@ -451,11 +451,11 @@ add_tail_layer :: proc(
   propagation_speed: f32 = 0.5,
   damping: f32 = 0.9,
   weight: f32 = 1,
-  layer_index: int = -1,
+  replace: Maybe(LayerHandle) = nil,
   reverse_chain: bool = false, // root is at the tail end; reverse to head→tail
   stretch: bool = false, // bones may stretch; false = rigid hinge chain
 ) -> (
-  index: int,
+  handle: LayerHandle,
   ok: bool,
 ) #optional_ok {
   bones := bone_chain_down(&rig.skeleton, root_bone, length) or_return
@@ -472,18 +472,18 @@ add_tail_layer :: proc(
       },
     },
   }
-  return put_layer(self, layer, layer_index), true
+  return put_layer(self, layer, replace), true
 }
 
 // set_tail_params updates the tail layer at index; nil arguments are left unchanged.
 set_tail_params :: proc(
   self: ^Animator,
-  index: int,
+  layer: LayerHandle,
   propagation_speed: Maybe(f32) = nil,
   damping: Maybe(f32) = nil,
   stretch: Maybe(bool) = nil,
 ) -> bool {
-  m := modifier(self, index, TailModifier) or_return
+  m := modifier(self, layer, TailModifier) or_return
   if v, ok := propagation_speed.?; ok do m.propagation_speed = v
   if v, ok := damping.?; ok do m.damping = v
   if v, ok := stretch.?; ok do m.stretch = v
@@ -492,7 +492,7 @@ set_tail_params :: proc(
 
 @(private)
 build_path_spline :: proc(path: [][3]f32, closed: bool) -> Spline([3]f32) {
-  if closed && len(path) >= 3 do return spline_build_closed(path)
+  if closed && len(path) >= 3 do return spline_create_closed(path)
   times := make([]f32, len(path), context.temp_allocator)
   for i in 0 ..< len(times) do times[i] = f32(i)
   spline: Spline([3]f32)
@@ -500,8 +500,8 @@ build_path_spline :: proc(path: [][3]f32, closed: bool) -> Spline([3]f32) {
   return spline
 }
 
-// add_path_layer adds a layer that moves a bone_length-bone chain from root_bone along path.
-add_path_layer :: proc(
+// path_layer_create adds a layer that moves a bone_length-bone chain from root_bone along path.
+path_layer_create :: proc(
   self: ^Animator,
   rig: ^Rig,
   root_bone: string,
@@ -513,12 +513,12 @@ add_path_layer :: proc(
   loop: bool = false,
   closed: bool = false, // build a closed-loop spline with a smooth seam
   weight: f32 = 1,
-  layer_index: int = -1,
+  replace: Maybe(LayerHandle) = nil,
 ) -> (
-  index: int,
+  handle: LayerHandle,
   ok: bool,
 ) #optional_ok {
-  if len(path) < 2 do return -1, false
+  if len(path) < 2 do return 0, false
   bones := bone_chain_down(&rig.skeleton, root_bone, bone_length) or_return
   layer := Layer {
     weight = weight,
@@ -534,13 +534,13 @@ add_path_layer :: proc(
       },
     },
   }
-  return put_layer(self, layer, layer_index), true
+  return put_layer(self, layer, replace), true
 }
 
 // set_path_params updates the path layer at index; nil arguments are left unchanged.
 set_path_params :: proc(
   self: ^Animator,
-  index: int,
+  layer: LayerHandle,
   path: Maybe([][3]f32) = nil,
   offset: Maybe(f32) = nil,
   length: Maybe(f32) = nil,
@@ -548,7 +548,7 @@ set_path_params :: proc(
   loop: Maybe(bool) = nil,
   closed: Maybe(bool) = nil,
 ) -> bool {
-  m := modifier(self, index, PathModifier) or_return
+  m := modifier(self, layer, PathModifier) or_return
   if v, ok := closed.?; ok do m.closed = v
   if v, ok := path.?; ok && len(v) >= 2 {
     spline_destroy(&m.spline)
@@ -561,26 +561,26 @@ set_path_params :: proc(
   return true
 }
 
-// add_spider_leg_layer adds a layer with one leg per config. Each leg's chain starts at
+// spider_leg_layer_create adds a layer with one leg per config. Each leg's chain starts at
 // `config.root`; leg constraints transfer to the layer.
-add_spider_leg_layer :: proc(
+spider_leg_layer_create :: proc(
   self: ^Animator,
   rig: ^Rig,
   legs: []SpiderLegConfig,
   weight: f32 = 1,
-  layer_index: int = -1,
+  replace: Maybe(LayerHandle) = nil,
 ) -> (
-  index: int,
+  handle: LayerHandle,
   ok: bool,
 ) #optional_ok {
-  if len(legs) == 0 do return -1, false
+  if len(legs) == 0 do return 0, false
   all_bones := make([dynamic]u32, 0, context.temp_allocator)
   out := make([]SpiderLeg, len(legs))
   for config, i in legs {
     chain, chain_ok := bone_chain_down(&rig.skeleton, config.root, config.chain_length, context.temp_allocator)
     if !chain_ok {
       delete(out)
-      return -1, false
+      return 0, false
     }
     spider_leg_init(&out[i], config)
     out[i].chain_start = u32(len(all_bones))
@@ -594,12 +594,12 @@ add_spider_leg_layer :: proc(
       modifier = SpiderLegModifier{legs = out},
     },
   }
-  return put_layer(self, layer, layer_index), true
+  return put_layer(self, layer, replace), true
 }
 
 // spider_leg_target returns a pointer to the foot target of a leg so the caller can move it.
-spider_leg_target :: proc(self: ^Animator, index, leg: int) -> (target: ^[3]f32, ok: bool) {
-  m := modifier(self, index, SpiderLegModifier) or_return
+spider_leg_target :: proc(self: ^Animator, layer: LayerHandle, leg: int) -> (target: ^[3]f32, ok: bool) {
+  m := modifier(self, layer, SpiderLegModifier) or_return
   if leg < 0 || leg >= len(m.legs) do return nil, false
   return &m.legs[leg].target, true
 }
@@ -607,13 +607,14 @@ spider_leg_target :: proc(self: ^Animator, index, leg: int) -> (target: ^[3]f32,
 // set_spider_leg_params updates one leg's stepping parameters; nil arguments are left unchanged.
 set_spider_leg_params :: proc(
   self: ^Animator,
-  index, leg: int,
+  layer: LayerHandle,
+  leg: int,
   lift_height: Maybe(f32) = nil,
   lift_frequency: Maybe(f32) = nil,
   lift_duration: Maybe(f32) = nil,
   time_offset: Maybe(f32) = nil,
 ) -> bool {
-  m := modifier(self, index, SpiderLegModifier) or_return
+  m := modifier(self, layer, SpiderLegModifier) or_return
   if leg < 0 || leg >= len(m.legs) do return false
   l := &m.legs[leg]
   if v, ok := lift_height.?; ok do l.lift_height = v
@@ -621,4 +622,14 @@ set_spider_leg_params :: proc(
   if v, ok := lift_duration.?; ok do l.lift_duration = v
   if v, ok := time_offset.?; ok do l.time_offset = v
   return true
+}
+
+// destroy frees an animator, rig, skeleton, clip or spline, or an animator's layer, as its *_destroy does.
+destroy :: proc {
+  animator_destroy,
+  rig_destroy,
+  skeleton_destroy,
+  clip_destroy,
+  spline_destroy,
+  layer_destroy,
 }

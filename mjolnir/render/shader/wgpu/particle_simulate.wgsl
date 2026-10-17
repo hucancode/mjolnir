@@ -25,7 +25,7 @@ struct ForceField {
 }
 
 struct ForceFieldPlacement {
-    forcefield: u32,
+    force_field: u32,
     node: u32,
 }
 
@@ -37,14 +37,14 @@ struct Alive {
 }
 
 @group(0) @binding(0) var<storage, read> nodes: array<Node>;
-@group(0) @binding(1) var<storage, read> forcefields: array<ForceField>;
+@group(0) @binding(1) var<storage, read> force_fields: array<ForceField>;
 @group(0) @binding(2) var<storage, read_write> particles: array<Particle>;
 @group(0) @binding(3) var<storage, read_write> alive: Alive;
 @group(0) @binding(4) var<storage, read> placements: array<ForceFieldPlacement>;
 
 struct ParticleSystemParams {
     emitter_placement_count: u32,
-    forcefield_placement_count: u32,
+    force_field_placement_count: u32,
     delta_time: f32,
     frame_counter: u32,
     emit_total: u32,
@@ -56,11 +56,11 @@ struct ParticleSystemParams {
 fn simulate(i: u32) -> bool {
     let p = particles[i].position;
     var v = particles[i].velocity;
-    let n = min(u.forcefield_placement_count, MAX_FORCE_FIELDS);
+    let n = min(u.force_field_placement_count, MAX_FORCE_FIELDS);
     for (var f = 0u; f < n; f++) {
         let placed = placements[f];
         // free rows and destroyed force fields are zero: area_of_effect 0
-        let ff = forcefields[placed.forcefield];
+        let ff = force_fields[placed.force_field];
         if (ff.area_of_effect <= 0.0 || placed.node == 0u) { continue; }
         let ff_pos = nodes[placed.node].world_matrix[3].xyz;
         let dist = length(p - ff_pos);

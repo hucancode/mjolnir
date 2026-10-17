@@ -71,14 +71,14 @@ setup :: proc(app: ^App) -> bool {
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   light_handle = world.spawn(&app.scene, {4, 8, 4})
-  render.attach(&app.renderer, light_handle.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, f32(light_intensity)}, 15.0, true)))
+  render.attach(&app.renderer, render.SlotHandle(light_handle.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, f32(light_intensity)}, 15.0, true)))
 
   ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 8.0)
 
   cube_handle = world.spawn(&app.scene, cube_pos)
-  render.attach(&app.renderer, cube_handle.index, render.primitive(&app.renderer, .CUBE, .CYAN))
+  render.attach(&app.renderer, render.SlotHandle(cube_handle.index), render.primitive(&app.renderer, .CUBE, .CYAN))
   world.scale(&app.scene, cube_handle, 0.5)
   log.info("Input demo  WASD: move cube  Q/E: yaw  LMB drag, RMB, scroll, typing read from the input snapshot")
   return true
@@ -86,7 +86,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -150,7 +150,7 @@ update :: proc(app: ^App, dt: f32) {
   }
   world.translate(&app.scene, cube_handle, cube_pos)
   world.rotate(&app.scene, cube_handle, cube_yaw)
-  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, light_handle.index, render.LightHandle)); ok {
+  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(light_handle.index), render.LightHandle)); ok {
     l.color[3] = f32(light_intensity)
   }
   world.update(&app.scene)

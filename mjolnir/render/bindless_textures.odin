@@ -15,8 +15,8 @@ import stbi "vendor:stb/image"
 MAX_RENDER_TARGETS :: 256
 
 @(private)
-texture_pool :: proc(r: ^Renderer, handle: TextureHandle) -> ^cont.Slots {
-  return &r.target_slots if handle < MAX_RENDER_TARGETS else &r.texture_slots
+texture_pool :: proc(self: ^Renderer, handle: TextureHandle) -> ^cont.Slots {
+  return &self.target_slots if handle < MAX_RENDER_TARGETS else &self.texture_slots
 }
 
 @(private)
@@ -27,11 +27,11 @@ calculate_mip_levels :: proc(width, height: u32) -> u32 {
 // `data` fills level 0; the other levels are blitted down. `target` takes the handle from
 // the render target range.
 @(private)
-allocate_texture :: proc(r: ^Renderer, desc: TextureDesc, data: []u8 = nil, target := false) -> (handle: TextureHandle, ok: bool) {
-  guard(r)
-  pool := &r.target_slots if target else &r.texture_slots
+allocate_texture :: proc(self: ^Renderer, desc: TextureDesc, data: []u8 = nil, target := false) -> (handle: TextureHandle, ok: bool) {
+  guard(self)
+  pool := &self.target_slots if target else &self.texture_slots
   h := cont.slots_alloc(pool) or_return
-  if !dev.texture_create(&r.gpu, TextureHandle(h), desc, data) {
+  if !dev.texture_create(&self.gpu, TextureHandle(h), desc, data) {
     cont.slots_free(pool, h)
     return 0, false
   }
@@ -40,17 +40,24 @@ allocate_texture :: proc(r: ^Renderer, desc: TextureDesc, data: []u8 = nil, targ
 
 // texture_destroy invalidates handle at once; its slot and image are released once no
 // frame in flight samples them. teardown frees every texture made since init.
-texture_destroy :: proc(r: ^Renderer, handle: TextureHandle) {
-  guard(r)
-  cont.slots_free(texture_pool(r, handle), u32(handle))
+texture_destroy :: proc(self: ^Renderer, handle: TextureHandle) {
+  guard(self)
+  cont.slots_free(texture_pool(self, handle), u32(handle))
 }
 
 // NO_TEXTURE is the TextureHandle of none, as materials, emitters and draw2d commands hold it.
 NO_TEXTURE :: 0
 
-// texture_create makes a 2D texture of raw pixels, size.x by size.y texels of format (A8
-// samples as white with alpha = the pixel). It lives until texture_destroy or teardown.
-texture_create :: proc(
+// texture_create makes a 2D texture that lives until texture_destroy or teardown, from either
+//   raw pixels: size.x by size.y texels of format (A8 samples as white with alpha = the pixel)
+//   an encoded image (png, jpg, hdr, ...) held in memory; RGBA32F decodes it as linear HDR
+texture_create :: proc {
+  texture_create_pixels,
+  texture_create_encoded,
+}
+
+@(private = "file")
+texture_create_pixels :: proc(
   self: ^Renderer,
   pixels: []u8,
   size: [2]u32,
@@ -62,10 +69,9 @@ texture_create :: proc(
   return allocate_texture(self, {extent = size, format = format, usage = {.SAMPLED}}, pixels)
 }
 
-// texture_load decodes an encoded image (png, jpg, hdr, ...) held in memory
-// into a 2D texture. RGBA32F decodes it as linear HDR.
-texture_load :: proc(
-  r: ^Renderer,
+@(private = "file")
+texture_create_encoded :: proc(
+  self: ^Renderer,
   data: []u8,
   format: TextureFormat = .RGBA8_SRGB,
   generate_mips: bool = false,
@@ -94,6 +100,6 @@ texture_load :: proc(
     usage      = {.SAMPLED},
     mip_levels = calculate_mip_levels(extent.x, extent.y) if generate_mips else 1,
   }
-  return allocate_texture(r, desc, ([^]u8)(pixels)[:width * height * texel_size])
+  return allocate_texture(self, desc, ([^]u8)(pixels)[:width * height * texel_size])
 }
 

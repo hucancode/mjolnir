@@ -38,7 +38,7 @@ SceneBuffer :: enum {
   MATERIALS,
   BONES,
   EMITTERS,
-  FORCEFIELDS,
+  FORCE_FIELDS,
   LIGHTS,
   DEBUG_LINES,
   BATCHES,
@@ -46,7 +46,7 @@ SceneBuffer :: enum {
   SKIN_OWNERS,
   LIGHT_PLACEMENTS,
   EMITTER_PLACEMENTS,
-  FORCEFIELD_PLACEMENTS,
+  FORCE_FIELD_PLACEMENTS,
   // the mesh streams, in MeshStream order
   VERTICES,
   INDICES,
@@ -64,8 +64,8 @@ SceneBuffer :: enum {
 
 // The buffer of a mesh stream.
 @(private)
-mesh_buffer :: #force_inline proc(r: ^Renderer, stream: MeshStream) -> rhi.Buffer {
-  return r.buffers[SceneBuffer(int(SceneBuffer.VERTICES) + int(stream))][0]
+mesh_buffer :: #force_inline proc(self: ^Renderer, stream: MeshStream) -> rhi.Buffer {
+  return self.buffers[SceneBuffer(int(SceneBuffer.VERTICES) + int(stream))][0]
 }
 
 // The scene set of a bindless device: the shaders' set 0, bindings in this order, every one
@@ -79,7 +79,7 @@ SCENE_SET :: [?]SceneBuffer {
   .BONES,
   .SKINNING,
   .EMITTERS,
-  .FORCEFIELDS,
+  .FORCE_FIELDS,
   .PARTICLES,
   .PARTICLE_ALIVE,
   .LIGHTS,
@@ -92,7 +92,7 @@ SCENE_SET :: [?]SceneBuffer {
   .VERTICES,
   .LIGHT_PLACEMENTS,
   .EMITTER_PLACEMENTS,
-  .FORCEFIELD_PLACEMENTS,
+  .FORCE_FIELD_PLACEMENTS,
 }
 // The scene groups of a device without bindless: the buffers each pass reads (or, for
 // compute, writes), in binding order.
@@ -109,7 +109,7 @@ SCENE_PASSES := [ScenePass]struct {
   .SHADOW            = {{.VIEWS, .NODES, .MESHES, .SKINNED_VERTICES}, {.VERTEX}, {}},
   .CULL              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .BATCHES, .NODE_BATCH}, {.COMPUTE}, {}},
   .PARTICLE_EMIT     = {{.NODES, .EMITTERS, .PARTICLES, .EMITTER_PLACEMENTS}, {.COMPUTE}, {.PARTICLES}},
-  .PARTICLE_SIMULATE = {{.NODES, .FORCEFIELDS, .PARTICLES, .PARTICLE_ALIVE, .FORCEFIELD_PLACEMENTS}, {.COMPUTE}, {.PARTICLES, .PARTICLE_ALIVE}},
+  .PARTICLE_SIMULATE = {{.NODES, .FORCE_FIELDS, .PARTICLES, .PARTICLE_ALIVE, .FORCE_FIELD_PLACEMENTS}, {.COMPUTE}, {.PARTICLES, .PARTICLE_ALIVE}},
   .PARTICLE_DRAW     = {{.VIEWS, .PARTICLES, .PARTICLE_ALIVE}, {.VERTEX}, {}},
   .DEBUG_LINE        = {{.VIEWS, .DEBUG_LINES}, {.VERTEX}, {}},
   .SKIN              = {{.NODES, .MESHES, .BONES, .SKINNING, .VERTICES, .SKIN_OWNERS, .SKINNED_VERTICES}, {.COMPUTE}, {.SKINNED_VERTICES}},
@@ -166,57 +166,57 @@ TextureGroupKey :: struct {
 PUSH_SIZE :: 128
 
 @(private)
-resources_init :: proc(r: ^Renderer) -> bool {
+resources_init :: proc(self: ^Renderer) -> bool {
   for t in Table {
     size := TABLES[t].stride * TABLES[t].capacity
     for f in 0 ..< FRAMES_IN_FLIGHT {
-      r.buffers[SceneBuffer(t)][f] = dev.buffer_create(&r.gpu, {size = size, usage = {.STORAGE}, memory = .UPLOAD}) or_return
+      self.buffers[SceneBuffer(t)][f] = dev.buffer_create(&self.gpu, {size = size, usage = {.STORAGE}, memory = .UPLOAD}) or_return
     }
   }
   // wireframe and random-color materials pull vertices and indices as storage (WebGPU)
   stream_usage := [MeshStream]bit_set[rhi.BufferUsage]{.VERTEX = {.VERTEX, .STORAGE}, .INDEX = {.INDEX, .STORAGE}, .SKINNING = {.STORAGE}}
   for stream in MeshStream {
-    size := int(r.mesh_slabs[stream].capacity) * MESH_STREAMS[stream].elem_size
-    r.buffers[SceneBuffer(int(SceneBuffer.VERTICES) + int(stream))][0] = dev.buffer_create(&r.gpu, {size = size, usage = stream_usage[stream]}) or_return
+    size := int(self.mesh_slabs[stream].capacity) * MESH_STREAMS[stream].elem_size
+    self.buffers[SceneBuffer(int(SceneBuffer.VERTICES) + int(stream))][0] = dev.buffer_create(&self.gpu, {size = size, usage = stream_usage[stream]}) or_return
   }
-  r.buffers[.SKINNED_VERTICES][0] = dev.buffer_create(&r.gpu, {size = SKIN_CAPACITY * size_of(SkinnedVertex), usage = {.STORAGE}}) or_return
-  r.buffers[.PARTICLE_ALIVE][0] = dev.buffer_create(&r.gpu, {size = (PARTICLE_ALIVE_HEADER + MAX_PARTICLES) * size_of(u32), usage = {.STORAGE, .INDIRECT}}) or_return
-  r.buffers[.PARTICLES][0] = dev.buffer_create(&r.gpu, {size = MAX_PARTICLES * size_of(Particle), usage = {.STORAGE}}) or_return
+  self.buffers[.SKINNED_VERTICES][0] = dev.buffer_create(&self.gpu, {size = SKIN_CAPACITY * size_of(SkinnedVertex), usage = {.STORAGE}}) or_return
+  self.buffers[.PARTICLE_ALIVE][0] = dev.buffer_create(&self.gpu, {size = (PARTICLE_ALIVE_HEADER + MAX_PARTICLES) * size_of(u32), usage = {.STORAGE, .INDIRECT}}) or_return
+  self.buffers[.PARTICLES][0] = dev.buffer_create(&self.gpu, {size = MAX_PARTICLES * size_of(Particle), usage = {.STORAGE}}) or_return
   for f in 0 ..< FRAMES_IN_FLIGHT {
-    r.ui_vertex_buffers[f] = dev.buffer_create(&r.gpu, {size = UI_MAX_VERTICES * size_of(Vertex2D), usage = {.VERTEX}, memory = .UPLOAD}) or_return
-    r.ui_index_buffers[f] = dev.buffer_create(&r.gpu, {size = UI_MAX_INDICES * size_of(u32), usage = {.INDEX}, memory = .UPLOAD}) or_return
+    self.ui_vertex_buffers[f] = dev.buffer_create(&self.gpu, {size = UI_MAX_VERTICES * size_of(Vertex2D), usage = {.VERTEX}, memory = .UPLOAD}) or_return
+    self.ui_index_buffers[f] = dev.buffer_create(&self.gpu, {size = UI_MAX_INDICES * size_of(u32), usage = {.INDEX}, memory = .UPLOAD}) or_return
   }
   return true
 }
 
 // After the textures and particle buffers exist: the layouts and groups shaders reach them by.
 @(private)
-resources_bind :: proc(r: ^Renderer) -> bool {
+resources_bind :: proc(self: ^Renderer) -> bool {
   white := TextureDesc{extent = {1, 1}, format = .RGBA8_UNORM, usage = {.SAMPLED}}
-  for f in 0 ..< FRAMES_IN_FLIGHT do atlas_make(r, f, MIN_ATLAS_LAYERS) or_return
-  r.white = allocate_texture(r, white, {255, 255, 255, 255}) or_return
+  for f in 0 ..< FRAMES_IN_FLIGHT do atlas_make(self, f, MIN_ATLAS_LAYERS) or_return
+  self.white = allocate_texture(self, white, {255, 255, 255, 255}) or_return
   cube := TextureDesc{extent = {1, 1}, format = .RGBA16F, usage = {.SAMPLED}, cube = true}
-  r.black_cube = allocate_texture(r, cube, make([]u8, 6 * 8, context.temp_allocator)) or_return
+  self.black_cube = allocate_texture(self, cube, make([]u8, 6 * 8, context.temp_allocator)) or_return
   when BINDLESS {
     entries: [len(SCENE_SET)]rhi.BindEntry
     for e, i in SCENE_SET do entries[i] = {kind = .TEXTURE_DEPTH_ARRAY if e == .SHADOW_MAPS else .STORAGE_BUFFER, stages = {.VERTEX, .FRAGMENT, .COMPUTE}}
-    r.scene_layouts[.NONE] = dev.bind_layout_create(&r.gpu, {entries = entries[:]}) or_return
-    for f in 0 ..< FRAMES_IN_FLIGHT do scene_group_make(r, f) or_return
+    self.scene_layouts[.NONE] = dev.bind_layout_create(&self.gpu, {entries = entries[:]}) or_return
+    for f in 0 ..< FRAMES_IN_FLIGHT do scene_group_make(self, f) or_return
   } else {
     for pass, p in SCENE_PASSES {
       entries := make([]rhi.BindEntry, len(pass.buffers), context.temp_allocator)
       for buffer, i in pass.buffers do entries[i] = {kind = .STORAGE_BUFFER if buffer in pass.writes else .STORAGE_BUFFER_READ, stages = pass.stages}
-      r.scene_layouts[p] = dev.bind_layout_create(&r.gpu, {entries = entries}) or_return
+      self.scene_layouts[p] = dev.bind_layout_create(&self.gpu, {entries = entries}) or_return
       for f in 0 ..< FRAMES_IN_FLIGHT {
         resources := make([]rhi.BindResource, len(pass.buffers), context.temp_allocator)
-        for buffer, i in pass.buffers do resources[i] = rhi.BufferRange{buffer = scene_buffer(r, buffer, u32(f))}
-        r.scene_groups[p][f] = dev.bind_group_create(&r.gpu, {layout = r.scene_layouts[p], resources = resources}) or_return
+        for buffer, i in pass.buffers do resources[i] = rhi.BufferRange{buffer = scene_buffer(self, buffer, u32(f))}
+        self.scene_groups[p][f] = dev.bind_group_create(&self.gpu, {layout = self.scene_layouts[p], resources = resources}) or_return
       }
     }
     for slots, l in TEXTURE_LAYOUTS {
       entries := make([]rhi.BindEntry, len(slots), context.temp_allocator)
       for slot, i in slots do entries[i] = {kind = TEXTURE_SLOT_KINDS[slot], stages = {.VERTEX, .FRAGMENT, .COMPUTE}}
-      r.texture_layouts[l] = dev.bind_layout_create(&r.gpu, {entries = entries}) or_return
+      self.texture_layouts[l] = dev.bind_layout_create(&self.gpu, {entries = entries}) or_return
     }
   }
   return true
@@ -234,37 +234,37 @@ TEXTURE_SLOT_KINDS := [TextureSlot]rhi.BindKind {
 
 // Frame `frame`'s copy of a table, the one copy of the rest.
 @(private = "file")
-scene_buffer :: proc(r: ^Renderer, buffer: SceneBuffer, frame: u32) -> rhi.Buffer {
-  return r.buffers[buffer][frame if int(buffer) < len(Table) else 0]
+scene_buffer :: proc(self: ^Renderer, buffer: SceneBuffer, frame: u32) -> rhi.Buffer {
+  return self.buffers[buffer][frame if int(buffer) < len(Table) else 0]
 }
 
 // The bindless scene set of frame `f`, with the frame's shadow atlas. Call again when the
 // atlas changes, once no submitted work reads the old group.
 @(private)
-scene_group_make :: proc(r: ^Renderer, f: int) -> bool {
-  old := r.scene_groups[.NONE][f]
+scene_group_make :: proc(self: ^Renderer, f: int) -> bool {
+  old := self.scene_groups[.NONE][f]
   resources: [len(SCENE_SET)]rhi.BindResource
   for e, i in SCENE_SET {
     if e == .SHADOW_MAPS {
-      resources[i] = rhi.TextureView{texture = r.atlas[f], mip = -1}
+      resources[i] = rhi.TextureView{texture = self.atlas[f], mip = -1}
     } else {
-      resources[i] = rhi.BufferRange{buffer = scene_buffer(r, e, u32(f))}
+      resources[i] = rhi.BufferRange{buffer = scene_buffer(self, e, u32(f))}
     }
   }
-  r.scene_groups[.NONE][f] = dev.bind_group_create(&r.gpu, {layout = r.scene_layouts[.NONE], resources = resources[:]}) or_return
-  if old != 0 do dev.bind_group_retire(&r.gpu, old)
+  self.scene_groups[.NONE][f] = dev.bind_group_create(&self.gpu, {layout = self.scene_layouts[.NONE], resources = resources[:]}) or_return
+  if old != 0 do dev.bind_group_retire(&self.gpu, old)
   return true
 }
 
 // Brings frame `f`'s copy of every table up to date with render's: a region render wrote goes
 // stale in every copy and is written into each as its frame comes up.
 @(private)
-tables_sync :: proc(r: ^Renderer, f: u32) {
+tables_sync :: proc(self: ^Renderer, f: u32) {
   for t in Table {
-    for &s in r.table_stale[t] do s |= r.dirty[t]
-    stale := &r.table_stale[t][f]
+    for &s in self.table_stale[t] do s |= self.dirty[t]
+    stale := &self.table_stale[t][f]
     if stale^ == 0 do continue
-    src := r.tables[t]
+    src := self.tables[t]
     size := (len(src) + TABLE_REGIONS - 1) / TABLE_REGIONS
     region := 0
     for region < TABLE_REGIONS {
@@ -277,7 +277,7 @@ tables_sync :: proc(r: ^Renderer, f: u32) {
       // buffer writes take 4-byte multiples
       lo := min(first * size, len(src)) &~ 3
       hi := min((min(region * size, len(src)) + 3) &~ 3, len(src))
-      if hi > lo do dev.buffer_write(&r.gpu, r.buffers[SceneBuffer(t)][f], lo, src[lo:hi])
+      if hi > lo do dev.buffer_write(&self.gpu, self.buffers[SceneBuffer(t)][f], lo, src[lo:hi])
     }
     stale^ = 0
   }
@@ -286,23 +286,23 @@ tables_sync :: proc(r: ^Renderer, f: u32) {
 // Binds the scene set (set 0) of `pass` for the frame, and the bindless arrays where there are
 // any. After the pipeline is bound.
 @(private)
-scene_bind :: proc(r: ^Renderer, cmd: rhi.CommandList, pass: ScenePass, f: u32) {
+scene_bind :: proc(self: ^Renderer, cmd: rhi.CommandList, pass: ScenePass, f: u32) {
   when BINDLESS {
-    dev.cmd_bind_group(&r.gpu, cmd, 0, r.scene_groups[.NONE][f])
-    dev.cmd_bind_bindless(&r.gpu, cmd)
+    dev.cmd_bind_group(&self.gpu, cmd, 0, self.scene_groups[.NONE][f])
+    dev.cmd_bind_bindless(&self.gpu, cmd)
   } else {
-    dev.cmd_bind_group(&r.gpu, cmd, 0, r.scene_groups[pass][f])
+    dev.cmd_bind_group(&self.gpu, cmd, 0, self.scene_groups[pass][f])
   }
 }
 
 // The set of texture slots a WebGPU pass binds as set 1; textures reach a bindless shader
 // by index instead. Slot 0 takes the default of its kind.
 @(private)
-texture_bind :: proc(r: ^Renderer, cmd: rhi.CommandList, layout: TextureLayout, textures: ..TextureHandle) {
+texture_bind :: proc(self: ^Renderer, cmd: rhi.CommandList, layout: TextureLayout, textures: ..TextureHandle) {
   when BINDLESS do return
   key := TextureGroupKey{layout = layout}
   for t, i in textures do key.textures[i] = t
-  group, ok := r.texture_groups[key]
+  group, ok := self.texture_groups[key]
   if !ok {
     slots := TEXTURE_LAYOUTS[layout]
     resources := make([]rhi.BindResource, len(slots), context.temp_allocator)
@@ -310,56 +310,56 @@ texture_bind :: proc(r: ^Renderer, cmd: rhi.CommandList, layout: TextureLayout, 
       texture := key.textures[i]
       switch slot {
       case .FLOAT, .UNFILTERABLE, .DEPTH:
-        if texture == 0 do texture = r.white
+        if texture == 0 do texture = self.white
       case .CUBE:
-        if texture == 0 do texture = r.black_cube
+        if texture == 0 do texture = self.black_cube
       case .SHADOW_ATLAS:
-        texture = r.atlas[0]
+        texture = self.atlas[0]
       }
       resources[i] = rhi.TextureView{texture = texture, mip = -1}
     }
-    group, ok = dev.bind_group_create(&r.gpu, {layout = r.texture_layouts[layout], resources = resources})
+    group, ok = dev.bind_group_create(&self.gpu, {layout = self.texture_layouts[layout], resources = resources})
     if !ok {
       log.errorf("Texture group %v failed", layout)
       return
     }
-    r.texture_groups[key] = group
+    self.texture_groups[key] = group
   }
-  dev.cmd_bind_group(&r.gpu, cmd, 1, group)
+  dev.cmd_bind_group(&self.gpu, cmd, 1, group)
 }
 
 // Binds `pipeline` and what a pass binds after it: the scene set of `scene` for frame `f`, the
 // texture group of `layout` (WebGPU) and `push`. WebGPU gives every pipeline a push group, so
 // every pass pushes, whether or not its shaders read it.
 @(private)
-pipeline_bind :: proc(r: ^Renderer, cmd: rhi.CommandList, pipeline: rhi.Pipeline, scene: ScenePass, f: u32, push: ^$T, layout: TextureLayout, textures: ..TextureHandle) {
-  dev.cmd_bind_pipeline(&r.gpu, cmd, pipeline)
-  scene_bind(r, cmd, scene, f)
-  texture_bind(r, cmd, layout, ..textures)
-  dev.cmd_push(&r.gpu, cmd, push, size_of(T))
+pipeline_bind :: proc(self: ^Renderer, cmd: rhi.CommandList, pipeline: rhi.Pipeline, scene: ScenePass, f: u32, push: ^$T, layout: TextureLayout, textures: ..TextureHandle) {
+  dev.cmd_bind_pipeline(&self.gpu, cmd, pipeline)
+  scene_bind(self, cmd, scene, f)
+  texture_bind(self, cmd, layout, ..textures)
+  dev.cmd_push(&self.gpu, cmd, push, size_of(T))
 }
 
 // Drops every cached bind group, made again on use: a texture they name changed.
 @(private)
-groups_clear :: proc(r: ^Renderer) {
-  for _, g in r.texture_groups do dev.bind_group_retire(&r.gpu, g)
-  clear(&r.texture_groups)
-  cull_groups_clear(r)
-  for _, g in r.lighting_output_groups do dev.bind_group_retire(&r.gpu, g)
-  clear(&r.lighting_output_groups)
+groups_clear :: proc(self: ^Renderer) {
+  for _, g in self.texture_groups do dev.bind_group_retire(&self.gpu, g)
+  clear(&self.texture_groups)
+  cull_groups_clear(self)
+  for _, g in self.lighting_output_groups do dev.bind_group_retire(&self.gpu, g)
+  clear(&self.lighting_output_groups)
 }
 
 // The layouts of a pipeline of `pass`: the scene set, then on a device without bindless the
 // textures (set 1) and the push group (set 2) and `extra`. The shaders' set numbers.
 @(private)
-pipeline_layout :: proc(r: ^Renderer, pass: ScenePass, textures: TextureLayout = .NONE, extra: rhi.BindLayout = 0) -> rhi.PipelineLayoutDesc {
+pipeline_layout :: proc(self: ^Renderer, pass: ScenePass, textures: TextureLayout = .NONE, extra: rhi.BindLayout = 0) -> rhi.PipelineLayoutDesc {
   when BINDLESS {
     layouts := make([]rhi.BindLayout, 1, context.temp_allocator)
-    layouts[0] = r.scene_layouts[.NONE]
+    layouts[0] = self.scene_layouts[.NONE]
     return {layouts = layouts, push_size = PUSH_SIZE, bindless = true}
   } else {
     layouts := make([dynamic]rhi.BindLayout, context.temp_allocator)
-    append(&layouts, r.scene_layouts[pass], r.texture_layouts[textures], rhi.PUSH_GROUP)
+    append(&layouts, self.scene_layouts[pass], self.texture_layouts[textures], rhi.PUSH_GROUP)
     if extra != 0 do append(&layouts, extra)
     return {layouts = layouts[:], push_size = PUSH_SIZE}
   }
@@ -367,8 +367,8 @@ pipeline_layout :: proc(r: ^Renderer, pass: ScenePass, textures: TextureLayout =
 
 // mesh_write uploads data at element `first` of stream's buffer before the next frame.
 @(private)
-mesh_write :: proc(r: ^Renderer, stream: MeshStream, data: []$T, first: u32) -> bool {
+mesh_write :: proc(self: ^Renderer, stream: MeshStream, data: []$T, first: u32) -> bool {
   #assert(size_of(T) % 4 == 0)
   if len(data) == 0 do return true
-  return dev.buffer_write(&r.gpu, mesh_buffer(r, stream), int(first) * size_of(T), ([^]u8)(raw_data(data))[:len(data) * size_of(T)])
+  return dev.buffer_write(&self.gpu, mesh_buffer(self, stream), int(first) * size_of(T), ([^]u8)(raw_data(data))[:len(data) * size_of(T)])
 }

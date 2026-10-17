@@ -10,11 +10,17 @@ import js "core:sys/wasm/js"
 // CANVAS_ID is the id of the page's <canvas> the engine draws into.
 CANVAS_ID :: "canvas"
 
-// Platform is the page's canvas, sized to its CSS box at the device pixel ratio, with DOM
-// events written into `input`. Must not move after init (the listeners keep a pointer to it).
-// `window` is the canvas selector render.init takes.
+// Platform is the page's canvas, sized to its CSS box at the device pixel ratio. Must not
+// move after init (the listeners keep a pointer to it). `window` is the canvas selector
+// render.init takes.
 Platform :: struct {
-  window:   cstring,
+  window:  cstring,
+  using _: Platform_State,
+}
+
+@(private)
+Platform_State :: struct {
+  // DOM events since the last read_input
   input:    input.Accumulator,
   context_: runtime.Context,
 }

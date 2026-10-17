@@ -10,10 +10,16 @@ import "core:time"
 import "../input"
 import "vendor:glfw"
 
-// Platform is a GLFW window that writes device events into `input`. Must not move after
-// init (the window callbacks keep a pointer to it). `window` is what render.init takes.
+// Platform is a GLFW window. Must not move after init (the window callbacks keep a pointer
+// to it). `window` is what render.init takes.
 Platform :: struct {
-  window:   glfw.WindowHandle,
+  window:  glfw.WindowHandle,
+  using _: Platform_State,
+}
+
+@(private)
+Platform_State :: struct {
+  // device events since the last read_input
   input:    input.Accumulator,
   context_: runtime.Context,
 }

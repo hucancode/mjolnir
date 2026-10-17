@@ -70,9 +70,9 @@ setup :: proc(app: ^App) -> bool {
     app.orbit.yaw, app.orbit.pitch, app.orbit.distance = render.camera_orbit_state(cam)
   }
   sun := world.spawn(&app.scene, {6, 12, 6})
-  render.attach(&app.renderer, sun.index, render.light_create(&app.renderer, render.make_directional_light(color = {1, 0.97, 0.92, 1}, shadow_radius = 6.0, cast_shadow = true)))
+  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 0.97, 0.92, 1}, shadow_radius = 6.0, cast_shadow = true)))
   ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
 
   spawn_landmark(app, {-6, 1, 0}, .RED)
@@ -81,9 +81,9 @@ setup :: proc(app: ^App) -> bool {
   spawn_landmark(app, {0, 1, 6}, .YELLOW)
 
   cube := world.spawn(&app.scene, {0, 0.5, 0})
-  render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, .MAGENTA))
+  render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .MAGENTA))
   runner_handle = world.spawn(&app.scene, follow_target)
-  render.attach(&app.renderer, runner_handle.index, render.primitive(&app.renderer, .SPHERE, .CYAN))
+  render.attach(&app.renderer, render.SlotHandle(runner_handle.index), render.primitive(&app.renderer, .SPHERE, .CYAN))
   world.scale(&app.scene, runner_handle, 0.6)
 
   log.info("Camera controllers — switch live via UI (ORBIT/FREE/FOLLOW)")
@@ -92,7 +92,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -104,7 +104,7 @@ should_close :: proc(app: ^App) -> bool {
 
 spawn_landmark :: proc(app: ^App, pos: [3]f32, color: render.Color) {
   n := world.spawn(&app.scene, pos)
-  render.attach(&app.renderer, n.index, render.primitive(&app.renderer, .CONE, color))
+  render.attach(&app.renderer, render.SlotHandle(n.index), render.primitive(&app.renderer, .CONE, color))
 }
 
 update :: proc(app: ^App, dt: f32) {

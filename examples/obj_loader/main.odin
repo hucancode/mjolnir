@@ -58,7 +58,7 @@ setup :: proc(app: ^App) -> bool {
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   light := world.spawn(&app.scene, {10, 18, 10})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 3.0}, 10.0, false)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 3.0}, 10.0, false)))
   world.rotate(&app.scene, light, 1.5707963, [3]f32{1, 0, 0})
 
   display_material = render.material_create(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1})
@@ -80,14 +80,14 @@ setup :: proc(app: ^App) -> bool {
   }
 
   display_node = world.spawn(&app.scene)
-  render.attach(&app.renderer, display_node.index, render.MeshAttachment{handle = loaded_meshes[0], material = display_material, cast_shadow = true})
+  render.attach(&app.renderer, render.SlotHandle(display_node.index), render.MeshAttachment{mesh = loaded_meshes[0], material = display_material, cast_shadow = true})
   swap_model(app, 0)
   return true
 }
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -123,9 +123,9 @@ swap_model :: proc(app: ^App, index: int) {
   radius := linalg.length(extents) * 0.5
   if radius < 0.001 do radius = 1
 
-  if a, ok := render.attachment(&app.renderer, display_node.index, render.MeshAttachment); ok {
-    a.handle = loaded_meshes[index]
-    render.attach(&app.renderer, display_node.index, a)
+  if a, ok := render.attachment(&app.renderer, render.SlotHandle(display_node.index), render.MeshAttachment); ok {
+    a.mesh = loaded_meshes[index]
+    render.attach(&app.renderer, render.SlotHandle(display_node.index), a)
   }
   world.translate(&app.scene, display_node, -center)
 

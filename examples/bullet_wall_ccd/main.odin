@@ -63,7 +63,7 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -83,14 +83,14 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {-14, 8, 14}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-5, 12, 5})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.95, 0.9, 1}, 6.0, true)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.95, 0.9, 1}, 6.0, true)))
 
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
   ground := world.spawn(&app.scene, {0, -0.5, 0})
   physics.body_create(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {30.0, 0.5, 12.0}}, user = world.Handle(ground))
   ground_visual := world.spawn(&app.scene, parent = ground)
-  render.attach(&app.renderer, ground_visual.index, render.MeshAttachment{handle = cube_mesh, material = app.renderer.builtin_materials[.GRAY], cast_shadow = true})
-  world.scale_xyz(&app.scene, ground_visual, 30.0, 0.5, 12.0)
+  render.attach(&app.renderer, render.SlotHandle(ground_visual.index), render.MeshAttachment{mesh = cube_mesh, material = app.renderer.builtin_materials[.GRAY], cast_shadow = true})
+  world.scale(&app.scene, ground_visual, 30.0, 0.5, 12.0)
 
   wall_colors := [WALL_COUNT]render.Color{.RED, .YELLOW, .GREEN}
   for i in 0 ..< WALL_COUNT {
@@ -100,15 +100,15 @@ setup :: proc(app: ^App) -> bool {
     wall_nodes[i] = world.spawn(&app.scene, wall_pos)
     physics.body_create(&phys, wall_pos, collider = physics.BoxCollider{half_extents = {half_thick, 1.5, 2.0}}, user = world.Handle(wall_nodes[i]))
     wall_visual := world.spawn(&app.scene, parent = wall_nodes[i])
-    render.attach(&app.renderer, wall_visual.index, render.MeshAttachment{handle = cube_mesh, material = app.renderer.builtin_materials[wall_colors[i]], cast_shadow = true})
-    world.scale_xyz(&app.scene, wall_visual, half_thick, 1.5, 2.0)
+    render.attach(&app.renderer, render.SlotHandle(wall_visual.index), render.MeshAttachment{mesh = cube_mesh, material = app.renderer.builtin_materials[wall_colors[i]], cast_shadow = true})
+    world.scale(&app.scene, wall_visual, half_thick, 1.5, 2.0)
   }
 
   bullet_node = world.spawn(&app.scene, START_POS)
   bullet_body = physics.body_create(&phys, START_POS, mass = BULLET_MASS, collider = physics.SphereCollider{radius = BULLET_RADIUS}, user = world.Handle(bullet_node))
   bullet_visual := world.spawn(&app.scene, parent = bullet_node)
-  render.attach(&app.renderer, bullet_visual.index, render.primitive(&app.renderer, .SPHERE, .CYAN))
-  world.scale_xyz(&app.scene, bullet_visual, BULLET_RADIUS, BULLET_RADIUS, BULLET_RADIUS)
+  render.attach(&app.renderer, render.SlotHandle(bullet_visual.index), render.primitive(&app.renderer, .SPHERE, .CYAN))
+  world.scale(&app.scene, bullet_visual, BULLET_RADIUS, BULLET_RADIUS, BULLET_RADIUS)
   params := physics.body_params(&phys, bullet_body)
   params.linear_damping = 0
   params.angular_damping = 0

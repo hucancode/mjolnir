@@ -59,20 +59,20 @@ setup :: proc(app: ^App) -> bool {
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   light := world.spawn(&app.scene, {8, 14, 8})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light(
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light(
     color         = {1, 0.97, 0.92, 1},
     shadow_radius = 8.0,
     cast_shadow   = true,
   )))
 
   ground := world.spawn(&app.scene, {0, -2, 0})
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
 
   // Sun — root of the rotating subtree
   sun_mat := render.material_create(&app.renderer, base_color_factor = {1.0, 0.8, 0.2, 1.0}, emissive_value = 2.0)
   sun_handle = world.spawn(&app.scene)
-  render.attach(&app.renderer, sun_handle.index, render.MeshAttachment{handle = app.renderer.builtin_meshes[.SPHERE], material = sun_mat, cast_shadow = true})
+  render.attach(&app.renderer, render.SlotHandle(sun_handle.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.SPHERE], material = sun_mat, cast_shadow = true})
   world.scale(&app.scene, sun_handle, 1.2)
 
   // Planets — children of sun, each at fixed local offset
@@ -80,20 +80,20 @@ setup :: proc(app: ^App) -> bool {
   planet_radii := [3]f32{3.5, 6.0, 9.0}
   for i in 0 ..< 3 {
     planet_handles[i] = world.spawn(&app.scene, {planet_radii[i], 0, 0}, parent = sun_handle)
-    render.attach(&app.renderer, planet_handles[i].index, render.primitive(&app.renderer, .SPHERE, planet_colors[i]))
+    render.attach(&app.renderer, render.SlotHandle(planet_handles[i].index), render.primitive(&app.renderer, .SPHERE, planet_colors[i]))
     world.scale(&app.scene, planet_handles[i], 0.5)
   }
 
   // Moon — child of outermost planet
   moon_handle = world.spawn(&app.scene, {1.5, 0, 0}, parent = planet_handles[2])
-  render.attach(&app.renderer, moon_handle.index, render.primitive(&app.renderer, .CUBE, .WHITE))
+  render.attach(&app.renderer, render.SlotHandle(moon_handle.index), render.primitive(&app.renderer, .CUBE, .WHITE))
   world.scale(&app.scene, moon_handle, 0.3)
   return true
 }
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)

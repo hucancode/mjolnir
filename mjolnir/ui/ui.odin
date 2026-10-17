@@ -124,8 +124,8 @@ init :: proc(self: ^UI, max_nodes: u32 = 4096) {
   self.nodes = make([]Node, max_nodes)
 }
 
-// destroy frees everything `self` owns.
-destroy :: proc(self: ^UI) {
+// shutdown frees everything `self` owns.
+shutdown :: proc(self: ^UI) {
   c: u32
   for i in cont.slots_next(&self.slots, &c) do delete(self.nodes[i].text)
   cont.slots_destroy(&self.slots)
@@ -170,9 +170,9 @@ node_destroy :: proc(self: ^UI, handle: NodeHandle) {
   }
 }
 
-// node returns the node behind `handle`, to edit in place; nil when stale. Change text
+// node returns the node behind `handle`, to edit in place; false when stale. Change text
 // with set_text.
-node :: proc(self: ^UI, handle: NodeHandle) -> ^Node {
+node :: proc(self: ^UI, handle: NodeHandle) -> (^Node, bool) #optional_ok {
   return lookup(self, handle)
 }
 
@@ -217,4 +217,9 @@ within :: proc(self: ^UI, node, handle: NodeHandle) -> bool {
     n := lookup(self, h) or_return
     h = n.parent
   }
+}
+
+// destroy removes a node, as node_destroy does.
+destroy :: proc {
+  node_destroy,
 }

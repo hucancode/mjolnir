@@ -21,64 +21,64 @@ DEFAULT_PREWARM_SIZES :: []f32{14, 16, 20, 24}
 PREWARM_TEXT :: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
 
 // init loads a font; `font_data` is a TTF/OTF file in memory; it is copied. Paired with destroy.
-init :: proc(f: ^Font, font_data: []u8, prewarm_sizes := DEFAULT_PREWARM_SIZES) -> bool {
-  fs.Init(f, 512, 512, .TOPLEFT)
-  if fs.AddFontMem(f, "default", slice.clone(font_data), true) == fs.INVALID {
+init :: proc(self: ^Font, font_data: []u8, prewarm_sizes := DEFAULT_PREWARM_SIZES) -> bool {
+  fs.Init(self, 512, 512, .TOPLEFT)
+  if fs.AddFontMem(self, "default", slice.clone(font_data), true) == fs.INVALID {
     log.errorf("Failed to load font (%d bytes)", len(font_data))
-    fs.Destroy(f)
+    fs.Destroy(self)
     return false
   }
   for size in prewarm_sizes {
     out: [dynamic]Glyph
-    glyphs(f, PREWARM_TEXT, {}, size, &out)
+    glyphs(self, PREWARM_TEXT, {}, size, &out)
     delete(out)
   }
   return true
 }
 
 // destroy frees the font and its atlas.
-destroy :: proc(f: ^Font) {
-  fs.Destroy(f)
+destroy :: proc(self: ^Font) {
+  fs.Destroy(self)
 }
 
 // Text state of one line at `size` pixels, positioned by its top-left.
 @(private = "file")
-set_line :: proc(f: ^Font, size: f32) {
-  fs.ClearState(f)
-  fs.SetSize(f, size)
-  fs.SetAlignVertical(f, .TOP)
+set_line :: proc(self: ^Font, size: f32) {
+  fs.ClearState(self)
+  fs.SetSize(self, size)
+  fs.SetAlignVertical(self, .TOP)
 }
 
 // measure returns the width of `text` on one line at `size` pixels.
-measure :: proc(f: ^Font, text: string, size: f32) -> f32 {
-  set_line(f, size)
-  return fs.TextBounds(f, text)
+measure :: proc(self: ^Font, text: string, size: f32) -> f32 {
+  set_line(self, size)
+  return fs.TextBounds(self, text)
 }
 
 // line_height returns the distance between two lines at `size` pixels.
-line_height :: proc(f: ^Font, size: f32) -> f32 {
-  set_line(f, size)
-  _, _, h := fs.VerticalMetrics(f)
+line_height :: proc(self: ^Font, size: f32) -> f32 {
+  set_line(self, size)
+  _, _, h := fs.VerticalMetrics(self)
   return h
 }
 
 // glyphs appends the glyphs of `text` on one line whose top-left is `origin`.
-glyphs :: proc(f: ^Font, text: string, origin: [2]f32, size: f32, out: ^[dynamic]Glyph) {
-  set_line(f, size)
-  iter := fs.TextIterInit(f, origin.x, origin.y, text)
+glyphs :: proc(self: ^Font, text: string, origin: [2]f32, size: f32, out: ^[dynamic]Glyph) {
+  set_line(self, size)
+  iter := fs.TextIterInit(self, origin.x, origin.y, text)
   q: fs.Quad
-  for fs.TextIterNext(f, &iter, &q) {
+  for fs.TextIterNext(self, &iter, &q) {
     // after the glyph rasterized: it may have grown the atlas, which keeps
     // every glyph's texels
-    texels := [2]f32{f32(f.width), f32(f.height)}
+    texels := [2]f32{f32(self.width), f32(self.height)}
     append(out, Glyph{{q.x0, q.y0}, {q.x1, q.y1}, [2]f32{q.s0, q.t0} * texels, [2]f32{q.s1, q.t1} * texels})
   }
 }
 
 // atlas returns the R8 atlas pixels (size.x by size.y); changed when glyphs were
 // rasterized or the atlas grew since the previous call.
-atlas :: proc(f: ^Font) -> (pixels: []u8, size: [2]u32, changed: bool) {
+atlas :: proc(self: ^Font) -> (pixels: []u8, size: [2]u32, changed: bool) {
   dirty: [4]f32
-  changed = fs.ValidateTexture(f, &dirty)
-  return f.textureData, {u32(f.width), u32(f.height)}, changed
+  changed = fs.ValidateTexture(self, &dirty)
+  return self.textureData, {u32(self.width), u32(self.height)}, changed
 }

@@ -41,7 +41,7 @@ setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   cube := world.spawn(&app.scene)
-  render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, .RED))
+  render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .RED))
   render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   return true

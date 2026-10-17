@@ -937,18 +937,18 @@ bvh_build_parallel_benchmark :: proc(t: ^testing.T) {
 
 // Structural invariants of a built BVH.
 @(private = "file")
-bvh_validate :: proc(bvh: ^BVH($T)) -> bool {
-  if len(bvh.nodes) == 0 do return true
-  for i in 0 ..< len(bvh.nodes) {
-    node := bvh.nodes[i]
+bvh_validate :: proc(self: ^BVH($T)) -> bool {
+  if len(self.nodes) == 0 do return true
+  for i in 0 ..< len(self.nodes) {
+    node := self.nodes[i]
     if node.left_child >= 0 {
       // Internal node checks
       if node.right_child < 0 do return false
       if node.primitive_count != -1 do return false
-      if node.left_child >= i32(len(bvh.nodes)) do return false
-      if node.right_child >= i32(len(bvh.nodes)) do return false
-      left := bvh.nodes[node.left_child]
-      right := bvh.nodes[node.right_child]
+      if node.left_child >= i32(len(self.nodes)) do return false
+      if node.right_child >= i32(len(self.nodes)) do return false
+      left := self.nodes[node.left_child]
+      right := self.nodes[node.right_child]
       // Check bounds contain children (with some tolerance)
       if !aabb_contains_approx(node.bounds, left.bounds, 1e-3) do return false
       if !aabb_contains_approx(node.bounds, right.bounds, 1e-3) do return false
@@ -956,7 +956,7 @@ bvh_validate :: proc(bvh: ^BVH($T)) -> bool {
       // Leaf node checks
       if node.primitive_count <= 0 do return false
       if node.primitive_start < 0 do return false
-      if node.primitive_start + node.primitive_count > i32(len(bvh.primitives)) do return false
+      if node.primitive_start + node.primitive_count > i32(len(self.primitives)) do return false
     }
   }
   return true
@@ -988,9 +988,9 @@ BVHStats :: struct {
 }
 
 @(private = "file")
-bvh_get_stats :: proc(bvh: ^BVH($T)) -> BVHStats {
+bvh_get_stats :: proc(self: ^BVH($T)) -> BVHStats {
   stats: BVHStats
-  for node in bvh.nodes {
+  for node in self.nodes {
     stats.total_nodes += 1
     if node.left_child < 0 {
       stats.leaf_nodes += 1

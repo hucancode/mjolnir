@@ -76,14 +76,14 @@ setup :: proc(app: ^App) -> bool {
       user = world.Handle(parent),
     ) or_continue
     mh := world.spawn(&app.scene, parent = parent) or_continue
-    render.attach(&app.renderer, mh.index, render.MeshAttachment{handle = cube_mesh, material = cube_mat, cast_shadow = false})
-    world.scale_xyz(&app.scene, mh, half, half, half)
+    render.attach(&app.renderer, render.SlotHandle(mh.index), render.MeshAttachment{mesh = cube_mesh, material = cube_mat, cast_shadow = false})
+    world.scale(&app.scene, mh, half, half, half)
     append(&cube_mesh_handles, mh)
     cube_body_to_mesh[body_handle] = mh
   }
   effector_position = {0, 1, 0}
   effector_sphere = world.spawn(&app.scene)
-  render.attach(&app.renderer, effector_sphere.index, render.MeshAttachment{handle = sphere_mesh, material = effector_mat, cast_shadow = false})
+  render.attach(&app.renderer, render.SlotHandle(effector_sphere.index), render.MeshAttachment{mesh = sphere_mesh, material = effector_mat, cast_shadow = false})
   world.translate(&app.scene, effector_sphere, effector_position)
   world.scale(&app.scene, effector_sphere, 0.5)
   render.camera_look_at(render.main_camera(&app.renderer), {10, 30, 10}, {0, 0, 0})

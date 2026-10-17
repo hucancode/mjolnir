@@ -266,21 +266,21 @@ test_crowd_lifecycle_add_remove :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	testing.expect(t, init(c, 8, 0.6, nav), "init")
-	defer destroy(c)
+	defer shutdown(c)
 
 	params := default_agent_params()
-	a0, _ := agent_add(c, {0, 0, 0}, params)
-	a1, _ := agent_add(c, {1, 0, 0}, params)
+	a0, _ := agent_create(c, {0, 0, 0}, params)
+	a1, _ := agent_create(c, {1, 0, 0}, params)
 	testing.expectf(t, a0 == 0 && a1 == 1, "expected sequential slots, got %d %d", a0, a1)
 
 	ag, ag_ok := agent(c, a0)
-	testing.expect(t, ag_ok && ag.active, "agent must be active after add")
+	testing.expect(t, ag_ok && ag.state != .INVALID, "agent must be active after add")
 
-	agent_remove(c, a0)
-	testing.expect(t, !c.agents[a0].active, "agent must be inactive after remove")
+	agent_destroy(c, a0)
+	testing.expect(t, c.agents[a0].state == .INVALID, "agent must be inactive after remove")
 
 	// reuse slot
-	a2, _ := agent_add(c, {0, 0, 0}, params)
+	a2, _ := agent_create(c, {0, 0, 0}, params)
 	testing.expectf(t, a2 == a0, "slot should be recycled, got %d", a2)
 }
 
@@ -292,10 +292,10 @@ test_crowd_add_agent_off_navmesh_fails :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	init(c, 4, 0.6, nav)
-	defer destroy(c)
+	defer shutdown(c)
 
 	params := default_agent_params()
-	_, added := agent_add(c, {1000, 0, 1000}, params)
+	_, added := agent_create(c, {1000, 0, 1000}, params)
 	testing.expect(t, !added, "off-navmesh add should fail")
 }
 
@@ -307,14 +307,14 @@ test_crowd_request_move_target_state :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	init(c, 4, 0.6, nav)
-	defer destroy(c)
+	defer shutdown(c)
 	params := default_agent_params()
-	idx, _ := agent_add(c, {0, 0, 0}, params)
+	idx, _ := agent_create(c, {0, 0, 0}, params)
 	testing.expect(t, idx >= 0, "agent add")
 
 	// invalid index
 	testing.expect(t, !request_move_target(c, -1, 1, {0, 0, 0}), "negative idx rejected")
-	testing.expect(t, !request_move_target(c, idx, detour.INVALID_POLY_REF, {0, 0, 0}), "invalid ref rejected")
+	testing.expect(t, !request_move_target(c, int(idx), detour.INVALID_POLY_REF, {0, 0, 0}), "invalid ref rejected")
 
 	// valid request: pick any first poly via nearest poly query
 	filter: detour.Query_Filter
@@ -322,7 +322,7 @@ test_crowd_request_move_target_state :: proc(t: ^testing.T) {
 	half := [3]f32{2, 4, 2}
 	st, ref, _ := detour.find_nearest_poly(c.nav_query, {3, 0, 3}, half, &filter)
 	if detour.status_succeeded(st) && ref != detour.INVALID_POLY_REF {
-		ok2 := request_move_target(c, idx, ref, {3, 0, 3})
+		ok2 := request_move_target(c, int(idx), ref, {3, 0, 3})
 		testing.expect(t, ok2, "valid request must succeed")
 		testing.expect(t, c.agents[idx].target_state == .Requesting, "state should be Requesting")
 	}
@@ -336,10 +336,10 @@ test_crowd_update_advances_agent :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	init(c, 4, 0.6, nav)
-	defer destroy(c)
+	defer shutdown(c)
 
 	params := default_agent_params()
-	idx, _ := agent_add(c, {-5, 0, -5}, params)
+	idx, _ := agent_create(c, {-5, 0, -5}, params)
 	testing.expect(t, idx >= 0, "agent add")
 
 	filter: detour.Query_Filter
@@ -347,7 +347,7 @@ test_crowd_update_advances_agent :: proc(t: ^testing.T) {
 	half := [3]f32{2, 4, 2}
 	st, ref, _ := detour.find_nearest_poly(c.nav_query, {5, 0, 5}, half, &filter)
 	if !detour.status_succeeded(st) do return
-	request_move_target(c, idx, ref, {5, 0, 5})
+	request_move_target(c, int(idx), ref, {5, 0, 5})
 
 	start_pos := c.agents[idx].npos
 	// run several update ticks; path planning is sliced and may take several frames
@@ -432,7 +432,7 @@ bench_crowd_update :: proc(t: ^testing.T) {
 				fi := f32(i)
 				x := -8.0 + (fi * 0.5)
 				z := -8.0 + (f32(i / 8) * 0.5)
-				agent_add(c, {x, 0, z}, params)
+				agent_create(c, {x, 0, z}, params)
 			}
 			filter: detour.Query_Filter
 			detour.query_filter_init(&filter)
@@ -455,7 +455,7 @@ bench_crowd_update :: proc(t: ^testing.T) {
 		},
 		teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_crowd_state)opts.user_data
-			destroy(s.crowd)
+			shutdown(s.crowd)
 			free(s.crowd)
 			destroy_test_navmesh(s.nav)
 			return .Okay
@@ -476,9 +476,9 @@ test_crowd_move_to_reaches_goal :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	init(c, 4, 0.6, nav)
-	defer destroy(c)
+	defer shutdown(c)
 	params := default_agent_params()
-	idx, _ := agent_add(c, {0, 0, 0}, params)
+	idx, _ := agent_create(c, {0, 0, 0}, params)
 	testing.expect(t, move_to(c, idx, {5, 0, 5}), "move_to on the mesh must succeed")
 	for _ in 0 ..< 100 do update(c, 0.1)
 	d := c.agents[idx].npos - {5, 0, 5}

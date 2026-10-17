@@ -46,7 +46,7 @@ camera_ready :: proc(self: ^Renderer, c: u32) -> bool {
 SHADOW_DRAW_SLOT_BASE :: MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
 #assert(SHADOW_DRAW_SLOT_BASE + FRAMES_IN_FLIGHT <= MAX_DRAW_LIST_SLOTS)
 @(private)
-CAMERA_LIST_CAPACITY :: MAX_NODES_IN_SCENE
+CAMERA_LIST_CAPACITY :: MAX_SLOTS
 @(private)
 SHADOW_LIST_CAPACITY :: 4096 * MAX_SHADOW_VIEWS
 
@@ -58,11 +58,11 @@ draw_list_shape :: proc(self: ^Renderer, shadow: bool) -> (lists, capacity: u32)
   when BINDLESS {
     return 1 if shadow else DRAW_LISTS, SHADOW_LIST_CAPACITY if shadow else CAMERA_LIST_CAPACITY
   } else {
-    return MAX_SHADOW_VIEWS if shadow else 1, MAX_NODES_IN_SCENE
+    return MAX_SHADOW_VIEWS if shadow else 1, MAX_SLOTS
   }
 }
 
-// Camera is a view into the scene: pose and projection. Its images are camera_attachment's,
+// Camera is a view into the scene: pose and projection. Its images are camera_image's,
 // its size camera_resize's.
 Camera :: struct {
   position:   [3]f32,
@@ -76,7 +76,7 @@ Camera :: struct {
 @(private)
 CameraTargets :: struct {
   extent:       [2]u32, // width, height
-  attachments:  [AttachmentType][FRAMES_IN_FLIGHT]TextureHandle,
+  images:       [CameraImage][FRAMES_IN_FLIGHT]TextureHandle,
   // first serial whose compute work may read depth and pyramids; until then no occlusion, no lists
   ready_serial: u64,
 }
@@ -294,13 +294,13 @@ camera_destroy :: proc(self: ^Renderer, handle: CameraHandle) {
   if handle == self.main_camera do self.main_camera = 0
 }
 
-// camera_attachment returns a camera's attachment texture as the next frame renders it.
+// camera_image returns one of a camera's images as the next frame renders it.
 // previous_frame returns the one the last submitted frame rendered instead: sampling it
 // while the next frame draws the other copy does not depend on the order cameras draw in.
-camera_attachment :: proc(
+camera_image :: proc(
   self: ^Renderer,
   handle: CameraHandle,
-  attachment_type: AttachmentType,
+  image: CameraImage,
   previous_frame := false,
 ) -> (
   texture: TextureHandle,
@@ -309,7 +309,7 @@ camera_attachment :: proc(
   camera(self, handle) or_return
   f := current_frame(self)
   if previous_frame do f = (f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
-  return self.camera_targets[handle].attachments[attachment_type][f], true
+  return self.camera_targets[handle].images[image][f], true
 }
 
 // camera_resize resizes a camera's render targets; a perspective projection follows the new aspect ratio.
@@ -342,7 +342,7 @@ View :: struct {
   position:            [4]f32,
   extent:              [2]f32,
   near, far:           f32,
-  attachments:         [AttachmentType]u32,
+  images:              [CameraImage]u32,
   // bindless depth pyramid
   pyramid:         u32,
   // bit t: material type t is tested against the pyramid
@@ -364,16 +364,16 @@ View :: struct {
 }
 #assert(size_of(View) == 448)
 
-// A camera's attachments and depth pyramids, one set per frame in flight (pyramid_shape).
+// A camera's images and depth pyramids, one set per frame in flight (pyramid_shape).
 @(private)
 create_targets :: proc(self: ^Renderer, index: u32) -> bool {
   targets := &self.camera_targets[index]
-  attachments := ATTACHMENTS
-  for a in AttachmentType {
-    desc := attachments[a]
+  images := CAMERA_IMAGES
+  for a in CameraImage {
+    desc := images[a]
     desc.extent = targets.extent
     for frame in 0 ..< FRAMES_IN_FLIGHT {
-      targets.attachments[a][frame] = allocate_texture(self, desc, target = true) or_return
+      targets.images[a][frame] = allocate_texture(self, desc, target = true) or_return
     }
   }
   half, mips := pyramid_shape(targets.extent)
@@ -397,8 +397,8 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
 @(private)
 destroy_targets :: proc(self: ^Renderer, index: u32) {
   targets := &self.camera_targets[index]
-  for frames in targets.attachments do for handle in frames do texture_destroy(self, handle)
-  targets.attachments = {}
+  for frames in targets.images do for handle in frames do texture_destroy(self, handle)
+  targets.images = {}
   cull_groups_clear(self)
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     slot := camera_slot(index) + frame

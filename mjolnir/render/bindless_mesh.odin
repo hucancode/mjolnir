@@ -50,38 +50,38 @@ MESH_STREAMS := [MeshStream]struct {
 
 // Returns the first element index; empty data takes no range.
 @(private = "file")
-mesh_arena_upload :: proc(r: ^Renderer, stream: MeshStream, data: []$T) -> (offset: u32, ok: bool) {
+mesh_arena_upload :: proc(self: ^Renderer, stream: MeshStream, data: []$T) -> (offset: u32, ok: bool) {
   if len(data) == 0 do return 0, true
-  slab := &r.mesh_slabs[stream]
+  slab := &self.mesh_slabs[stream]
   offset = cont.slab_alloc(slab, u32(len(data))) or_return
-  ok = mesh_write(r, stream, data, offset)
+  ok = mesh_write(self, stream, data, offset)
   if !ok do cont.slab_free(slab, offset)
   return
 }
 
 @(private)
-free_mesh :: proc(r: ^Renderer, m: MeshData) {
-  if m.vertex_count > 0 do cont.slab_free(&r.mesh_slabs[.VERTEX], u32(m.vertex_offset))
-  if m.index_count > 0 do cont.slab_free(&r.mesh_slabs[.INDEX], m.first_index)
-  if .SKINNED in m.flags do cont.slab_free(&r.mesh_slabs[.SKINNING], m.skinning_offset)
+free_mesh :: proc(self: ^Renderer, m: MeshData) {
+  if m.vertex_count > 0 do cont.slab_free(&self.mesh_slabs[.VERTEX], u32(m.vertex_offset))
+  if m.index_count > 0 do cont.slab_free(&self.mesh_slabs[.INDEX], m.first_index)
+  if .SKINNED in m.flags do cont.slab_free(&self.mesh_slabs[.SKINNING], m.skinning_offset)
 }
 
 // Fills entry `index` of the mesh table. On failure the ranges taken so far are freed.
 @(private)
-upload_mesh :: proc(render: ^Renderer, index: u32, g: Geometry) -> (ok: bool) {
-  m := &write_table(render, .MESHES, MeshData)[index]
+upload_mesh :: proc(self: ^Renderer, index: u32, g: Geometry) -> (ok: bool) {
+  m := &write_table(self, .MESHES, MeshData)[index]
   aabb := aabb_from_vertices(g.vertices)
   m^ = {aabb_min = aabb.min, aabb_max = aabb.max}
   defer if !ok {
-    free_mesh(render, m^)
+    free_mesh(self, m^)
     m^ = {}
   }
-  defer mark_dirty(render, .MESHES, int(index))
-  offset := mesh_arena_upload(render, .VERTEX, g.vertices) or_return
+  defer mark_dirty(self, .MESHES, int(index))
+  offset := mesh_arena_upload(self, .VERTEX, g.vertices) or_return
   m.vertex_offset, m.vertex_count = i32(offset), u32(len(g.vertices))
-  m.first_index = mesh_arena_upload(render, .INDEX, g.indices) or_return
+  m.first_index = mesh_arena_upload(self, .INDEX, g.indices) or_return
   m.index_count = u32(len(g.indices))
-  m.skinning_offset = mesh_arena_upload(render, .SKINNING, g.skinnings) or_return
+  m.skinning_offset = mesh_arena_upload(self, .SKINNING, g.skinnings) or_return
   if len(g.skinnings) > 0 do m.flags |= {.SKINNED}
   return true
 }
@@ -95,7 +95,7 @@ mesh_create :: proc(
   handle: MeshHandle,
   ok: bool,
 ) #optional_ok {
-  defer delete_geometry(geometry_data)
+  defer geometry_destroy(geometry_data)
   guard(self)
   handle = MeshHandle(cont.slots_alloc(&self.mesh_slots) or_return)
   if !upload_mesh(self, u32(handle), geometry_data) {

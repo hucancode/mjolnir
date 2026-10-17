@@ -31,7 +31,7 @@ struct View {
     vec2 extent;
     float near;
     float far;
-    uint attachments[6]; // this frame's bindless images, by AttachmentType
+    uint images[6]; // this frame's bindless images, by CameraImage
     uint pyramid; // bindless depth pyramid
     uint occlusion_mask; // bit t: material type t is tested against the pyramid
     uint list_stride;

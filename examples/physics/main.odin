@@ -61,7 +61,7 @@ shutdown :: proc(app: ^App) {
 
 spawn_mesh :: proc(app: ^App, m: render.MeshHandle, mat: render.MaterialHandle, parent: world.NodeHandle) -> world.NodeHandle {
   n := world.spawn(&app.scene, parent = parent)
-  render.attach(&app.renderer, n.index, render.MeshAttachment{handle = m, material = mat, cast_shadow = true})
+  render.attach(&app.renderer, render.SlotHandle(n.index), render.MeshAttachment{mesh = m, material = mat, cast_shadow = true})
   return n
 }
 
@@ -86,7 +86,7 @@ setup :: proc(app: ^App) -> bool {
   ground := world.spawn(&app.scene, {0, -0.5, 0})
   physics.body_create(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {PLANE_WIDTH, 0.5, PLANE_HEIGHT}}, user = world.Handle(ground))
   ground_visual := spawn_mesh(app, ground_mesh, ground_mat, ground)
-  world.scale_xyz(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
+  world.scale(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   ball := world.spawn(&app.scene, {2.5, SPHERE_RADIUS, 0})
   physics.body_create(&phys, {2.5, SPHERE_RADIUS, 0}, collider = physics.SphereCollider{radius = SPHERE_RADIUS}, user = world.Handle(ball))
   ball_visual := spawn_mesh(app, sphere_mesh, sphere_mat, ball)
@@ -111,7 +111,7 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {30, 25, 30}, {0, 5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {0, 20, 0})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_spot_light({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_spot_light({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25)))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   return true
 }
@@ -131,7 +131,7 @@ update :: proc(app: ^App, dt: f32) {
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   physics.step(&phys, dt)
-  for k in phys.killed do world.despawn(&app.scene, world.NodeHandle(k.user))
+  for k in phys.killed do world.destroy(&app.scene, world.NodeHandle(k.user))
   world.set_world_poses(&app.scene, physics.body_poses(&phys))
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

@@ -85,19 +85,19 @@ build_level :: proc(app: ^App) -> bool {
   clear(&example_meshes)
   clear(&example_nodes)
   clear(&gltf_roots)
-  for &a in animators do anim.animator_destroy(&a)
+  for &a in animators do anim.destroy(&a)
   clear(&animators)
-  gltf.scene_destroy(&character)
+  gltf.destroy(&character)
 
   half := f32(GRID - 1) * 0.5 * SPACING
   render.camera_look_at(render.main_camera(&app.renderer), {half + 4, half + 6, half * 2.4}, {0, half - 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-6, 14, 6})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.96, 0.9, 1}, 8.0)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.96, 0.9, 1}, 8.0)))
 
   // Ground uses BUILTIN mesh + material: stays put through every destroy button.
   ground := world.spawn(&app.scene, {0, -1, 0})
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, f32(GRID) * SPACING * 1.5)
 
   // One example mesh per column (distinct primitive), so "Destroy All Meshes" is
@@ -135,15 +135,15 @@ build_level :: proc(app: ^App) -> bool {
     y := f32(row) * SPACING
     node, node_ok := world.spawn(&app.scene, {x, y, 0})
     if !node_ok do continue
-    render.attach(&app.renderer, node.index, render.MeshAttachment{handle = col_meshes[col], material = mat, cast_shadow = true})
+    render.attach(&app.renderer, render.SlotHandle(node.index), render.MeshAttachment{mesh = col_meshes[col], material = mat, cast_shadow = true})
     append(&example_nodes, node)
   }
 
   // glTF models join the mix. Their loader-created meshes/materials land in the
   // same render pools, so fold them into the tracked lists — the destroy buttons
   // then free them exactly like the grid resources, and reset rebuilds them.
-  if duck, ok := gltf.load(&app.scene, &app.renderer, #load("../../assets/Duck.glb")); ok {
-    defer gltf.scene_destroy(&duck)
+  if duck, ok := gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/Duck.glb")); ok {
+    defer gltf.destroy(&duck)
     for h in duck.roots {
       world.scale(&app.scene, h, 1.3)
       world.translate(&app.scene, h, -3.5, 0, 4.5)
@@ -151,7 +151,7 @@ build_level :: proc(app: ^App) -> bool {
     }
     collect_gltf_resources(app, duck.roots[:])
   }
-  if scene, ok := gltf.load(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb")); ok {
+  if scene, ok := gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb")); ok {
     character = scene
     for h in character.roots {
       world.scale(&app.scene, h, 6.0)
@@ -179,9 +179,9 @@ build_level :: proc(app: ^App) -> bool {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.scene_destroy(&character)
+  gltf.destroy(&character)
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -195,11 +195,11 @@ collect_gltf_resources :: proc(app: ^App, roots: []world.NodeHandle) {
   for len(stack) > 0 {
     h := pop(&stack)
     append(&stack, ..world.children(&app.scene, h))
-    att := render.attachment(&app.renderer, h.index, render.MeshAttachment) or_continue
+    att := render.attachment(&app.renderer, render.SlotHandle(h.index), render.MeshAttachment) or_continue
     append(&example_nodes, h)
-    if att.handle not_in seen_mesh {
-      seen_mesh[att.handle] = true
-      append(&example_meshes, att.handle)
+    if att.mesh not_in seen_mesh {
+      seen_mesh[att.mesh] = true
+      append(&example_meshes, att.mesh)
     }
     if att.material not_in seen_mat {
       seen_mat[att.material] = true
@@ -212,14 +212,14 @@ act_destroy_materials :: proc(app: ^App) {
   if len(example_materials) == 0 do return
   default_mat := app.renderer.builtin_materials[.GRAY]
   for h in example_nodes {
-    if a, ok := render.attachment(&app.renderer, h.index, render.MeshAttachment); ok {
+    if a, ok := render.attachment(&app.renderer, render.SlotHandle(h.index), render.MeshAttachment); ok {
       a.material = default_mat
-      render.attach(&app.renderer, h.index, a)
+      render.attach(&app.renderer, render.SlotHandle(h.index), a)
     }
   }
   freed := len(example_materials)
   for m in example_materials {
-    render.material_destroy(&app.renderer, m)
+    render.destroy(&app.renderer, m)
   }
   clear(&example_materials)
   log.infof("destroyed %d materials -> builtin GRAY", freed)
@@ -229,14 +229,14 @@ act_destroy_meshes :: proc(app: ^App) {
   if len(example_meshes) == 0 do return
   cube := app.renderer.builtin_meshes[.CUBE]
   for h in example_nodes {
-    if a, ok := render.attachment(&app.renderer, h.index, render.MeshAttachment); ok {
-      a.handle = cube
-      render.attach(&app.renderer, h.index, a)
+    if a, ok := render.attachment(&app.renderer, render.SlotHandle(h.index), render.MeshAttachment); ok {
+      a.mesh = cube
+      render.attach(&app.renderer, render.SlotHandle(h.index), a)
     }
   }
   freed := len(example_meshes)
   for m in example_meshes {
-    render.mesh_destroy(&app.renderer, m)
+    render.destroy(&app.renderer, m)
   }
   clear(&example_meshes)
   log.infof("destroyed %d meshes -> builtin CUBE", freed)
@@ -295,7 +295,7 @@ update :: proc(app: ^App, delta_time: f32) {
   }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  for s, i in character.skinned do render.stage_bones(&app.renderer, s.node.index, animators[i].palette)
+  for s, i in character.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), animators[i].palette)
   render.update(&app.renderer, delta_time)
 }
 

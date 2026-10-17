@@ -12,7 +12,7 @@ test_despawn_single_node :: proc(t: ^testing.T) {
   defer shutdown(&w)
 
   // Spawn a single node
-  node_handle, ok := spawn(&w, {1, 2, 3})
+  node_handle, ok := node_create(&w, {1, 2, 3})
   testing.expectf(t, ok, "failed to spawn node")
 
   // Verify node exists
@@ -20,7 +20,7 @@ test_despawn_single_node :: proc(t: ^testing.T) {
   testing.expectf(t, n != nil, "node should exist after spawning")
 
   // Despawn the node
-  despawn_ok := despawn(&w, node_handle)
+  despawn_ok := node_destroy(&w, node_handle)
   testing.expectf(t, despawn_ok, "despawn should succeed")
 
   // Verify node no longer exists
@@ -39,16 +39,16 @@ test_despawn_node_with_children :: proc(t: ^testing.T) {
   defer shutdown(&w)
 
   // Create parent with 3 children
-  parent_handle, parent_ok := spawn(&w, {0, 0, 0})
+  parent_handle, parent_ok := node_create(&w, {0, 0, 0})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
 
-  child1_handle, child1_ok := spawn(&w, {1, 0, 0}, parent = parent_handle)
+  child1_handle, child1_ok := node_create(&w, {1, 0, 0}, parent = parent_handle)
   testing.expectf(t, child1_ok, "failed to spawn child1")
 
-  child2_handle, child2_ok := spawn(&w, {2, 0, 0}, parent = parent_handle)
+  child2_handle, child2_ok := node_create(&w, {2, 0, 0}, parent = parent_handle)
   testing.expectf(t, child2_ok, "failed to spawn child2")
 
-  child3_handle, child3_ok := spawn(&w, {3, 0, 0}, parent = parent_handle)
+  child3_handle, child3_ok := node_create(&w, {3, 0, 0}, parent = parent_handle)
   testing.expectf(t, child3_ok, "failed to spawn child3")
 
   // Verify all nodes exist
@@ -64,7 +64,7 @@ test_despawn_node_with_children :: proc(t: ^testing.T) {
   )
 
   // Despawn parent
-  despawn_ok := despawn(&w, parent_handle)
+  despawn_ok := node_destroy(&w, parent_handle)
   testing.expectf(t, despawn_ok, "despawn should succeed")
 
   // Verify all nodes are freed
@@ -93,23 +93,23 @@ test_despawn_hierarchy :: proc(t: ^testing.T) {
   //       └─ child2
   //           └─ grandchild2
 
-  parent_handle, parent_ok := spawn(&w, {0, 0, 0})
+  parent_handle, parent_ok := node_create(&w, {0, 0, 0})
   testing.expectf(t, parent_ok, "failed to spawn parent")
 
-  child1_handle, child1_ok := spawn(&w, {1, 0, 0}, parent = parent_handle)
+  child1_handle, child1_ok := node_create(&w, {1, 0, 0}, parent = parent_handle)
   testing.expectf(t, child1_ok, "failed to spawn child1")
 
-  child2_handle, child2_ok := spawn(&w, {2, 0, 0}, parent = parent_handle)
+  child2_handle, child2_ok := node_create(&w, {2, 0, 0}, parent = parent_handle)
   testing.expectf(t, child2_ok, "failed to spawn child2")
 
-  grandchild1_handle, gc1_ok := spawn(&w, {1, 1, 0}, parent = child1_handle)
+  grandchild1_handle, gc1_ok := node_create(&w, {1, 1, 0}, parent = child1_handle)
   testing.expectf(t, gc1_ok, "failed to spawn grandchild1")
 
-  grandchild2_handle, gc2_ok := spawn(&w, {2, 1, 0}, parent = child2_handle)
+  grandchild2_handle, gc2_ok := node_create(&w, {2, 1, 0}, parent = child2_handle)
   testing.expectf(t, gc2_ok, "failed to spawn grandchild2")
 
   // Despawn parent (should recursively delete entire subtree)
-  despawn_ok := despawn(&w, parent_handle)
+  despawn_ok := node_destroy(&w, parent_handle)
   testing.expectf(t, despawn_ok, "despawn should succeed")
 
   // Verify entire subtree is freed
@@ -147,13 +147,13 @@ test_despawn_detaches_from_parent :: proc(t: ^testing.T) {
   defer shutdown(&w)
 
   // Create parent with 2 children
-  parent_handle, parent_ok := spawn(&w, {0, 0, 0})
+  parent_handle, parent_ok := node_create(&w, {0, 0, 0})
   testing.expectf(t, parent_ok, "failed to spawn parent")
 
-  child1_handle, child1_ok := spawn(&w, parent = parent_handle)
+  child1_handle, child1_ok := node_create(&w, parent = parent_handle)
   testing.expectf(t, child1_ok, "failed to spawn child1")
 
-  child2_handle, child2_ok := spawn(&w, parent = parent_handle)
+  child2_handle, child2_ok := node_create(&w, parent = parent_handle)
   testing.expectf(t, child2_ok, "failed to spawn child2")
 
   testing.expectf(
@@ -163,7 +163,7 @@ test_despawn_detaches_from_parent :: proc(t: ^testing.T) {
   )
 
   // Despawn only child1 (not the parent)
-  despawn_ok := despawn(&w, child1_handle)
+  despawn_ok := node_destroy(&w, child1_handle)
   testing.expectf(t, despawn_ok, "despawn should succeed")
 
   // Verify child1 is freed but parent and child2 still exist
@@ -200,13 +200,13 @@ test_despawn_reports_removed_node :: proc(t: ^testing.T) {
   w: World
   init(&w)
   defer shutdown(&w)
-  node_handle, ok := spawn(&w, {1, 2, 3})
+  node_handle, ok := node_create(&w, {1, 2, 3})
   testing.expectf(t, ok, "failed to spawn node")
   update(&w)
   changed := false
   for n in changes(&w) do changed |= n.index == node_handle.index && !n.removed
   testing.expectf(t, changed, "spawned node should be in the change feed")
-  testing.expectf(t, despawn(&w, node_handle), "despawn should succeed")
+  testing.expectf(t, node_destroy(&w, node_handle), "despawn should succeed")
   testing.expectf(t, lookup(&w, node_handle) == nil, "node should be freed immediately")
   update(&w)
   removed := false
@@ -221,9 +221,9 @@ test_teardown_keeps_root :: proc(t: ^testing.T) {
   w: World
   init(&w)
   defer shutdown(&w)
-  parent := spawn(&w)
-  child := spawn(&w, parent = parent)
-  despawn(&w, spawn(&w)) // retiring at teardown
+  parent := node_create(&w)
+  child := node_create(&w, parent = parent)
+  node_destroy(&w, node_create(&w)) // retiring at teardown
   update(&w)
   teardown(&w)
   _, root_ok := node(&w, w.root)
@@ -233,7 +233,7 @@ test_teardown_keeps_root :: proc(t: ^testing.T) {
   testing.expect_value(t, node_count(&w), 1)
   testing.expect_value(t, len(children(&w, w.root)), 0)
   // the next map spawns into the freed slots and traverses cleanly
-  again := spawn(&w, {1, 0, 0})
+  again := node_create(&w, {1, 0, 0})
   testing.expect_value(t, again.index, parent.index)
   update(&w)
   testing.expect_value(t, len(changes(&w)), 1)

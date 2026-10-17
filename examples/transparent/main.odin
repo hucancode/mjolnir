@@ -75,13 +75,13 @@ setup :: proc(app: ^App) -> bool {
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 6.0)
 
   // Solid red sphere behind the glass slabs
   red_mat := render.material_create(&app.renderer, base_color_factor = {0.95, 0.15, 0.15, 1}, roughness_value = 0.4)
   sphere := world.spawn(&app.scene, {0, 1, -2})
-  render.attach(&app.renderer, sphere.index, render.MeshAttachment{handle = app.renderer.builtin_meshes[.SPHERE], material = red_mat, cast_shadow = true})
+  render.attach(&app.renderer, render.SlotHandle(sphere.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.SPHERE], material = red_mat, cast_shadow = true})
 
   // Stack of transparent quads, increasing opacity
   cube := app.renderer.builtin_meshes[.CUBE]
@@ -94,12 +94,12 @@ setup :: proc(app: ^App) -> bool {
   for c, i in colors {
     mat := render.material_create(&app.renderer, .TRANSPARENT, base_color_factor = c)
     h := world.spawn(&app.scene, {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4})
-    render.attach(&app.renderer, h.index, render.MeshAttachment{handle = cube, material = mat, cast_shadow = false})
+    render.attach(&app.renderer, render.SlotHandle(h.index), render.MeshAttachment{mesh = cube, material = mat, cast_shadow = false})
     world.scale(&app.scene, h, 0.8)
   }
 
   light := world.spawn(&app.scene, {3, 6, 3})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light(
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light(
     color         = {1, 0.97, 0.9, 1},
     shadow_radius = 10,
     cast_shadow   = true,

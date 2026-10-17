@@ -128,10 +128,10 @@ setup :: proc(app: ^App) -> bool {
   ground := app.renderer.builtin_meshes[.QUAD_XZ]
   dark_mat := render.material_create(&app.renderer, type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0})
   floor := world.spawn(&app.scene)
-  render.attach(&app.renderer, floor.index, render.MeshAttachment{handle = ground, material = dark_mat, cast_shadow = false})
+  render.attach(&app.renderer, render.SlotHandle(floor.index), render.MeshAttachment{mesh = ground, material = dark_mat, cast_shadow = false})
   world.scale(&app.scene, floor, RADIUS * 6.0)
   spot := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, spot.index, render.light_create(&app.renderer, render.make_spot_light({1, 1, 1, 1}, 12.0, math.PI * 0.35, true)))
+  render.attach(&app.renderer, render.SlotHandle(spot.index), render.light_create(&app.renderer, render.make_spot_light({1, 1, 1, 1}, 12.0, math.PI * 0.35, true)))
   world.rotate(&app.scene, spot, math.PI * 0.55, {1, 0, 0})
   render.camera_look_at(render.main_camera(&app.renderer), {0, 14, 14}, {0, 8, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
@@ -146,11 +146,11 @@ setup :: proc(app: ^App) -> bool {
 
 reset_game :: proc(app: ^App) {
   for col in 0 ..< GRID_W do for row in 0 ..< GRID_H do if state.occupied[col][row] {
-    world.despawn(&app.scene, state.board[col][row])
+    world.destroy(&app.scene, state.board[col][row])
     state.board[col][row] = {}; state.occupied[col][row] = false
   }
   if state.has_active {
-    for h in state.active_cells do world.despawn(&app.scene, h)
+    for h in state.active_cells do world.destroy(&app.scene, h)
     state.has_active = false
   }
   state.score = 0; state.fall_timer = 0
@@ -168,7 +168,7 @@ spawn_piece :: proc(app: ^App) {
   mat := state.transparent_material[state.active_piece.color]
   for i in 0 ..< PIECE_LEN {
     h := world.spawn(&app.scene)
-    render.attach(&app.renderer, h.index, render.MeshAttachment{handle = cube, material = mat, cast_shadow = true})
+    render.attach(&app.renderer, render.SlotHandle(h.index), render.MeshAttachment{mesh = cube, material = mat, cast_shadow = true})
     state.active_cells[i] = h
     world.scale(&app.scene, h, 0.5 * CELL)
   }
@@ -219,9 +219,9 @@ lock_piece :: proc(app: ^App) {
     row := state.active_pos[1] + c[1]
     state.board[col][row] = state.active_cells[i]
     state.occupied[col][row] = true
-    if a, ok := render.attachment(&app.renderer, state.active_cells[i].index, render.MeshAttachment); ok {
+    if a, ok := render.attachment(&app.renderer, render.SlotHandle(state.active_cells[i].index), render.MeshAttachment); ok {
       a.material = opaque
-      render.attach(&app.renderer, state.active_cells[i].index, a)
+      render.attach(&app.renderer, render.SlotHandle(state.active_cells[i].index), a)
     }
   }
   state.has_active = false
@@ -237,7 +237,7 @@ clear_lines :: proc(app: ^App) -> int {
     for col in 0 ..< GRID_W do if !state.occupied[col][r] { full = false; break }
     if !full { r += 1; continue }
     for col in 0 ..< GRID_W {
-      world.despawn(&app.scene, state.board[col][r])
+      world.destroy(&app.scene, state.board[col][r])
       state.board[col][r] = {}; state.occupied[col][r] = false
     }
     for r2 := r; r2 < GRID_H - 1; r2 += 1 {

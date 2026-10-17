@@ -30,7 +30,7 @@ PATH_DEBUG_SAMPLES :: 96
 snake:         gltf.Scene
 // one animator (and its path layer) per snake.skinned entry
 animators:     [dynamic]animation.Animator
-layer_indices: [dynamic]int
+layer_indices: [dynamic]animation.LayerHandle
 path_buf:      [CONTROL_POINTS][3]f32
 spline:        animation.Spline([3]f32)
 
@@ -65,9 +65,9 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.scene_destroy(&snake)
+  gltf.destroy(&snake)
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -88,8 +88,8 @@ regenerate_points :: proc() {
 
 rebuild_path :: proc(app: ^App) {
   regenerate_points()
-  animation.spline_destroy(&spline)
-  spline = animation.spline_build_closed(path_buf[:])
+  animation.destroy(&spline)
+  spline = animation.spline_create_closed(path_buf[:])
   for &a, i in animators do animation.set_path_params(&a, layer_indices[i], path = path_buf[:])
 }
 
@@ -118,15 +118,15 @@ setup :: proc(app: ^App) -> bool {
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {5, 3, 5}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  snake = gltf.load(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
+  snake = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
   regenerate_points()
-  spline = animation.spline_build_closed(path_buf[:])
+  spline = animation.spline_create_closed(path_buf[:])
 
   for s in snake.skinned {
     rig := &snake.rigs[s.rig]
     a: animation.Animator
     animation.animator_init(&a, rig)
-    idx, _ := animation.add_path_layer(&a, rig, "root", 14,
+    idx, _ := animation.path_layer_create(&a, rig, "root", 14,
       path = path_buf[:], offset = f32(offset_val), length = f32(fit_len),
       speed = 0, loop = true, closed = true, weight = 1.0,
     )
@@ -134,10 +134,10 @@ setup :: proc(app: ^App) -> bool {
     append(&layer_indices, idx)
   }
   ground := world.spawn(&app.scene, {0, -3, 0})
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 30.0)
   light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_point_light({1, 0.9, 0.8, 1}, 15.0, true)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1, 0.9, 0.8, 1}, 15.0, true)))
   return true
 }
 
@@ -166,7 +166,7 @@ update :: proc(app: ^App, dt: f32) {
   draw_path_debug(app)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  for s, i in snake.skinned do render.stage_bones(&app.renderer, s.node.index, animators[i].palette)
+  for s, i in snake.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), animators[i].palette)
   render.update(&app.renderer, dt)
 }
 

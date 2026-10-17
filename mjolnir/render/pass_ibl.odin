@@ -37,7 +37,7 @@ PrecomputePush :: struct {
 // equirect into env_cube, then irradiance and every prefilter mip (PREFILTER_MIPS) from it.
 // Each dispatch writes one cube level as six storage layers.
 @(private)
-precompute_ibl :: proc(r: ^Renderer, equirect, env_cube, irradiance_cube, prefilter_cube: TextureHandle) -> bool {
+precompute_ibl :: proc(self: ^Renderer, equirect, env_cube, irradiance_cube, prefilter_cube: TextureHandle) -> bool {
   Dispatch :: struct {
     shader: PrecomputeShader,
     src:    TextureHandle,
@@ -70,50 +70,50 @@ precompute_ibl :: proc(r: ^Renderer, equirect, env_cube, irradiance_cube, prefil
   pipelines: [PrecomputeShader]rhi.Pipeline
   groups: [PRECOMPUTE_DISPATCHES]rhi.BindGroup
   defer {
-    for p in pipelines do dev.pipeline_retire(&r.gpu, p)
-    for g in groups do dev.bind_group_retire(&r.gpu, g)
+    for p in pipelines do dev.pipeline_retire(&self.gpu, p)
+    for g in groups do dev.bind_group_retire(&self.gpu, g)
   }
   for shader in PrecomputeShader {
-    layout := pipeline_layout(r, .NONE)
+    layout := pipeline_layout(self, .NONE)
     when !BINDLESS {
       stages := bit_set[rhi.ShaderStage]{.COMPUTE}
       entries := [?]rhi.BindEntry{{kind = .TEXTURE_FLOAT if shader == .EQUIRECT else .TEXTURE_CUBE, stages = stages}, {kind = .STORAGE_TEXTURE_ARRAY, stages = stages, format = .RGBA16F}}
-      layouts[shader] = dev.bind_layout_create(&r.gpu, {entries = entries[:]}) or_return
-      layout = pipeline_layout(r, .NONE, .NONE, layouts[shader])
+      layouts[shader] = dev.bind_layout_create(&self.gpu, {entries = entries[:]}) or_return
+      layout = pipeline_layout(self, .NONE, .NONE, layouts[shader])
     }
-    pipelines[shader] = dev.compute_pipeline_create(&r.gpu, {{spirv = {comp = spirvs[shader]}, wgsl = wgsls[shader]}, layout}) or_return
+    pipelines[shader] = dev.compute_pipeline_create(&self.gpu, {{spirv = {comp = spirvs[shader]}, wgsl = wgsls[shader]}, layout}) or_return
   }
   when BINDLESS {
-    for d, i in dispatches do dev.bindless_write(&r.gpu, .STORAGE_IMAGES, PRECOMPUTE_STORAGE_BASE + u32(i), rhi.TextureView{d.dst, i32(d.mip)})
+    for d, i in dispatches do dev.bindless_write(&self.gpu, .STORAGE_IMAGES, PRECOMPUTE_STORAGE_BASE + u32(i), rhi.TextureView{d.dst, i32(d.mip)})
   } else {
     for d, i in dispatches {
       resources := [2]rhi.BindResource{rhi.TextureView{d.src, -1}, rhi.TextureView{d.dst, i32(d.mip)}}
-      groups[i] = dev.bind_group_create(&r.gpu, {layout = layouts[d.shader], resources = resources[:]}) or_return
+      groups[i] = dev.bind_group_create(&self.gpu, {layout = layouts[d.shader], resources = resources[:]}) or_return
     }
   }
-  cmd := dev.cmd_begin(&r.gpu, .GRAPHICS, 0)
+  cmd := dev.cmd_begin(&self.gpu, .GRAPHICS, 0)
   // the equirect source may still be staged
-  dev.cmd_flush_uploads(&r.gpu, cmd)
-  dev.cmd_label_begin(&r.gpu, cmd, "ibl precompute")
+  dev.cmd_flush_uploads(&self.gpu, cmd)
+  dev.cmd_label_begin(&self.gpu, cmd, "ibl precompute")
   cubes := [3]TextureHandle{env_cube, irradiance_cube, prefilter_cube}
-  dev.cmd_barrier(&r.gpu, cmd, nil, cubes[:])
-  dev.cmd_begin_compute(&r.gpu, cmd)
+  dev.cmd_barrier(&self.gpu, cmd, nil, cubes[:])
+  dev.cmd_begin_compute(&self.gpu, cmd)
   for d, i in dispatches {
     size := max(d.size >> d.mip, 1)
     push := PrecomputePush{u32(d.src), PRECOMPUTE_STORAGE_BASE + u32(i), size, d.value, d.count}
-    pipeline_bind(r, cmd, pipelines[d.shader], .NONE, 0, &push, .NONE)
-    when !BINDLESS do dev.cmd_bind_group(&r.gpu, cmd, 3, groups[i])
-    dev.cmd_dispatch(&r.gpu, cmd, (size + 7) / 8, (size + 7) / 8, 6)
+    pipeline_bind(self, cmd, pipelines[d.shader], .NONE, 0, &push, .NONE)
+    when !BINDLESS do dev.cmd_bind_group(&self.gpu, cmd, 3, groups[i])
+    dev.cmd_dispatch(&self.gpu, cmd, (size + 7) / 8, (size + 7) / 8, 6)
     // later dispatches sample the env cube, the lighting passes the outputs
     written := [1]rhi.Barrier{{{.COMPUTE_SHADER}, {.COMPUTE_SHADER, .FRAGMENT_SHADER}, {.SHADER_WRITE}, {.SHADER_READ}}}
-    dev.cmd_barrier(&r.gpu, cmd, written[:], nil)
+    dev.cmd_barrier(&self.gpu, cmd, written[:], nil)
   }
-  dev.cmd_end_compute(&r.gpu, cmd)
-  dev.cmd_label_end(&r.gpu, cmd)
-  dev.cmd_end(&r.gpu, cmd)
+  dev.cmd_end_compute(&self.gpu, cmd)
+  dev.cmd_label_end(&self.gpu, cmd)
+  dev.cmd_end(&self.gpu, cmd)
   cmds := [1]rhi.CommandList{cmd}
-  dev.submit(&r.gpu, {queue = .GRAPHICS, cmds = cmds[:]})
-  dev.wait_idle(&r.gpu)
+  dev.submit(&self.gpu, {queue = .GRAPHICS, cmds = cmds[:]})
+  dev.wait_idle(&self.gpu)
   log.infof(
     "IBL precompute done: env=%d^2, irradiance=%d^2, prefilter=%d^2 x %d mips",
     ENV_CUBE_SIZE, IRRADIANCE_SIZE, PREFILTER_SIZE, PREFILTER_MIPS,

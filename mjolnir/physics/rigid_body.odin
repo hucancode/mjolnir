@@ -11,7 +11,7 @@ import "core:math/linalg"
 // A sensor reports overlaps in `World.sensor_overlaps` and is never
 // simulated, solved or hit by queries; move it with `set_pose`.
 Body :: struct {
-  user:                 cont.Handle, // caller-owned link back, e.g. the scene node this body drives
+  user:                 Handle, // caller-owned link back, e.g. the scene node this body drives
   is_sensor:            bool,
   moving:               bool, // integrated and kept in the dynamic BVH
   is_sleeping:          bool,
@@ -63,7 +63,7 @@ body_init :: proc(
   collider: Collider,
   mass: f32,
   is_sensor: bool,
-  user: cont.Handle,
+  user: Handle,
 ) {
   self^ = {
     user            = user,

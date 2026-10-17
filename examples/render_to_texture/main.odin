@@ -56,7 +56,7 @@ should_close :: proc(app: ^App) -> bool {
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, position: [3]f32, scale_factor: f32 = 1, cast_shadow := true) -> world.NodeHandle {
   n := world.spawn(&app.scene, position)
-  render.attach(&app.renderer, n.index, render.primitive(&app.renderer, shape, color, cast_shadow))
+  render.attach(&app.renderer, render.SlotHandle(n.index), render.primitive(&app.renderer, shape, color, cast_shadow))
   if scale_factor != 1 do world.scale(&app.scene, n, scale_factor)
   return n
 }
@@ -76,14 +76,14 @@ setup :: proc(app: ^App) -> bool {
   spinner_handle = spawn_primitive(app, .CUBE, .YELLOW, {0, 1.8, 0}, 0.4)
 
   light := world.spawn(&app.scene, {0, 3, 1.5})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_point_light({1.0, 0.6, 0.3, 1.0}, 12.0, false)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1.0, 0.6, 0.3, 1.0}, 12.0, false)))
 
   rtt_camera_handle = render.camera_create(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
   rtt_material_handle = render.material_create(&app.renderer)
 
   display_mesh := app.renderer.builtin_meshes[.QUAD_XY]
   display_handle := world.spawn(&app.scene, {0, 2.5, -3.5})
-  render.attach(&app.renderer, display_handle.index, render.MeshAttachment{handle = display_mesh, material = rtt_material_handle, cast_shadow = false})
+  render.attach(&app.renderer, render.SlotHandle(display_handle.index), render.MeshAttachment{mesh = display_mesh, material = rtt_material_handle, cast_shadow = false})
   world.scale(&app.scene, display_handle, 3.0)
   return true
 }
@@ -111,7 +111,7 @@ frame :: proc(app: ^App) -> bool {
   if mat, found := render.material(&app.renderer, rtt_material_handle); found {
     // the image the frame just submitted rendered: the next frame samples it
     // while it draws into the other one
-    mat.albedo_texture = render.camera_attachment(&app.renderer, rtt_camera_handle, .FINAL_IMAGE, previous_frame = true)
+    mat.albedo_texture = render.camera_image(&app.renderer, rtt_camera_handle, .FINAL_IMAGE, previous_frame = true)
   }
   return ok
 }

@@ -76,7 +76,7 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -103,7 +103,7 @@ setup :: proc(app: ^App) -> bool {
   app.vignette, ok = render.post_shader_create(&app.renderer, vignette_spirv, vignette_wgsl)
   if !ok do log.error("Failed to create the vignette shader")
   ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 30.0)
 
   cube_mesh   := app.renderer.builtin_meshes[.CUBE]
@@ -129,16 +129,16 @@ setup :: proc(app: ^App) -> bool {
   for i in 0 ..< 5 do spawn_mesh(app, cube_mesh, white_mat, {f32(i) * 4.0 - 8.0, 0.5, -7.0})
 
   sun := world.spawn(&app.scene, {-3, 8, 6})
-  render.attach(&app.renderer, sun.index, render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9, 1}, shadow_radius = 5.0, cast_shadow = true)))
+  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9, 1}, shadow_radius = 5.0, cast_shadow = true)))
   lamp := world.spawn(&app.scene, {0, 3, 0})
-  render.attach(&app.renderer, lamp.index, render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2, 1}, radius = 8.0, cast_shadow = false)))
+  render.attach(&app.renderer, render.SlotHandle(lamp.index), render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2, 1}, radius = 8.0, cast_shadow = false)))
   log.info("Post-process stack panel — toggle effects via debug UI")
   return true
 }
 
 spawn_mesh :: proc(app: ^App, mesh: render.MeshHandle, material: render.MaterialHandle, position: [3]f32, cast_shadow := true) {
   n := world.spawn(&app.scene, position)
-  render.attach(&app.renderer, n.index, render.MeshAttachment{handle = mesh, material = material, cast_shadow = cast_shadow})
+  render.attach(&app.renderer, render.SlotHandle(n.index), render.MeshAttachment{mesh = mesh, material = material, cast_shadow = cast_shadow})
 }
 
 update :: proc(app: ^App, dt: f32) {

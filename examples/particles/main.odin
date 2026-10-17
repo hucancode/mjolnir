@@ -103,20 +103,20 @@ setup :: proc(app: ^App) -> bool {
   app.renderer.skybox_intensity = 0
 
   for file in TEXTURE_FILES {
-    handle, ok := render.texture_load(&app.renderer, file.data)
+    handle, ok := render.texture_create(&app.renderer, file.data)
     if !ok do continue
     append(&textures, TextureEntry{name = strings.clone(file.name), handle = handle})
   }
   if len(textures) > 0 && int(selected_tex_index) >= len(textures) do selected_tex_index = 0
 
   emitter_node = world.spawn(&app.scene, {0, 2, 0})
-  render.attach(&app.renderer, emitter_node.index, render.emitter_create(&app.renderer, render.make_emitter()))
+  render.attach(&app.renderer, render.SlotHandle(emitter_node.index), render.emitter_create(&app.renderer, render.make_emitter()))
   return true
 }
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -141,8 +141,8 @@ update :: proc(app: ^App, dt: f32) {
   if len(textures) > 0 && int(selected_tex_index) < len(textures) {
     tex = textures[selected_tex_index].handle
   }
-  if em, ok := render.emitter(&app.renderer, render.attachment(&app.renderer, emitter_node.index, render.EmitterHandle)); ok {
-    em.texture_index     = tex
+  if em, ok := render.emitter(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(emitter_node.index), render.EmitterHandle)); ok {
+    em.texture           = tex
     // a zero rate pauses the emitter
     em.emission_rate     = f32(emission_rate) if enabled else 0
     em.particle_lifetime = f32(lifetime)

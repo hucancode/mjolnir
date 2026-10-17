@@ -95,7 +95,7 @@ frame :: proc(app: ^App) -> bool {
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, pos: [3]f32 = {}) -> world.NodeHandle {
   n := world.spawn(&app.scene, pos)
-  render.attach(&app.renderer, n.index, render.primitive(&app.renderer, shape, color))
+  render.attach(&app.renderer, render.SlotHandle(n.index), render.primitive(&app.renderer, shape, color))
   return n
 }
 
@@ -108,7 +108,7 @@ setup :: proc(app: ^App) -> bool {
   wall_h :: 0.5
 
   floor := spawn_primitive(app, .CUBE, .GRAY, {0, -0.5, 0})
-  world.scale_xyz(&app.scene, floor, half, 0.5, half)
+  world.scale(&app.scene, floor, half, 0.5, half)
 
   spawn_wall(app, {0, wall_h, half + wall_t}, half + wall_t * 2, wall_h, wall_t)
   spawn_wall(app, {0, wall_h, -(half + wall_t)}, half + wall_t * 2, wall_h, wall_t)
@@ -120,7 +120,7 @@ setup :: proc(app: ^App) -> bool {
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
   spot := world.spawn(&app.scene, {0, 10, 4})
-  render.attach(&app.renderer, spot.index, render.light_create(&app.renderer, render.make_spot_light({0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true)))
+  render.attach(&app.renderer, render.SlotHandle(spot.index), render.light_create(&app.renderer, render.make_spot_light({0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true)))
   world.rotate(&app.scene, spot, math.PI * 0.55, linalg.VECTOR3F32_X_AXIS)
 
 
@@ -136,11 +136,11 @@ setup :: proc(app: ^App) -> bool {
 
 spawn_wall :: proc(app: ^App, pos: [3]f32, sx, sy, sz: f32) {
   h := spawn_primitive(app, .CUBE, .WHITE, pos)
-  world.scale_xyz(&app.scene, h, sx, sy, sz)
+  world.scale(&app.scene, h, sx, sy, sz)
 }
 
 reset_game :: proc(app: ^App) {
-  for h in g.body_nodes do world.despawn(&app.scene, h)
+  for h in g.body_nodes do world.destroy(&app.scene, h)
   clear(&g.body_nodes); clear(&g.body)
 
   mid: i32 = GRID / 2

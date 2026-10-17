@@ -18,8 +18,8 @@ Geometry :: struct {
   indices:   []u32,
 }
 
-// make_geometry wraps vertices and indices into a Geometry, generating tangents if missing.
-make_geometry :: proc(
+// geometry_create wraps vertices and indices into a Geometry, generating tangents if missing.
+geometry_create :: proc(
   vertices: []Vertex,
   indices: []u32,
   skinnings: []SkinningData = nil,
@@ -66,8 +66,8 @@ make_geometry :: proc(
   return {vertices = vertices, skinnings = skinnings, indices = indices}
 }
 
-// delete_geometry frees the arrays of a Geometry.
-delete_geometry :: proc(geometry: Geometry) {
+// geometry_destroy frees the arrays of a Geometry.
+geometry_destroy :: proc(geometry: Geometry) {
   delete(geometry.vertices)
   delete(geometry.skinnings)
   delete(geometry.indices)
@@ -121,5 +121,5 @@ from_triangles :: proc(positions: [][3]f32, indices: []u32) -> Geometry {
     v.color = {1, 1, 1, 1}
     v.uv = v.position.xz * 0.1
   }
-  return make_geometry(vertices, slice.clone(indices))
+  return geometry_create(vertices, slice.clone(indices))
 }

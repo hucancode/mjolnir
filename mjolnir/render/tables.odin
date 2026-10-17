@@ -57,20 +57,20 @@ TABLES := [Table]struct {
   capacity: int,
 } {
   .VIEWS = {size_of(View), MAX_VIEWS},
-  .NODES = {size_of(Node), MAX_NODES_IN_SCENE},
+  .NODES = {size_of(Node), MAX_SLOTS},
   .MESHES = {size_of(MeshData), MAX_MESHES},
   .MATERIALS = {size_of(Material), MAX_MATERIALS},
   .BONES = {size_of(matrix[4, 4]f32), BONE_CAPACITY},
   .EMITTERS = {size_of(Emitter), MAX_EMITTERS},
-  .FORCEFIELDS = {size_of(ForceField), MAX_FORCE_FIELDS},
+  .FORCE_FIELDS = {size_of(ForceField), MAX_FORCE_FIELDS},
   .LIGHTS = {size_of(Light), MAX_LIGHTS},
   .DEBUG_LINES = {size_of(DebugLineSegment), MAX_SEGMENTS},
   .BATCHES = {size_of(Batch), MAX_BATCHES},
-  .NODE_BATCH = {size_of(u32), MAX_NODES_IN_SCENE},
+  .NODE_BATCH = {size_of(u32), MAX_SLOTS},
   .SKIN_OWNERS = {size_of(u32), SKIN_CAPACITY},
   .LIGHT_PLACEMENTS = {size_of(LightPlacement), MAX_LIGHTS},
   .EMITTER_PLACEMENTS = {size_of(EmitterPlacement), MAX_EMITTERS},
-  .FORCEFIELD_PLACEMENTS = {size_of(ForceFieldPlacement), MAX_FORCE_FIELDS},
+  .FORCE_FIELD_PLACEMENTS = {size_of(ForceFieldPlacement), MAX_FORCE_FIELDS},
 }
 
 // The frame in flight frame records next: it picks this frame's copy of per-frame resources.

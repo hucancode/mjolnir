@@ -29,7 +29,7 @@ struct Emitter {
     weight_spread: f32,
     // read by render, which counts each frame's new particles
     emission_rate: f32,
-    texture_index: u32,
+    texture: u32,
 }
 
 // Where an emitter is attached; placement i emits the frame's new particles
@@ -47,7 +47,7 @@ struct EmitterPlacement {
 
 struct ParticleSystemParams {
     emitter_placement_count: u32,
-    forcefield_placement_count: u32,
+    force_field_placement_count: u32,
     delta_time: f32,
     frame_counter: u32,
     // new particles this frame
@@ -132,6 +132,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         lifetime,
         lifetime,
         weight,
-        emitter.texture_index,
+        emitter.texture,
     );
 }

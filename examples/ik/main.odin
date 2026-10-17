@@ -23,7 +23,7 @@ mesh_node: world.NodeHandle
 ground_plane: world.NodeHandle
 
 leg_targets: [6][3]f32
-leg_layers: [6]int = {-1, -1, -1, -1, -1, -1}
+leg_layers: [6]Maybe(animation.LayerHandle)
 
 body_amplitude: mu.Real = 2.5
 body_speed: mu.Real = 0.15
@@ -77,7 +77,7 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {0, 20, 20}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
 
-  scene = gltf.load(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
+  scene = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
   if len(scene.roots) == 0 || len(scene.skinned) == 0 do return true
   spider_root_node = scene.roots[0]
   world.translate(&app.scene, spider_root_node, [3]f32{0, 5, 0})
@@ -116,7 +116,7 @@ setup :: proc(app: ^App) -> bool {
     constraints := animation.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90})
 
     bones, _ := animation.bone_chain(skel, leg_configs[i].root_name, leg_configs[i].tip_name)
-    idx, ok := animation.add_ik_layer(&animator, rig, bones,
+    idx, ok := animation.ik_layer_create(&animator, rig, bones,
       leg_targets[i], pole_pos, weight = 1.0, constraints = constraints, space = .WORLD,
     )
     if !ok {
@@ -129,17 +129,17 @@ setup :: proc(app: ^App) -> bool {
   }
 
   ground_plane = world.spawn(&app.scene)
-  render.attach(&app.renderer, ground_plane.index, render.primitive(&app.renderer, .CUBE, .GRAY))
+  render.attach(&app.renderer, render.SlotHandle(ground_plane.index), render.primitive(&app.renderer, .CUBE, .GRAY))
   world.scale(&app.scene, ground_plane, [3]f32{40, 0.2, 40})
   light := world.spawn(&app.scene)
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 1, 1, 1}, 10.0)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 1, 1, 1}, 10.0)))
   return true
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.scene_destroy(&scene)
+  gltf.destroy(&scene)
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -173,9 +173,9 @@ update :: proc(app: ^App, dt: f32) {
     } else {
       target_pos.y += lift * math.max(math.sin(animation_time * spd * math.PI), 0)
     }
-    if leg_layers[i] >= 0 {
-      animation.set_ik_target(&animator, leg_layers[i], target_pos, pole_pos)
-      animation.set_layer_weight(&animator, leg_layers[i], f32(ik_weight))
+    if layer, ok := leg_layers[i].?; ok {
+      animation.set_ik_target(&animator, layer, target_pos, pole_pos)
+      animation.set_layer_weight(&animator, layer, f32(ik_weight))
     }
     if show_markers {
       render.debug_sphere(&app.renderer, target_pos, 0.5, {1, 0.2, 0.2, 1})
@@ -185,7 +185,7 @@ update :: proc(app: ^App, dt: f32) {
   if rig != nil do animation.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, mesh_node))
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  if rig != nil do render.stage_bones(&app.renderer, mesh_node.index, animator.palette)
+  if rig != nil do render.stage_bones(&app.renderer, render.SlotHandle(mesh_node.index), animator.palette)
   render.update(&app.renderer, dt)
 }
 

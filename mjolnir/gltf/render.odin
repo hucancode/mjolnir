@@ -39,7 +39,7 @@ load_meshes :: proc(
     geometry := load_geometry(&gltf_mesh, skinned[i])
     log.infof("Processed mesh with %d vertices, %d indices", len(geometry.vertices), len(geometry.indices))
     handle := render.mesh_create(r, geometry) or_continue
-    looks[i] = render.MeshAttachment{handle = handle, material = material, cast_shadow = true}
+    looks[i] = render.MeshAttachment{mesh = handle, material = material, cast_shadow = true}
   }
   log.infof("glTF looks: %d textures, %d materials", len(textures), len(materials))
   return looks, true
@@ -62,7 +62,7 @@ load_texture :: proc(
   }
   view := texture.image_.buffer_view
   pixel_data := slice.from_ptr(mem.ptr_offset(cast(^u8)view.buffer.data, view.offset), int(view.size))
-  handle = render.texture_load(r, pixel_data, format) or_return
+  handle = render.texture_create(r, pixel_data, format) or_return
   cache[texture] = handle
   log.infof("Created texture %v", handle)
   return handle, true
@@ -146,7 +146,7 @@ load_geometry :: proc(gltf_mesh: ^cgltf.mesh, include_skinning: bool) -> render.
     }
   }
   // nil skinnings without include_skinning
-  return render.make_geometry(vertices[:], indices[:], skinnings[:])
+  return render.geometry_create(vertices[:], indices[:], skinnings[:])
 }
 
 @(private = "file")

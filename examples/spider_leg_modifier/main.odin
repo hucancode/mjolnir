@@ -21,7 +21,7 @@ animator: animation.Animator
 animation_time: f32 = 0
 spider_root_node: world.NodeHandle
 spider_mesh_node: world.NodeHandle
-spider_leg_layer_index: int = -1
+spider_leg_layer: Maybe(animation.LayerHandle)
 ground_plane: world.NodeHandle
 
 lift_frequency_default :: f32(1.5)
@@ -75,11 +75,11 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
-  gltf.scene_destroy(&scene)
+  gltf.destroy(&scene)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -93,7 +93,7 @@ setup :: proc(app: ^App) -> bool {
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {0, 30, 15}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  scene = gltf.load(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
+  scene = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
   if len(scene.roots) == 0 || len(scene.skinned) == 0 do return true
   spider_root_node = scene.roots[0]
   world.translate(&app.scene, spider_root_node, y = 5)
@@ -128,22 +128,22 @@ setup :: proc(app: ^App) -> bool {
       time_offset    = leg_meta[i].time_offset,
     }
   }
-  if idx, ok := animation.add_spider_leg_layer(&animator, rig, legs[:], weight = 1.0); ok {
-    spider_leg_layer_index = idx
-    log.infof("Added spider leg modifiers for all 6 legs (layer %d)", spider_leg_layer_index)
+  if idx, ok := animation.spider_leg_layer_create(&animator, rig, legs[:], weight = 1.0); ok {
+    spider_leg_layer = idx
+    log.infof("Added spider leg modifiers for all 6 legs (layer %d)", idx)
   }
 
   ground_plane = world.spawn(&app.scene)
-  render.attach(&app.renderer, ground_plane.index, render.primitive(&app.renderer, .CUBE, .GRAY))
+  render.attach(&app.renderer, render.SlotHandle(ground_plane.index), render.primitive(&app.renderer, .CUBE, .GRAY))
   world.scale(&app.scene, ground_plane, [3]f32{20, 0.2, 20})
   light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_point_light(radius=15)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light(radius=15)))
   return true
 }
 
-apply_group :: proc(app: ^App, group: []int, lift_height, lift_duration, lift_frequency, time_offset: f32) {
+apply_group :: proc(app: ^App, layer: animation.LayerHandle, group: []int, lift_height, lift_duration, lift_frequency, time_offset: f32) {
   for leg_index in group {
-    animation.set_spider_leg_params(&animator, spider_leg_layer_index, leg_index,
+    animation.set_spider_leg_params(&animator, layer, leg_index,
       lift_height = lift_height, lift_frequency = lift_frequency,
       lift_duration = lift_duration, time_offset = time_offset,
     )
@@ -179,22 +179,24 @@ update :: proc(app: ^App, dt: f32) {
   }
   world.translate(&app.scene, spider_root_node, body_current_pos)
 
-  if spider_leg_layer_index >= 0 {
-    apply_group(app, GROUP_A[:], f32(lift_height_a), f32(lift_duration_a), f32(lift_frequency_shared), 0.0)
-    apply_group(app, GROUP_B[:], f32(lift_height_b), f32(lift_duration_b), f32(lift_frequency_shared), f32(phase_offset_b))
+  layer, has_layer := spider_leg_layer.?
+  if has_layer {
+    apply_group(app, layer, GROUP_A[:], f32(lift_height_a), f32(lift_duration_a), f32(lift_frequency_shared), 0.0)
+    apply_group(app, layer, GROUP_B[:], f32(lift_height_b), f32(lift_duration_b), f32(lift_frequency_shared), f32(phase_offset_b))
   }
 
   if rig != nil do animation.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, spider_mesh_node))
 
   red := [4]f32{1, 0.2, 0.2, 1}
   for i in 0 ..< 6 {
-    target, ok := animation.spider_leg_target(&animator, spider_leg_layer_index, i)
+    if !has_layer do break
+    target, ok := animation.spider_leg_target(&animator, layer, i)
     if !ok do continue
     render.debug_sphere(&app.renderer, target^, 0.2, red)
   }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  if rig != nil do render.stage_bones(&app.renderer, spider_mesh_node.index, animator.palette)
+  if rig != nil do render.stage_bones(&app.renderer, render.SlotHandle(spider_mesh_node.index), animator.palette)
   render.update(&app.renderer, dt)
 }
 

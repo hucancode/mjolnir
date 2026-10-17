@@ -10,7 +10,7 @@ DrawQuadCommand :: struct {
   position:   [2]f32,
   size:       [2]f32,
   color:      [4]u8,
-  texture_id: u32,
+  texture:    TextureHandle,
 }
 
 // A run of glyphs of the DrawList's font atlas (font.glyphs), in one color.
@@ -24,7 +24,7 @@ DrawMeshCommand :: struct {
   position:   [2]f32,
   vertices:   []Vertex2D,
   indices:    []u32,
-  texture_id: u32,
+  texture:    TextureHandle,
 }
 
 // RenderCommand is one 2D draw staged through DrawList: a shape, drawn in z_order
@@ -52,31 +52,31 @@ DrawList :: struct {
 // vertex stream: draw2d commands staged by the app (sorted by z_order, clipped per command).
 // A batch is one scissor and one texture.
 @(private)
-overlay_init :: proc(r: ^Renderer) -> bool {
-  r.ui_batches = make([dynamic]UIBatch, 0, 64)
-  r.ui_vertices = make([]Vertex2D, UI_MAX_VERTICES)
-  r.ui_indices = make([]u32, UI_MAX_INDICES)
+overlay_init :: proc(self: ^Renderer) -> bool {
+  self.ui_batches = make([dynamic]UIBatch, 0, 64)
+  self.ui_vertices = make([]Vertex2D, UI_MAX_VERTICES)
+  self.ui_indices = make([]u32, UI_MAX_INDICES)
   return true
 }
 
 @(private)
-allocate_alpha_texture :: proc(r: ^Renderer, pixels: []u8, width, height: u32) -> (TextureHandle, bool) {
-  return allocate_texture(r, {extent = {width, height}, format = .A8, usage = {.SAMPLED}}, pixels)
+allocate_alpha_texture :: proc(self: ^Renderer, pixels: []u8, width, height: u32) -> (TextureHandle, bool) {
+  return allocate_texture(self, {extent = {width, height}, format = .A8, usage = {.SAMPLED}}, pixels)
 }
 
 // Empties the overlay: what frame draws is staged again for the next.
 @(private)
-overlay_clear :: proc(r: ^Renderer) {
-  r.ui_vertex_count = 0
-  r.ui_index_count = 0
-  clear(&r.ui_batches)
+overlay_clear :: proc(self: ^Renderer) {
+  self.ui_vertex_count = 0
+  self.ui_index_count = 0
+  clear(&self.ui_batches)
 }
 
 // The staged draw2d commands draw only with a main camera.
 @(private)
-overlay_flush :: proc(r: ^Renderer) {
-  if _, ok := main_camera(r); !ok do overlay_clear(r)
-  end_batch(r)
+overlay_flush :: proc(self: ^Renderer) {
+  if _, ok := main_camera(self); !ok do overlay_clear(self)
+  end_batch(self)
 }
 
 // A batch takes the texture of its first quad.
@@ -150,7 +150,7 @@ batch_commands :: proc(self: ^Renderer, commands: []RenderCommand, extent: [2]u3
     }
     switch c in command.shape {
     case DrawQuadCommand:
-      push_quad(self, c.position, c.position + c.size, {0, 0}, {1, 1}, c.color, resolve_texture(self, c.texture_id))
+      push_quad(self, c.position, c.position + c.size, {0, 0}, {1, 1}, c.color, resolve_texture(self, c.texture))
     case DrawTextCommand:
       if self.ui_font_atlas == 0 do continue
       atlas_size := self.ui_font_atlas_size
@@ -158,7 +158,7 @@ batch_commands :: proc(self: ^Renderer, commands: []RenderCommand, extent: [2]u3
         push_quad(self, g.p0, g.p1, g.uv0 / atlas_size, g.uv1 / atlas_size, c.color, self.ui_font_atlas)
       }
     case DrawMeshCommand:
-      push_mesh(self, c, resolve_texture(self, c.texture_id))
+      push_mesh(self, c, resolve_texture(self, c.texture))
     }
   }
 }
@@ -174,8 +174,8 @@ clip_scissor :: proc(clip: [4]f32, extent: [2]u32) -> [4]i32 {
 }
 
 @(private)
-resolve_texture :: proc(self: ^Renderer, texture_id: u32) -> TextureHandle {
-  return self.white if texture_id == NO_TEXTURE else TextureHandle(texture_id)
+resolve_texture :: proc(self: ^Renderer, texture: TextureHandle) -> TextureHandle {
+  return self.white if texture == NO_TEXTURE else texture
 }
 
 @(private)

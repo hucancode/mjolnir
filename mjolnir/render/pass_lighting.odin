@@ -35,71 +35,71 @@ LightingPush :: struct {
 }
 
 @(private)
-lighting_init :: proc(r: ^Renderer) -> bool {
+lighting_init :: proc(self: ^Renderer) -> bool {
   when !BINDLESS {
     entries := [1]rhi.BindEntry{{kind = .STORAGE_TEXTURE, stages = {.COMPUTE}, format = HDR_COLOR_FORMAT}}
-    r.lighting_output_layout = dev.bind_layout_create(&r.gpu, {entries = entries[:]}) or_return
+    self.lighting_output_layout = dev.bind_layout_create(&self.gpu, {entries = entries[:]}) or_return
   }
-  r.lighting_pipeline = dev.compute_pipeline_create(
-    &r.gpu,
+  self.lighting_pipeline = dev.compute_pipeline_create(
+    &self.gpu,
     {
       {spirv = {comp = spirv("shader/vulkan/lighting/lighting.spv")}, wgsl = wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/lighting.wgsl"))},
-      pipeline_layout(r, .LIGHTING, .LIGHTING, r.lighting_output_layout),
+      pipeline_layout(self, .LIGHTING, .LIGHTING, self.lighting_output_layout),
     },
   ) or_return
   return true
 }
 
 @(private)
-lighting_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
-  attachments := &r.camera_targets[cam].attachments
+lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
+  images := &self.camera_targets[cam].images
   group: rhi.BindGroup
   when !BINDLESS {
-    output := attachments[.FINAL_IMAGE][f]
+    output := images[.FINAL_IMAGE][f]
     cached: bool
-    group, cached = r.lighting_output_groups[output]
+    group, cached = self.lighting_output_groups[output]
     if !cached {
       resources := [1]rhi.BindResource{rhi.TextureView{output, 0}}
       ok: bool
-      group, ok = dev.bind_group_create(&r.gpu, {layout = r.lighting_output_layout, resources = resources[:]})
+      group, ok = dev.bind_group_create(&self.gpu, {layout = self.lighting_output_layout, resources = resources[:]})
       if !ok do return
-      r.lighting_output_groups[output] = group
+      self.lighting_output_groups[output] = group
     }
   }
   push := LightingPush {
     camera_index     = cam,
-    irradiance       = u32(r.irradiance_cube),
-    prefilter        = u32(r.prefilter_cube),
-    brdf_lut         = u32(r.brdf_lut),
-    environment      = u32(r.environment_map),
-    skybox_intensity = r.skybox_intensity,
-    skybox_blur      = r.skybox_blur,
+    irradiance       = u32(self.irradiance_cube),
+    prefilter        = u32(self.prefilter_cube),
+    brdf_lut         = u32(self.brdf_lut),
+    environment      = u32(self.environment_map),
+    skybox_intensity = self.skybox_intensity,
+    skybox_blur      = self.skybox_blur,
     output_index     = LIT_STORAGE_BASE + camera_slot(cam) + f,
-    light_count      = r.light_placement_slots.high_water,
-    ibl_intensity    = r.ibl_intensity,
+    light_count      = self.light_placement_slots.high_water,
+    ibl_intensity    = self.ibl_intensity,
   }
-  dev.cmd_begin_compute(&r.gpu, cmd)
-  defer dev.cmd_end_compute(&r.gpu, cmd)
+  dev.cmd_begin_compute(&self.gpu, cmd)
+  defer dev.cmd_end_compute(&self.gpu, cmd)
   pipeline_bind(
-    r,
+    self,
     cmd,
-    r.lighting_pipeline,
+    self.lighting_pipeline,
     .LIGHTING,
     f,
     &push,
     .LIGHTING,
-    attachments[.NORMAL][f],
-    attachments[.ALBEDO][f],
-    attachments[.METALLIC_ROUGHNESS][f],
-    attachments[.EMISSIVE][f],
-    attachments[.DEPTH][f],
+    images[.NORMAL][f],
+    images[.ALBEDO][f],
+    images[.METALLIC_ROUGHNESS][f],
+    images[.EMISSIVE][f],
+    images[.DEPTH][f],
     0,
-    r.irradiance_cube,
-    r.prefilter_cube,
-    r.brdf_lut,
-    r.environment_map,
+    self.irradiance_cube,
+    self.prefilter_cube,
+    self.brdf_lut,
+    self.environment_map,
   )
-  if group != 0 do dev.cmd_bind_group(&r.gpu, cmd, 3, group)
-  groups := (r.camera_targets[cam].extent + LIGHTING_TILE - 1) / LIGHTING_TILE
-  dev.cmd_dispatch(&r.gpu, cmd, groups.x, groups.y, 1)
+  if group != 0 do dev.cmd_bind_group(&self.gpu, cmd, 3, group)
+  groups := (self.camera_targets[cam].extent + LIGHTING_TILE - 1) / LIGHTING_TILE
+  dev.cmd_dispatch(&self.gpu, cmd, groups.x, groups.y, 1)
 }

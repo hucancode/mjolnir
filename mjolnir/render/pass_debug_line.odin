@@ -13,42 +13,42 @@ DebugLinePush :: struct {
 }
 
 @(private)
-debug_line_init :: proc(r: ^Renderer) -> bool {
+debug_line_init :: proc(self: ^Renderer) -> bool {
   shader := rhi.ShaderSource {
     spirv = {vert = spirv("shader/vulkan/debug_line/vert.spv"), frag = spirv("shader/vulkan/debug_line/frag.spv")},
     wgsl = wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/debug_line.wgsl")),
   }
   formats := [?]TextureFormat{.BACKBUFFER}
-  for &pipeline, ring in r.debug_line_pipelines {
+  for &pipeline, ring in self.debug_line_pipelines {
     desc := rhi.GraphicsPipelineDesc {
       shader        = shader,
-      layout        = pipeline_layout(r, .DEBUG_LINE),
+      layout        = pipeline_layout(self, .DEBUG_LINE),
       topology      = .LINE_LIST,
       color_formats = formats[:],
       blend         = .ALPHA,
       depth         = rhi.DepthState{compare = .LESS_EQUAL if ring == 0 else .ALWAYS},
     }
-    pipeline = dev.graphics_pipeline_create(&r.gpu, desc) or_return
+    pipeline = dev.graphics_pipeline_create(&self.gpu, desc) or_return
   }
   return true
 }
 
 @(private)
-debug_line_record :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
+debug_line_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
   // filled segments of each ring
-  counts := [2]u32{u32(min(r.debug_filled[0], DEBUG_RING)), u32(min(r.debug_filled[1], DEBUG_RING))}
+  counts := [2]u32{u32(min(self.debug_filled[0], DEBUG_RING)), u32(min(self.debug_filled[1], DEBUG_RING))}
   if counts == {} do return
   colors := [1]rhi.ColorTarget{{texture = BACKBUFFER, load = .LOAD}}
-  dev.cmd_begin_pass(&r.gpu, cmd, {colors = colors[:], depth = rhi.DepthTarget{texture = r.camera_targets[cam].attachments[.DEPTH][f], load = .LOAD, read_only = true}})
+  dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:], depth = rhi.DepthTarget{texture = self.camera_targets[cam].images[.DEPTH][f], load = .LOAD, read_only = true}})
   // the shader skips segments past their expiry
-  sync.mutex_lock(&r.debug_mutex)
+  sync.mutex_lock(&self.debug_mutex)
   push := DebugLinePush{cam}
-  sync.mutex_unlock(&r.debug_mutex)
-  pipeline_bind(r, cmd, r.debug_line_pipelines[0], .DEBUG_LINE, f, &push, .NONE)
+  sync.mutex_unlock(&self.debug_mutex)
+  pipeline_bind(self, cmd, self.debug_line_pipelines[0], .DEBUG_LINE, f, &push, .NONE)
   for count, ring in counts {
     if count == 0 do continue
-    dev.cmd_bind_pipeline(&r.gpu, cmd, r.debug_line_pipelines[ring])
-    dev.cmd_draw(&r.gpu, cmd, 2 * count, 1, u32(ring) * 2 * DEBUG_RING, 0)
+    dev.cmd_bind_pipeline(&self.gpu, cmd, self.debug_line_pipelines[ring])
+    dev.cmd_draw(&self.gpu, cmd, 2 * count, 1, u32(ring) * 2 * DEBUG_RING, 0)
   }
-  dev.cmd_end_pass(&r.gpu, cmd)
+  dev.cmd_end_pass(&self.gpu, cmd)
 }

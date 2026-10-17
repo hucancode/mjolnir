@@ -39,7 +39,11 @@ SPECULATIVE_DISTANCE :: 0.02
 BVH_REBUILD_THRESHOLD :: #config(PHYSICS_BVH_REBUILD_THRESHOLD, 512)
 
 // BodyHandle is a generational handle to a Body in a World.
-BodyHandle :: distinct cont.Handle
+// Handle is an untyped handle, the link a body keeps to what it drives (world.Handle is the
+// same type).
+Handle :: cont.Handle
+
+BodyHandle :: distinct Handle
 
 // MAX_BODIES is how many bodies a World holds at once.
 MAX_BODIES :: #config(PHYSICS_MAX_BODIES, 65536)
@@ -127,10 +131,10 @@ SensorOverlap :: struct {
 }
 
 // KilledBody is a body destroyed by `step` for falling below KILL_Y. `body` is already
-// freed; `user` is its caller link, e.g. the scene node to despawn.
+// freed; `user` is its caller link, e.g. the scene node to destroy.
 KilledBody :: struct {
   body: BodyHandle,
-  user: cont.Handle,
+  user: Handle,
 }
 
 // World owns the bodies, broad-phase BVHs and per-step contact state. init/shutdown own its
@@ -249,7 +253,7 @@ body_create :: proc(
   collider: Collider = {},
   mass: f32 = 0,
   is_sensor := false,
-  user: cont.Handle = {},
+  user: Handle = {},
 ) -> (
   handle: BodyHandle,
   ok: bool,
@@ -400,7 +404,7 @@ apply_impulse :: proc(self: ^World, handle: BodyHandle, impulse: [3]f32) {
 
 // BodyPose is a body's position and rotation together with its user link.
 BodyPose :: struct {
-  user:     cont.Handle,
+  user:     Handle,
   position: [3]f32,
   rotation: quaternion128,
 }
@@ -690,4 +694,9 @@ step :: proc(self: ^World, dt: f32) {
       self.last_perf.body_count, awake_body_count, len(self.contacts),
     )
   }
+}
+
+// destroy frees a body, as body_destroy does.
+destroy :: proc {
+  body_destroy,
 }

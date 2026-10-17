@@ -34,13 +34,13 @@ BVH_Levels :: struct {
 }
 
 // bvh_destroy frees the memory held by bvh.
-bvh_destroy :: proc(bvh: ^BVH($T)) {
-  delete(bvh.nodes)
-  delete(bvh.primitives)
-  for &level in bvh.node_levels {
+bvh_destroy :: proc(self: ^BVH($T)) {
+  delete(self.nodes)
+  delete(self.primitives)
+  for &level in self.node_levels {
     delete(level)
   }
-  delete(bvh.node_levels)
+  delete(self.node_levels)
 }
 
 @(private = "file")
@@ -81,21 +81,21 @@ BVH_Build_Task_Data :: struct {
 }
 
 // bvh_build rebuilds bvh over items; leaves hold at most max_leaf_size items.
-bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
-  if bvh == nil do return
-  if bvh.bounds_func == nil do return
-  clear(&bvh.nodes)
-  clear(&bvh.primitives)
+bvh_build :: proc(self: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
+  if self == nil do return
+  if self.bounds_func == nil do return
+  clear(&self.nodes)
+  clear(&self.primitives)
   if len(items) == 0 do return
-  reserve(&bvh.primitives, len(items))
-  append(&bvh.primitives, ..items)
+  reserve(&self.primitives, len(items))
+  append(&self.primitives, ..items)
   arena: mem.Dynamic_Arena
   mem.dynamic_arena_init(&arena)
   defer mem.dynamic_arena_destroy(&arena)
   arena_allocator := mem.dynamic_arena_allocator(&arena)
   build_prims := make([]BVHPrimitive, len(items), arena_allocator)
   for item, i in items {
-    bounds := bvh.bounds_func(item)
+    bounds := self.bounds_func(item)
     build_prims[i] = BVHPrimitive {
       index    = i32(i),
       bounds   = bounds,
@@ -110,9 +110,9 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
     arena_allocator,
   )
   for prim, i in build_prims {
-    bvh.primitives[i] = items[prim.index]
+    self.primitives[i] = items[prim.index]
   }
-  flatten_bvh(bvh, root)
+  flatten_bvh(self, root)
 }
 
 @(private)
@@ -315,17 +315,17 @@ count_build_nodes :: proc(node: ^BVHBuildNode) -> i32 {
 }
 
 @(private)
-flatten_bvh :: proc(bvh: ^BVH($T), root: ^BVHBuildNode) {
+flatten_bvh :: proc(self: ^BVH($T), root: ^BVHBuildNode) {
   node_count := count_build_nodes(root)
-  resize(&bvh.nodes, int(node_count))
+  resize(&self.nodes, int(node_count))
   next_node_idx: i32 = 0
-  flatten_node(bvh, root, &next_node_idx)
-  compute_bvh_levels(bvh)
+  flatten_node(self, root, &next_node_idx)
+  compute_bvh_levels(self)
 }
 
 @(private)
 flatten_node :: proc(
-  bvh: ^BVH($T),
+  self: ^BVH($T),
   build_node: ^BVHBuildNode,
   next_idx: ^i32,
 ) -> i32 {
@@ -342,22 +342,22 @@ flatten_node :: proc(
   } else {
     node.primitive_start = -1
     node.primitive_count = -1
-    node.left_child = flatten_node(bvh, build_node.left, next_idx)
-    node.right_child = flatten_node(bvh, build_node.right, next_idx)
+    node.left_child = flatten_node(self, build_node.left, next_idx)
+    node.right_child = flatten_node(self, build_node.right, next_idx)
   }
-  bvh.nodes[node_idx] = node
+  self.nodes[node_idx] = node
   return node_idx
 }
 
 // bvh_query_aabb replaces results with the items whose bounds overlap query_bounds.
 bvh_query_aabb :: proc(
-  bvh: ^BVH($T),
+  self: ^BVH($T),
   query_bounds: Aabb,
   results: ^[dynamic]T,
 ) {
-  if bvh == nil || results == nil do return
+  if self == nil || results == nil do return
   clear(results)
-  if len(bvh.nodes) == 0 do return
+  if len(self.nodes) == 0 do return
 
   BVH_MAX_STACK_DEPTH :: 64
   stack: [BVH_MAX_STACK_DEPTH]i32
@@ -367,7 +367,7 @@ bvh_query_aabb :: proc(
   for stack_size > 0 {
     stack_size -= 1
     node_idx := stack[stack_size]
-    node := &bvh.nodes[node_idx]
+    node := &self.nodes[node_idx]
 
     if !aabb_intersects(node.bounds, query_bounds) do continue
 
@@ -377,15 +377,15 @@ bvh_query_aabb :: proc(
 
       when intrinsics.type_has_field(T, "bounds") {
         #no_bounds_check for i in prim_start ..< prim_end {
-          if aabb_intersects(bvh.primitives[i].bounds, query_bounds) {
-            append(results, bvh.primitives[i])
+          if aabb_intersects(self.primitives[i].bounds, query_bounds) {
+            append(results, self.primitives[i])
           }
         }
       } else {
-        if bvh.bounds_func == nil do continue
+        if self.bounds_func == nil do continue
         for i in prim_start ..< prim_end {
-          prim := bvh.primitives[i]
-          prim_bounds := bvh.bounds_func(prim)
+          prim := self.primitives[i]
+          prim_bounds := self.bounds_func(prim)
           if aabb_intersects(prim_bounds, query_bounds) {
             append(results, prim)
           }
@@ -431,13 +431,13 @@ ray_aabb_intersection_safe :: proc(
 
 // bvh_query_ray replaces results with the items whose bounds the ray crosses within max_dist.
 bvh_query_ray :: proc(
-  bvh: ^BVH($T),
+  self: ^BVH($T),
   ray: Ray,
   max_dist: f32,
   results: ^[dynamic]T,
 ) {
   clear(results)
-  if len(bvh.nodes) == 0 do return
+  if len(self.nodes) == 0 do return
 
   BVH_MAX_STACK_DEPTH :: 64
   stack: [BVH_MAX_STACK_DEPTH]i32
@@ -447,7 +447,7 @@ bvh_query_ray :: proc(
   for stack_size > 0 {
     stack_size -= 1
     node_idx := stack[stack_size]
-    node := &bvh.nodes[node_idx]
+    node := &self.nodes[node_idx]
 
     t_near, t_far := ray_aabb_intersection_safe(
       ray.origin,
@@ -462,7 +462,7 @@ bvh_query_ray :: proc(
 
       when intrinsics.type_has_field(T, "bounds") {
         #no_bounds_check for i in prim_start ..< prim_end {
-          prim := bvh.primitives[i]
+          prim := self.primitives[i]
           prim_t_near, prim_t_far := ray_aabb_intersection_safe(
             ray.origin,
             ray.direction,
@@ -473,10 +473,10 @@ bvh_query_ray :: proc(
           }
         }
       } else {
-        if bvh.bounds_func == nil do continue
+        if self.bounds_func == nil do continue
         for i in prim_start ..< prim_end {
-          prim := bvh.primitives[i]
-          prim_bounds := bvh.bounds_func(prim)
+          prim := self.primitives[i]
+          prim_bounds := self.bounds_func(prim)
           prim_t_near, prim_t_far := ray_aabb_intersection_safe(
             ray.origin,
             ray.direction,
@@ -504,42 +504,42 @@ RayHit :: struct($T: typeid) {
 }
 
 // bvh_refit recomputes node bounds bottom-up after items moved, keeping the tree shape.
-bvh_refit :: proc(bvh: ^BVH($T)) {
-  for i := len(bvh.nodes) - 1; i >= 0; i -= 1 {
-    node := &bvh.nodes[i]
+bvh_refit :: proc(self: ^BVH($T)) {
+  for i := len(self.nodes) - 1; i >= 0; i -= 1 {
+    node := &self.nodes[i]
     if node.left_child < 0 {
       node.bounds = AABB_UNDEFINED
       for j in node.primitive_start ..< node.primitive_start + node.primitive_count {
-        prim_bounds := bvh.bounds_func(bvh.primitives[j])
+        prim_bounds := self.bounds_func(self.primitives[j])
         node.bounds = aabb_union(node.bounds, prim_bounds)
       }
     } else {
-      left_bounds := bvh.nodes[node.left_child].bounds
-      right_bounds := bvh.nodes[node.right_child].bounds
+      left_bounds := self.nodes[node.left_child].bounds
+      right_bounds := self.nodes[node.right_child].bounds
       node.bounds = aabb_union(left_bounds, right_bounds)
     }
   }
 }
 
 @(private)
-compute_bvh_levels :: proc(bvh: ^BVH($T)) {
-  if len(bvh.nodes) == 0 do return
-  for &level in bvh.node_levels {
+compute_bvh_levels :: proc(self: ^BVH($T)) {
+  if len(self.nodes) == 0 do return
+  for &level in self.node_levels {
     delete(level)
   }
-  clear(&bvh.node_levels)
+  clear(&self.node_levels)
   queue := make([dynamic]struct{idx: i32, depth: i32}, context.temp_allocator)
   append(&queue, struct{idx: i32, depth: i32}{idx = 0, depth = 0})
-  bvh.max_depth = 0
+  self.max_depth = 0
   for len(queue) > 0 {
     current := queue[0]
     ordered_remove(&queue, 0)
-    for i32(len(bvh.node_levels)) <= current.depth {
-      append(&bvh.node_levels, make([dynamic]i32))
+    for i32(len(self.node_levels)) <= current.depth {
+      append(&self.node_levels, make([dynamic]i32))
     }
-    append(&bvh.node_levels[current.depth], current.idx)
-    bvh.max_depth = max(bvh.max_depth, current.depth)
-    node := &bvh.nodes[current.idx]
+    append(&self.node_levels[current.depth], current.idx)
+    self.max_depth = max(self.max_depth, current.depth)
+    node := &self.nodes[current.idx]
     if node.left_child >= 0 {
       append(&queue, struct{idx: i32, depth: i32}{idx = node.left_child, depth = current.depth + 1})
       append(&queue, struct{idx: i32, depth: i32}{idx = node.right_child, depth = current.depth + 1})
@@ -561,25 +561,25 @@ BVHCrossPair :: struct($T: typeid, $U: typeid) {
 
 // bvh_find_all_overlaps finds all overlapping pairs within a single BVH in O(N + K).
 bvh_find_all_overlaps :: proc(
-  bvh: ^BVH($T),
+  self: ^BVH($T),
   results: ^[dynamic]BVHOverlapPair(T),
 ) {
   clear(results)
-  if len(bvh.nodes) == 0 do return
-  if bvh.bounds_func == nil do return
+  if len(self.nodes) == 0 do return
+  if self.bounds_func == nil do return
 
-  find_overlaps_recursive(bvh, 0, 0, results)
+  find_overlaps_recursive(self, 0, 0, results)
 }
 
 @(private)
 find_overlaps_recursive :: proc(
-  bvh: ^BVH($T),
+  self: ^BVH($T),
   node_a_idx: i32,
   node_b_idx: i32,
   results: ^[dynamic]BVHOverlapPair(T),
 ) {
-  node_a := &bvh.nodes[node_a_idx]
-  node_b := &bvh.nodes[node_b_idx]
+  node_a := &self.nodes[node_a_idx]
+  node_b := &self.nodes[node_b_idx]
 
   if !aabb_intersects(node_a.bounds, node_b.bounds) do return
 
@@ -594,14 +594,14 @@ find_overlaps_recursive :: proc(
 
     when intrinsics.type_has_field(T, "bounds") {
       #no_bounds_check for i in prim_a_start ..< prim_a_end {
-        prim_a := bvh.primitives[i]
+        prim_a := self.primitives[i]
         bounds_a := prim_a.bounds
 
         // If same node, start after current index to avoid duplicates
         j_start := prim_b_start if node_a_idx != node_b_idx else i + 1
 
         #no_bounds_check for j in j_start ..< prim_b_end {
-          prim_b := bvh.primitives[j]
+          prim_b := self.primitives[j]
           bounds_b := prim_b.bounds
 
           if aabb_intersects(bounds_a, bounds_b) {
@@ -611,15 +611,15 @@ find_overlaps_recursive :: proc(
       }
     } else {
       for i in prim_a_start ..< prim_a_end {
-        prim_a := bvh.primitives[i]
-        bounds_a := bvh.bounds_func(prim_a)
+        prim_a := self.primitives[i]
+        bounds_a := self.bounds_func(prim_a)
 
         // If same node, start after current index to avoid duplicates
         j_start := prim_b_start if node_a_idx != node_b_idx else i + 1
 
         for j in j_start ..< prim_b_end {
-          prim_b := bvh.primitives[j]
-          bounds_b := bvh.bounds_func(prim_b)
+          prim_b := self.primitives[j]
+          bounds_b := self.bounds_func(prim_b)
 
           if aabb_intersects(bounds_a, bounds_b) {
             append(results, BVHOverlapPair(T){a = prim_a, b = prim_b})
@@ -631,45 +631,45 @@ find_overlaps_recursive :: proc(
   }
 
   if a_is_leaf {
-    find_overlaps_recursive(bvh, node_a_idx, node_b.left_child, results)
-    find_overlaps_recursive(bvh, node_a_idx, node_b.right_child, results)
+    find_overlaps_recursive(self, node_a_idx, node_b.left_child, results)
+    find_overlaps_recursive(self, node_a_idx, node_b.right_child, results)
   } else if b_is_leaf {
-    find_overlaps_recursive(bvh, node_a.left_child, node_b_idx, results)
-    find_overlaps_recursive(bvh, node_a.right_child, node_b_idx, results)
+    find_overlaps_recursive(self, node_a.left_child, node_b_idx, results)
+    find_overlaps_recursive(self, node_a.right_child, node_b_idx, results)
   } else {
     if node_a_idx == node_b_idx {
-      find_overlaps_recursive(bvh, node_a.left_child, node_a.left_child, results)
-      find_overlaps_recursive(bvh, node_a.left_child, node_a.right_child, results)
-      find_overlaps_recursive(bvh, node_a.right_child, node_a.right_child, results)
+      find_overlaps_recursive(self, node_a.left_child, node_a.left_child, results)
+      find_overlaps_recursive(self, node_a.left_child, node_a.right_child, results)
+      find_overlaps_recursive(self, node_a.right_child, node_a.right_child, results)
     } else {
-      find_overlaps_recursive(bvh, node_a.left_child, node_b.left_child, results)
-      find_overlaps_recursive(bvh, node_a.left_child, node_b.right_child, results)
-      find_overlaps_recursive(bvh, node_a.right_child, node_b.left_child, results)
-      find_overlaps_recursive(bvh, node_a.right_child, node_b.right_child, results)
+      find_overlaps_recursive(self, node_a.left_child, node_b.left_child, results)
+      find_overlaps_recursive(self, node_a.left_child, node_b.right_child, results)
+      find_overlaps_recursive(self, node_a.right_child, node_b.left_child, results)
+      find_overlaps_recursive(self, node_a.right_child, node_b.right_child, results)
     }
   }
 }
 
 // bvh_find_cross_overlaps finds all overlapping pairs between two BVHs in O(N + M + K).
 bvh_find_cross_overlaps :: proc(
-  bvh_a: ^BVH($T),
+  self: ^BVH($T),
   bvh_b: ^BVH($U),
   results: ^[dynamic]BVHCrossPair(T, U),
 ) {
   clear(results)
-  if len(bvh_a.nodes) == 0 || len(bvh_b.nodes) == 0 do return
-  find_cross_overlaps_recursive(bvh_a, bvh_b, 0, 0, results)
+  if len(self.nodes) == 0 || len(bvh_b.nodes) == 0 do return
+  find_cross_overlaps_recursive(self, bvh_b, 0, 0, results)
 }
 
 @(private)
 find_cross_overlaps_recursive :: proc(
-  bvh_a: ^BVH($T),
+  self: ^BVH($T),
   bvh_b: ^BVH($U),
   node_a_idx: i32,
   node_b_idx: i32,
   results: ^[dynamic]BVHCrossPair(T, U),
 ) {
-  node_a := &bvh_a.nodes[node_a_idx]
+  node_a := &self.nodes[node_a_idx]
   node_b := &bvh_b.nodes[node_b_idx]
 
   if !aabb_intersects(node_a.bounds, node_b.bounds) do return
@@ -686,7 +686,7 @@ find_cross_overlaps_recursive :: proc(
     when intrinsics.type_has_field(T, "bounds") &&
          intrinsics.type_has_field(U, "bounds") {
       #no_bounds_check for i in prim_a_start ..< prim_a_end {
-        prim_a := bvh_a.primitives[i]
+        prim_a := self.primitives[i]
         bounds_a := prim_a.bounds
 
         #no_bounds_check for j in prim_b_start ..< prim_b_end {
@@ -700,7 +700,7 @@ find_cross_overlaps_recursive :: proc(
       }
     } else when intrinsics.type_has_field(T, "bounds") {
       #no_bounds_check for i in prim_a_start ..< prim_a_end {
-        prim_a := bvh_a.primitives[i]
+        prim_a := self.primitives[i]
         bounds_a := prim_a.bounds
 
         for j in prim_b_start ..< prim_b_end {
@@ -714,8 +714,8 @@ find_cross_overlaps_recursive :: proc(
       }
     } else when intrinsics.type_has_field(U, "bounds") {
       for i in prim_a_start ..< prim_a_end {
-        prim_a := bvh_a.primitives[i]
-        bounds_a := bvh_a.bounds_func(prim_a)
+        prim_a := self.primitives[i]
+        bounds_a := self.bounds_func(prim_a)
 
         #no_bounds_check for j in prim_b_start ..< prim_b_end {
           prim_b := bvh_b.primitives[j]
@@ -728,8 +728,8 @@ find_cross_overlaps_recursive :: proc(
       }
     } else {
       for i in prim_a_start ..< prim_a_end {
-        prim_a := bvh_a.primitives[i]
-        bounds_a := bvh_a.bounds_func(prim_a)
+        prim_a := self.primitives[i]
+        bounds_a := self.bounds_func(prim_a)
 
         for j in prim_b_start ..< prim_b_end {
           prim_b := bvh_b.primitives[j]
@@ -745,16 +745,16 @@ find_cross_overlaps_recursive :: proc(
   }
 
   if a_is_leaf {
-    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a_idx, node_b.left_child, results)
-    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a_idx, node_b.right_child, results)
+    find_cross_overlaps_recursive(self, bvh_b, node_a_idx, node_b.left_child, results)
+    find_cross_overlaps_recursive(self, bvh_b, node_a_idx, node_b.right_child, results)
   } else if b_is_leaf {
-    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.left_child, node_b_idx, results)
-    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.right_child, node_b_idx, results)
+    find_cross_overlaps_recursive(self, bvh_b, node_a.left_child, node_b_idx, results)
+    find_cross_overlaps_recursive(self, bvh_b, node_a.right_child, node_b_idx, results)
   } else {
-    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.left_child, node_b.left_child, results)
-    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.left_child, node_b.right_child, results)
-    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.right_child, node_b.left_child, results)
-    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.right_child, node_b.right_child, results)
+    find_cross_overlaps_recursive(self, bvh_b, node_a.left_child, node_b.left_child, results)
+    find_cross_overlaps_recursive(self, bvh_b, node_a.left_child, node_b.right_child, results)
+    find_cross_overlaps_recursive(self, bvh_b, node_a.right_child, node_b.left_child, results)
+    find_cross_overlaps_recursive(self, bvh_b, node_a.right_child, node_b.right_child, results)
   }
 }
 
@@ -945,26 +945,26 @@ parallel_build_recursive :: proc(
 
 // bvh_build_parallel builds the BVH on the thread pool, falling back to a sequential build for small inputs.
 bvh_build_parallel :: proc(
-  bvh: ^BVH($T),
+  self: ^BVH($T),
   items: []T,
   thread_pool: ^thread.Pool,
   max_leaf_size: i32 = 4,
   parallel_threshold: int = PARALLEL_BUILD_THRESHOLD,
 ) {
-  if bvh == nil do return
-  if bvh.bounds_func == nil do return
+  if self == nil do return
+  if self.bounds_func == nil do return
 
-  clear(&bvh.nodes)
-  clear(&bvh.primitives)
+  clear(&self.nodes)
+  clear(&self.primitives)
   if len(items) == 0 do return
 
   if len(items) < parallel_threshold || thread_pool == nil || !thread_pool.is_running || len(thread_pool.threads) == 0 {
-    bvh_build(bvh, items, max_leaf_size)
+    bvh_build(self, items, max_leaf_size)
     return
   }
 
-  reserve(&bvh.primitives, len(items))
-  append(&bvh.primitives, ..items)
+  reserve(&self.primitives, len(items))
+  append(&self.primitives, ..items)
 
   // Setup per-thread arenas for thread-safe memory allocation
   num_threads := len(thread_pool.threads)
@@ -979,7 +979,7 @@ bvh_build_parallel :: proc(
 
   build_prims := parallel_prepare_primitives(
     items,
-    bvh.bounds_func,
+    self.bounds_func,
     thread_pool,
     num_threads,
     arena_allocator,
@@ -993,8 +993,8 @@ bvh_build_parallel :: proc(
   )
 
   for prim, i in build_prims {
-    bvh.primitives[i] = items[prim.index]
+    self.primitives[i] = items[prim.index]
   }
 
-  flatten_bvh(bvh, root)
+  flatten_bvh(self, root)
 }

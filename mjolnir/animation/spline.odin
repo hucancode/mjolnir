@@ -30,10 +30,10 @@ spline_create :: proc($T: typeid, count: int) -> Spline(T) {
 }
 
 // spline_destroy frees the spline's points, times and arc-length table.
-spline_destroy :: proc(spline: ^Spline($T)) {
-  delete(spline.points)
-  delete(spline.times)
-  if table, ok := spline.arc_table.?; ok {
+spline_destroy :: proc(self: ^Spline($T)) {
+  delete(self.points)
+  delete(self.times)
+  if table, ok := self.arc_table.?; ok {
     delete(table.arc_lengths)
     delete(table.times)
   }
@@ -188,26 +188,26 @@ Spline_Arc_Length_Table :: struct($T: typeid) {
 }
 
 @(private)
-spline_build_arc_table :: proc(spline: ^Spline($T), samples := 200) {
+spline_build_arc_table :: proc(self: ^Spline($T), samples := 200) {
   // samples: Number of samples for approximation (more = accurate but slower)
-  if len(spline.times) == 0 do return
+  if len(self.times) == 0 do return
   table := Spline_Arc_Length_Table(T) {
     arc_lengths = make([]f32, samples),
     times       = make([]f32, samples),
   }
-  t_start := slice.first(spline.times)
-  t_range := slice.last(spline.times) - t_start
-  prev_pos := spline_sample(spline^, t_start)
+  t_start := slice.first(self.times)
+  t_range := slice.last(self.times) - t_start
+  prev_pos := spline_sample(self^, t_start)
   total_length := f32(0)
   for i in 0 ..< samples {
     t := t_start + f32(i) * t_range / f32(samples - 1)
-    pos := spline_sample(spline^, t)
+    pos := spline_sample(self^, t)
     if i > 0 do total_length += linalg.distance(pos, prev_pos)
     table.arc_lengths[i] = total_length
     table.times[i] = t
     prev_pos = pos
   }
-  spline.arc_table = table
+  self.arc_table = table
 }
 
 // spline_sample_uniform evaluates the spline at arc length s; without an arc table s is treated as time.
@@ -242,7 +242,7 @@ spline_arc_length :: proc(spline: Spline($T)) -> f32 {
 // spline_build_closed builds a closed-loop Catmull-Rom spline through `base` (base[N-1] must
 // differ from base[0]). Ghost points around the seam keep tangents smooth; the arc table
 // covers t in [0, N], so spline_arc_length is exactly one loop.
-spline_build_closed :: proc(base: [][3]f32, samples := 200) -> Spline([3]f32) {
+spline_create_closed :: proc(base: [][3]f32, samples := 200) -> Spline([3]f32) {
   n := len(base)
   pts := make([][3]f32, n + 3)
   ts := make([]f32, n + 3)

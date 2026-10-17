@@ -28,7 +28,8 @@ GOAL_MIN_DIST :: f32(20)
 // Scene-side view of a crowd agent; steering, avoidance and path following
 // run in navigation/crowd.
 Agent :: struct {
-  id:    int, // crowd agent index
+  id:     crowd.AgentHandle,
+  placed: bool, // agent_create found room on the mesh
   color: [4]f32,
   node:  world.NodeHandle,
 }
@@ -77,7 +78,7 @@ setup :: proc(app: ^App) -> bool {
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {15, 25, 15})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 1}, 10.0, true)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 1}, 10.0, true)))
   build_scene(app)
   build_navmesh(app)
   visualize_navmesh(app)
@@ -88,11 +89,11 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
-  if agent_crowd != nil do crowd.destroy(agent_crowd)
+  if agent_crowd != nil do crowd.shutdown(agent_crowd)
   free(agent_crowd)
   nav.destroy(&navmesh)
   bake.builder_destroy(&nav_builder)
@@ -109,7 +110,7 @@ build_scene :: proc(app: ^App) {
   gm := render.mesh_create(&app.renderer, ground_geom)
   gmat := render.material_create(&app.renderer, type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8)
   ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, ground.index, render.MeshAttachment{handle = gm, material = gmat, cast_shadow = false})
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.MeshAttachment{mesh = gm, material = gmat, cast_shadow = false})
 
   obstacles := [?]struct{pos, size: [3]f32}{
     {{-18, 1.5, -14}, {3, 3, 3}}, {{18, 1.5, -14}, {3, 3, 3}}, {{-18, 1.5, 14}, {3, 3, 3}}, {{18, 1.5, 14}, {3, 3, 3}},
@@ -124,17 +125,17 @@ build_scene :: proc(app: ^App) {
     mh := render.mesh_create(&app.renderer, g)
     mat := render.material_create(&app.renderer, type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6)
     n := world.spawn(&app.scene, o.pos)
-    render.attach(&app.renderer, n.index, render.MeshAttachment{handle = mh, material = mat, cast_shadow = true})
+    render.attach(&app.renderer, render.SlotHandle(n.index), render.MeshAttachment{mesh = mh, material = mat, cast_shadow = true})
   }
 }
 
 build_navmesh :: proc(app: ^App) {
   data, ok := bake.build(&nav_builder, allocator = context.temp_allocator)
-  if !ok || !nav.load(&navmesh, data) do log.error("navmesh build failed")
+  if !ok || !nav.init(&navmesh, data) do log.error("navmesh build failed")
 }
 
 visualize_navmesh :: proc(app: ^App) {
-  world.despawn(&app.scene, navmesh_node_handle)
+  world.destroy(&app.scene, navmesh_node_handle)
   positions, indices := nav.debug_triangles(&navmesh, context.temp_allocator)
   for &p in positions do p.y += 0.2 // lift above the ground to avoid z-fighting
   nm_geom := render.from_triangles(positions, indices)
@@ -143,7 +144,7 @@ visualize_navmesh :: proc(app: ^App) {
   nm_mat, mat_ok := render.material_create(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7})
   if !mat_ok do return
   navmesh_node_handle = world.spawn(&app.scene)
-  render.attach(&app.renderer, navmesh_node_handle.index, render.MeshAttachment{handle = nm_mesh, material = nm_mat, cast_shadow = true})
+  render.attach(&app.renderer, render.SlotHandle(navmesh_node_handle.index), render.MeshAttachment{mesh = nm_mesh, material = nm_mat, cast_shadow = true})
 }
 
 random_goal :: proc(app: ^App, away_from: [3]f32) -> [3]f32 {
@@ -179,20 +180,20 @@ spawn_agents :: proc(app: ^App) {
     r := SPAWN_RADIUS - 4.0
     pos := [3]f32{math.cos(angle) * r, 0, math.sin(angle) * r}
     // -1 when off the mesh: the agent is skipped
-    agents[i].id, _ = crowd.agent_add(agent_crowd, pos, params)
+    agents[i].id, agents[i].placed = crowd.agent_create(agent_crowd, pos, params)
     agents[i].color = palette[i % len(palette)]
     cap_geom := render.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS)
     mh := render.mesh_create(&app.renderer, cap_geom)
     mat := render.material_create(&app.renderer, type = .PBR, base_color_factor = agents[i].color, emissive_value = 0.4)
     agents[i].node = world.spawn(&app.scene, pos + {0, AGENT_HEIGHT * 0.5, 0})
-    render.attach(&app.renderer, agents[i].node.index, render.MeshAttachment{handle = mh, material = mat, cast_shadow = true})
+    render.attach(&app.renderer, render.SlotHandle(agents[i].node.index), render.MeshAttachment{mesh = mh, material = mat, cast_shadow = true})
   }
 }
 
 assign_swap_targets :: proc(app: ^App) {
   if agent_crowd == nil do return
   for a in agents {
-    if a.id < 0 do continue
+    if !a.placed do continue
     crowd.move_to(agent_crowd, a.id, random_goal(app, crowd.agent(agent_crowd, a.id).npos))
   }
 }
@@ -200,7 +201,7 @@ assign_swap_targets :: proc(app: ^App) {
 assign_all_to :: proc(app: ^App, goal: [3]f32) {
   if agent_crowd == nil do return
   for a in agents {
-    if a.id >= 0 do crowd.move_to(agent_crowd, a.id, goal)
+    if a.placed do crowd.move_to(agent_crowd, a.id, goal)
   }
 }
 
@@ -233,7 +234,7 @@ update :: proc(app: ^App, dt: f32) {
   if agent_crowd != nil {
     crowd.update(agent_crowd, dt)
     for a in agents {
-      if a.id < 0 do continue
+      if !a.placed do continue
       ag := crowd.agent(agent_crowd, a.id)
       world.translate(&app.scene, a.node, ag.npos + {0, AGENT_HEIGHT * 0.5, 0})
       if linalg.length2(ag.vel.xz) > 0.01 {

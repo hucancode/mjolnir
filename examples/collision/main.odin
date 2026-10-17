@@ -105,7 +105,7 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -131,7 +131,7 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {16, 14, 16}, {0, 1.5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-6, 14, 6})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.96, 0.9, 1}, 6.0, true)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.96, 0.9, 1}, 6.0, true)))
   spawn_scene(app)
   return true
 }
@@ -148,8 +148,8 @@ spawn_scene :: proc(app: ^App) {
     s.node, _ = world.spawn(&app.scene, s.center)
     physics.body_create(&phys, s.center, collider = physics.BoxCollider{half_extents = s.half}, user = world.Handle(s.node))
     visual := world.spawn(&app.scene, parent = s.node)
-    render.attach(&app.renderer, visual.index, render.primitive(&app.renderer, .CUBE, .GRAY))
-    world.scale_xyz(&app.scene, visual, s.half.x, s.half.y, s.half.z)
+    render.attach(&app.renderer, render.SlotHandle(visual.index), render.primitive(&app.renderer, .CUBE, .GRAY))
+    world.scale(&app.scene, visual, s.half.x, s.half.y, s.half.z)
   }
 
   bodies = default_bodies()
@@ -158,9 +158,9 @@ spawn_scene :: proc(app: ^App) {
     b.node, _ = world.spawn(&app.scene, b.position)
     world.rotate(&app.scene, b.node, q)
     b.visual, _ = world.spawn(&app.scene, parent = b.node)
-    render.attach(&app.renderer, b.visual.index, render.primitive(&app.renderer, obj_mesh(b.shape), obj_color(b.kind)))
+    render.attach(&app.renderer, render.SlotHandle(b.visual.index), render.primitive(&app.renderer, obj_mesh(b.shape), obj_color(b.kind)))
     s := obj_visual_scale(&b)
-    world.scale_xyz(&app.scene, b.visual, s.x, s.y, s.z)
+    world.scale(&app.scene, b.visual, s.x, s.y, s.z)
     create_body_physics(app, &b)
     b.built_shape = b.shape
     b.built_size = b.size
@@ -230,15 +230,15 @@ apply_shape :: proc(app: ^App, b: ^Body) {
   physics.set_collider(&phys, b.handle, obj_collider(b))
   render.attach(
     &app.renderer,
-    b.visual.index,
+    render.SlotHandle(b.visual.index),
     render.MeshAttachment {
-      handle = app.renderer.builtin_meshes[obj_mesh(b.shape)],
+      mesh = app.renderer.builtin_meshes[obj_mesh(b.shape)],
       material = app.renderer.builtin_materials[obj_color(b.kind)],
       cast_shadow = true,
     },
   )
   s := obj_visual_scale(b)
-  world.scale_xyz(&app.scene, b.visual, s.x, s.y, s.z) // marks the node dirty → re-staged
+  world.scale(&app.scene, b.visual, s.x, s.y, s.z) // marks the node dirty → re-staged
   b.built_shape = b.shape
   b.built_size = b.size
 }

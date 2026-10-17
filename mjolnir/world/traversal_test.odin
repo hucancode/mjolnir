@@ -39,9 +39,9 @@ test_node_translate :: proc(t: ^testing.T) {
   w: World
   init(&w)
   defer shutdown(&w)
-  parent_handle, parent_ok := spawn(&w, {1, 2, 3})
+  parent_handle, parent_ok := node_create(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
-  child, ok := spawn(&w, parent = parent_handle)
+  child, ok := node_create(&w, parent = parent_handle)
   child_ptr := node(&w, child)
   testing.expectf(t, ok, "failed to spawn child node")
   translate(&w, child, 4, 5, 6)
@@ -61,7 +61,7 @@ test_node_rotate :: proc(t: ^testing.T) {
   w: World
   init(&w)
   defer shutdown(&w)
-  child, ok := spawn(&w)
+  child, ok := node_create(&w)
   child_ptr := node(&w, child)
   testing.expectf(t, ok, "failed to spawn node")
   rotate(&w, child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
@@ -82,12 +82,12 @@ test_node_scale :: proc(t: ^testing.T) {
   w: World
   init(&w)
   defer shutdown(&w)
-  parent_handle, parent_ok := spawn(&w, {1, 2, 3})
+  parent_handle, parent_ok := node_create(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
-  child, child_ok := spawn(&w, parent = parent_handle)
+  child, child_ok := node_create(&w, parent = parent_handle)
   child_ptr := node(&w, child)
   testing.expectf(t, child_ok, "failed to spawn child node")
-  scale_xyz(&w, child, 5, 6, 7)
+  scale(&w, child, 5, 6, 7)
   update(&w)
   actual := world_matrix(&w, child)
   expected := matrix[4, 4]f32{
@@ -104,7 +104,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   w: World
   init(&w)
   defer shutdown(&w)
-  n, node_ok := spawn(&w)
+  n, node_ok := node_create(&w)
   node_ptr := node(&w, n)
   testing.expectf(t, node_ok, "failed to spawn node")
   scale(&w, n, 2)
@@ -129,11 +129,11 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   init(&w)
   defer shutdown(&w)
   // Create a 4-node chain
-  node1_handle, node1_ok := spawn(&w)
+  node1_handle, node1_ok := node_create(&w)
   testing.expectf(t, node1_ok, "failed to spawn node1")
-  node2_handle, node2_ok := spawn(&w, parent = node1_handle)
+  node2_handle, node2_ok := node_create(&w, parent = node1_handle)
   testing.expectf(t, node2_ok, "failed to spawn node2")
-  node3_handle, node3_ok := spawn(&w, parent = node2_handle)
+  node3_handle, node3_ok := node_create(&w, parent = node2_handle)
   node3 := node(&w, node3_handle)
   testing.expectf(t, node3_ok, "failed to spawn node3")
   translate(&w, node1_handle, x = 1)
@@ -160,10 +160,10 @@ test_node_chain_transform :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-create_scene :: proc(scene: ^World, max_node: int, max_depth: int) {
+create_scene :: proc(self: ^World, max_node: int, max_depth: int) {
   target_nodes := max_node
-  if scene.slots.capacity > 0 {
-    target_nodes = min(target_nodes, int(scene.slots.capacity))
+  if self.slots.capacity > 0 {
+    target_nodes = min(target_nodes, int(self.slots.capacity))
   }
   if max_depth <= 0 || target_nodes <= 0 do return
   QueueEntry :: struct {
@@ -172,27 +172,27 @@ create_scene :: proc(scene: ^World, max_node: int, max_depth: int) {
   }
   queue: [dynamic]QueueEntry
   defer delete(queue)
-  entry := QueueEntry{scene.root, 0}
+  entry := QueueEntry{self.root, 0}
   append(&queue, entry)
   n := 0
-  count := node_count(scene) // tracked locally: node_count is O(n)
+  count := node_count(self) // tracked locally: node_count is O(n)
   for len(queue) > 0 && count < target_nodes {
     current := pop_front(&queue)
     if current.depth < max_depth {
-      child_handle := spawn(scene, parent = current.handle) or_continue
-      translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
+      child_handle := node_create(self, parent = current.handle) or_continue
+      translate(self, child_handle, f32(n % 10) * 0.1, 0, 0)
       rotate(
-        scene,
+        self,
         child_handle,
         f32(n) * 0.01,
         linalg.VECTOR3F32_Y_AXIS,
       )
       append(&queue, QueueEntry{child_handle, current.depth + 1})
     } else {
-      child_handle := spawn(scene) or_continue
-      translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
+      child_handle := node_create(self) or_continue
+      translate(self, child_handle, f32(n % 10) * 0.1, 0, 0)
       rotate(
-        scene,
+        self,
         child_handle,
         f32(n) * 0.01,
         linalg.VECTOR3F32_Y_AXIS,
@@ -204,7 +204,7 @@ create_scene :: proc(scene: ^World, max_node: int, max_depth: int) {
   }
   log.infof(
     "Generated a scene with %d nodes and max depth %d",
-    node_count(scene),
+    node_count(self),
     max_depth,
   )
 }
@@ -347,7 +347,7 @@ test_scene_memory_cleanup :: proc(t: ^testing.T) {
   init(&scene)
   defer shutdown(&scene)
   for i in 0 ..< 1000 {
-    spawn(&scene)
+    node_create(&scene)
   }
   // expect no memory leaks in the test report
 }

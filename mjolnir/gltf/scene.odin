@@ -6,10 +6,13 @@ import "../world"
 import "core:log"
 import "vendor:cgltf"
 
-// SkinnedNode is a skinned node and the rig (index into Scene.rigs) that deforms it.
+// RigHandle identifies a rig of a Scene: its index in Scene.rigs.
+RigHandle :: distinct u32
+
+// SkinnedNode is a skinned node and the rig that deforms it.
 SkinnedNode :: struct {
   node: world.NodeHandle,
-  rig:  int,
+  rig:  RigHandle,
 }
 
 // Scene is the result of load. World nodes and render resources belong
@@ -29,11 +32,11 @@ scene_destroy :: proc(self: ^Scene) {
   self^ = {}
 }
 
-// load instantiates a glTF held in memory, a .glb or a glTF whose buffers and images are
+// scene_create instantiates a glTF held in memory, a .glb or a glTF whose buffers and images are
 // all embedded (the engine reads no files: #load it or platform.read_file it): render looks (see load_meshes),
-// one rig per skin (see load_rig) and one world node per glTF
+// one rig per skin (see rig_create) and one world node per glTF
 // node, spawned under `parent` (the world root by default).
-load :: proc(
+scene_create :: proc(
   w: ^world.World,
   r: ^render.Renderer,
   data: []u8,
@@ -72,7 +75,7 @@ load_data :: proc(
   for &skin, i in data.skins {
     skin_rigs[i] = -1
     if !skin_used[i] do continue
-    rig := load_rig(data, &skin) or_continue
+    rig := rig_create(data, &skin) or_continue
     skin_rigs[i] = len(scene.rigs)
     append(&scene.rigs, rig)
   }
@@ -120,10 +123,10 @@ construct_scene :: proc(
     }
     if gltf_node.mesh != nil {
       if look, has_look := looks[cgltf.mesh_index(gltf_data, gltf_node.mesh)].?; has_look {
-        render.attach(r, node_handle.index, look)
+        render.attach(r, render.SlotHandle(node_handle.index), look)
         if gltf_node.skin != nil {
           if rig := skin_rigs[cgltf.skin_index(gltf_data, gltf_node.skin)]; rig >= 0 {
-            append(&scene.skinned, SkinnedNode{node = node_handle, rig = rig})
+            append(&scene.skinned, SkinnedNode{node = node_handle, rig = RigHandle(rig)})
           }
         }
       }
@@ -134,4 +137,9 @@ construct_scene :: proc(
       append(&stack, TraverseEntry{idx = u32(child_idx), parent = node_handle})
     }
   }
+}
+
+// destroy frees a Scene, as scene_destroy does.
+destroy :: proc {
+  scene_destroy,
 }

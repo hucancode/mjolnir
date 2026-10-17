@@ -39,7 +39,7 @@ make_cube :: proc(
     p := indices[face * 6:]
     p[0], p[1], p[2], p[3], p[4], p[5] = i, i + 1, i + 2, i + 2, i + 3, i
   }
-  return make_geometry(vertices, indices)
+  return geometry_create(vertices, indices)
 }
 
 // make_quad builds a quad on the XZ plane facing +Y.
@@ -54,7 +54,7 @@ make_quad :: proc(
   vertices[3] = {{1, 0, -1}, geometry.VEC_UP, color, {1, 0}, {}}
   indices[0], indices[1], indices[2] = 0, 1, 2
   indices[3], indices[4], indices[5] = 2, 3, 0
-  return make_geometry(vertices, indices)
+  return geometry_create(vertices, indices)
 }
 
 // make_billboard_quad builds a quad on the XY plane facing +Z, for camera-facing sprites.
@@ -69,7 +69,7 @@ make_billboard_quad :: proc(
   vertices[3] = {{-1, 1, 0}, geometry.VEC_FORWARD, color, {0, 0}, {}}
   indices[0], indices[1], indices[2] = 0, 1, 2
   indices[3], indices[4], indices[5] = 2, 3, 0
-  return make_geometry(vertices, indices)
+  return geometry_create(vertices, indices)
 }
 
 // make_sphere builds a UV sphere of the given radius centered at the origin.
@@ -110,7 +110,7 @@ make_sphere :: proc(
       i += 6
     }
   }
-  return make_geometry(vertices, indices)
+  return geometry_create(vertices, indices)
 }
 
 // make_cone builds a cone along Y with a capped base and its tip at +height/2.
@@ -161,7 +161,7 @@ make_cone :: proc(
     p[0], p[1], p[2] = 1, 2 + i, next
     idx += 3
   }
-  return make_geometry(vertices, indices)
+  return geometry_create(vertices, indices)
 }
 
 // make_capsule builds a capsule along Y: two hemispheres joined by a cylinder.
@@ -234,7 +234,7 @@ make_capsule :: proc(
     p[0], p[1], p[2], p[3], p[4], p[5] = a, c, b, b, c, d
     i += 6
   }
-  return make_geometry(vertices, indices)
+  return geometry_create(vertices, indices)
 }
 
 // make_torus builds a torus in the XY plane, around the Z axis.
@@ -282,7 +282,7 @@ make_torus :: proc(
       i += 6
     }
   }
-  return make_geometry(vertices, indices)
+  return geometry_create(vertices, indices)
 }
 
 // make_cylinder builds a capped cylinder along Y centered at the origin.
@@ -321,5 +321,5 @@ make_cylinder :: proc(
     p[6], p[7], p[8] = top_center, top_rim + 1, top_rim
     p[9], p[10], p[11] = bottom_center, bottom_rim, bottom_rim + 1
   }
-  return make_geometry(vertices, indices)
+  return geometry_create(vertices, indices)
 }

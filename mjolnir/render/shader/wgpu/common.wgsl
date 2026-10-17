@@ -40,8 +40,8 @@ struct View {
     extent: vec2f,
     near: f32,
     far: f32,
-    // render's texture handles, by AttachmentType (bound through group 1 here)
-    attachments: array<u32, 6>,
+    // render's texture handles, by CameraImage (bound through group 1 here)
+    images: array<u32, 6>,
     pyramid: u32,
     // bit t: material type t is tested against the pyramid
     occlusion_mask: u32,
@@ -109,7 +109,7 @@ struct Light {
     angle_inner: f32,
     angle_outer: f32,
     light_type: u32,
-    should_cast_shadow: u32,
+    cast_shadow: u32,
 }
 
 // Where a light is attached.

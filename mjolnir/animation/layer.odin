@@ -70,8 +70,8 @@ TransitionState :: enum {
 
 // Transition is a timed cross-fade between the weights of two layers.
 Transition :: struct {
-  from_layer: int,  // Source layer index
-  to_layer:   int,  // Target layer index
+  from_layer: LayerHandle,
+  to_layer:   LayerHandle,
   duration:   f32,  // Total transition time
   elapsed:    f32,  // Time elapsed
   curve:      ease.Ease, // Easing curve
@@ -83,7 +83,7 @@ Transition :: struct {
 @(private)
 transition_update :: proc(self: ^Transition, layers: []Layer, delta_time: f32) {
   if self.state != .ACTIVE do return
-  if self.from_layer >= len(layers) || self.to_layer >= len(layers) {
+  if int(self.from_layer) >= len(layers) || int(self.to_layer) >= len(layers) {
     self.state = .NONE
     return
   }
@@ -134,7 +134,7 @@ blend_sample :: proc(acc: ^TRS, acc_w: ^f32, s, rest: TRS, w: f32, mode: BlendMo
 
 // FKLayer plays one clip of the rig (index into Rig.clips).
 FKLayer :: struct {
-  clip:         int,
+  clip:         ClipHandle,
   using player: ClipPlayer,
 }
 
@@ -144,6 +144,12 @@ LayerData :: union {
   IKTarget,
   ProceduralLayer,
 }
+
+// LayerHandle identifies a layer of an Animator (clip_layer_create and the other *_layer_create).
+LayerHandle :: distinct u32
+
+// ClipHandle identifies a clip of a Rig (find_clip).
+ClipHandle :: distinct u32
 
 // Layer is one weighted, optionally bone-masked source of pose data in an Animator.
 Layer :: struct {

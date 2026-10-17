@@ -41,12 +41,12 @@ PathModifier :: struct {
   length: f32, // Length of the path segment to fit the skeleton to
   speed:  f32,
   loop:   bool,
-  closed: bool, // True if spline was built closed (see spline_build_closed)
+  closed: bool, // True if spline was built closed (see spline_create_closed)
 }
 
 // SpiderLegConfig describes one leg of a spider rig: its bone chain and stepping parameters.
 SpiderLegConfig :: struct {
-  root:           string, // first bone of the chain, resolved by add_spider_leg_layer
+  root:           string, // first bone of the chain, resolved by spider_leg_layer_create
   chain_length:   u32, // bones in the chain, root first
   constraints:    []IKBoneConstraint, // nil = unconstrained; owned by the layer
   offset:         [3]f32, // rest foot position relative to the leg root, world space

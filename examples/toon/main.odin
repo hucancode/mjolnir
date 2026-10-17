@@ -67,7 +67,7 @@ setup :: proc(app: ^App) -> bool {
   }
 
   ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
 
   meshes := app.renderer.builtin_meshes
@@ -83,19 +83,19 @@ setup :: proc(app: ^App) -> bool {
   spawn_mesh(app, meshes[.SPHERE], pbr, {0, 1.0, -3.0})
 
   sun := world.spawn(&app.scene, {-3, 8, 6})
-  render.attach(&app.renderer, sun.index, render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9, 3}, shadow_radius = 8.0, cast_shadow = true)))
+  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9, 3}, shadow_radius = 8.0, cast_shadow = true)))
   return true
 }
 
 spawn_mesh :: proc(app: ^App, mesh: render.MeshHandle, material: render.MaterialHandle, position: [3]f32) {
   n := world.spawn(&app.scene, position)
-  render.attach(&app.renderer, n.index, render.MeshAttachment{handle = mesh, material = material, cast_shadow = true})
+  render.attach(&app.renderer, render.SlotHandle(n.index), render.MeshAttachment{mesh = mesh, material = material, cast_shadow = true})
 }
 
 shutdown :: proc(app: ^App) {
   delete(app.materials)
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)

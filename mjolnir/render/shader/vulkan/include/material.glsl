@@ -36,7 +36,7 @@ struct View {
     float near;
     float far;
     // the rest is render's own; don't rely on it
-    uint attachments[6];
+    uint images[6];
     uint pyramid;
     uint occlusion_mask;
     uint list_stride;

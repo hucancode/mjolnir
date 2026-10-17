@@ -95,7 +95,7 @@ setup :: proc(app: ^App) -> bool {
   app.renderer.ibl_intensity = 0.3
 
   ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 10.0)
 
   for x in 0 ..< 3 do for z in 0 ..< 3 {
@@ -106,16 +106,16 @@ setup :: proc(app: ^App) -> bool {
     case 2: color = .CYAN
     }
     sphere := world.spawn(&app.scene, {f32(x - 1) * 2.5, 0.7, f32(z - 1) * 2.5})
-    render.attach(&app.renderer, sphere.index, render.primitive(&app.renderer, .SPHERE, color))
+    render.attach(&app.renderer, render.SlotHandle(sphere.index), render.primitive(&app.renderer, .SPHERE, color))
     world.scale(&app.scene, sphere, 0.7)
   }
   cube := world.spawn(&app.scene, {0, 1.5, 0})
-  render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, .YELLOW))
+  render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .YELLOW))
   world.scale(&app.scene, cube, 0.6)
 
   dir_light = world.spawn(&app.scene, {6, 10, 6})
   world.rotate(&app.scene, dir_light, linalg.quaternion_between_two_vector3_f32({0, 0, 1}, linalg.normalize([3]f32{-6, -10, -6})))
-  render.attach(&app.renderer, dir_light.index, render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1, f32(dir_intensity)}, shadow_radius = 12.0, cast_shadow = true)))
+  render.attach(&app.renderer, render.SlotHandle(dir_light.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1, f32(dir_intensity)}, shadow_radius = 12.0, cast_shadow = true)))
 
   // Glowing marker so each light's position is visible.
   marker_material = render.material_create(&app.renderer, emissive_value = 4.0)
@@ -127,7 +127,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   delete(lights)
@@ -154,13 +154,13 @@ spawn_light :: proc(app: ^App, kind: LightKind) {
   l.node = node
   switch kind {
   case .POINT:
-    render.attach(&app.renderer, node.index, render.light_create(&app.renderer, render.make_point_light(radius = f32(point_radius))))
+    render.attach(&app.renderer, render.SlotHandle(node.index), render.light_create(&app.renderer, render.make_point_light(radius = f32(point_radius))))
   case .SPOT:
-    render.attach(&app.renderer, node.index, render.light_create(&app.renderer, render.make_spot_light(radius = f32(spot_radius), angle = math.to_radians(f32(spot_outer_deg)))))
+    render.attach(&app.renderer, render.SlotHandle(node.index), render.light_create(&app.renderer, render.make_spot_light(radius = f32(spot_radius), angle = math.to_radians(f32(spot_outer_deg)))))
   }
   // A slot holds one attachment, so the marker mesh lives on a child node.
   marker := world.spawn(&app.scene, parent = node)
-  render.attach(&app.renderer, marker.index, render.MeshAttachment{handle = app.renderer.builtin_meshes[.CUBE], material = marker_material, cast_shadow = false})
+  render.attach(&app.renderer, render.SlotHandle(marker.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.CUBE], material = marker_material, cast_shadow = false})
   world.scale(&app.scene, marker, MARKER_SCALE)
   append(&lights, l)
 }
@@ -168,7 +168,7 @@ spawn_light :: proc(app: ^App, kind: LightKind) {
 remove_random_light :: proc(app: ^App) {
   if len(lights) == 0 do return
   i := rand.int_max(len(lights))
-  world.despawn(&app.scene, lights[i].node)
+  world.destroy(&app.scene, lights[i].node)
   unordered_remove(&lights, i)
 }
 
@@ -191,7 +191,7 @@ light_position :: proc(l: MovingLight) -> [3]f32 {
 }
 
 apply_light_settings :: proc(app: ^App) {
-  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, dir_light.index, render.LightHandle)); ok {
+  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(dir_light.index), render.LightHandle)); ok {
     world.set_visible(&app.scene, dir_light, dir_enabled)
     l.color = {1, 1, 1, f32(dir_intensity)}
   }
@@ -199,13 +199,13 @@ apply_light_settings :: proc(app: ^App) {
     color := [4]f32{ml.color.r, ml.color.g, ml.color.b, 0}
     switch ml.kind {
     case .POINT:
-      l := render.light(&app.renderer, render.attachment(&app.renderer, ml.node.index, render.LightHandle)) or_continue
+      l := render.light(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(ml.node.index), render.LightHandle)) or_continue
       world.set_visible(&app.scene, ml.node, point_enabled)
       l.color = color
       l.color.a = f32(point_intensity)
       l.radius = f32(point_radius)
     case .SPOT:
-      l := render.light(&app.renderer, render.attachment(&app.renderer, ml.node.index, render.LightHandle)) or_continue
+      l := render.light(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(ml.node.index), render.LightHandle)) or_continue
       world.set_visible(&app.scene, ml.node, spot_enabled)
       l.color = color
       l.color.a = f32(spot_intensity)

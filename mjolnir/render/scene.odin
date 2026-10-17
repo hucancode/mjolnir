@@ -71,11 +71,11 @@ Renderer_State :: struct {
   // lights, emitters and force fields: their tables' rows
   light_slots:            cont.Slots,
   emitter_slots:          cont.Slots,
-  forcefield_slots:       cont.Slots,
+  force_field_slots:       cont.Slots,
   // where they are attached: the rows of the *_PLACEMENTS tables
   light_placement_slots:      cont.Slots,
   emitter_placement_slots:    cont.Slots,
-  forcefield_placement_slots: cont.Slots,
+  force_field_placement_slots: cont.Slots,
   cameras:                []Camera,
   camera_targets:         []CameraTargets,
   camera_slots:           cont.Slots,
@@ -232,12 +232,12 @@ init_resources :: proc(self: ^Renderer) -> bool {
   }
   cont.slots_init(&self.light_slots, MAX_LIGHTS, RETIRE_GRACE)
   cont.slots_init(&self.emitter_slots, MAX_EMITTERS, RETIRE_GRACE)
-  cont.slots_init(&self.forcefield_slots, MAX_FORCE_FIELDS, RETIRE_GRACE)
+  cont.slots_init(&self.force_field_slots, MAX_FORCE_FIELDS, RETIRE_GRACE)
   // placements have no handle to go stale and each frame reads its own copy of the
   // table, so no grace
   cont.slots_init(&self.light_placement_slots, MAX_LIGHTS)
   cont.slots_init(&self.emitter_placement_slots, MAX_EMITTERS)
-  cont.slots_init(&self.forcefield_placement_slots, MAX_FORCE_FIELDS)
+  cont.slots_init(&self.force_field_placement_slots, MAX_FORCE_FIELDS)
   cont.slab_init(&self.bone_matrix_slab, BONE_SLAB_CONFIG)
   cont.slab_init(&self.skin_slab, SKIN_SLAB_CONFIG)
   self.cameras = make([]Camera, MAX_ACTIVE_CAMERAS)
@@ -274,7 +274,7 @@ mark_resources :: proc(self: ^Renderer) {
   cont.slots_mark(&self.material_slots)
   cont.slots_mark(&self.light_slots)
   cont.slots_mark(&self.emitter_slots)
-  cont.slots_mark(&self.forcefield_slots)
+  cont.slots_mark(&self.force_field_slots)
   cont.slots_mark(&self.texture_slots)
   cont.slots_mark(&self.camera_slots)
 }
@@ -319,10 +319,10 @@ teardown :: proc(self: ^Renderer) {
   }
   rewind(self, &self.light_slots, .LIGHTS)
   rewind(self, &self.emitter_slots, .EMITTERS)
-  rewind(self, &self.forcefield_slots, .FORCEFIELDS)
+  rewind(self, &self.force_field_slots, .FORCE_FIELDS)
   rewind(self, &self.light_placement_slots, .LIGHT_PLACEMENTS)
   rewind(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS)
-  rewind(self, &self.forcefield_placement_slots, .FORCEFIELD_PLACEMENTS)
+  rewind(self, &self.force_field_placement_slots, .FORCE_FIELD_PLACEMENTS)
   self.shadow_casters = {}
 }
 
@@ -358,10 +358,10 @@ shutdown :: proc(self: ^Renderer) {
   cont.slots_destroy(&self.material_slots)
   cont.slots_destroy(&self.light_slots)
   cont.slots_destroy(&self.emitter_slots)
-  cont.slots_destroy(&self.forcefield_slots)
+  cont.slots_destroy(&self.force_field_slots)
   cont.slots_destroy(&self.light_placement_slots)
   cont.slots_destroy(&self.emitter_placement_slots)
-  cont.slots_destroy(&self.forcefield_placement_slots)
+  cont.slots_destroy(&self.force_field_placement_slots)
   cont.slots_destroy(&self.texture_slots)
   cont.slots_destroy(&self.target_slots)
   delete(self.cameras)
@@ -392,30 +392,30 @@ POST_PROCESS_RING :: 3
 // The post-process ring of every frame in flight, at the swapchain extent;
 // recreate_swapchain rebuilds it.
 @(private = "file")
-post_process_create_images :: proc(r: ^Renderer) -> bool {
+post_process_create_images :: proc(self: ^Renderer) -> bool {
   desc := TextureDesc {
-    extent = dev.extent(&r.gpu),
+    extent = dev.extent(&self.gpu),
     format = HDR_COLOR_FORMAT,
     usage  = {.COLOR_TARGET, .SAMPLED},
   }
-  for &frame in r.post_process_ring {
-    for &handle in frame do handle = allocate_texture(r, desc, target = true) or_return
+  for &frame in self.post_process_ring {
+    for &handle in frame do handle = allocate_texture(self, desc, target = true) or_return
   }
   return true
 }
 
 @(private = "file")
-post_process_release_images :: proc(r: ^Renderer) {
-  for &frame in r.post_process_ring {
+post_process_release_images :: proc(self: ^Renderer) {
+  for &frame in self.post_process_ring {
     for &handle in frame {
-      texture_destroy(r, handle)
+      texture_destroy(self, handle)
       handle = 0
     }
   }
 }
 
-// lock holds off frame while another thread edits through the pointers material,
-// emitter and forcefield return; stage_*, create_* and destroy_* lock themselves.
+// lock holds off frame while another thread edits through the pointers material, light,
+// emitter and force_field return; stage_*, create_* and destroy_* lock themselves.
 lock :: proc(self: ^Renderer) {
   sync.recursive_mutex_lock(&self.mutex)
 }
@@ -498,12 +498,16 @@ Node :: struct #packed {
 }
 #assert(size_of(Node) == 96)
 
-// MeshAttachment draws mesh handle with material from a slot's transform.
+// MeshAttachment draws mesh with material from a slot's transform.
 MeshAttachment :: struct {
-  handle:      MeshHandle,
+  mesh:        MeshHandle,
   material:    MaterialHandle,
   cast_shadow: bool,
 }
+
+// SlotHandle is a scene slot: a world node's index (NodeHandle.index), whose transform
+// stage_transforms feeds.
+SlotHandle :: distinct u32
 
 // What a slot draws: a mesh, or a light, emitter or force field (*_create) placed at the
 // slot's transform. One light, emitter or force field may be attached at many slots.
@@ -518,7 +522,7 @@ Attachment :: union {
 // holds the render mutex and marks what it changes.
 @(private)
 slot_node :: proc(self: ^Renderer, slot: u32) -> ^Node {
-  assert(slot < MAX_NODES_IN_SCENE, "slot exceeds MAX_NODES_IN_SCENE")
+  assert(slot < MAX_SLOTS, "slot exceeds MAX_SLOTS")
   self.node_count = max(self.node_count, slot + 1)
   return &write_table(self, .NODES, Node)[slot]
 }
@@ -573,7 +577,7 @@ unplace :: proc(self: ^Renderer, slots: ^cont.Slots, table: Table, $T: typeid, s
 unbind :: proc(self: ^Renderer, slot: u32) {
   unplace(self, &self.light_placement_slots, .LIGHT_PLACEMENTS, LightPlacement, slot)
   unplace(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS, EmitterPlacement, slot)
-  unplace(self, &self.forcefield_placement_slots, .FORCEFIELD_PLACEMENTS, ForceFieldPlacement, slot)
+  unplace(self, &self.force_field_placement_slots, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement, slot)
 }
 
 // Stores `value` in a free row of `table`; the row is the resource's handle.
@@ -652,7 +656,8 @@ skin_fits :: proc(self: ^Renderer, node: Node, mesh_id: u32) -> bool {
 
 // Skin palette (bone skinning matrices) for the skinned mesh at `slot`, attached first.
 // The matrices are copied.
-stage_bones :: proc(self: ^Renderer, slot: u32, matrices: []matrix[4, 4]f32) {
+stage_bones :: proc(self: ^Renderer, slot: SlotHandle, matrices: []matrix[4, 4]f32) {
+  slot := u32(slot)
   count := u32(len(matrices))
   if count == 0 do return
   guard(self)
@@ -687,7 +692,8 @@ stage_bones :: proc(self: ^Renderer, slot: u32, matrices: []matrix[4, 4]f32) {
 
 // attach draws attachment at slot (a world node's index), replacing what the slot drew before. A bone palette
 // stays while the slot draws a skinned mesh whose vertices fit the slot's skinned range.
-attach :: proc(self: ^Renderer, slot: u32, attachment: Attachment) {
+attach :: proc(self: ^Renderer, slot: SlotHandle, attachment: Attachment) {
+  slot := u32(slot)
   guard(self)
   node := slot_node(self, slot)
   unbind(self, slot)
@@ -696,7 +702,7 @@ attach :: proc(self: ^Renderer, slot: u32, attachment: Attachment) {
   node.flags -= {.CASTS_SHADOW}
   switch a in attachment {
   case MeshAttachment:
-    node.mesh_id, node.material_id = u32(a.handle), u32(a.material)
+    node.mesh_id, node.material_id = u32(a.mesh), u32(a.material)
     batch_join(self, slot, node.mesh_id, node.material_id)
     if a.cast_shadow do node.flags += {.CASTS_SHADOW}
   case LightHandle:
@@ -708,7 +714,7 @@ attach :: proc(self: ^Renderer, slot: u32, attachment: Attachment) {
       log.warnf("No room for more than %d placed emitters; the emitter is dropped", MAX_EMITTERS - 1)
     }
   case ForceFieldHandle:
-    if !place(self, &self.forcefield_placement_slots, .FORCEFIELD_PLACEMENTS, ForceFieldPlacement{forcefield = a, node = slot}) {
+    if !place(self, &self.force_field_placement_slots, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement{force_field = a, node = slot}) {
       log.warnf("No room for more than %d placed force fields; the force field is dropped", MAX_FORCE_FIELDS - 1)
     }
   }
@@ -717,16 +723,17 @@ attach :: proc(self: ^Renderer, slot: u32, attachment: Attachment) {
 }
 
 // attachment returns the attachment of type T at slot, e.g. attachment(r, slot, LightHandle).
-// Edit a light, emitter or force field through its handle (light, emitter, forcefield); a
+// Edit a light, emitter or force field through its handle (light, emitter, force_field); a
 // MeshAttachment is a copy to pass back to attach.
 attachment :: proc(
   self: ^Renderer,
-  slot: u32,
+  slot: SlotHandle,
   $T: typeid,
 ) -> (
   att: T,
   ok: bool,
 ) #optional_ok {
+  slot := u32(slot)
   guard(self)
   when T == MeshAttachment {
     if slot >= self.node_count do return
@@ -740,8 +747,8 @@ attachment :: proc(
     i := placed_at(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS, EmitterPlacement, slot) or_return
     return write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[i].emitter, true
   } else when T == ForceFieldHandle {
-    i := placed_at(self, &self.forcefield_placement_slots, .FORCEFIELD_PLACEMENTS, ForceFieldPlacement, slot) or_return
-    return write_table(self, .FORCEFIELD_PLACEMENTS, ForceFieldPlacement)[i].forcefield, true
+    i := placed_at(self, &self.force_field_placement_slots, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement, slot) or_return
+    return write_table(self, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement)[i].force_field, true
   }
   return
 }
@@ -759,7 +766,7 @@ Light :: struct #align(16) {
   angle_outer:        f32,
   type:               LightType,
   // the light competes for a shadow map
-  should_cast_shadow: b32,
+  cast_shadow: b32,
 }
 #assert(size_of(Light) == 48)
 
@@ -776,19 +783,19 @@ LightPlacement :: struct {
 }
 
 // light_create stores `l`; attach places it at slots. It lives until light_destroy or teardown.
-light_create :: proc(r: ^Renderer, l: Light) -> (handle: LightHandle, ok: bool) #optional_ok {
-  i := resource_create(r, &r.light_slots, .LIGHTS, l) or_return
+light_create :: proc(self: ^Renderer, l: Light) -> (handle: LightHandle, ok: bool) #optional_ok {
+  i := resource_create(self, &self.light_slots, .LIGHTS, l) or_return
   return LightHandle(i), true
 }
 
-// light returns the light of `h`, to edit in place; every slot it is attached to follows.
-light :: proc(r: ^Renderer, h: LightHandle) -> (^Light, bool) #optional_ok {
-  return resource(r, &r.light_slots, .LIGHTS, Light, u32(h))
+// light returns the light of `handle`, to edit in place; every slot it is attached to follows.
+light :: proc(self: ^Renderer, handle: LightHandle) -> (^Light, bool) #optional_ok {
+  return resource(self, &self.light_slots, .LIGHTS, Light, u32(handle))
 }
 
 // light_destroy frees the light; slots it stays attached to shine nothing.
-light_destroy :: proc(r: ^Renderer, h: LightHandle) {
-  resource_destroy(r, &r.light_slots, .LIGHTS, u32(h))
+light_destroy :: proc(self: ^Renderer, handle: LightHandle) {
+  resource_destroy(self, &self.light_slots, .LIGHTS, u32(handle))
 }
 
 // Where a light at a node's transform sits and shines: its translation and normalized forward
@@ -805,7 +812,7 @@ make_point_light :: proc(
   radius: f32 = 10.0,
   cast_shadow: bool = true,
 ) -> Light {
-  return {type = .POINT, color = color, radius = radius, should_cast_shadow = b32(cast_shadow)}
+  return {type = .POINT, color = color, radius = radius, cast_shadow = b32(cast_shadow)}
 }
 
 // make_directional_light returns a sun-like Light for light_create; shadow_radius is its shadow distance.
@@ -814,7 +821,7 @@ make_directional_light :: proc(
   shadow_radius: f32 = 10.0,
   cast_shadow: bool = false,
 ) -> Light {
-  return {type = .DIRECTIONAL, color = color, radius = shadow_radius, should_cast_shadow = b32(cast_shadow)}
+  return {type = .DIRECTIONAL, color = color, radius = shadow_radius, cast_shadow = b32(cast_shadow)}
 }
 
 // make_spot_light returns a cone Light of the given half angle for light_create.
@@ -830,7 +837,7 @@ make_spot_light :: proc(
     radius      = radius,
     angle_inner = angle * SPOT_LIGHT_INNER_RATIO,
     angle_outer = angle,
-    should_cast_shadow = b32(cast_shadow),
+    cast_shadow = b32(cast_shadow),
   }
 }
 
@@ -999,7 +1006,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   for p, i in placements {
     if p.light == 0 do continue
     light := lights[p.light]
-    if !light.should_cast_shadow || .VISIBLE not_in nodes[p.node].flags do continue
+    if !light.cast_shadow || .VISIBLE not_in nodes[p.node].flags do continue
     if light.type == .DIRECTIONAL && !has_eye do continue
     // a spot light reuses the point light's sphere: loose but simple
     position, _ := light_pose(nodes[p.node].world_matrix)
@@ -1077,7 +1084,7 @@ flush_particles :: proc(self: ^Renderer) {
   // a ring slot takes at most one new particle per frame
   p.emit_total = min(total, MAX_PARTICLES)
   p.emitter_placement_count = u32(len(placements))
-  p.forcefield_placement_count = self.forcefield_placement_slots.high_water
+  p.force_field_placement_count = self.force_field_placement_slots.high_water
   p.frame_counter += 1
 }
 
@@ -1117,7 +1124,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       list_capacity       = CAMERA_LIST_CAPACITY,
       time                = self.time,
     }
-    for a in AttachmentType do v.attachments[a] = u32(targets.attachments[a][frame_index])
+    for a in CameraImage do v.images[a] = u32(targets.images[a][frame_index])
   }
 }
 
@@ -1160,4 +1167,18 @@ frame :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool
   case .ERROR:
   }
   return false
+}
+
+// destroy frees a resource by its handle (or a Geometry), as its *_destroy does.
+destroy :: proc {
+  mesh_destroy,
+  material_destroy,
+  texture_destroy,
+  camera_destroy,
+  light_destroy,
+  emitter_destroy,
+  force_field_destroy,
+  material_shader_destroy,
+  post_shader_destroy,
+  geometry_destroy,
 }

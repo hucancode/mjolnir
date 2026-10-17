@@ -45,19 +45,19 @@ setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   light := world.spawn(&app.scene, {10, 18, 10})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 2.0}, 60.0, false)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 2.0}, 60.0, false)))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
 
   tiny := world.spawn(&app.scene, {0, -0.5, 0})
-  render.attach(&app.renderer, tiny.index, render.primitive(&app.renderer, .CUBE, .GRAY))
+  render.attach(&app.renderer, render.SlotHandle(tiny.index), render.primitive(&app.renderer, .CUBE, .GRAY))
   world.scale(&app.scene, tiny, 0.01)
   ground := world.spawn(&app.scene, {0, -1, 0})
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY))
   world.scale(&app.scene, ground, 20.0)
 
   // Real cube provides depth-occlusion contrast for the adjacent debug cube.
   occluder := world.spawn(&app.scene, {-6, 0, 0})
-  render.attach(&app.renderer, occluder.index, render.primitive(&app.renderer, .CUBE, .BLUE))
+  render.attach(&app.renderer, render.SlotHandle(occluder.index), render.primitive(&app.renderer, .CUBE, .BLUE))
   world.scale(&app.scene, occluder, 0.8)
 
   render.camera_look_at(render.main_camera(&app.renderer), {12, 8, 14}, {0, 0, 0})

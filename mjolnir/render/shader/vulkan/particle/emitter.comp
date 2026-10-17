@@ -28,7 +28,7 @@ struct Emitter {
   float weight;
   float weight_spread;
   float emission_rate; // read by render, which counts each frame's new particles
-  uint texture_index;
+  uint texture;
 };
 
 // Where an emitter is attached; placement i emits the frame's new particles
@@ -53,7 +53,7 @@ layout(set = 0, binding = 8) buffer ParticleBuffer {
 
 layout(push_constant) uniform ParticleSystemParams {
     uint emitter_placement_count;
-    uint forcefield_placement_count;
+    uint force_field_placement_count;
     float delta_time;
     uint frame_counter;
     uint emit_total; // new particles this frame
@@ -156,6 +156,6 @@ void main() {
         lifetime,
         lifetime,
         weight,
-        emitter.texture_index
+        emitter.texture
     );
 }

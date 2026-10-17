@@ -71,7 +71,7 @@ shutdown :: proc(app: ^App) {
 
 spawn_mesh :: proc(app: ^App, m: render.MeshHandle, mat: render.MaterialHandle, parent: world.NodeHandle) -> world.NodeHandle {
   n := world.spawn(&app.scene, parent = parent)
-  render.attach(&app.renderer, n.index, render.MeshAttachment{handle = m, material = mat, cast_shadow = true})
+  render.attach(&app.renderer, render.SlotHandle(n.index), render.MeshAttachment{mesh = m, material = mat, cast_shadow = true})
   return n
 }
 
@@ -114,7 +114,7 @@ setup :: proc(app: ^App) -> bool {
   ground_hull := b3.MakeBoxHull(PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   _ = b3.CreateHullShape(ground_body, shape_def(0), &ground_hull.base)
   ground_visual := spawn_mesh(app, ground_mesh, ground_mat, ground)
-  world.scale_xyz(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
+  world.scale(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   ball := world.spawn(&app.scene, {2.5, SPHERE_RADIUS, 0})
   ball_body := body_create(app, .staticBody, {2.5, SPHERE_RADIUS, 0})
   _ = b3.CreateSphereShape(ball_body, shape_def(0), &b3.Sphere{radius = SPHERE_RADIUS})
@@ -151,7 +151,7 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {30, 25, 30}, {0, 5, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {0, 20, 0})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_spot_light({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_spot_light({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25)))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   return true
 }
@@ -177,7 +177,7 @@ update :: proc(app: ^App, dt: f32) {
     pos := b3.Body_GetPosition(p.body)
     if pos.y < KILL_Y {
       b3.DestroyBody(p.body)
-      world.despawn(&app.scene, p.node)
+      world.destroy(&app.scene, p.node)
       unordered_remove(&app.pieces, i)
       continue
     }

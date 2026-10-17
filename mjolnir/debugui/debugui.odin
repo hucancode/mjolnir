@@ -5,9 +5,14 @@ import "../render"
 import "core:math"
 import mu "vendor:microui"
 
-// Context is the debug UI: a microui context (mu) and what it takes to feed and draw it.
+// Context is the debug UI: build widgets on its microui context (mu) between begin and end.
 Context :: struct {
-  mu:       mu.Context,
+  mu:      mu.Context,
+  using _: Context_State,
+}
+
+@(private)
+Context_State :: struct {
   // microui's builtin font and icon atlas
   atlas:    render.TextureHandle,
   // buttons pressed over the UI, owned by it through release
@@ -30,8 +35,8 @@ init :: proc(self: ^Context, r: ^render.Renderer) -> bool {
   return ok
 }
 
-// destroy frees what the debug UI holds; render.shutdown frees its atlas.
-destroy :: proc(self: ^Context) {
+// shutdown frees what the debug UI holds; render.shutdown frees its atlas.
+shutdown :: proc(self: ^Context) {
   delete(self.vertices)
   delete(self.indices)
   delete(self.commands)
@@ -111,7 +116,7 @@ end :: proc(self: ^Context, dpi_scale: f32) -> []render.RenderCommand {
       shape = render.DrawMeshCommand{
         vertices = self.vertices[run.first_vertex:last_vertex],
         indices = self.indices[run.first_index:last_index],
-        texture_id = u32(self.atlas),
+        texture = self.atlas,
       },
       z_order = max(i32),
       clip = run.clip,

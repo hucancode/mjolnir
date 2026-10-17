@@ -17,7 +17,7 @@ scene: gltf.Scene
 rig: ^anim.Rig
 animator: anim.Animator
 snake_child_node: world.NodeHandle
-tail_layer_index: int = -1
+tail_layer: Maybe(anim.LayerHandle)
 
 propagation_speed: mu.Real = 0.3
 damping: mu.Real = 0.7
@@ -70,11 +70,11 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
-  gltf.scene_destroy(&scene)
+  gltf.destroy(&scene)
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -89,24 +89,24 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {0, 4, -4}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   ground := world.spawn(&app.scene, {0, GROUND_Y, 0})
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
-  scene = gltf.load(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
+  scene = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
   if len(scene.skinned) == 0 do return true
   snake_child_node = scene.skinned[0].node
   rig = &scene.rigs[scene.skinned[0].rig]
   anim.animator_init(&animator, rig)
-  if idx, layer_ok := anim.add_tail_layer(&animator, rig, "root", 10,
+  if idx, layer_ok := anim.tail_layer_create(&animator, rig, "root", 10,
     propagation_speed = f32(propagation_speed),
     damping = f32(damping),
     weight = 1.0,
   ); layer_ok {
-    tail_layer_index = idx
-    log.infof("Added tail modifier to node (layer %d)", tail_layer_index)
+    tail_layer = idx
+    log.infof("Added tail modifier to node (layer %d)", idx)
   }
   head_bone, head_found = anim.find_bone(&rig.skeleton, HEAD_BONE)
   light := world.spawn(&app.scene, {-4, 10, 6})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_point_light({0.6, 0.7, 1.0, 1.5}, 15.0, false)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({0.6, 0.7, 1.0, 1.5}, 15.0, false)))
   return true
 }
 
@@ -129,8 +129,8 @@ update :: proc(app: ^App, dt: f32) {
   } else {
     handle_drag(app)
   }
-  if tail_layer_index >= 0 {
-    anim.set_tail_params(&animator, tail_layer_index,
+  if layer, ok := tail_layer.?; ok {
+    anim.set_tail_params(&animator, layer,
       propagation_speed = f32(propagation_speed),
       damping = f32(damping),
       stretch = stretch_enabled,
@@ -139,7 +139,7 @@ update :: proc(app: ^App, dt: f32) {
   if rig != nil do anim.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, snake_child_node))
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  if rig != nil do render.stage_bones(&app.renderer, snake_child_node.index, animator.palette)
+  if rig != nil do render.stage_bones(&app.renderer, render.SlotHandle(snake_child_node.index), animator.palette)
   render.update(&app.renderer, dt)
 }
 

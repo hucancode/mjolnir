@@ -15,7 +15,7 @@ import "core:math"
 // How the app draws a node: ui lays nodes out, the app gives them a look.
 Look :: struct {
   color:   [4]u8,
-  texture: u32, // render.NO_TEXTURE for a flat color
+  texture: render.TextureHandle, // render.NO_TEXTURE for a flat color
 }
 
 App :: struct {
@@ -67,7 +67,7 @@ setup :: proc(app: ^App) -> bool {
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   build_ui(app)
   cube := world.spawn(&app.scene)
-  render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, .BLUE))
+  render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .BLUE))
   render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   return true
@@ -75,7 +75,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   delete(app.looks)
-  ui.destroy(&app.gui)
+  ui.shutdown(&app.gui)
   font.destroy(&app.font)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
@@ -120,9 +120,9 @@ build_ui :: proc(app: ^App) {
   app.looks[hint] = {{0, 0, 0, 160}, render.NO_TEXTURE}
   text(app, hint, "drag: orbit   wheel over list: scroll", 14)
   // an image anchored bottom-right, and a star mesh bottom-left
-  if star_texture, ok := render.texture_load(&app.renderer, #load("../../assets/gold-star.png")); ok {
+  if star_texture, ok := render.texture_create(&app.renderer, #load("../../assets/gold-star.png")); ok {
     image := ui.node_create(&app.gui, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, size = {{.FIXED, 128}, {.FIXED, 128}}})
-    app.looks[image] = {{255, 255, 255, 255}, u32(star_texture)}
+    app.looks[image] = {{255, 255, 255, 255}, star_texture}
   }
   app.star = ui.node_create(&app.gui, {position = .ABSOLUTE, anchor = {0, 1}, offset = {16, -16}, size = {{.FIXED, 140}, {.FIXED, 140}}})
 }

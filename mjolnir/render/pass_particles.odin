@@ -43,24 +43,24 @@ ParticleDrawPush :: struct {
 }
 
 @(private)
-particles_init :: proc(r: ^Renderer) -> bool {
+particles_init :: proc(self: ^Renderer) -> bool {
   common := wgsl("shader/wgpu/common.wgsl")
-  r.particle_emit_pipeline = dev.compute_pipeline_create(
-    &r.gpu,
-    {{spirv = {comp = spirv("shader/vulkan/particle/emitter.spv")}, wgsl = wgsl_join(common, wgsl("shader/wgpu/particle_emit.wgsl"))}, pipeline_layout(r, .PARTICLE_EMIT)},
+  self.particle_emit_pipeline = dev.compute_pipeline_create(
+    &self.gpu,
+    {{spirv = {comp = spirv("shader/vulkan/particle/emitter.spv")}, wgsl = wgsl_join(common, wgsl("shader/wgpu/particle_emit.wgsl"))}, pipeline_layout(self, .PARTICLE_EMIT)},
   ) or_return
-  r.particle_sim_pipeline = dev.compute_pipeline_create(
-    &r.gpu,
-    {{spirv = {comp = spirv("shader/vulkan/particle/compute.spv")}, wgsl = wgsl_join(common, wgsl("shader/wgpu/particle_simulate.wgsl"))}, pipeline_layout(r, .PARTICLE_SIMULATE)},
+  self.particle_sim_pipeline = dev.compute_pipeline_create(
+    &self.gpu,
+    {{spirv = {comp = spirv("shader/vulkan/particle/compute.spv")}, wgsl = wgsl_join(common, wgsl("shader/wgpu/particle_simulate.wgsl"))}, pipeline_layout(self, .PARTICLE_SIMULATE)},
   ) or_return
-  r.particle_draw_pipeline = dev.graphics_pipeline_create(
-    &r.gpu,
+  self.particle_draw_pipeline = dev.graphics_pipeline_create(
+    &self.gpu,
     {
       shader = {
         spirv = {vert = spirv("shader/vulkan/particle/vert.spv"), frag = spirv("shader/vulkan/particle/frag.spv")},
         wgsl = wgsl_join(common, wgsl("shader/wgpu/particle.wgsl")),
       },
-      layout = pipeline_layout(r, .PARTICLE_DRAW, .PARTICLES),
+      layout = pipeline_layout(self, .PARTICLE_DRAW, .PARTICLES),
       topology = .POINT_LIST if BINDLESS else .TRIANGLE_LIST,
       // drawn in the forward pass
       color_formats = material_pass_formats(.FORWARD),
@@ -68,54 +68,54 @@ particles_init :: proc(r: ^Renderer) -> bool {
       depth = material_pass_depth(.FORWARD),
     },
   ) or_return
-  return particles_gpu_reset(r)
+  return particles_gpu_reset(self)
 }
 
 // Kills every particle before the next frame.
 @(private)
-particles_gpu_reset :: proc(r: ^Renderer) -> bool {
-  dev.buffer_write(&r.gpu, r.buffers[.PARTICLES][0], 0, make([]u8, MAX_PARTICLES * size_of(Particle), context.temp_allocator)) or_return
+particles_gpu_reset :: proc(self: ^Renderer) -> bool {
+  dev.buffer_write(&self.gpu, self.buffers[.PARTICLES][0], 0, make([]u8, MAX_PARTICLES * size_of(Particle), context.temp_allocator)) or_return
   header := [PARTICLE_ALIVE_HEADER]u32{0, 1, 0, 0} if BINDLESS else {6, 0, 0, 0}
-  return dev.buffer_write(&r.gpu, r.buffers[.PARTICLE_ALIVE][0], 0, ([^]u8)(&header)[:size_of(header)])
+  return dev.buffer_write(&self.gpu, self.buffers[.PARTICLE_ALIVE][0], 0, ([^]u8)(&header)[:size_of(header)])
 }
 
 // After drawing: the next frame draws what this simulates.
 @(private)
-particles_simulate :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32) {
-  params := &r.particle_params
+particles_simulate :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
+  params := &self.particle_params
   // the previous simulation and this frame's draws use what gets rewritten
-  barrier(r, cmd, .PARTICLES_TO_FILL)
+  barrier(self, cmd, .PARTICLES_TO_FILL)
   // the alive count: the vertex count for points, the instance count for quads
   count_word := 0 if BINDLESS else size_of(u32)
-  dev.cmd_fill_buffer(&r.gpu, cmd, r.buffers[.PARTICLE_ALIVE][0], count_word, size_of(u32))
-  dev.cmd_begin_compute(&r.gpu, cmd)
-  defer dev.cmd_end_compute(&r.gpu, cmd)
+  dev.cmd_fill_buffer(&self.gpu, cmd, self.buffers[.PARTICLE_ALIVE][0], count_word, size_of(u32))
+  dev.cmd_begin_compute(&self.gpu, cmd)
+  defer dev.cmd_end_compute(&self.gpu, cmd)
   if params.emit_total > 0 {
-    pipeline_bind(r, cmd, r.particle_emit_pipeline, .PARTICLE_EMIT, f, params, .NONE)
-    dev.cmd_dispatch(&r.gpu, cmd, (params.emit_total + 63) / 64, 1, 1)
+    pipeline_bind(self, cmd, self.particle_emit_pipeline, .PARTICLE_EMIT, f, params, .NONE)
+    dev.cmd_dispatch(&self.gpu, cmd, (params.emit_total + 63) / 64, 1, 1)
   }
-  barrier(r, cmd, .FILL_TO_COMPUTE)
-  pipeline_bind(r, cmd, r.particle_sim_pipeline, .PARTICLE_SIMULATE, f, params, .NONE)
-  dev.cmd_dispatch(&r.gpu, cmd, MAX_PARTICLES / COMPUTE_PARTICLE_BATCH, 1, 1)
+  barrier(self, cmd, .FILL_TO_COMPUTE)
+  pipeline_bind(self, cmd, self.particle_sim_pipeline, .PARTICLE_SIMULATE, f, params, .NONE)
+  dev.cmd_dispatch(&self.gpu, cmd, MAX_PARTICLES / COMPUTE_PARTICLE_BATCH, 1, 1)
 }
 
 // Inside the forward pass. Where textures are bound as groups (WebGPU) particles sample the
 // first MAX_PARTICLE_TEXTURES distinct emitter textures; the rest draw untextured.
 @(private)
-particles_draw :: proc(r: ^Renderer, cmd: rhi.CommandList, f: u32, camera_index: u32) {
+particles_draw :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, camera_index: u32) {
   push := ParticleDrawPush{camera_index = camera_index}
   textures: [MAX_PARTICLE_TEXTURES]TextureHandle
   when !BINDLESS {
     n := 0
-    emitters := write_table(r, .EMITTERS, Emitter)[:r.emitter_slots.high_water]
+    emitters := write_table(self, .EMITTERS, Emitter)[:self.emitter_slots.high_water]
     outer: for &em in emitters {
-      if em.texture_index == 0 || n == MAX_PARTICLE_TEXTURES do continue
-      for t in textures[:n] do if t == em.texture_index do continue outer
-      textures[n] = em.texture_index
-      push.textures[n] = u32(em.texture_index)
+      if em.texture == 0 || n == MAX_PARTICLE_TEXTURES do continue
+      for t in textures[:n] do if t == em.texture do continue outer
+      textures[n] = em.texture
+      push.textures[n] = u32(em.texture)
       n += 1
     }
   }
-  pipeline_bind(r, cmd, r.particle_draw_pipeline, .PARTICLE_DRAW, f, &push, .PARTICLES, ..textures[:])
-  dev.cmd_draw_indirect(&r.gpu, cmd, r.buffers[.PARTICLE_ALIVE][0], 0, 1, 0)
+  pipeline_bind(self, cmd, self.particle_draw_pipeline, .PARTICLE_DRAW, f, &push, .PARTICLES, ..textures[:])
+  dev.cmd_draw_indirect(&self.gpu, cmd, self.buffers[.PARTICLE_ALIVE][0], 0, 1, 0)
 }

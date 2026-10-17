@@ -18,7 +18,7 @@ MaterialShader :: distinct u32
 // what they declare; it declares `fs_main(in: VertexOut) -> @location(0) vec4f`.
 // Both read the material's params (Material.params), render's time and the image size there.
 material_shader_create :: proc(
-  r: ^Renderer,
+  self: ^Renderer,
   frag_spirv: []u8,
   frag_wgsl: string,
   blend: BlendMode = .ALPHA,
@@ -28,7 +28,7 @@ material_shader_create :: proc(
   ok: bool,
 ) {
   slot := -1
-  for p, i in r.custom_material_pipelines {
+  for p, i in self.custom_material_pipelines {
     if p == 0 {
       slot = i
       break
@@ -38,24 +38,24 @@ material_shader_create :: proc(
   vertex := wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/mesh.wgsl"), wgsl("shader/wgpu/material_custom.wgsl"))
   desc := rhi.GraphicsPipelineDesc {
     shader        = {spirv = {vert = spirv("shader/vulkan/gbuffer/vert.spv"), frag = frag_spirv}, wgsl = wgsl_join(vertex, frag_wgsl)},
-    layout        = pipeline_layout(r, .MESH, .MATERIAL),
-    vertex        = mesh_vertex_streams(r),
+    layout        = pipeline_layout(self, .MESH, .MATERIAL),
+    vertex        = mesh_vertex_streams(self),
     cull          = cull,
     color_formats = material_pass_formats(.FORWARD),
     blend         = blend,
     depth         = material_pass_depth(.FORWARD),
   }
-  pipeline := dev.graphics_pipeline_create(&r.gpu, desc) or_return
-  r.custom_material_pipelines[slot] = pipeline
+  pipeline := dev.graphics_pipeline_create(&self.gpu, desc) or_return
+  self.custom_material_pipelines[slot] = pipeline
   return MaterialShader(slot + 1), true
 }
 
 // material_shader_destroy frees a shader from material_shader_create; its materials draw
 // nothing until they get another.
-material_shader_destroy :: proc(r: ^Renderer, shader: MaterialShader) {
+material_shader_destroy :: proc(self: ^Renderer, shader: MaterialShader) {
   if shader == 0 || int(shader) > MAX_MATERIAL_SHADERS do return
-  p := &r.custom_material_pipelines[shader - 1]
-  if p^ != 0 do dev.pipeline_retire(&r.gpu, p^)
+  p := &self.custom_material_pipelines[shader - 1]
+  if p^ != 0 do dev.pipeline_retire(&self.gpu, p^)
   p^ = 0
 }
 

@@ -39,7 +39,7 @@ struct Light {
     float angle_inner;
     float angle_outer;
     uint type;
-    uint should_cast_shadow;
+    uint cast_shadow;
 };
 
 struct LightPlacement {
@@ -60,12 +60,12 @@ struct Node {
 
 const uint NODE_VISIBLE = 1u;
 
-// View.attachments indices (AttachmentType)
-const uint ATTACHMENT_NORMAL = 1u;
-const uint ATTACHMENT_ALBEDO = 2u;
-const uint ATTACHMENT_METALLIC_ROUGHNESS = 3u;
-const uint ATTACHMENT_EMISSIVE = 4u;
-const uint ATTACHMENT_DEPTH = 5u;
+// View.images indices (CameraImage)
+const uint IMAGE_NORMAL = 1u;
+const uint IMAGE_ALBEDO = 2u;
+const uint IMAGE_METALLIC_ROUGHNESS = 3u;
+const uint IMAGE_EMISSIVE = 4u;
+const uint IMAGE_DEPTH = 5u;
 
 struct View {
     mat4 view;
@@ -77,7 +77,7 @@ struct View {
     vec2 extent;
     float near;
     float far;
-    uint attachments[6]; // this frame's bindless images, by AttachmentType
+    uint images[6]; // this frame's bindless images, by CameraImage
     uint pyramid; // bindless depth pyramid
     uint occlusion_mask; // bit t: material type t is tested against the pyramid
     uint list_stride;
@@ -134,11 +134,11 @@ vec3 worldPosition(View camera, vec2 uv, float depth) {
 }
 
 float sceneDepth(View camera, ivec2 pixel) {
-    return texelFetch(sampler2D(textures[camera.attachments[ATTACHMENT_DEPTH]], samplers[SAMPLER_NEAREST_CLAMP]), pixel, 0).r;
+    return texelFetch(sampler2D(textures[camera.images[IMAGE_DEPTH]], samplers[SAMPLER_NEAREST_CLAMP]), pixel, 0).r;
 }
 
-vec4 attachment(View camera, uint a, ivec2 pixel) {
-    return texelFetch(sampler2D(textures[camera.attachments[a]], samplers[SAMPLER_NEAREST_CLAMP]), pixel, 0);
+vec4 camera_image(View camera, uint a, ivec2 pixel) {
+    return texelFetch(sampler2D(textures[camera.images[a]], samplers[SAMPLER_NEAREST_CLAMP]), pixel, 0);
 }
 
 // Difference of world positions across `pixel` along `axis`, taken towards
@@ -449,18 +449,18 @@ void main() {
         imageStore(lit_images[output_index], pixel, vec4(sky, 1.0));
         return;
     }
-    vec3 raw_normal = attachment(camera, ATTACHMENT_NORMAL, pixel).xyz * 2.0 - 1.0;
-    vec2 mr = attachment(camera, ATTACHMENT_METALLIC_ROUGHNESS, pixel).rg;
+    vec3 raw_normal = camera_image(camera, IMAGE_NORMAL, pixel).xyz * 2.0 - 1.0;
+    vec2 mr = camera_image(camera, IMAGE_METALLIC_ROUGHNESS, pixel).rg;
     Surface s;
     s.position = worldPosition(camera, uv, depth);
     // unfiltered: a blend across a silhouette is no surface's normal
     s.normal = normalize(raw_normal);
     s.V = normalize(camera.position.xyz - s.position);
-    s.albedo = attachment(camera, ATTACHMENT_ALBEDO, pixel).rgb;
+    s.albedo = camera_image(camera, IMAGE_ALBEDO, pixel).rgb;
     s.metallic = clamp(mr.r, 0.0, 1.0);
     s.geometric = geometricNormal(camera, pixel, s.position, depth, s.normal);
 
-    vec3 color = attachment(camera, ATTACHMENT_EMISSIVE, pixel).rgb;
+    vec3 color = camera_image(camera, IMAGE_EMISSIVE, pixel).rgb;
     color += ambientLight(ibl_intensity, raw_normal, s, mr.g);
     s.roughness = clamp(mr.g, 0.08, 1.0);
     for (uint i = 0u; i < tile_light_count; i++) {

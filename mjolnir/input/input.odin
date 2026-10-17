@@ -82,49 +82,49 @@ new_frame :: proc(self: ^State, acc: ^Accumulator) {
 }
 
 // on_key records a key event.
-on_key :: proc(acc: ^Accumulator, key: Key, action: Action) {
+on_key :: proc(self: ^Accumulator, key: Key, action: Action) {
   if !key_valid(key) do return
   k := int(key)
   switch action {
   case .PRESS:
-    acc.keys[k] = true
-    acc.keys_pressed[k] = true
+    self.keys[k] = true
+    self.keys_pressed[k] = true
   case .REPEAT:
-    acc.keys_repeated[k] = true
+    self.keys_repeated[k] = true
   case .RELEASE:
-    acc.keys[k] = false
-    acc.keys_released[k] = true
+    self.keys[k] = false
+    self.keys_released[k] = true
   }
 }
 
 // on_button records a mouse button event.
-on_button :: proc(acc: ^Accumulator, button: MouseButton, action: Action) {
+on_button :: proc(self: ^Accumulator, button: MouseButton, action: Action) {
   if button < min(MouseButton) || button > max(MouseButton) do return
   if action == .RELEASE {
-    acc.buttons -= {button}
-    acc.buttons_released += {button}
+    self.buttons -= {button}
+    self.buttons_released += {button}
   } else {
-    acc.buttons += {button}
-    acc.buttons_pressed += {button}
+    self.buttons += {button}
+    self.buttons_pressed += {button}
   }
 }
 
 // on_cursor records the cursor position in window pixels.
-on_cursor :: proc(acc: ^Accumulator, x, y: f32) {
-  acc.cursor = {x, y}
+on_cursor :: proc(self: ^Accumulator, x, y: f32) {
+  self.cursor = {x, y}
 }
 
 // on_scroll adds a scroll offset, summed until the next tick.
-on_scroll :: proc(acc: ^Accumulator, dx, dy: f32) {
-  acc.scroll += {dx, dy}
+on_scroll :: proc(self: ^Accumulator, dx, dy: f32) {
+  self.scroll += {dx, dy}
 }
 
 // on_char appends a typed character; dropped when the tick's text buffer is full.
-on_char :: proc(acc: ^Accumulator, ch: rune) {
+on_char :: proc(self: ^Accumulator, ch: rune) {
   bytes, size := utf8.encode_rune(ch)
-  if acc.text_len + size > TEXT_CAPACITY do return
-  copy(acc.text[acc.text_len:], bytes[:size])
-  acc.text_len += size
+  if self.text_len + size > TEXT_CAPACITY do return
+  copy(self.text[self.text_len:], bytes[:size])
+  self.text_len += size
 }
 
 // key_down reports whether `key` is held.

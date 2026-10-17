@@ -7,10 +7,10 @@ import "core:math/linalg"
 import "core:slice"
 import "vendor:cgltf"
 
-// load_rig builds a rig from a parsed glTF skin: its joint hierarchy as the skeleton,
+// rig_create builds a rig from a parsed glTF skin: its joint hierarchy as the skeleton,
 // and every animation in `data` as a clip over those joints. Free with
 // anim.rig_destroy.
-load_rig :: proc(data: ^cgltf.data, skin: ^cgltf.skin) -> (rig: anim.Rig, ok: bool) {
+rig_create :: proc(data: ^cgltf.data, skin: ^cgltf.skin) -> (rig: anim.Rig, ok: bool) {
   n := len(skin.joints)
   parents := make([]i32, n, context.temp_allocator)
   inverse_bind := make([]matrix[4, 4]f32, n, context.temp_allocator)

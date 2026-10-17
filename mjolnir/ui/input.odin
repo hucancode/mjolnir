@@ -53,24 +53,24 @@ update_input :: proc(self: ^UI, s: ^input.State) {
   if self.focused != {} do s.keyboard_captured = true
 }
 
-// hovered reports whether the cursor is over `h` or a node inside it.
-hovered :: proc(self: ^UI, h: NodeHandle) -> bool {
-  return within(self, self.hovered, h)
+// hovered reports whether the cursor is over `handle` or a node inside it.
+hovered :: proc(self: ^UI, handle: NodeHandle) -> bool {
+  return within(self, self.hovered, handle)
 }
 
-// pressed reports whether the node held down is `h` or inside it.
-pressed :: proc(self: ^UI, h: NodeHandle) -> bool {
-  return within(self, self.pressed, h)
+// pressed reports whether the node held down is `handle` or inside it.
+pressed :: proc(self: ^UI, handle: NodeHandle) -> bool {
+  return within(self, self.pressed, handle)
 }
 
-// clicked reports whether this tick released a press made on `h` (or inside it) over the
+// clicked reports whether this tick released a press made on `handle` (or inside it) over the
 // same node.
-clicked :: proc(self: ^UI, h: NodeHandle) -> bool {
-  return within(self, self.clicked, h)
+clicked :: proc(self: ^UI, handle: NodeHandle) -> bool {
+  return within(self, self.clicked, handle)
 }
 
-// focused reports whether `h` or a node inside it has keyboard focus. Read keys and text
+// focused reports whether `handle` or a node inside it has keyboard focus. Read keys and text
 // from input.State while it does.
-focused :: proc(self: ^UI, h: NodeHandle) -> bool {
-  return within(self, self.focused, h)
+focused :: proc(self: ^UI, handle: NodeHandle) -> bool {
+  return within(self, self.focused, handle)
 }

@@ -46,10 +46,10 @@ Material :: struct {
 // A pointer to a material in the table the next frame draws from: edit it in
 // place. The pointer is valid until the next frame; edits from another
 // thread than frame's happen between lock and unlock.
-material :: proc(r: ^Renderer, h: MaterialHandle) -> (^Material, bool) #optional_ok {
-  if !cont.slots_live(&r.material_slots, u32(h)) do return nil, false
-  mark_dirty(r, .MATERIALS, int(h))
-  return &write_table(r, .MATERIALS, Material)[h], true
+material :: proc(self: ^Renderer, handle: MaterialHandle) -> (^Material, bool) #optional_ok {
+  if !cont.slots_live(&self.material_slots, u32(handle)) do return nil, false
+  mark_dirty(self, .MATERIALS, int(handle))
+  return &write_table(self, .MATERIALS, Material)[handle], true
 }
 
 // material_create creates a material; it lives until material_destroy or teardown. type
@@ -120,7 +120,7 @@ primitive :: proc(
   cast_shadow := true,
 ) -> MeshAttachment {
   return {
-    handle = self.builtin_meshes[shape],
+    mesh = self.builtin_meshes[shape],
     material = self.builtin_materials[color],
     cast_shadow = cast_shadow,
   }

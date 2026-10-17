@@ -46,14 +46,14 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {5, 6, 5}, {0, 5, 0})
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  app.gltf = gltf.load(&app.scene, &app.renderer, #load("../../assets/Duck.glb"))
+  app.gltf = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/Duck.glb"))
   light := world.spawn(&app.scene)
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light()))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
   return true
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.scene_destroy(&app.gltf)
+  gltf.destroy(&app.gltf)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)

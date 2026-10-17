@@ -67,13 +67,13 @@ setup :: proc(app: ^App) -> bool {
 
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
   plane_mesh := app.renderer.builtin_meshes[.QUAD_XZ]
-  ground_albedo, _ := render.texture_load(&app.renderer, #load("statue-1275469_1280.jpg"), generate_mips = true)
+  ground_albedo, _ := render.texture_create(&app.renderer, #load("statue-1275469_1280.jpg"), generate_mips = true)
   plane_material := render.material_create(&app.renderer, .PBR,
     albedo_texture = ground_albedo, roughness_value = 0.7, metallic_value = 0.0,
   )
 
   plane := world.spawn(&app.scene, {0, -1, 0})
-  render.attach(&app.renderer, plane.index, render.MeshAttachment{handle = plane_mesh, material = plane_material, cast_shadow = false})
+  render.attach(&app.renderer, render.SlotHandle(plane.index), render.MeshAttachment{mesh = plane_mesh, material = plane_material, cast_shadow = false})
   world.scale(&app.scene, plane, f32(GRID) * SPACING * 1.5)
 
   base_color: [4]f32 = {0.85, 0.85, 0.9, 1}
@@ -86,20 +86,20 @@ setup :: proc(app: ^App) -> bool {
     x := f32(col) * SPACING - half
     y := f32(row) * SPACING
     sphere := world.spawn(&app.scene, {x, y, 0})
-    render.attach(&app.renderer, sphere.index, render.MeshAttachment{handle = sphere_mesh, material = mat, cast_shadow = true})
+    render.attach(&app.renderer, render.SlotHandle(sphere.index), render.MeshAttachment{mesh = sphere_mesh, material = mat, cast_shadow = true})
   }
 
   q1 := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
   q2 := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
   sun_light = world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, sun_light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, f32(sun_intensity)}, 12.0)))
+  render.attach(&app.renderer, render.SlotHandle(sun_light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, f32(sun_intensity)}, 12.0)))
   world.rotate(&app.scene, sun_light, q2 * q1)
   return true
 }
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -130,7 +130,7 @@ update :: proc(app: ^App, dt: f32) {
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, sun_light.index, render.LightHandle)); ok {
+  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(sun_light.index), render.LightHandle)); ok {
     l.color[3] = f32(sun_intensity)
   }
   app.renderer.ibl_intensity = f32(ibl_intensity)

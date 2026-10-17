@@ -21,7 +21,7 @@ setup :: proc(f: ^Fixture) {
 }
 
 teardown :: proc(f: ^Fixture) {
-	destroy(&f.ui)
+	shutdown(&f.ui)
 	font.destroy(&f.font)
 }
 

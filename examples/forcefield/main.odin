@@ -59,7 +59,7 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -79,7 +79,7 @@ spawn_field :: proc(
   s: FFState
   s.parent = world.spawn(&app.scene, {0, 2, 0})
   s.ff_node = world.spawn(&app.scene, {offset_x, 0, 0}, parent = s.parent)
-  render.attach(&app.renderer, s.ff_node.index, render.forcefield_create(&app.renderer, render.make_forcefield(area_of_effect = area, strength = strength, tangent_strength = tangent)))
+  render.attach(&app.renderer, render.SlotHandle(s.ff_node.index), render.force_field_create(&app.renderer, render.make_force_field(area_of_effect = area, strength = strength, tangent_strength = tangent)))
   s.color = color
   s.enabled = true
   s.strength = mu.Real(strength)
@@ -100,9 +100,9 @@ setup :: proc(app: ^App) -> bool {
   app.renderer.skybox_intensity = 0
 
   // Particle source at center, large position spread
-  if tex, ok := render.texture_load(&app.renderer, #load("../../assets/particles/star_09.png")); ok {
+  if tex, ok := render.texture_create(&app.renderer, #load("../../assets/particles/star_09.png")); ok {
     em := render.make_emitter(
-      texture_handle    = tex,
+      texture           = tex,
       emission_rate     = 100,
       initial_velocity  = {0, 0, 0},
       velocity_spread   = 0.5,
@@ -116,7 +116,7 @@ setup :: proc(app: ^App) -> bool {
       weight_spread     = 0.0,
     )
     n := world.spawn(&app.scene, {0, 2, 0})
-    render.attach(&app.renderer, n.index, render.emitter_create(&app.renderer, em))
+    render.attach(&app.renderer, render.SlotHandle(n.index), render.emitter_create(&app.renderer, em))
   }
 
   // Repulsion field — blue marker
@@ -125,12 +125,12 @@ setup :: proc(app: ^App) -> bool {
   attract = spawn_field(app, 3.5, 12.0, -5.0, 4.0, {0.2, 1.0, 0.4, 1}, 0.7, -1.0)
 
   light := world.spawn(&app.scene, {3, 6, 3})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1, 1}, shadow_radius = 10)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1, 1}, shadow_radius = 10)))
   return true
 }
 
 apply_ff :: proc(app: ^App, s: ^FFState) {
-  ff, ok := render.forcefield(&app.renderer, render.attachment(&app.renderer, s.ff_node.index, render.ForceFieldHandle))
+  ff, ok := render.force_field(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(s.ff_node.index), render.ForceFieldHandle))
   if !ok do return
   ff.strength         = f32(s.strength)
   ff.tangent_strength = f32(s.tangent_strength)

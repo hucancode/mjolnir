@@ -81,7 +81,7 @@ batches_reset :: proc(self: ^Renderer) {
   self.batch_high = 0
   self.batch_stale = false
   clear_entry(self, .BATCHES, 0, MAX_BATCHES)
-  clear_entry(self, .NODE_BATCH, 0, MAX_NODES_IN_SCENE)
+  clear_entry(self, .NODE_BATCH, 0, MAX_SLOTS)
 }
 
 // Before a frame: lays the batches' instance ranges end to end when membership changed.

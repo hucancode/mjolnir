@@ -43,7 +43,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.scene_destroy(&app.gltf)
+  gltf.destroy(&app.gltf)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
@@ -60,7 +60,7 @@ setup :: proc(app: ^App) -> bool {
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {1.5, 1.5, 1.5}, {0, 1, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  app.gltf = gltf.load(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb"))
+  app.gltf = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb"))
   for s in app.gltf.skinned {
     rig := &app.gltf.rigs[s.rig]
     a: anim.Animator
@@ -69,7 +69,7 @@ setup :: proc(app: ^App) -> bool {
     append(&app.animators, a)
   }
   light := world.spawn(&app.scene)
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light()))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
   return true
 }
 
@@ -88,7 +88,7 @@ update :: proc(app: ^App, dt: f32) {
   for s, i in app.gltf.skinned do anim.animator_update(&app.animators[i], &app.gltf.rigs[s.rig], dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  for s, i in app.gltf.skinned do render.stage_bones(&app.renderer, s.node.index, app.animators[i].palette)
+  for s, i in app.gltf.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), app.animators[i].palette)
   render.update(&app.renderer, dt)
 }
 

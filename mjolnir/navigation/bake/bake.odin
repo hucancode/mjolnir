@@ -14,44 +14,44 @@ NavGeometryBuilder :: struct {
 // append_triangles adds a triangle mesh to b. Triangles are walkable unless
 // `is_obstacle`. Every position is offset by `offset`.
 append_triangles :: proc(
-  b: ^NavGeometryBuilder,
+  self: ^NavGeometryBuilder,
   positions: [][3]f32,
   indices: []u32,
   offset: [3]f32 = {0, 0, 0},
   is_obstacle: bool = false,
 ) {
-  base := i32(len(b.vertices))
-  for p in positions do append(&b.vertices, p + offset)
-  for i in indices do append(&b.indices, base + i32(i))
+  base := i32(len(self.vertices))
+  for p in positions do append(&self.vertices, p + offset)
+  for i in indices do append(&self.indices, base + i32(i))
   area: u8 = u8(recast.RC_NULL_AREA) if is_obstacle else u8(recast.RC_WALKABLE_AREA)
-  for _ in 0 ..< len(indices) / 3 do append(&b.area_types, area)
+  for _ in 0 ..< len(indices) / 3 do append(&self.area_types, area)
 }
 
 // builder_destroy frees the builder arrays.
-builder_destroy :: proc(b: ^NavGeometryBuilder) {
-  delete(b.vertices)
-  delete(b.indices)
-  delete(b.area_types)
-  b^ = {}
+builder_destroy :: proc(self: ^NavGeometryBuilder) {
+  delete(self.vertices)
+  delete(self.indices)
+  delete(self.area_types)
+  self^ = {}
 }
 
 // build bakes the builder's triangles into a navigation mesh, encoded as navigation.save
-// encodes one, in memory the caller frees: navigation.load it, or store it
+// encodes one, in memory the caller frees: navigation.init with it, or store it
 // (platform.write_file) and load it in the shipped game.
 build :: proc(
-  geom: ^NavGeometryBuilder,
+  self: ^NavGeometryBuilder,
   config: NavMeshConfig = DEFAULT_NAVMESH_CONFIG,
   allocator := context.allocator,
 ) -> (
   data: []u8,
   ok: bool,
 ) {
-  if len(geom.vertices) == 0 || len(geom.indices) == 0 {
+  if len(self.vertices) == 0 || len(self.indices) == 0 {
     log.error("Cannot build navigation mesh from empty geometry")
     return nil, false
   }
   cfg := config_to_recast(config)
-  pmesh, dmesh := recast.build_navmesh(geom.vertices[:], geom.indices[:], geom.area_types[:], cfg) or_return
+  pmesh, dmesh := recast.build_navmesh(self.vertices[:], self.indices[:], self.area_types[:], cfg) or_return
   defer {
     recast.destroy_poly_mesh(pmesh)
     recast.destroy_poly_mesh_detail(dmesh)
@@ -88,4 +88,9 @@ build :: proc(
     return nil, false
   }
   return detour.save_navmesh(&mesh, allocator), true
+}
+
+// destroy frees a builder, as builder_destroy does.
+destroy :: proc {
+  builder_destroy,
 }

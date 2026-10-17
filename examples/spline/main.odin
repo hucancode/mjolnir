@@ -47,7 +47,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  animation.spline_destroy(&spline)
+  animation.destroy(&spline)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
@@ -86,14 +86,14 @@ setup :: proc(app: ^App) -> bool {
   cube := app.renderer.builtin_meshes[.CUBE]
   for i in 0 ..< CUBE_COUNT {
     cubes[i] = world.spawn(&app.scene, {0, 0, 0})
-    render.attach(&app.renderer, cubes[i].index, render.MeshAttachment{handle = cube, material = mats[i % len(mats)]})
+    render.attach(&app.renderer, render.SlotHandle(cubes[i].index), render.MeshAttachment{mesh = cube, material = mats[i % len(mats)]})
     world.scale(&app.scene, cubes[i], 0.3)
   }
   ground := world.spawn(&app.scene, {0, -2, 0})
-  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
   light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_point_light({1, 1, 1, 1}, 20.0, true)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1, 1, 1, 1}, 20.0, true)))
   return true
 }
 

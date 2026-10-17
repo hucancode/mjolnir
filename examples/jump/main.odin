@@ -66,14 +66,14 @@ setup :: proc(app: ^App) -> bool {
   ground := world.spawn(&app.scene, {0, -0.5, 0})
   physics.body_create(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {40.0, 0.5, 40.0}}, user = world.Handle(ground))
   ground_visual := world.spawn(&app.scene, parent = ground)
-  render.attach(&app.renderer, ground_visual.index, render.primitive(&app.renderer, .CUBE, .GRAY))
-  world.scale_xyz(&app.scene, ground_visual, 40.0, 0.5, 40.0)
+  render.attach(&app.renderer, render.SlotHandle(ground_visual.index), render.primitive(&app.renderer, .CUBE, .GRAY))
+  world.scale(&app.scene, ground_visual, 40.0, 0.5, 40.0)
   cube_handle = world.spawn(&app.scene, {0, 3, 0})
   cube_body = physics.body_create(&phys, {0, 3, 0}, mass = f32(mass), collider = box_collider, user = world.Handle(cube_handle))
   cube_visual := world.spawn(&app.scene, parent = cube_handle)
-  render.attach(&app.renderer, cube_visual.index, render.primitive(&app.renderer, .CUBE, .CYAN))
+  render.attach(&app.renderer, render.SlotHandle(cube_visual.index), render.primitive(&app.renderer, .CUBE, .CYAN))
   s := box_collider.half_extents
-  world.scale_xyz(&app.scene, cube_visual, s.x, s.y, s.z)
+  world.scale(&app.scene, cube_visual, s.x, s.y, s.z)
   render.camera_look_at(render.main_camera(&app.renderer), {8, 5, 8}, {0, 2, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   return true
@@ -81,7 +81,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)

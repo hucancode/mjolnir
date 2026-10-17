@@ -68,7 +68,7 @@ setup :: proc(app: ^App) -> bool {
     x := f32(col - 1) * 2.5
     z := f32(row - 1) * 2.5
     h := world.spawn(&app.scene, {x, 0, z})
-    render.attach(&app.renderer, h.index, render.MeshAttachment{handle = cube, material = mat, cast_shadow = false})
+    render.attach(&app.renderer, render.SlotHandle(h.index), render.MeshAttachment{mesh = cube, material = mat, cast_shadow = false})
     world.scale(&app.scene, h, 0.7)
     handles[i] = h
   }

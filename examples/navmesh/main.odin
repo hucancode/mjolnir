@@ -71,7 +71,7 @@ frame :: proc(app: ^App) -> bool {
 
 spawn_mesh :: proc(app: ^App, mesh_handle: render.MeshHandle, material: render.MaterialHandle, pos: [3]f32 = {}) -> world.NodeHandle {
   n := world.spawn(&app.scene, pos)
-  render.attach(&app.renderer, n.index, render.MeshAttachment{handle = mesh_handle, material = material, cast_shadow = true})
+  render.attach(&app.renderer, render.SlotHandle(n.index), render.MeshAttachment{mesh = mesh_handle, material = material, cast_shadow = true})
   return n
 }
 
@@ -142,14 +142,14 @@ setup_navigation_mesh :: proc(app: ^App) {
     log.error("No source geometry available for navmesh generation"); return
   }
   data, ok := bake.build(&nav_builder, allocator = context.temp_allocator)
-  if !ok || !nav.load(&navmesh, data) {
+  if !ok || !nav.init(&navmesh, data) {
     log.error("Failed to build navmesh"); return
   }
   visualize_navmesh(app)
 }
 
 visualize_navmesh :: proc(app: ^App) {
-  world.despawn(&app.scene, navmesh_node_handle)
+  world.destroy(&app.scene, navmesh_node_handle)
   positions, indices := nav.debug_triangles(&navmesh, context.temp_allocator)
   navmesh_geom := render.from_triangles(positions, indices)
   log.infof("Built navmesh visualization geometry: %d vertices, %d indices", len(navmesh_geom.vertices), len(navmesh_geom.indices))
@@ -175,7 +175,7 @@ start_find_path :: proc(app: ^App) {
 }
 
 update_position_marker :: proc(app: ^App, handle: ^world.NodeHandle, pos: [3]f32, color: [4]f32) {
-  world.despawn(&app.scene, handle^)
+  world.destroy(&app.scene, handle^)
   g := render.make_sphere(12, 6, 0.3, color)
   m := render.mesh_create(&app.renderer, g)
   mat := render.material_create(&app.renderer, metallic_value = 0.2, roughness_value = 0.8, emissive_value = 0.5)

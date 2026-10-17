@@ -23,7 +23,7 @@ struct ForceField {
 };
 
 struct ForceFieldPlacement {
-    uint forcefield;
+    uint force_field;
     uint node;
 };
 
@@ -33,7 +33,7 @@ layout(set = 0, binding = 8) buffer ParticleBuffer {
 
 layout(push_constant) uniform ParticleSystemParams {
     uint emitter_placement_count;
-    uint forcefield_placement_count;
+    uint force_field_placement_count;
     float delta_time;
     uint frame_counter;
     uint emit_total;
@@ -50,7 +50,7 @@ layout(set = 0, binding = 9) buffer AliveBuffer {
 };
 
 layout(set = 0, binding = 7) readonly buffer ForceFieldBuffer {
-    ForceField forcefields[];
+    ForceField force_fields[];
 };
 
 layout(set = 0, binding = 20) readonly buffer ForceFieldPlacementBuffer {
@@ -79,11 +79,11 @@ const vec3 GRAVITY = vec3(0.0, -9.8, 0.0);
 bool simulate(uint i) {
     vec3 p = particles[i].position;
     vec3 v = particles[i].velocity;
-    uint n = min(forcefield_placement_count, MAX_FORCE_FIELDS);
+    uint n = min(force_field_placement_count, MAX_FORCE_FIELDS);
     for (uint f = 0; f < n; ++f) {
         ForceFieldPlacement placed = placements[f];
         // free rows and destroyed force fields are zero: area_of_effect 0
-        ForceField ff = forcefields[placed.forcefield];
+        ForceField ff = force_fields[placed.force_field];
         if (ff.area_of_effect <= 0.0 || placed.node == 0u) continue;
         vec3 ff_pos = nodes[placed.node].world_matrix[3].xyz;
         vec3 to_particle = p - ff_pos;

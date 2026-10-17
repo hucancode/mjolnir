@@ -149,6 +149,24 @@ internal_defs :: proc() -> map[string]string {
 	return defs
 }
 
+// A struct's anonymous `using _: X` is its private state: the reference shows the public
+// fields alone.
+drop_private_using :: proc(sig: string) -> string {
+	sig := sig
+	for {
+		start := strings.index(sig, "using _: ")
+		if start < 0 do return sig
+		end := start + len("using _: ")
+		for end < len(sig) && (sig[end] == '_' || (sig[end] >= '0' && sig[end] <= '9') || (sig[end] | 0x20 >= 'a' && sig[end] | 0x20 <= 'z')) {end += 1}
+		if strings.has_prefix(sig[end:], ", ") {
+			end += 2
+		} else if start >= 2 && sig[start - 2:start] == ", " {
+			start -= 2
+		}
+		sig = strings.concatenate({sig[:start], sig[end:]})
+	}
+}
+
 // `defs` resolves aliases of the GPU layer (render's `BlendMode :: rhi.BlendMode`), which the
 // reference leaves out, to their definitions
 load_pkg :: proc(path: string, defs: map[string]string) -> Pkg {
@@ -162,6 +180,7 @@ load_pkg :: proc(path: string, defs: map[string]string) -> Pkg {
 			if i := strings.index(sig, " :: "); i >= 0 {
 				if def, ok := defs[sig[i + 4:]]; ok {sig = strings.concatenate({sig[:i + 4], def})}
 			}
+			sig = drop_private_using(sig)
 			append(&syms, Sym{sig = sig, doc = strings.join(s.doc[:], "\n")})
 		}
 		if len(syms) > 0 {append(&sections, Section{name = r.name, syms = syms[:]})}

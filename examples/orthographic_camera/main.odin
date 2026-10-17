@@ -53,7 +53,7 @@ should_close :: proc(app: ^App) -> bool {
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, position: [3]f32, scale_factor: f32 = 1, cast_shadow := true) -> world.NodeHandle {
   n := world.spawn(&app.scene, position)
-  render.attach(&app.renderer, n.index, render.primitive(&app.renderer, shape, color, cast_shadow))
+  render.attach(&app.renderer, render.SlotHandle(n.index), render.primitive(&app.renderer, shape, color, cast_shadow))
   if scale_factor != 1 do world.scale(&app.scene, n, scale_factor)
   return n
 }
@@ -72,9 +72,9 @@ setup :: proc(app: ^App) -> bool {
   spawn_primitive(app, .QUAD_XZ, .GRAY, {0, 0, 0}, 6.0, cast_shadow = false)
 
   point := world.spawn(&app.scene, {3, 8, 3})
-  render.attach(&app.renderer, point.index, render.light_create(&app.renderer, render.make_point_light({1.0, 0.95, 0.8, 1.0}, 25.0, false)))
+  render.attach(&app.renderer, render.SlotHandle(point.index), render.light_create(&app.renderer, render.make_point_light({1.0, 0.95, 0.8, 1.0}, 25.0, false)))
   sun := world.spawn(&app.scene, {-6, 10, -4})
-  render.attach(&app.renderer, sun.index, render.light_create(&app.renderer, render.make_directional_light({1.0, 0.95, 0.9, 4.0}, 15.0, true)))
+  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light({1.0, 0.95, 0.9, 4.0}, 15.0, true)))
 
   cam := render.main_camera(&app.renderer)
   render.camera_set_orthographic(cam, f32(ortho_width), f32(ortho_height))
@@ -85,7 +85,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)

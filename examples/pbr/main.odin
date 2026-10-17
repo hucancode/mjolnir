@@ -80,15 +80,15 @@ setup :: proc(app: ^App) -> bool {
 
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   dir_light = world.spawn(&app.scene, {4, 6, 4})
-  render.attach(&app.renderer, dir_light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false)))
+  render.attach(&app.renderer, render.SlotHandle(dir_light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false)))
   swap_model(app, 0)
   return true
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.scene_destroy(&model)
+  gltf.destroy(&model)
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -100,11 +100,11 @@ should_close :: proc(app: ^App) -> bool {
 
 swap_model :: proc(app: ^App, index: int) {
   if index == current_model do return
-  for h in model.roots do world.despawn(&app.scene, h)
-  gltf.scene_destroy(&model)
+  for h in model.roots do world.destroy(&app.scene, h)
+  gltf.destroy(&model)
   current_model = index
   m := MODELS[index]
-  model = gltf.load(&app.scene, &app.renderer, m.data)
+  model = gltf.scene_create(&app.scene, &app.renderer, m.data)
   rotation_phase = 0
 }
 
@@ -119,7 +119,7 @@ update :: proc(app: ^App, dt: f32) {
     app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, dir_light.index, render.LightHandle)); ok {
+  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(dir_light.index), render.LightHandle)); ok {
     l.color[3] = f32(dir_intensity)
   }
   app.renderer.ibl_intensity = f32(ibl_intensity)

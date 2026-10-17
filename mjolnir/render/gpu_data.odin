@@ -4,7 +4,8 @@ package render
 // The GPU data contract: the budgets, vertex formats, material and light types, effects and
 // tables render writes and its shaders (in both backends) read.
 
-MAX_NODES_IN_SCENE :: 65536
+// MAX_SLOTS is how many slots (SlotHandle) a scene has.
+MAX_SLOTS :: 65536
 
 // The views table holds every camera at CAMERA_VIEW_BASE + camera, then the shadow views.
 @(private)
@@ -56,8 +57,8 @@ TABLE_REGIONS :: 64
 @(private)
 HDR_COLOR_FORMAT :: TextureFormat.RGBA16F
 
-// AttachmentType names the images a camera renders into.
-AttachmentType :: enum {
+// CameraImage names the images a camera renders into.
+CameraImage :: enum {
   FINAL_IMAGE        = 0,
   NORMAL             = 1,
   ALBEDO             = 2,
@@ -68,7 +69,7 @@ AttachmentType :: enum {
 
 // Each camera attachment's texture; pipelines drawing into an attachment take its format.
 @(private)
-ATTACHMENTS :: [AttachmentType]TextureDesc {
+CAMERA_IMAGES :: [CameraImage]TextureDesc {
   // written whole by the lighting dispatch, then drawn over by the forward pass
   .FINAL_IMAGE        = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED, .STORAGE}},
   .NORMAL             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
@@ -138,7 +139,7 @@ Table :: enum {
   MATERIALS,
   BONES,
   EMITTERS,
-  FORCEFIELDS,
+  FORCE_FIELDS,
   LIGHTS,
   DEBUG_LINES,
   // draw batches and each node's batch: kept only where draws are not compacted by
@@ -150,7 +151,7 @@ Table :: enum {
   // where each light, emitter and force field is attached: a resource handle and a slot
   LIGHT_PLACEMENTS,
   EMITTER_PLACEMENTS,
-  FORCEFIELD_PLACEMENTS,
+  FORCE_FIELD_PLACEMENTS,
 }
 
 // SkinnedVertex is a vertex the skinning pass wrote, read by vertex shaders in place of the
@@ -277,7 +278,7 @@ PostprocessEffect :: union {
 ParticleSystemParams :: struct {
   // rows of the emitter and force field placement tables
   emitter_placement_count:    u32,
-  forcefield_placement_count: u32,
+  force_field_placement_count: u32,
   delta_time:       f32,
   frame_counter:    u32,
   // new particles this frame, all emitters together

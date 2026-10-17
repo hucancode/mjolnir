@@ -129,7 +129,7 @@ update :: proc(app: ^App, dt: f32) {
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   for &c in characters {
-    for s, i in c.scene.skinned do render.stage_bones(&app.renderer, s.node.index, c.animators[i].palette)
+    for s, i in c.scene.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), c.animators[i].palette)
   }
   render.update(&app.renderer, dt)
 }
@@ -154,7 +154,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  for &c in characters do gltf.scene_destroy(&c.scene)
+  for &c in characters do gltf.destroy(&c.scene)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
@@ -183,7 +183,7 @@ spawn :: proc(
   ok: bool,
 ) #optional_ok {
   handle = world.spawn(&app.scene, position, parent = parent if parent != {} else app.scene.root) or_return
-  if attachment != nil do render.attach(&app.renderer, handle.index, attachment)
+  if attachment != nil do render.attach(&app.renderer, render.SlotHandle(handle.index), attachment)
   return handle, true
 }
 
@@ -214,7 +214,7 @@ setup :: proc(app: ^App) -> bool {
             node_handle, node_ok = spawn(
               app,
               attachment = render.MeshAttachment {
-                handle = cube_mesh_handle,
+                mesh = cube_mesh_handle,
                 material = mat_handle,
                 cast_shadow = true,
               },
@@ -223,7 +223,7 @@ setup :: proc(app: ^App) -> bool {
             node_handle, node_ok = spawn(
               app,
               attachment = render.MeshAttachment {
-                handle = cone_mesh_handle,
+                mesh = cone_mesh_handle,
                 material = mat_handle,
                 cast_shadow = true,
               },
@@ -232,7 +232,7 @@ setup :: proc(app: ^App) -> bool {
             node_handle, node_ok = spawn(
               app,
               attachment = render.MeshAttachment {
-                handle = sphere_mesh_handle,
+                mesh = sphere_mesh_handle,
                 material = mat_handle,
                 cast_shadow = true,
               },
@@ -254,7 +254,7 @@ setup :: proc(app: ^App) -> bool {
   when true {
     brick_wall_mat_handle: render.MaterialHandle
     brick_wall_mat_ok := false
-    brick_albedo_handle, brick_albedo_ok := render.texture_load(&app.renderer, #load("assets/t_brick_floor_002_diffuse_1k.jpg"),
+    brick_albedo_handle, brick_albedo_ok := render.texture_create(&app.renderer, #load("assets/t_brick_floor_002_diffuse_1k.jpg"),
     )
     if brick_albedo_ok {
       brick_wall_mat_handle, brick_wall_mat_ok = render.material_create(
@@ -270,7 +270,7 @@ setup :: proc(app: ^App) -> bool {
         app,
         {0, 0, 0},
         render.MeshAttachment {
-          handle = ground_mesh_handle,
+          mesh = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
@@ -279,7 +279,7 @@ setup :: proc(app: ^App) -> bool {
         app,
         {0, 0, 0},
         attachment = render.MeshAttachment {
-          handle = ground_mesh_handle,
+          mesh = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
@@ -295,7 +295,7 @@ setup :: proc(app: ^App) -> bool {
         app,
         {0, 0, 0},
         attachment = render.MeshAttachment {
-          handle = ground_mesh_handle,
+          mesh = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
@@ -311,7 +311,7 @@ setup :: proc(app: ^App) -> bool {
         app,
         {0, 0, 0},
         attachment = render.MeshAttachment {
-          handle = ground_mesh_handle,
+          mesh = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
@@ -327,7 +327,7 @@ setup :: proc(app: ^App) -> bool {
         app,
         {0, 0, 0},
         attachment = render.MeshAttachment {
-          handle = ground_mesh_handle,
+          mesh = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
@@ -343,8 +343,8 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading Hammer GLTF...")
-    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/Mjolnir.glb")); ok {
-      defer gltf.scene_destroy(&gltf_nodes)
+    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/Mjolnir.glb")); ok {
+      defer gltf.destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 3, 1, -2)
@@ -354,7 +354,7 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading Warrior GLTF...")
-    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/Warrior.glb")); ok {
+    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/Warrior.glb")); ok {
       for armature in gltf_nodes.roots do world.translate(&app.scene, armature, 0, 0, 1)
       character := add_character(gltf_nodes, "idle")
       // Attach a spinning cube to the hand.L bone of the first skinned mesh
@@ -364,7 +364,7 @@ setup :: proc(app: ^App) -> bool {
           app,
           parent = s.node,
           attachment = render.MeshAttachment {
-            handle = cube_mesh_handle,
+            mesh = cube_mesh_handle,
             material = plain_material_handle,
             cast_shadow = true,
           },
@@ -381,9 +381,9 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading Damaged Helmet GLTF...")
-    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/DamagedHelmet.glb"));
+    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/DamagedHelmet.glb"));
        ok {
-      defer gltf.scene_destroy(&gltf_nodes)
+      defer gltf.destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 0, 1, 3)
@@ -393,8 +393,8 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading Suzanne GLTF...")
-    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/Suzanne.glb")); ok {
-      defer gltf.scene_destroy(&gltf_nodes)
+    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/Suzanne.glb")); ok {
+      defer gltf.destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, -3, 1, 0)
@@ -403,9 +403,9 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading SciFiHelmet GLTF...")
-    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/SciFiHelmet.glb"));
+    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/SciFiHelmet.glb"));
        ok {
-      defer gltf.scene_destroy(&gltf_nodes)
+      defer gltf.destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 3, 0, 3)
@@ -415,7 +415,7 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("loading Fox GLTF...")
-    if gltf_nodes, ok := gltf.load(&app.scene, &app.renderer, #load("assets/Fox2.glb")); ok {
+    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/Fox2.glb")); ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 6, 0, 0)
@@ -461,7 +461,7 @@ setup :: proc(app: ^App) -> bool {
               radius      = 14.0,
               angle_inner = math.PI * 0.25 * 0.8,
               angle_outer = math.PI * 0.25,
-              should_cast_shadow = true,
+              cast_shadow = true,
             }),
           ) or_continue
           world.translate(
@@ -482,7 +482,7 @@ setup :: proc(app: ^App) -> bool {
           spawn(
             app,
             parent = lights_root_handle,
-            attachment = render.light_create(&app.renderer, render.Light{type = .POINT, color = color, radius = 14.0, should_cast_shadow = true}),
+            attachment = render.light_create(&app.renderer, render.Light{type = .POINT, color = color, radius = 14.0, cast_shadow = true}),
           ) or_continue
           world.translate(
             &app.scene,
@@ -496,7 +496,7 @@ setup :: proc(app: ^App) -> bool {
           app,
           parent = light_handle,
           attachment = render.MeshAttachment {
-            handle = cube_mesh_handle,
+            mesh = cube_mesh_handle,
             material = plain_material_handle,
             cast_shadow = false,
           },
@@ -518,7 +518,7 @@ setup :: proc(app: ^App) -> bool {
       bright_ball := spawn(
         app,
         attachment = render.MeshAttachment {
-          handle = sphere_mesh_handle,
+          mesh = sphere_mesh_handle,
           material = emissive_texture,
           cast_shadow = false,
         },
@@ -529,9 +529,9 @@ setup :: proc(app: ^App) -> bool {
   }
   when true {
     log.info("Setting up particles...")
-    black_circle_texture_handle, black_circle_ok := render.texture_load(&app.renderer, #load("assets/particles/circle_05.png"),
+    black_circle_texture_handle, black_circle_ok := render.texture_create(&app.renderer, #load("assets/particles/circle_05.png"),
     )
-    goldstar_texture_handle, goldstar_texture_ok := render.texture_load(&app.renderer, #load("assets/particles/star_07.png"),
+    goldstar_texture_handle, goldstar_texture_ok := render.texture_create(&app.renderer, #load("assets/particles/star_07.png"),
     )
     goldstar_material_handle: render.MaterialHandle
     goldstar_material_ok := false
@@ -548,7 +548,7 @@ setup :: proc(app: ^App) -> bool {
         app,
         parent = psys_handle1,
         attachment = render.emitter_create(&app.renderer, render.make_emitter(
-          texture_handle = goldstar_texture_handle,
+          texture = goldstar_texture_handle,
           emission_rate = 70,
           particle_lifetime = 2.0,
           position_spread = 0.1,
@@ -569,7 +569,7 @@ setup :: proc(app: ^App) -> bool {
         app,
         parent = psys_handle2,
         attachment = render.emitter_create(&app.renderer, render.make_emitter(
-          texture_handle = black_circle_texture_handle,
+          texture = black_circle_texture_handle,
           emission_rate = 70,
           particle_lifetime = 3.0,
           position_spread = 0.3,
@@ -584,20 +584,20 @@ setup :: proc(app: ^App) -> bool {
         )),
       )
     }
-    forcefield_root_handle := world.spawn(&app.scene, {0, 4, 0})
-    add_node_clip(app, forcefield_root_handle, spin_clip("forcefield_rotation", 8, {0, math.PI * 0.5, math.PI, math.PI * 1.5, math.PI * 2}, .LINEAR))
-    forcefield_handle := world.spawn(&app.scene, parent = forcefield_root_handle)
-    world.translate(&app.scene, forcefield_handle, 3.0, 0.0, 0.0)
-    render.attach(&app.renderer, forcefield_handle.index, render.forcefield_create(&app.renderer, render.make_forcefield(
+    force_field_root_handle := world.spawn(&app.scene, {0, 4, 0})
+    add_node_clip(app, force_field_root_handle, spin_clip("force_field_rotation", 8, {0, math.PI * 0.5, math.PI, math.PI * 1.5, math.PI * 2}, .LINEAR))
+    force_field_handle := world.spawn(&app.scene, parent = force_field_root_handle)
+    world.translate(&app.scene, force_field_handle, 3.0, 0.0, 0.0)
+    render.attach(&app.renderer, render.SlotHandle(force_field_handle.index), render.force_field_create(&app.renderer, render.make_force_field(
       tangent_strength = 2.0,
       strength = 20.0,
       area_of_effect = 5.0,
     )))
     handle := spawn(
       app,
-      parent = forcefield_handle,
+      parent = force_field_handle,
       attachment = render.MeshAttachment {
-        handle = sphere_mesh_handle,
+        mesh = sphere_mesh_handle,
         material = goldstar_material_handle,
         cast_shadow = false,
       },
@@ -640,7 +640,7 @@ setup :: proc(app: ^App) -> bool {
         app,
         {0, 0, 0},
         attachment = render.MeshAttachment {
-          handle = portal_quad_handle,
+          mesh = portal_quad_handle,
           material = portal_material_handle,
           cast_shadow = false,
         },
@@ -653,7 +653,7 @@ setup :: proc(app: ^App) -> bool {
     log.info(
       "spawning Warrior effect sprite with animation (99 frames @ 24fps)...",
     )
-    warrior_sprite_texture, warrior_sprite_ok := render.texture_load(&app.renderer, #load("assets/Warrior_Sheet-Effect.png"),
+    warrior_sprite_texture, warrior_sprite_ok := render.texture_create(&app.renderer, #load("assets/Warrior_Sheet-Effect.png"),
     )
     if warrior_sprite_ok {
       // 6x17 sprite sheet using frames 0-98, animated in update
@@ -661,7 +661,7 @@ setup :: proc(app: ^App) -> bool {
       warrior_sprite = sprite_material
       if sprite_ok {
         sprite_attachment := render.MeshAttachment {
-          handle   = app.renderer.builtin_meshes[.QUAD_XY],
+          mesh   = app.renderer.builtin_meshes[.QUAD_XY],
           material = sprite_material,
         }
         handle, spawn_ok := spawn(app, {4, 1.5, 0}, sprite_attachment)
@@ -686,6 +686,6 @@ on_key :: proc(app: ^App, key: input.Key, pressed: bool) {
 on_post_render :: proc(app: ^App) {
   if material, ok := render.material(&app.renderer, portal_material_handle);
      ok {
-    material.albedo_texture = render.camera_attachment(&app.renderer, portal_camera_handle, .FINAL_IMAGE)
+    material.albedo_texture = render.camera_image(&app.renderer, portal_camera_handle, .FINAL_IMAGE)
   }
 }

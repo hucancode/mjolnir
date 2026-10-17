@@ -56,7 +56,7 @@ setup :: proc(app: ^App) -> bool {
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   light := world.spawn(&app.scene, {10, 18, 10})
-  render.attach(&app.renderer, light.index, render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 3.0}, 60.0, false)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 3.0}, 60.0, false)))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   render.camera_look_at(render.main_camera(&app.renderer), {14, 14, 14}, {0, 0, 0})
   app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
@@ -66,7 +66,7 @@ setup :: proc(app: ^App) -> bool {
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
-  debugui.destroy(&app.debug)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
@@ -98,7 +98,7 @@ update :: proc(app: ^App, dt: f32) {
     despawn_cooldown -= 1
     if despawn_cooldown == 0 do spawn_grid(app, pending_index)
   } else if pending_index >= 0 && pending_index != current_size_index {
-    if grid_root.index != 0 do world.despawn(&app.scene, grid_root)
+    if grid_root.index != 0 do world.destroy(&app.scene, grid_root)
     grid_root = {}
     despawn_cooldown = 5
   }
@@ -122,7 +122,7 @@ spawn_grid :: proc(app: ^App, idx: int) {
       log.warnf("out of node slots, grid truncated at row %d, column %d", z, x)
       return
     }
-    render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, color))
+    render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, color))
   }
 }
 
