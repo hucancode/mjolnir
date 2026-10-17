@@ -135,14 +135,18 @@ main > div.examples { grid-template-columns: 14rem minmax(0, 1fr); }
 .stage { aspect-ratio: 16 / 9; background: #000; border: var(--border) solid var(--color-base-300); }
 .stage > iframe, .stage > video { display: block; width: 100%; height: 100%; border: 0; }
 .stage > p { display: flex; align-items: center; justify-content: center; height: 100%; margin: 0; color: var(--color-neutral-content); }
-.examples pre { max-height: 32rem; margin: 1rem 0 0; overflow: auto; border: var(--border) solid var(--color-base-300); }
-.examples pre[hidden] { display: none; }
-@media (min-width: 70rem) {
-  /* wide screens: code beside the running example */
-  .examples section.with-code { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 0 1rem; align-items: start; }
-  .examples section.with-code > :not(.stage):not(pre) { grid-column: 1 / -1; }
-  .examples section.with-code pre { margin: 0; max-height: 40rem; }
+.code-dialog {
+  width: min(60rem, calc(100vw - 2rem)); max-height: calc(100vh - 4rem); padding: 0;
+  color: inherit; background: var(--color-base-100); border: var(--border) solid var(--color-neutral);
 }
+.code-dialog[open] { display: flex; flex-direction: column; }
+.code-dialog::backdrop { background: rgb(0 0 0 / 0.6); }
+.code-dialog > header { display: flex; justify-content: space-between; align-items: center; margin: 0; padding: 0.5rem 0.75rem; text-align: left; }
+.code-dialog > header > button {
+  font: inherit; padding: 0.25rem 0.75rem; cursor: pointer;
+  color: inherit; background: var(--color-base-200); border: var(--border) solid var(--color-neutral);
+}
+.code-dialog pre { flex: 1; min-height: 0; border-width: var(--border) 0 0; }
 
 /* api: sidebar + content */
 main > div { display: grid; grid-template-columns: 14rem 1fr; gap: 2rem; align-items: start; }

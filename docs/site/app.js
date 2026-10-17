@@ -54,8 +54,11 @@ function renderExamples(root) {
   const modeBtn = el('button', { type: 'button' });
   const codeBtn = el('button', { type: 'button', textContent: 'Show code' });
   const code = el('code');
-  const pre = el('pre', { hidden: true }, code);
-  const view = el('section', {}, title, desc, el('p', { className: 'toolbar' }, modeBtn, codeBtn), stage, pre);
+  const pre = el('pre', {}, code);
+  const closeBtn = el('button', { type: 'button', textContent: 'Close' });
+  const dialogTitle = el('strong');
+  const dialog = el('dialog', { className: 'code-dialog' }, el('header', {}, dialogTitle, closeBtn), pre);
+  const view = el('section', {}, title, desc, el('p', { className: 'toolbar' }, modeBtn, codeBtn), stage, dialog);
   root.append(el('div', { className: 'examples' }, el('search', {}, nav), view));
 
   for (const e of list) nav.append(el('a', { href: '#' + e.name, textContent: e.name }));
@@ -88,16 +91,15 @@ function renderExamples(root) {
     title.textContent = e.name;
     desc.textContent = e.desc;
     code.textContent = e.source;
+    dialogTitle.textContent = e.name + ' source';
     pre.scrollTop = 0;
     mount();
   }
 
   modeBtn.addEventListener('click', () => { live = !live; mount(); });
-  codeBtn.addEventListener('click', () => {
-    pre.hidden = !pre.hidden;
-    codeBtn.textContent = pre.hidden ? 'Show code' : 'Hide code';
-    view.classList.toggle('with-code', !pre.hidden);
-  });
+  codeBtn.addEventListener('click', () => dialog.showModal());
+  closeBtn.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('click', (ev) => { if (ev.target === dialog) dialog.close(); }); // backdrop click
   addEventListener('hashchange', show);
   show();
 }
