@@ -1,6 +1,6 @@
 1. single source of truth. no derived/duplicated info across structs. no pointer on struct
-2. keep struct count minimal
-3. modules layered, dependency go top→bottom, <5 layers
-6. be straightforward, no branch/special-casing
-4. be terse, no indirection/wrapper
-5. data-oriented, use large constiguous array. avoid small scattered arrays
+2. few structs
+3. modules layered, modules in layer n import layer n-1 or less, at most 5 layers
+6. generic, straightforward, no special-casing
+4. terse, avoid thin wrapper
+5. data-oriented, use large constiguous array
