@@ -192,20 +192,20 @@ frame :: proc(app: ^App) -> bool {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Pause", &paused)
     mu.checkbox(ctx, "Show markers", &show_markers)
-    mu.label(ctx, fmt.tprintf("Body amplitude: %.2f", body_amplitude))
+    mu.label(ctx, "Body amplitude")
     mu.slider(ctx, &body_amplitude, 0.0, 6.0)
-    mu.label(ctx, fmt.tprintf("Body speed: %.2f", body_speed))
+    mu.label(ctx, "Body speed")
     mu.slider(ctx, &body_speed, 0.0, 1.0)
-    mu.label(ctx, fmt.tprintf("IK weight: %.2f", ik_weight))
+    mu.label(ctx, "IK weight")
     mu.slider(ctx, &ik_weight, 0.0, 1.0)
     mu.checkbox(ctx, "Manual feet Y", &manual_feet)
     if manual_feet {
       for i in 0 ..< 6 {
-        mu.label(ctx, fmt.tprintf("%s foot Y: %.2f", LEG_NAMES[i], foot_y[i]))
+        mu.label(ctx, fmt.tprintf("%s foot Y", LEG_NAMES[i]))
         mu.slider(ctx, &foot_y[i], 0.0, 6.0)
       }
     } else {
-      mu.label(ctx, fmt.tprintf("Leg lift: %.2f", leg_lift))
+      mu.label(ctx, "Leg lift")
       mu.slider(ctx, &leg_lift, 0.0, 6.0)
     }
   }

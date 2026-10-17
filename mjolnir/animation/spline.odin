@@ -10,7 +10,7 @@ import "core:slice"
 Spline :: struct($T: typeid) {
   points:    []T,
   times:     []f32,
-  arc_table: Maybe(Spline_Arc_Length_Table(T)), // Optional arc-length table for uniform sampling
+  arc_table: Maybe(SplineArcTable(T)), // Optional arc-length table for uniform sampling
 }
 
 // spline_init copies `points` and their key `times` into a spline. Fails without
@@ -181,8 +181,8 @@ spline_duration :: proc(spline: Spline($T)) -> f32 {
   return slice.last(spline.times) - slice.first(spline.times)
 }
 
-// Spline_Arc_Length_Table is an arc-length lookup table for uniform spatial sampling.
-Spline_Arc_Length_Table :: struct($T: typeid) {
+// SplineArcTable is an arc-length lookup table for uniform spatial sampling.
+SplineArcTable :: struct($T: typeid) {
   arc_lengths: []f32, // Cumulative arc-lengths at sample points
   times:       []f32, // Corresponding time values
 }
@@ -191,7 +191,7 @@ Spline_Arc_Length_Table :: struct($T: typeid) {
 spline_build_arc_table :: proc(self: ^Spline($T), samples := 200) {
   // samples: Number of samples for approximation (more = accurate but slower)
   if len(self.times) == 0 do return
-  table := Spline_Arc_Length_Table(T) {
+  table := SplineArcTable(T) {
     arc_lengths = make([]f32, samples),
     times       = make([]f32, samples),
   }
@@ -251,7 +251,7 @@ spline_create_closed :: proc(base: [][3]f32, samples := 200) -> Spline([3]f32) {
   n := len(base)
   result := Spline([3]f32){points = make([][3]f32, n + 3), times = make([]f32, n + 3)}
   closed_points(base, result.points, result.times)
-  table := Spline_Arc_Length_Table([3]f32) {
+  table := SplineArcTable([3]f32) {
     arc_lengths = make([]f32, samples),
     times       = make([]f32, samples),
   }

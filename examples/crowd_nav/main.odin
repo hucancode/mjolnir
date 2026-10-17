@@ -194,7 +194,7 @@ assign_swap_targets :: proc(app: ^App) {
   if agent_crowd == nil do return
   for a in agents {
     if !a.placed do continue
-    crowd.move_to(agent_crowd, a.id, random_goal(app, crowd.agent(agent_crowd, a.id).npos))
+    crowd.move_to(agent_crowd, a.id, random_goal(app, crowd.agent(agent_crowd, a.id).position))
   }
 }
 
@@ -236,9 +236,9 @@ update :: proc(app: ^App, dt: f32) {
     for a in agents {
       if !a.placed do continue
       ag := crowd.agent(agent_crowd, a.id)
-      world.translate(&app.scene, a.node, ag.npos + {0, AGENT_HEIGHT * 0.5, 0})
-      if linalg.length2(ag.vel.xz) > 0.01 {
-        world.rotate(&app.scene, a.node, math.atan2(ag.vel.x, ag.vel.z), linalg.VECTOR3F32_Y_AXIS)
+      world.translate(&app.scene, a.node, ag.position + {0, AGENT_HEIGHT * 0.5, 0})
+      if linalg.length2(ag.velocity.xz) > 0.01 {
+        world.rotate(&app.scene, a.node, math.atan2(ag.velocity.x, ag.velocity.z), linalg.VECTOR3F32_Y_AXIS)
       }
       draw_agent_corners(app, ag, a.color)
     }
@@ -252,8 +252,8 @@ update :: proc(app: ^App, dt: f32) {
 draw_agent_corners :: proc(app: ^App, ag: crowd.Agent, color: [4]f32) {
   ag := ag
   lift := [3]f32{0, 0.15, 0}
-  prev := ag.npos + lift
-  for p in ag.corner_verts[:ag.ncorners] {
+  prev := ag.position + lift
+  for p in ag.corners[:ag.corner_count] {
     render.debug_segment(&app.renderer, prev, p + lift, color)
     prev = p + lift
   }

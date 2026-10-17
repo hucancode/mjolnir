@@ -19,9 +19,10 @@ import "core:time"
 @(test)
 test_proximity_grid_add_query :: proc(t: ^testing.T) {
 	// Pool needs slack: sentinel covers (0..15)x(0..15)=256 cells, plus items.
-	grid, ok := create_proximity_grid(512, 1.0)
+	grid := &Proximity_Grid{}
+	ok := proximity_grid_init(grid, 512, 1.0)
 	testing.expect(t, ok, "grid create")
-	defer destroy_proximity_grid(grid)
+	defer proximity_grid_destroy(grid)
 
 	// Seed bounds with a sentinel covering 0..15 in both axes.
 	proximity_grid_add_item(grid, 0xfffe, 0, 0, 15, 15)
@@ -51,8 +52,9 @@ test_proximity_grid_add_query :: proc(t: ^testing.T) {
 @(test)
 test_proximity_grid_get_item_count_at :: proc(t: ^testing.T) {
 	// 8x8 sentinel cells = 64 pool entries, plus item.
-	grid, _ := create_proximity_grid(128, 1.0)
-	defer destroy_proximity_grid(grid)
+	grid := &Proximity_Grid{}
+	proximity_grid_init(grid, 128, 1.0)
+	defer proximity_grid_destroy(grid)
 	proximity_grid_add_item(grid, 0xfffe, 0, 0, 7, 7)
 	proximity_grid_add_item(grid, 5, 3.1, 3.1, 3.9, 3.9)
 	c := proximity_grid_get_item_count_at(grid, 3, 3)
@@ -63,8 +65,8 @@ test_proximity_grid_get_item_count_at :: proc(t: ^testing.T) {
 
 @(test)
 test_local_boundary_segment_sorted_by_distance :: proc(t: ^testing.T) {
-	b := create_local_boundary()
-	defer destroy_local_boundary(b)
+	b := &Local_Boundary{}
+	local_boundary_init(b)
 
 	// insert in scrambled order, expect sorted ascending by distance
 	dists := [?]f32{4, 1, 8, 2, 0.5, 6, 3, 5}
@@ -80,8 +82,8 @@ test_local_boundary_segment_sorted_by_distance :: proc(t: ^testing.T) {
 
 @(test)
 test_local_boundary_get_segment_bounds :: proc(t: ^testing.T) {
-	b := create_local_boundary()
-	defer destroy_local_boundary(b)
+	b := &Local_Boundary{}
+	local_boundary_init(b)
 	s := [6]f32{1, 2, 3, 4, 5, 6}
 	local_boundary_add_segment(b, 1.0, s)
 	got := local_boundary_get_segment(b, 0)
@@ -162,30 +164,30 @@ test_integrate_velocity_clamped_by_acceleration :: proc(t: ^testing.T) {
 	ag: Agent
 	ag.params.max_acceleration = 4.0
 	ag.params.max_speed = 10.0
-	ag.vel = {0, 0, 0}
+	ag.velocity = {0, 0, 0}
 	ag.nvel = {10, 0, 0} // big request
 	integrate(&ag, 0.5) // max delta = 4 * 0.5 = 2
-	speed := math.sqrt(ag.vel.x * ag.vel.x + ag.vel.z * ag.vel.z)
+	speed := math.sqrt(ag.velocity.x * ag.velocity.x + ag.velocity.z * ag.velocity.z)
 	testing.expectf(t, math.abs(speed - 2.0) < 1e-4, "expected clamped speed=2, got %f", speed)
 
 	// position must advance
-	testing.expect(t, ag.npos.x > 0, "position should move along velocity")
+	testing.expect(t, ag.position.x > 0, "position should move along velocity")
 }
 
 @(test)
 test_integrate_zero_velocity_resets :: proc(t: ^testing.T) {
 	ag: Agent
 	ag.params.max_acceleration = 100.0
-	ag.vel = {0.00001, 0, 0}
+	ag.velocity = {0.00001, 0, 0}
 	ag.nvel = {0, 0, 0}
 	integrate(&ag, 0.016)
-	testing.expect(t, ag.vel == [3]f32{0, 0, 0}, "tiny velocity must zero out")
+	testing.expect(t, ag.velocity == [3]f32{0, 0, 0}, "tiny velocity must zero out")
 }
 
 @(test)
 test_calc_steer_directions_no_corners :: proc(t: ^testing.T) {
 	ag: Agent
-	ag.ncorners = 0
+	ag.corner_count = 0
 	dir: [3]f32 = {1, 1, 1}
 	calc_smooth_steer_direction(&ag, &dir)
 	testing.expect(t, dir == [3]f32{0, 0, 0}, "smooth: zero out when no corners")
@@ -197,14 +199,14 @@ test_calc_steer_directions_no_corners :: proc(t: ^testing.T) {
 @(test)
 test_get_distance_to_goal_clamps_to_range :: proc(t: ^testing.T) {
 	ag: Agent
-	ag.ncorners = 0
+	ag.corner_count = 0
 	d := get_distance_to_goal(&ag, 5.0)
 	testing.expect(t, d == 5.0, "no corners returns range")
 
-	ag.ncorners = 1
+	ag.corner_count = 1
 	ag.corner_flags[0] = 0x02 // DT_STRAIGHTPATH_END
-	ag.npos = {0, 0, 0}
-	ag.corner_verts[0] = {2, 0, 0}
+	ag.position = {0, 0, 0}
+	ag.corners[0] = {2, 0, 0}
 	d2 := get_distance_to_goal(&ag, 5.0)
 	testing.expectf(t, math.abs(d2 - 2.0) < 1e-4, "expected 2, got %f", d2)
 }
@@ -215,8 +217,9 @@ test_get_distance_to_goal_clamps_to_range :: proc(t: ^testing.T) {
 
 @(test)
 test_obstacle_avoidance_query_capacity :: proc(t: ^testing.T) {
-	q := create_obstacle_avoidance_query(2, 2)
-	defer destroy_obstacle_avoidance_query(q)
+	q := &Obstacle_Avoidance_Query{}
+	obstacle_avoidance_query_init(q, 2, 2)
+	defer obstacle_avoidance_query_destroy(q)
 	obstacle_avoidance_query_add_circle(q, {1, 0, 0}, 0.5, {0, 0, 0}, {0, 0, 0})
 	obstacle_avoidance_query_add_circle(q, {2, 0, 0}, 0.5, {0, 0, 0}, {0, 0, 0})
 	obstacle_avoidance_query_add_circle(q, {3, 0, 0}, 0.5, {0, 0, 0}, {0, 0, 0}) // dropped
@@ -320,7 +323,7 @@ test_crowd_request_move_target_state :: proc(t: ^testing.T) {
 	filter: detour.Query_Filter
 	detour.query_filter_init(&filter)
 	half := [3]f32{2, 4, 2}
-	st, ref, _ := detour.find_nearest_poly(c.nav_query, {3, 0, 3}, half, &filter)
+	st, ref, _ := detour.find_nearest_poly(&c.nav_query, {3, 0, 3}, half, &filter)
 	if detour.status_succeeded(st) && ref != detour.INVALID_POLY_REF {
 		ok2 := request_move_target(c, int(idx), ref, {3, 0, 3})
 		testing.expect(t, ok2, "valid request must succeed")
@@ -345,16 +348,16 @@ test_crowd_update_advances_agent :: proc(t: ^testing.T) {
 	filter: detour.Query_Filter
 	detour.query_filter_init(&filter)
 	half := [3]f32{2, 4, 2}
-	st, ref, _ := detour.find_nearest_poly(c.nav_query, {5, 0, 5}, half, &filter)
+	st, ref, _ := detour.find_nearest_poly(&c.nav_query, {5, 0, 5}, half, &filter)
 	if !detour.status_succeeded(st) do return
 	request_move_target(c, int(idx), ref, {5, 0, 5})
 
-	start_pos := c.agents[idx].npos
+	start_pos := c.agents[idx].position
 	// run several update ticks; path planning is sliced and may take several frames
 	for _ in 0 ..< 50 {
 		update(c, 0.1)
 	}
-	end_pos := c.agents[idx].npos
+	end_pos := c.agents[idx].position
 	moved_sq := (end_pos.x - start_pos.x) * (end_pos.x - start_pos.x) +
 	            (end_pos.z - start_pos.z) * (end_pos.z - start_pos.z)
 	testing.expectf(t, moved_sq > 0.0001, "agent should have moved, dx2+dz2=%f", moved_sq)
@@ -376,7 +379,8 @@ bench_proximity_grid_query :: proc(t: ^testing.T) {
 		rounds   = 5000,
 		setup    = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_proximity_grid_state)opts.user_data
-			s.grid, _ = create_proximity_grid(1024, 1.0)
+			s.grid = new(Proximity_Grid)
+			proximity_grid_init(s.grid, 1024, 1.0)
 			proximity_grid_add_item(s.grid, 0xfffe, 0, 0, 31, 31)
 			for i in 0 ..< 256 {
 				x := f32(i % 16) + 0.5
@@ -396,7 +400,8 @@ bench_proximity_grid_query :: proc(t: ^testing.T) {
 		},
 		teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_proximity_grid_state)opts.user_data
-			destroy_proximity_grid(s.grid)
+			proximity_grid_destroy(s.grid)
+			free(s.grid)
 			return .Okay
 		},
 		user_data = &state,
@@ -437,7 +442,7 @@ bench_crowd_update :: proc(t: ^testing.T) {
 			filter: detour.Query_Filter
 			detour.query_filter_init(&filter)
 			half := [3]f32{2, 4, 2}
-			st, ref, _ := detour.find_nearest_poly(c.nav_query, {8, 0, 8}, half, &filter)
+			st, ref, _ := detour.find_nearest_poly(&c.nav_query, {8, 0, 8}, half, &filter)
 			if detour.status_succeeded(st) && ref != detour.INVALID_POLY_REF {
 				for i in 0 ..< N {
 					request_move_target(c, i, ref, {8, 0, 8})
@@ -481,6 +486,6 @@ test_crowd_move_to_reaches_goal :: proc(t: ^testing.T) {
 	idx, _ := agent_create(c, {0, 0, 0}, params)
 	testing.expect(t, move_to(c, idx, {5, 0, 5}), "move_to on the mesh must succeed")
 	for _ in 0 ..< 100 do update(c, 0.1)
-	d := c.agents[idx].npos - {5, 0, 5}
-	testing.expectf(t, d.x * d.x + d.z * d.z < 1.0, "agent should reach the goal, at %v", c.agents[idx].npos)
+	d := c.agents[idx].position - {5, 0, 5}
+	testing.expectf(t, d.x * d.x + d.z * d.z < 1.0, "agent should reach the goal, at %v", c.agents[idx].position)
 }

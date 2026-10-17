@@ -131,7 +131,7 @@ update :: proc(app: ^App, dt: f32) {
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
   physics.step(&phys, dt)
-  for k in phys.killed do world.destroy(&app.scene, world.NodeHandle(k.user))
+  for k in physics.killed(&phys) do world.destroy(&app.scene, world.NodeHandle(k.user))
   world.set_world_poses(&app.scene, physics.body_poses(&phys))
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

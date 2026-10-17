@@ -7,7 +7,6 @@ import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
-import "core:fmt"
 import "core:log"
 import "core:math"
 import mu "vendor:microui"
@@ -110,10 +109,10 @@ frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Ortho Main", {700, 20, 280, 280}, {.NO_CLOSE}) {
-    mu.label(ctx, fmt.tprintf("Ortho width: %.1f", ortho_width));   mu.slider(ctx, &ortho_width, 2.0, 30.0)
-    mu.label(ctx, fmt.tprintf("Ortho height: %.1f", ortho_height)); mu.slider(ctx, &ortho_height, 2.0, 30.0)
-    mu.label(ctx, fmt.tprintf("Cam height: %.1f", cam_height));     mu.slider(ctx, &cam_height, 2.0, 30.0)
-    mu.label(ctx, fmt.tprintf("Cam yaw: %.2f rad", cam_yaw));       mu.slider(ctx, &cam_yaw, -math.PI, math.PI)
+    mu.label(ctx, "Ortho width"); mu.slider(ctx, &ortho_width, 2.0, 30.0)
+    mu.label(ctx, "Ortho height"); mu.slider(ctx, &ortho_height, 2.0, 30.0)
+    mu.label(ctx, "Cam height"); mu.slider(ctx, &cam_height, 2.0, 30.0)
+    mu.label(ctx, "Cam yaw (rad)"); mu.slider(ctx, &cam_yaw, -math.PI, math.PI)
   }
   render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))

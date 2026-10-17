@@ -29,7 +29,7 @@ path_spline :: proc(state: []f32) -> (spline: Spline([3]f32), ok: bool) {
   p += 3 * n
   spline.times = state[p:][:n]
   p += n
-  spline.arc_table = Spline_Arc_Length_Table([3]f32) {
+  spline.arc_table = SplineArcTable([3]f32) {
     arc_lengths = state[p:][:PATH_SAMPLES],
     times       = state[p + PATH_SAMPLES:][:PATH_SAMPLES],
   }

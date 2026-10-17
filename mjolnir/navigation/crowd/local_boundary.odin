@@ -26,15 +26,8 @@ Boundary_Segment :: struct {
 }
 
 @(private)
-create_local_boundary :: proc() -> ^Local_Boundary {
-	boundary := new(Local_Boundary)
+local_boundary_init :: proc(boundary: ^Local_Boundary) {
 	local_boundary_reset(boundary)
-	return boundary
-}
-
-@(private)
-destroy_local_boundary :: proc(boundary: ^Local_Boundary) {
-	free(boundary)
 }
 
 @(private = "file")

@@ -107,18 +107,6 @@ safe_dir :: #force_inline proc(v, fallback: [3]f32) -> [3]f32 {
   return v / math.sqrt(l2) if l2 > 1e-12 else fallback
 }
 
-// FABRIK solver for N-bone IK chains (minimum 2 bones)
-// Forward And Backward Reaching Inverse Kinematics
-//
-// Algorithm:
-// 1. Forward pass: Starting from end effector, drag each joint toward target
-// 2. Backward pass: Starting from root, restore root position.
-// 3. Repeat until convergence or max iterations
-// With constraints, the backward pass clamps each segment direction to the bone's
-// cone, measured against its FK orientation carried by the parent's solved swing.
-// When progress stalls the forward pass clamps too (using the latest backward
-// pass's frames), so the chain can fold instead of sitting at a fixed point.
-//
 // ik_solve bends the chain `bones` (root first, each the parent of the next) so its last bone
 // reaches `target`, all in skeleton space, within the pose's joint limits. The chain keeps its
 // rest bone lengths; `pole` twists it (see IKParams). 0 iterations or tolerance = defaults.
@@ -131,6 +119,14 @@ ik_solve :: proc(
   iterations: int = 10,
   tolerance: f32 = 0.001,
 ) {
+  // FABRIK (Forward And Backward Reaching Inverse Kinematics):
+  // 1. Forward pass: starting from the end effector, drag each joint toward the target.
+  // 2. Backward pass: starting from the root, restore the root position.
+  // 3. Repeat until convergence or max iterations.
+  // With constraints, the backward pass clamps each segment direction to the bone's
+  // cone, measured against its FK orientation carried by the parent's solved swing.
+  // When progress stalls the forward pass clamps too (using the latest backward
+  // pass's frames), so the chain can fold instead of sitting at a fixed point.
   positions, rotations := pose.positions, pose.rotations
   chain_length := len(bones)
   if chain_length < 2 do return

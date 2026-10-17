@@ -1,7 +1,6 @@
 // Procedural bone modifier following a spline.
 package main
 
-import "core:fmt"
 import "core:log"
 import "core:math"
 import mu "vendor:microui"
@@ -182,12 +181,12 @@ debug_ui :: proc(app: ^App) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Auto play", &auto_play)
     spline_len := animation.spline_arc_length(spline)
-    mu.label(ctx, fmt.tprintf("Offset: %.2f / %.2f", f32(offset_val), spline_len))
+    mu.label(ctx, "Offset")
     if spline_len > 0 do mu.slider(ctx, &offset_val, 0, mu.Real(spline_len))
-    mu.label(ctx, fmt.tprintf("Speed: %.2f", speed_val)); mu.slider(ctx, &speed_val, 0, 10)
-    mu.label(ctx, fmt.tprintf("Fit length: %.2f", fit_len)); mu.slider(ctx, &fit_len, 0.5, 12)
-    mu.label(ctx, fmt.tprintf("Radius: %.2f", radius)); mu.slider(ctx, &radius, 1, 8)
-    mu.label(ctx, fmt.tprintf("Height: %.2f", height)); mu.slider(ctx, &height, 0, 6)
-    mu.label(ctx, fmt.tprintf("Lobes: %d", int(math.round(f32(lobes))))); mu.slider(ctx, &lobes, 1, 8)
+    mu.label(ctx, "Speed"); mu.slider(ctx, &speed_val, 0, 10)
+    mu.label(ctx, "Fit length"); mu.slider(ctx, &fit_len, 0.5, 12)
+    mu.label(ctx, "Radius"); mu.slider(ctx, &radius, 1, 8)
+    mu.label(ctx, "Height"); mu.slider(ctx, &height, 0, 6)
+    mu.label(ctx, "Lobes"); mu.slider(ctx, &lobes, 1, 8)
   }
 }

@@ -367,7 +367,7 @@ draw_contacts :: proc(app: ^App, dt: f32) {
       render.debug_arrow(&app.renderer, p, p + n * flen, {1, 0.25, 0.2, 1}, life, true)
     }
   }
-  for c in phys.contacts {
+  for c in physics.contacts(&phys) {
     for i in 0 ..< c.count {
       p := c.points[i]
       draw_one(app, p.point, c.normal, -p.base_separation, p.normal_impulse, dt, life)
@@ -462,10 +462,11 @@ panel :: proc(app: ^App) {
     if .SUBMIT in mu.button(ctx, "Reset Scene") do reset_requested = true
     if .SUBMIT in mu.button(ctx, paused ? "Resume" : "Pause") do paused = !paused
 
-    mu.label(ctx, fmt.tprintf("Contacts: %d", phys.last_perf.contact_count))
+    mu.label(ctx, fmt.tprintf("Contacts: %d", physics.perf(&phys).contact_count))
 
     mu.layout_row(ctx, {-1}, 0)
-    for c in phys.contacts[:min(6, len(phys.contacts))] {
+    shown := physics.contacts(&phys)
+    for c in shown[:min(6, len(shown))] {
       p := c.points[0]
       mu.label(
         ctx,

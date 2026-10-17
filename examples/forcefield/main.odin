@@ -7,7 +7,6 @@ import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
-import "core:fmt"
 import "core:log"
 import "core:math/linalg"
 import mu "vendor:microui"
@@ -183,13 +182,13 @@ frame :: proc(app: ^App) -> bool {
 ff_panel :: proc(ctx: ^mu.Context, name: string, s: ^FFState) {
   mu.layout_row(ctx, {-1}, 0)
   mu.checkbox(ctx, name, &s.enabled)
-  mu.label(ctx, fmt.tprintf("Strength: %.2f", f32(s.strength)))
+  mu.label(ctx, "Strength")
   mu.slider(ctx, &s.strength, -30, 30)
-  mu.label(ctx, fmt.tprintf("Tangent: %.2f", f32(s.tangent_strength)))
+  mu.label(ctx, "Tangent")
   mu.slider(ctx, &s.tangent_strength, -15, 15)
-  mu.label(ctx, fmt.tprintf("Radius: %.2f", f32(s.area_of_effect)))
+  mu.label(ctx, "Radius")
   mu.slider(ctx, &s.area_of_effect, 0.5, 10)
-  mu.label(ctx, fmt.tprintf("Spin: %.2f", f32(s.spin_speed)))
+  mu.label(ctx, "Spin")
   mu.slider(ctx, &s.spin_speed, 0, 4)
   mu.label(ctx, "")
 }

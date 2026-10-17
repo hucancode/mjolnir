@@ -7,7 +7,6 @@ import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
-import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -150,20 +149,20 @@ frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Environment", {700, 20, 280, 180}, {.NO_CLOSE}) {
-    mu.label(ctx, fmt.tprintf("Sun intensity: %.2f", sun_intensity))
+    mu.label(ctx, "Sun intensity")
     mu.slider(ctx, &sun_intensity, 0.0, 5.0)
-    mu.label(ctx, fmt.tprintf("IBL intensity: %.2f", ibl_intensity))
+    mu.label(ctx, "IBL intensity")
     mu.slider(ctx, &ibl_intensity, 0.0, 2.0)
     mu.checkbox(ctx, "Skybox", &skybox_on)
   }
   if mu.window(ctx, "PBR Range", {700, 210, 280, 220}, {.NO_CLOSE}) {
-    mu.label(ctx, fmt.tprintf("Metallic min: %.2f (rows bottom)", metallic_min))
+    mu.label(ctx, "Metallic min (rows bottom)")
     mu.slider(ctx, &metallic_min, 0.0, 1.0)
-    mu.label(ctx, fmt.tprintf("Metallic max: %.2f (rows top)", metallic_max))
+    mu.label(ctx, "Metallic max (rows top)")
     mu.slider(ctx, &metallic_max, 0.0, 1.0)
-    mu.label(ctx, fmt.tprintf("Roughness min: %.2f (cols left)", roughness_min))
+    mu.label(ctx, "Roughness min (cols left)")
     mu.slider(ctx, &roughness_min, 0.0, 1.0)
-    mu.label(ctx, fmt.tprintf("Roughness max: %.2f (cols right)", roughness_max))
+    mu.label(ctx, "Roughness max (cols right)")
     mu.slider(ctx, &roughness_max, 0.0, 1.0)
   }
   render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})

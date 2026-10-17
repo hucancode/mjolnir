@@ -70,51 +70,20 @@ Obstacle_Avoidance_Query :: struct {
 	nsegments:     int,
 }
 
-@(private = "file")
-create_obstacle_avoidance_debug_data :: proc(max_samples: int, allocator := context.allocator) -> ^Obstacle_Avoidance_Debug_Data {
-	context.allocator = allocator
-	data := new(Obstacle_Avoidance_Debug_Data)
-	data.max_samples = max_samples
-	data.vel = make([][3]f32, max_samples)
-	data.ssize = make([]f32, max_samples)
-	data.pen = make([]f32, max_samples)
-	data.vpen = make([]f32, max_samples)
-	data.vcpen = make([]f32, max_samples)
-	data.spen = make([]f32, max_samples)
-	data.tpen = make([]f32, max_samples)
-	return data
-}
-
-@(private = "file")
-destroy_obstacle_avoidance_debug_data :: proc(data: ^Obstacle_Avoidance_Debug_Data) {
-	if data == nil do return
-	delete(data.vel)
-	delete(data.ssize)
-	delete(data.pen)
-	delete(data.vpen)
-	delete(data.vcpen)
-	delete(data.spen)
-	delete(data.tpen)
-	free(data)
-}
-
 @(private)
-create_obstacle_avoidance_query :: proc(max_circles: int, max_segments: int, allocator := context.allocator) -> ^Obstacle_Avoidance_Query {
+obstacle_avoidance_query_init :: proc(query: ^Obstacle_Avoidance_Query, max_circles: int, max_segments: int, allocator := context.allocator) {
 	context.allocator = allocator
-	query := new(Obstacle_Avoidance_Query)
 	query.max_circles = max_circles
 	query.circles = make([]Obstacle_Circle, max_circles)
 	query.max_segments = max_segments
 	query.segments = make([]Obstacle_Segment, max_segments)
-	return query
 }
 
 @(private)
-destroy_obstacle_avoidance_query :: proc(query: ^Obstacle_Avoidance_Query) {
-	if query == nil do return
+obstacle_avoidance_query_destroy :: proc(query: ^Obstacle_Avoidance_Query) {
 	delete(query.circles)
 	delete(query.segments)
-	free(query)
+	query^ = {}
 }
 
 @(private)

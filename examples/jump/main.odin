@@ -8,7 +8,6 @@ import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "../../mjolnir/physics"
-import "core:fmt"
 import "core:log"
 import "core:math/linalg"
 import mu "vendor:microui"
@@ -128,14 +127,14 @@ frame :: proc(app: ^App) -> bool {
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Jump", {720, 20, 260, 350}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
-    mu.label(ctx, fmt.tprintf("Mass: %.1f kg", mass))
+    mu.label(ctx, "Mass (kg)")
     mu.slider(ctx, &mass, 1.0, 10.0)
-    mu.label(ctx, fmt.tprintf("Jump force: %.0f", jump_force))
+    mu.label(ctx, "Jump force")
     mu.slider(ctx, &jump_force, 5.0, 50.0)
-    mu.label(ctx, fmt.tprintf("Move force: %.1f", move_force))
+    mu.label(ctx, "Move force")
     mu.slider(ctx, &move_force, 1.0, 20.0)
     mu.checkbox(ctx, "Auto-jump", &auto_jump)
-    mu.label(ctx, fmt.tprintf("Auto-jump interval: %.1f s", jump_interval))
+    mu.label(ctx, "Auto-jump interval (s)")
     mu.slider(ctx, &jump_interval, 0.5, 10.0)
     mu.label(ctx, "")
     if .SUBMIT in mu.button(ctx, "Jump now") {

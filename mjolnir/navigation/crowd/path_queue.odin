@@ -31,45 +31,36 @@ Path_Queue :: struct {
 	next_handle:    Path_Queue_Ref,
 	max_path_size:  int,
 	queue_head:     int,
-	nav_query:      ^detour.Nav_Mesh_Query,
+	nav_query:      detour.Nav_Mesh_Query,
+	// every query's path, max_path_size each
+	paths:          []detour.Poly_Ref,
 }
 
 @(private)
-create_path_queue :: proc(max_path_size: int, max_search_node_count: int,
-                          nav: ^detour.Nav_Mesh, allocator := context.allocator) -> (queue: ^Path_Queue, ok: bool) {
+path_queue_init :: proc(queue: ^Path_Queue, max_path_size: int, max_search_node_count: int,
+                        nav: ^detour.Nav_Mesh, allocator := context.allocator) -> bool {
 	context.allocator = allocator
-	queue = new(Path_Queue)
-
-	query := new(detour.Nav_Mesh_Query)
-	status := detour.nav_mesh_query_init(query, nav, i32(max_search_node_count))
-	if detour.status_failed(status) {
-		free(query)
-		free(queue)
-		return nil, false
-	}
-	queue.nav_query = query
+	status := detour.nav_mesh_query_init(&queue.nav_query, nav, i32(max_search_node_count))
+	if detour.status_failed(status) do return false
 
 	queue.max_path_size = max_path_size
+	queue.paths = make([]detour.Poly_Ref, MAX_QUEUE * max_path_size)
 	for i in 0..<MAX_QUEUE {
 		queue.queue[i].ref = PATHQ_INVALID
-		queue.queue[i].path = make([]detour.Poly_Ref, max_path_size)
+		queue.queue[i].path = queue.paths[i * max_path_size:][:max_path_size]
 	}
 
 	queue.next_handle = 1
 	queue.queue_head = 0
 
-	return queue, true
+	return true
 }
 
 @(private)
-destroy_path_queue :: proc(queue: ^Path_Queue) {
-	if queue == nil do return
-	detour.nav_mesh_query_destroy(queue.nav_query)
-	free(queue.nav_query)
-	for i in 0..<MAX_QUEUE {
-		delete(queue.queue[i].path)
-	}
-	free(queue)
+path_queue_destroy :: proc(queue: ^Path_Queue) {
+	detour.nav_mesh_query_destroy(&queue.nav_query)
+	delete(queue.paths)
+	queue^ = {}
 }
 
 @(private)
@@ -97,19 +88,19 @@ path_queue_update :: proc(queue: ^Path_Queue, max_iters: int) {
 		}
 
 		if q.status == {} {
-			q.status = detour.init_sliced_find_path(queue.nav_query, q.start_ref, q.end_ref,
+			q.status = detour.init_sliced_find_path(&queue.nav_query, q.start_ref, q.end_ref,
 			                                        q.start_pos, q.end_pos, q.filter, 0)
 		}
 
 		if detour.status_in_progress(q.status) {
 			iters: i32
-			iters, q.status = detour.update_sliced_find_path(queue.nav_query, i32(iter_count))
+			iters, q.status = detour.update_sliced_find_path(&queue.nav_query, i32(iter_count))
 			iter_count -= int(iters)
 		}
 
 		if detour.status_succeeded(q.status) {
 			npath: i32
-			q.status, npath = detour.finalize_sliced_find_path(queue.nav_query, q.path,
+			q.status, npath = detour.finalize_sliced_find_path(&queue.nav_query, q.path,
 			                                                    i32(queue.max_path_size))
 			q.npath = int(npath)
 		}

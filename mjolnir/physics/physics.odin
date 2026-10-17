@@ -140,17 +140,17 @@ KilledBody :: struct {
 // World owns the bodies, broad-phase BVHs and per-step contact state. init/shutdown own its
 // memory and thread pool (application lifetime); teardown empties it between maps.
 World :: struct {
-  gravity:              [3]f32,
-  // Read-only after each step
-  contacts:             [dynamic]Contact,
-  sensor_overlaps:      [dynamic]SensorOverlap,
-  killed:               [dynamic]KilledBody,
-  last_perf:            PerfFrame,
+  gravity: [3]f32,
   using _: World_State,
 }
 
 @(private)
 World_State :: struct {
+  // what the last step found (contacts, sensor_overlaps, killed, perf)
+  contacts:             [dynamic]Contact,
+  sensor_overlaps:      [dynamic]SensorOverlap,
+  killed:               [dynamic]KilledBody,
+  last_perf:            PerfFrame,
   // indexed by BodyHandle.index; body_slots says which are live
   bodies:               []Body,
   body_slots:           cont.Slots,
@@ -420,6 +420,28 @@ body_poses :: proc(self: ^World, allocator := context.temp_allocator) -> []BodyP
     append(&poses, BodyPose{body.user, body.position, body.rotation})
   }
   return poses[:]
+}
+
+// contacts returns the touching pairs the last step found; valid until the next step.
+contacts :: proc(self: ^World) -> []Contact {
+  return self.contacts[:]
+}
+
+// sensor_overlaps returns the bodies inside each sensor after the last step; valid until the
+// next step.
+sensor_overlaps :: proc(self: ^World) -> []SensorOverlap {
+  return self.sensor_overlaps[:]
+}
+
+// killed returns the bodies the last step destroyed for falling below KILL_Y, with their user
+// links to clean up; valid until the next step.
+killed :: proc(self: ^World) -> []KilledBody {
+  return self.killed[:]
+}
+
+// perf returns the timings and counters of the last step.
+perf :: proc(self: ^World) -> PerfFrame {
+  return self.last_perf
 }
 
 // Rebuilds dirty BVHs; stale entries of destroyed bodies are dropped here.

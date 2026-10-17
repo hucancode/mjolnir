@@ -22,26 +22,24 @@ Grid_Item :: struct {
 }
 
 @(private)
-create_proximity_grid :: proc(pool_size: int, cell_size: f32, allocator := context.allocator) -> (grid: ^Proximity_Grid, ok: bool) {
+proximity_grid_init :: proc(grid: ^Proximity_Grid, pool_size: int, cell_size: f32, allocator := context.allocator) -> bool {
 	if pool_size <= 0 || cell_size <= 0 {
-		return nil, false
+		return false
 	}
 	context.allocator = allocator
-	grid = new(Proximity_Grid)
 	grid.cell_size = cell_size
 	grid.inv_cell_size = 1.0 / cell_size
 	grid.pool = make([dynamic]Grid_Item, 0, pool_size)
 	grid.buckets = make([dynamic]u16, 0)
 	grid.bounds = {0, 0, 0, 0}
-	return grid, true
+	return true
 }
 
 @(private)
-destroy_proximity_grid :: proc(grid: ^Proximity_Grid) {
-	if grid == nil do return
+proximity_grid_destroy :: proc(grid: ^Proximity_Grid) {
 	delete(grid.pool)
 	delete(grid.buckets)
-	free(grid)
+	grid^ = {}
 }
 
 @(private)

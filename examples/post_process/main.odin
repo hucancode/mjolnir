@@ -184,7 +184,7 @@ debug_ui :: proc(app: ^App) {
     mu.checkbox(ctx, "Tonemap", &tonemap_on)
     if tonemap_on {
       mu.label(ctx, "Exposure"); mu.slider(ctx, &tonemap_exposure, 0.1, 4.0)
-      mu.label(ctx, "Gamma");       mu.slider(ctx, &tonemap_gamma, 1.0, 3.0)
+      mu.label(ctx, "Gamma"); mu.slider(ctx, &tonemap_gamma, 1.0, 3.0)
     }
     mu.checkbox(ctx, "Grayscale", &grayscale_on)
     if grayscale_on do mu.slider(ctx, &grayscale_strength, 0.0, 1.0)
@@ -195,8 +195,8 @@ debug_ui :: proc(app: ^App) {
     }
     mu.checkbox(ctx, "Fog", &fog_on)
     if fog_on {
-      mu.label(ctx, "Start");     mu.slider(ctx, &fog_start, 0.0, 50.0)
-      mu.label(ctx, "End");         mu.slider(ctx, &fog_end, 1.0, 200.0)
+      mu.label(ctx, "Start"); mu.slider(ctx, &fog_start, 0.0, 50.0)
+      mu.label(ctx, "End"); mu.slider(ctx, &fog_end, 1.0, 200.0)
     }
     mu.checkbox(ctx, "Outline", &outline_on)
     if outline_on do mu.slider(ctx, &outline_thickness, 0.5, 5.0)
@@ -204,14 +204,14 @@ debug_ui :: proc(app: ^App) {
     if dof_on {
       mu.label(ctx, "Focus"); mu.slider(ctx, &dof_focus, 1.0, 30.0)
       mu.label(ctx, "Range"); mu.slider(ctx, &dof_range, 0.5, 20.0)
-      mu.label(ctx, "Blur");   mu.slider(ctx, &dof_blur, 1.0, 50.0)
+      mu.label(ctx, "Blur"); mu.slider(ctx, &dof_blur, 1.0, 50.0)
     }
     mu.checkbox(ctx, "Gaussian Blur", &blur_on)
     if blur_on do mu.slider(ctx, &blur_radius, 0.5, 10.0)
     mu.checkbox(ctx, "Crosshatch", &crosshatch_on)
     mu.checkbox(ctx, "Vignette (user shader)", &vignette_on)
     if vignette_on {
-      mu.label(ctx, "Radius");   mu.slider(ctx, &vignette_radius, 0.2, 1.0)
+      mu.label(ctx, "Radius"); mu.slider(ctx, &vignette_radius, 0.2, 1.0)
       mu.label(ctx, "Softness"); mu.slider(ctx, &vignette_softness, 0.05, 0.8)
       mu.label(ctx, "Strength"); mu.slider(ctx, &vignette_strength, 0.0, 1.0)
     }

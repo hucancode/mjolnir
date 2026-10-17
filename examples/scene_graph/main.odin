@@ -7,7 +7,6 @@ import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
-import "core:fmt"
 import "core:log"
 import mu "vendor:microui"
 
@@ -133,9 +132,9 @@ frame :: proc(app: ^App) -> bool {
     mu.label(ctx, "Each planet inherits sun rotation.")
     mu.label(ctx, "Moon inherits outer planet too.")
     mu.label(ctx, "")
-    mu.label(ctx, fmt.tprintf("Orbit speed: %.2f", orbit_speed))
+    mu.label(ctx, "Orbit speed")
     mu.slider(ctx, &orbit_speed, 0.0, 4.0)
-    mu.label(ctx, fmt.tprintf("Spin speed: %.2f", spin_speed))
+    mu.label(ctx, "Spin speed")
     mu.slider(ctx, &spin_speed, 0.0, 6.0)
   }
   render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})

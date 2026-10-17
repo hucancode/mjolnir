@@ -171,7 +171,7 @@ debug_ui :: proc(app: ^App) {
     mu.label(ctx, "WASD move, Q/E yaw")
     mu.label(ctx, fmt.tprintf("Last key: %v %v", last_key, "PRESS" if last_key_pressed else "RELEASE"))
     mu.label(ctx, fmt.tprintf("Typed: %s", string(last_text[:last_text_len])))
-    mu.label(ctx, fmt.tprintf("Move speed: %.1f", move_speed))
+    mu.label(ctx, "Move speed")
     mu.slider(ctx, &move_speed, 0.5, 20.0)
     mu.label(ctx, fmt.tprintf("Mouse: %.0f %.0f", last_mouse.x, last_mouse.y))
     mu.label(ctx, fmt.tprintf("Drag delta: %.1f %.1f", last_drag.x, last_drag.y))

@@ -171,17 +171,17 @@ debug_ui :: proc(app: ^App) {
     if .SUBMIT in mu.button(ctx, "Green 0.8")  do target_wall = 2
 
     mu.layout_row(ctx, {-1}, 0)
-    mu.label(ctx, fmt.tprintf("Velocity: %.1f m/s", bullet_speed))
+    mu.label(ctx, "Velocity (m/s)")
     mu.slider(ctx, &bullet_speed, 1.0, 400.0)
-    mu.label(ctx, "CCD: ACTIVE (>=5 m/s threshold)" if bullet_speed >= 5.0 else "CCD: off (low velocity)")
+    mu.label(ctx, "CCD: ON" if bullet_speed >= 5.0 else "CCD: OFF")
 
     mu.layout_row(ctx, {130, -1}, 0)
     if .SUBMIT in mu.button(ctx, "Fire") do fire_bullet(app)
     mu.checkbox(ctx, "Auto-fire (2s)", &auto_fire)
 
     mu.layout_row(ctx, {-1}, 0)
-    mu.label(ctx, "--- Last Frame Stats ---")
-    perf := phys.last_perf
+    mu.label(ctx, "Stats")
+    perf := physics.perf(&phys)
     mu.label(ctx, fmt.tprintf("CCD bodies tested: %d", perf.ccd_bodies_tested))
     mu.label(ctx, fmt.tprintf("CCD swept candidates: %d", perf.ccd_total_candidates))
     mu.label(ctx, fmt.tprintf("CCD time: %.3f ms", perf.ccd_ms))

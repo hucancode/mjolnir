@@ -1,7 +1,6 @@
 // Bone-mask layer blending across multiple clips.
 package main
 
-import "core:fmt"
 import "core:log"
 import "core:math"
 import mu "vendor:microui"
@@ -187,7 +186,7 @@ debug_ui :: proc(app: ^App) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Base layer (Walk <-> Run)")
     mu.checkbox(ctx, "Auto blend", &auto_blend)
-    mu.label(ctx, fmt.tprintf("Blend: %.2f", walk_run_blend))
+    mu.label(ctx, "Blend")
     if .CHANGE in mu.slider(ctx, &walk_run_blend, 0.0, 1.0) {
       auto_blend = false
       set_walk_run(0)
@@ -202,18 +201,18 @@ debug_ui :: proc(app: ^App) {
     }
     mu.label(ctx, "")
     mu.label(ctx, "Upper body (Survey)")
-    mu.label(ctx, fmt.tprintf("Weight: %.2f", survey_weight)); mu.slider(ctx, &survey_weight, 0.0, 1.0)
+    mu.label(ctx, "Weight"); mu.slider(ctx, &survey_weight, 0.0, 1.0)
     mu.label(ctx, "")
     mu.label(ctx, "IK head tracking")
-    mu.label(ctx, fmt.tprintf("Weight: %.2f", ik_weight)); mu.slider(ctx, &ik_weight, 0.0, 1.0)
+    mu.label(ctx, "Weight"); mu.slider(ctx, &ik_weight, 0.0, 1.0)
     mu.checkbox(ctx, "Animate target", &animate_target)
     if animate_target {
-      mu.label(ctx, fmt.tprintf("Radius: %.2f", target_radius)); mu.slider(ctx, &target_radius, 1.0, 8.0)
-      mu.label(ctx, fmt.tprintf("Speed: %.2f", target_speed));   mu.slider(ctx, &target_speed, 0.0, 4.0)
+      mu.label(ctx, "Radius"); mu.slider(ctx, &target_radius, 1.0, 8.0)
+      mu.label(ctx, "Speed"); mu.slider(ctx, &target_speed, 0.0, 4.0)
     } else {
-      mu.label(ctx, fmt.tprintf("X: %.2f", target_x)); mu.slider(ctx, &target_x, -8.0, 8.0)
-      mu.label(ctx, fmt.tprintf("Y: %.2f", target_y)); mu.slider(ctx, &target_y, 0.0, 8.0)
-      mu.label(ctx, fmt.tprintf("Z: %.2f", target_z)); mu.slider(ctx, &target_z, -8.0, 8.0)
+      mu.label(ctx, "X"); mu.slider(ctx, &target_x, -8.0, 8.0)
+      mu.label(ctx, "Y"); mu.slider(ctx, &target_y, 0.0, 8.0)
+      mu.label(ctx, "Z"); mu.slider(ctx, &target_z, -8.0, 8.0)
     }
   }
 }

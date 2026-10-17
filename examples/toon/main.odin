@@ -131,7 +131,7 @@ frame :: proc(app: ^App) -> bool {
   if mu.window(ctx, "Toon", {700, 20, 280, 230}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Bands"); mu.slider(ctx, &bands, 1, 8, 1)
-    mu.label(ctx, "Rim");   mu.slider(ctx, &rim, 0, 1)
+    mu.label(ctx, "Rim"); mu.slider(ctx, &rim, 0, 1)
     mu.label(ctx, "Shade"); mu.slider(ctx, &shade, 0, 1)
   }
   render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})

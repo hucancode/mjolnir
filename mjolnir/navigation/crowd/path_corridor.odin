@@ -15,23 +15,9 @@ Path_Corridor :: struct {
 }
 
 @(private)
-create_path_corridor :: proc(max_path: int, allocator := context.allocator) -> (corridor: ^Path_Corridor, ok: bool) {
-	if max_path <= 0 {
-		return nil, false
-	}
-	context.allocator = allocator
-	corridor = new(Path_Corridor)
-	corridor.path = make([]detour.Poly_Ref, max_path)
-	corridor.npath = 0
-	corridor.max_path = max_path
-	return corridor, true
-}
-
-@(private)
-destroy_path_corridor :: proc(corridor: ^Path_Corridor) {
-	if corridor == nil do return
-	delete(corridor.path)
-	free(corridor)
+// path_corridor_init makes `path` (owned by the caller) the corridor's polygon buffer.
+path_corridor_init :: proc(corridor: ^Path_Corridor, path: []detour.Poly_Ref) {
+	corridor^ = {path = path, max_path = len(path)}
 }
 
 @(private)
