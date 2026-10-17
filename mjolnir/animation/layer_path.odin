@@ -2,11 +2,12 @@ package animation
 
 import "core:math"
 
-// PathParams lays a chain along a path (set with path_points), fitted to `length` of it from
-// `offset` on, moving `speed` units per second. Its layer's bones are the chain, head first.
+// PathParams lays a chain along a path (set with path_points), fitted to `length` of it behind
+// `offset`, moving `speed` units per second. Its layer's bones are the chain, head first: the head
+// leads and the rest trail behind it.
 PathParams :: struct {
   offset: f32, // where the chain's head starts along the path
-  length: f32, // path length the chain is fitted to; 0 = from offset to the end
+  length: f32, // path length the chain is fitted to; 0 = from the path's start to offset
   speed:  f32,
   loop:   bool, // wrap around the path's end instead of stopping there
 }
@@ -67,7 +68,7 @@ path_apply :: proc(pose: Pose, bones: []u32, state: []f32, params: PathParams, d
   total := spline_arc_length(spline)
   if n < 2 || total <= 0 do return
   wrap :: proc(s, total: f32, loop: bool) -> f32 {
-    return math.mod_f32(s, total) if loop else clamp(s, 0, total)
+    return s - math.floor(s / total) * total if loop else clamp(s, 0, total)
   }
   // state[0] is how far the chain travelled; the head never runs past the end of an open path
   head := wrap(params.offset + state[0] + params.speed * delta_time, total, params.loop)
@@ -75,14 +76,14 @@ path_apply :: proc(pose: Pose, bones: []u32, state: []f32, params: PathParams, d
   chain: f32 = 0
   for i in 1 ..< n do chain += pose.lengths[bones[i]]
   if chain <= 0 do return
-  fit := params.length if params.length > 0 else total - head
+  fit := params.length if params.length > 0 else head
   along: f32 = 0
   for b, i in bones {
-    pose.positions[b] = spline_sample_uniform(spline, wrap(head + along / chain * fit, total, params.loop))
+    pose.positions[b] = spline_sample_uniform(spline, wrap(head - along / chain * fit, total, params.loop))
     if i < n - 1 do along += pose.lengths[bones[i + 1]]
   }
   for i in 0 ..< n - 1 do aim_bone(pose, bones[i], pose.positions[bones[i + 1]] - pose.positions[bones[i]])
   last := bones[n - 1]
-  ahead := spline_sample_uniform(spline, wrap(head + fit + 0.01, total, params.loop))
+  ahead := spline_sample_uniform(spline, wrap(head - fit - 0.01, total, params.loop))
   aim_bone(pose, last, ahead - pose.positions[last])
 }
