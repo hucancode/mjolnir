@@ -1,13 +1,21 @@
 package behavior_tree
 
-// Status is what an action, and so a whole tree, reports for one tick.
+// Status is what a node, and so a whole tree, reports for one tick.
 Status :: enum {
   FAILURE,
   SUCCESS,
   RUNNING,
 }
 
-// Action is a named check or step run on the agent; conditions are actions too.
+// Condition guards its children with a named question about the agent: when the answer is no
+// it succeeds without running them; when yes it runs them as a Sequence and reports theirs.
+Condition :: struct($T: typeid) {
+  name:     string,
+  test:     proc(agent: ^T) -> bool,
+  children: []Behavior(T),
+}
+
+// Action is a named step the agent takes; it reports RUNNING while it is under way.
 Action :: struct($T: typeid) {
   name: string,
   run:  proc(agent: ^T) -> Status,
@@ -25,8 +33,9 @@ Selector :: struct($T: typeid) {
   children: []Behavior(T),
 }
 
-// Behavior is a tree node: an action or a composite of more nodes.
+// Behavior is a tree node: a condition, an action or a composite of more nodes.
 Behavior :: union($T: typeid) {
+  Condition(T),
   Action(T),
   Sequence(T),
   Selector(T),
@@ -43,6 +52,9 @@ Step :: struct {
 // agent. Each action run is appended to trace when one is given.
 tick :: proc(b: Behavior($T), agent: ^T, trace: ^[dynamic]Step = nil) -> Status {
   switch node in b {
+  case Condition(T):
+    if !node.test(agent) do return .SUCCESS
+    return tick(Behavior(T)(Sequence(T){node.children}), agent, trace)
   case Action(T):
     status := node.run(agent)
     if trace != nil do append(trace, Step{node.name, status})

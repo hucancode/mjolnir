@@ -6,6 +6,7 @@ package main
 import "../../mjolnir"
 import anim "../../mjolnir/animation"
 import bt "../../mjolnir/behavior_tree"
+import "../../mjolnir/fsm"
 import "../../mjolnir/font"
 import "../../mjolnir/geometry"
 import "../../mjolnir/gltf"
@@ -290,11 +291,23 @@ Projectile :: struct {
   life:     f32,
 }
 
-State :: enum {
+Screen :: enum {
   SELECT,
-  PLAY,
+  LEVEL_1,
+  LEVEL_2,
+  LEVEL_3,
   RESULT,
 }
+
+SCREENS := [Screen]fsm.State(App, Screen) {
+  .SELECT  = {enter = enter_select, update = update_select},
+  .LEVEL_1 = {enter = enter_level, update = update_level},
+  .LEVEL_2 = {enter = enter_level, update = update_level},
+  .LEVEL_3 = {enter = enter_level, update = update_level},
+  .RESULT  = {enter = enter_result, update = update_result, exit = exit_result},
+}
+
+#assert(len(LEVELS) == int(Screen.LEVEL_3) - int(Screen.LEVEL_1) + 1)
 
 Panel :: struct {
   root, title, stats:  ui.NodeHandle,
@@ -322,7 +335,7 @@ App :: struct {
   decor:        [len(DECOR)]gltf.Model,
   arrow:        gltf.Model,
   fireball:     render.MeshAttachment,
-  state:        State,
+  screen:       fsm.Machine(Screen),
   hero:         int,
   level:        int,
   score:        int,
@@ -345,30 +358,30 @@ Mob :: struct {
   enemy: ^Enemy,
 }
 
+Condition :: bt.Condition(Mob)
 Action :: bt.Action(Mob)
 Sequence :: bt.Sequence(Mob)
-Selector :: bt.Selector(Mob)
 Behavior :: bt.Behavior(Mob)
 
-MELEE := Behavior(Selector{{
-  Sequence{{Action{"is_dead", is_dead}, Action{"die", die}}},
-  Sequence{{Action{"in_range", in_range}, Action{"attack", attack}}},
-  Sequence{{Action{"sees_player", sees_player}, Action{"chase", chase}}},
+MELEE := Behavior(Sequence{{
+  Condition{"is_dead", is_dead, {Action{"die", die}}},
+  Condition{"in_range", in_range, {Action{"attack", attack}}},
+  Condition{"sees_player", sees_player, {Action{"chase", chase}}},
   Action{"patrol", patrol},
 }})
 
-RANGED := Behavior(Selector{{
-  Sequence{{Action{"is_dead", is_dead}, Action{"die", die}}},
-  Sequence{{Action{"too_close", too_close}, Action{"retreat", retreat}}},
-  Sequence{{Action{"in_range", in_range}, Action{"attack", attack}}},
-  Sequence{{Action{"sees_player", sees_player}, Action{"chase", chase}}},
+RANGED := Behavior(Sequence{{
+  Condition{"is_dead", is_dead, {Action{"die", die}}},
+  Condition{"too_close", too_close, {Action{"retreat", retreat}}},
+  Condition{"in_range", in_range, {Action{"attack", attack}}},
+  Condition{"sees_player", sees_player, {Action{"chase", chase}}},
   Action{"patrol", patrol},
 }})
 
-BOSS := Behavior(Selector{{
-  Sequence{{Action{"is_dead", is_dead}, Action{"die", die}}},
-  Sequence{{Action{"in_range", in_range}, Action{"attack", attack}}},
-  Sequence{{Action{"enraged", enraged}, Action{"charge", charge}}},
+BOSS := Behavior(Sequence{{
+  Condition{"is_dead", is_dead, {Action{"die", die}}},
+  Condition{"in_range", in_range, {Action{"attack", attack}}},
+  Condition{"enraged", enraged, {Action{"charge", charge}}},
   Action{"chase", chase},
 }})
 
@@ -401,7 +414,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.setup(&app.renderer)
   ui.init(&app.gui)
   build_panel(app)
-  build_select(app)
+  fsm.start(&app.screen, SCREENS, app, .SELECT)
   return .READY
 }
 
@@ -467,9 +480,8 @@ clear_scene :: proc(app: ^App) {
   render.teardown(&app.renderer)
 }
 
-build_select :: proc(app: ^App) {
+enter_select :: proc(app: ^App) {
   clear_scene(app)
-  app.state = .SELECT
   spawn_ground(app)
   app.renderer.ibl_intensity = 0.1
   app.renderer.skybox_intensity = 0.05
@@ -485,12 +497,15 @@ build_select :: proc(app: ^App) {
   render.camera_look_at(render.main_camera(&app.renderer), {0, 3, 9}, {0, 1.2, 0})
 }
 
-build_level :: proc(app: ^App, level: int) {
+level_screen :: proc(level: int) -> Screen {
+  return Screen(int(Screen.LEVEL_1) + level)
+}
+
+enter_level :: proc(app: ^App) {
   clear_scene(app)
-  app.state = .PLAY
+  level := int(app.screen.current) - int(Screen.LEVEL_1)
   app.level = level
   app.result_timer = 0
-  ui.node(&app.gui, app.panel.root).hidden = true
   spawn_ground(app)
   app.renderer.ibl_intensity = 1
   app.renderer.skybox_intensity = 1
@@ -680,14 +695,7 @@ actor_stage :: proc(app: ^App, a: ^Actor) {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   if input.key_pressed(&app.input, .F1) do app.debug = !app.debug
-  switch app.state {
-  case .SELECT:
-    update_select(app, dt)
-  case .PLAY:
-    update_play(app, dt)
-  case .RESULT:
-    update_result(app, dt)
-  }
+  fsm.update(&app.screen, SCREENS, app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   for &a in app.lineup do actor_stage(app, &a)
@@ -696,7 +704,7 @@ update :: proc(app: ^App, dt: f32) {
   render.update(&app.renderer, dt)
 }
 
-update_select :: proc(app: ^App, dt: f32) {
+update_select :: proc(app: ^App, dt: f32) -> Screen {
   step := int(input.key_pressed(&app.input, .D) || input.key_pressed(&app.input, .RIGHT)) - int(input.key_pressed(&app.input, .A) || input.key_pressed(&app.input, .LEFT))
   if step != 0 {
     actor_play(&app.lineup[app.hero], .IDLE)
@@ -708,13 +716,12 @@ update_select :: proc(app: ^App, dt: f32) {
     actor_move(&a, false)
     actor_update(app, &a, &app.heroes[i], dt)
   }
-  if input.key_pressed(&app.input, .ENTER) || input.key_pressed(&app.input, .SPACE) {
-    app.score = 0
-    build_level(app, 0)
-  }
+  if !input.key_pressed(&app.input, .ENTER) && !input.key_pressed(&app.input, .SPACE) do return .SELECT
+  app.score = 0
+  return .LEVEL_1
 }
 
-update_play :: proc(app: ^App, dt: f32) {
+update_level :: proc(app: ^App, dt: f32) -> Screen {
   drag := app.input.mouse_delta if input.mouse_down(&app.input, .RIGHT) else 0
   render.orbit_drag(&app.orbit, drag, app.input.scroll.y, min_distance = 4, max_distance = 20)
   update_player(app, dt)
@@ -734,8 +741,9 @@ update_play :: proc(app: ^App, dt: f32) {
   }
   if app.result_timer > 0 {
     app.result_timer -= dt
-    if app.result_timer <= 0 do show_result(app)
+    if app.result_timer <= 0 do return .RESULT
   }
+  return app.screen.current
 }
 
 update_player :: proc(app: ^App, dt: f32) {
@@ -899,9 +907,8 @@ brain :: proc(kind: EnemyKind) -> Behavior {
 }
 
 
-is_dead :: proc(m: ^Mob) -> bt.Status {
-  e := m.enemy
-  return .SUCCESS if e.health <= 0 else .FAILURE
+is_dead :: proc(m: ^Mob) -> bool {
+  return m.enemy.health <= 0
 }
 
 die :: proc(m: ^Mob) -> bt.Status {
@@ -913,24 +920,25 @@ die :: proc(m: ^Mob) -> bt.Status {
   return .RUNNING
 }
 
-in_range :: proc(m: ^Mob) -> bt.Status {
+in_range :: proc(m: ^Mob) -> bool {
   app, e := m.app, m.enemy
-  return .SUCCESS if enemy_distance(app, e) <= FOES[e.kind].range else .FAILURE
+  return enemy_distance(app, e) <= FOES[e.kind].range
 }
 
 attack :: proc(m: ^Mob) -> bt.Status {
   app, e := m.app, m.enemy
   halt(app, e)
-  if e.cooldown > 0 do return .RUNNING
-  actor_play(e, .ATTACK)
-  e.cooldown = FOES[e.kind].cooldown
-  e.strike = FOES[e.kind].windup
-  return .SUCCESS
+  if e.cooldown <= 0 {
+    actor_play(e, .ATTACK)
+    e.cooldown = FOES[e.kind].cooldown
+    e.strike = FOES[e.kind].windup
+  }
+  return .RUNNING
 }
 
-sees_player :: proc(m: ^Mob) -> bt.Status {
+sees_player :: proc(m: ^Mob) -> bool {
   app, e := m.app, m.enemy
-  return .SUCCESS if enemy_distance(app, e) <= SIGHT else .FAILURE
+  return enemy_distance(app, e) <= SIGHT
 }
 
 chase :: proc(m: ^Mob) -> bt.Status {
@@ -942,9 +950,9 @@ chase :: proc(m: ^Mob) -> bt.Status {
   return .RUNNING
 }
 
-too_close :: proc(m: ^Mob) -> bt.Status {
+too_close :: proc(m: ^Mob) -> bool {
   app, e := m.app, m.enemy
-  return .SUCCESS if enemy_distance(app, e) < FOES[e.kind].range * 0.4 else .FAILURE
+  return enemy_distance(app, e) < FOES[e.kind].range * 0.4
 }
 
 retreat :: proc(m: ^Mob) -> bt.Status {
@@ -966,9 +974,9 @@ patrol :: proc(m: ^Mob) -> bt.Status {
   return .RUNNING
 }
 
-enraged :: proc(m: ^Mob) -> bt.Status {
+enraged :: proc(m: ^Mob) -> bool {
   e := m.enemy
-  return .SUCCESS if e.health < FOES[e.kind].health * 0.5 else .FAILURE
+  return e.health < FOES[e.kind].health * 0.5
 }
 
 charge :: proc(m: ^Mob) -> bt.Status {
@@ -1075,8 +1083,7 @@ build_panel :: proc(app: ^App) {
   p.heroes = button(gui, row, "Change hero")
 }
 
-show_result :: proc(app: ^App) {
-  app.state = .RESULT
+enter_result :: proc(app: ^App) {
   last := app.level == len(LEVELS) - 1
   ui.set_text(&app.gui, app.panel.title, ("Victory!" if !last else "The crypt is cleared!") if app.won else "Defeated")
   ui.set_text(&app.gui, app.panel.stats, fmt.tprintf("Level %d   Score %d", app.level + 1, app.score))
@@ -1084,7 +1091,11 @@ show_result :: proc(app: ^App) {
   ui.node(&app.gui, app.panel.root).hidden = false
 }
 
-update_result :: proc(app: ^App, dt: f32) {
+exit_result :: proc(app: ^App) {
+  ui.node(&app.gui, app.panel.root).hidden = true
+}
+
+update_result :: proc(app: ^App, dt: f32) -> Screen {
   size := platform.framebuffer_size(&app.window)
   ui.layout(&app.gui, {size = {f32(size.x), f32(size.y)} / platform.dpi_scale(&app.window)}, &app.font)
   ui.update_input(&app.gui, &app.input)
@@ -1093,13 +1104,13 @@ update_result :: proc(app: ^App, dt: f32) {
   switch {
   case ui.clicked(&app.gui, app.panel.retry):
     if !app.won do app.score = 0
-    build_level(app, app.level)
+    return level_screen(app.level)
   case ui.clicked(&app.gui, app.panel.next):
-    build_level(app, app.level + 1)
+    return level_screen(app.level + 1)
   case ui.clicked(&app.gui, app.panel.heroes):
-    ui.node(&app.gui, app.panel.root).hidden = true
-    build_select(app)
+    return .SELECT
   }
+  return .RESULT
 }
 
 frame :: proc(app: ^App) -> bool {
@@ -1107,7 +1118,7 @@ frame :: proc(app: ^App) -> bool {
   commands := make([dynamic]render.RenderCommand, context.temp_allocator)
   size := platform.framebuffer_size(&app.window)
   screen := [2]f32{f32(size.x), f32(size.y)} / platform.dpi_scale(&app.window)
-  if app.state == .SELECT {
+  if app.screen.current == .SELECT {
     hero := HEROES[app.hero]
     text(&commands, "Choose your hero", {40, 36}, 40)
     text(&commands, fmt.tprintf("%s   health %.0f   speed %.1f   damage %.0f", hero.name, hero.health, hero.speed, hero.damage), {40, 90}, 24)
@@ -1116,7 +1127,7 @@ frame :: proc(app: ^App) -> bool {
   } else {
     hud(app, &commands)
   }
-  if app.state == .RESULT {
+  if app.screen.current == .RESULT {
     for h, z in app.gui.draw_order {
       r := ui.rect(&app.gui, h)
       n := ui.node(&app.gui, h)
@@ -1152,9 +1163,10 @@ hud :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand) {
     point := render.world_to_screen(&app.renderer, head) or_continue
     bar(commands, point - {30, 0}, {60, 7}, e.health / FOES[e.kind].health, {230, 200, 60, 255})
     if !app.debug do continue
-    for step, i in e.trace {
-      color := TRACE_COLORS[step.status]
-      text(commands, fmt.tprintf("%s %v", step.name, step.status), point + {-30, -16 * f32(len(e.trace) - i) - 4}, 13, color)
+    y := point.y - 6
+    #reverse for step in e.trace {
+      y -= 16
+      text(commands, fmt.tprintf("%s %v", step.name, step.status), {point.x - 30, y}, 13, TRACE_COLORS[step.status])
     }
   }
 }
