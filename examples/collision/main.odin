@@ -37,7 +37,7 @@ Kind :: enum {
 Body :: struct {
   kind:          Kind,
   shape:         Shape,
-  size:          [3]f32, // Sphere: x=radius; Box: half extents; Cylinder: x=radius y=height
+  size:          [3]f32, // Sphere: x=radius; Box: half extents; Cylinder: x=radius y=half height
   position:      [3]f32, // DynamicCircle: the orbit center
   euler_deg:     [3]f32,
   mass:          f32,
@@ -161,7 +161,7 @@ body_collider :: proc(b: ^Body) -> physics.Collider {
   switch b.shape {
   case .Sphere:   return physics.SphereCollider{radius = b.size.x}
   case .Box:      return physics.BoxCollider{half_extents = b.size}
-  case .Cylinder: return physics.CylinderCollider{radius = b.size.x, height = b.size.y}
+  case .Cylinder: return physics.CylinderCollider{radius = b.size.x, half_height = b.size.y}
   }
   return nil
 }
@@ -173,8 +173,7 @@ body_visual_scale :: proc(b: ^Body) -> [3]f32 {
   case .Box:
     return b.size
   case .Cylinder:
-    half_height := b.size.y * 0.5
-    return {b.size.x, half_height, b.size.x}
+    return {b.size.x, b.size.y, b.size.x}
   }
   return 1
 }
@@ -305,12 +304,11 @@ draw_selection :: proc(app: ^App) {
   case .Sphere:
     render.debug_sphere(&app.renderer, pos, b.size.x, green, 0, true)
   case .Box:
-    render.debug_cube(&app.renderer, pos, rot, b.size * 2, green, 0, true)
+    render.debug_cube(&app.renderer, pos, rot, b.size, green, 0, true)
   case .Cylinder:
     axis := linalg.quaternion_mul_vector3(rot, [3]f32{0, 1, 0})
-    half_height := b.size.y * 0.5
-    render.debug_circle(&app.renderer, pos + axis * half_height, axis, b.size.x, green, 0, true)
-    render.debug_circle(&app.renderer, pos - axis * half_height, axis, b.size.x, green, 0, true)
+    render.debug_circle(&app.renderer, pos + axis * b.size.y, axis, b.size.x, green, 0, true)
+    render.debug_circle(&app.renderer, pos - axis * b.size.y, axis, b.size.x, green, 0, true)
   }
 }
 
@@ -338,9 +336,9 @@ inspector :: proc(ctx: ^mu.Context, b: ^Body) {
     b.shape_changed |= slider_changed(ctx, &b.size.y, 0.2, 4.0)
     b.shape_changed |= slider_changed(ctx, &b.size.z, 0.2, 4.0)
   case .Cylinder:
-    mu.label(ctx, "Radius / Height")
+    mu.label(ctx, "Radius / Half height")
     b.shape_changed |= slider_changed(ctx, &b.size.x, 0.2, 4.0)
-    b.shape_changed |= slider_changed(ctx, &b.size.y, 0.4, 6.0)
+    b.shape_changed |= slider_changed(ctx, &b.size.y, 0.2, 3.0)
   }
 
   mu.label(ctx, "Orbit center X / Y / Z" if b.kind == .DynamicCircle else "Position X / Y / Z")

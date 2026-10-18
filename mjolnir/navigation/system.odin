@@ -6,9 +6,13 @@ import "core:math/linalg"
 import "../geometry"
 import "detour"
 
-// NavMesh is a navigation mesh plus the query used for path and point lookups. The detour
-// fields are exposed for advanced use: navigation/crowd steers on detour_mesh.
+// NavMesh is a navigation mesh plus the query used for path and point lookups.
 NavMesh :: struct {
+  using _: NavMesh_State,
+}
+
+@(private)
+NavMesh_State :: struct {
   detour_mesh: detour.Nav_Mesh,
   query:       detour.Nav_Mesh_Query,
   filter:      detour.Query_Filter,

@@ -146,7 +146,7 @@ test_raycast_aligned_box_normals :: proc(t: ^testing.T) {
 
 @(test)
 test_raycast_cylinder :: proc(t: ^testing.T) {
-  cyl: Collider = CylinderCollider{radius = 1, height = 2}
+  cyl: Collider = CylinderCollider{radius = 1, half_height = 1}
   id := linalg.QUATERNIONF32_IDENTITY
   // Side wall
   tt, n, hit := raycast_collider({origin = {-5, 0, 0}, direction = {1, 0, 0}}, &cyl, {}, id, 100)

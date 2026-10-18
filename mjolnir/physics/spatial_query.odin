@@ -121,7 +121,7 @@ raycast_collider :: proc(
   case BoxCollider:
     t, local_normal, hit = raycast_local_box(local, shape.half_extents)
   case CylinderCollider:
-    t, local_normal, hit = raycast_local_cylinder(local, shape.radius, shape.height)
+    t, local_normal, hit = raycast_local_cylinder(local, shape.radius, shape.half_height)
   }
   if !hit || t > max_dist do return 0, {}, false
   return t, geometry.qmv(rotation, local_normal), true
@@ -148,13 +148,12 @@ raycast_local_box :: proc(
 @(private = "file")
 raycast_local_cylinder :: proc(
   ray: geometry.Ray,
-  radius, height: f32,
+  radius, half_h: f32,
 ) -> (
   t: f32,
   normal: [3]f32,
   hit: bool,
 ) {
-  half_h := height * 0.5
   r2 := radius * radius
   if linalg.length2(ray.origin.xz) <= r2 && math.abs(ray.origin.y) <= half_h {
     return 0, -linalg.normalize(ray.direction), true

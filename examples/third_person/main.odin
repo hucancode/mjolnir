@@ -23,11 +23,12 @@ import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 
+DEBUG :: #config(DEBUG, false)
 CREDITS :: "Characters & props: KayKit by Kay Lousberg (CC0)   Particles: Kenney (CC0)"
 
 ARENA :: 14
 BODY_RADIUS :: 0.5
-BODY_HEIGHT :: 2.4
+BODY_HALF_HEIGHT :: 1.2
 JUMP_SPEED :: 8
 REACH :: 2.2
 SIGHT :: 16
@@ -262,6 +263,19 @@ Enemy :: struct {
   strike:      f32,
   repath:      f32,
   dying:       f32,
+  trace:       [8]Trace,
+  traced:      int,
+}
+
+TRACE_COLORS := [Status][4]u8 {
+  .FAILURE = {170, 170, 180, 255},
+  .SUCCESS = {120, 230, 120, 255},
+  .RUNNING = {250, 210, 80, 255},
+}
+
+Trace :: struct {
+  name:   string,
+  status: Status,
 }
 
 Pickup :: struct {
@@ -301,6 +315,8 @@ App :: struct {
   gui:          ui.UI,
   panel:        Panel,
   orbit:        render.Orbit,
+  debug:        bool,
+  bodies:       [dynamic]physics.BodyHandle,
   textures:     [Effect]render.TextureHandle,
   emitters:     [Effect]render.EmitterHandle,
   heroes:       [len(HEROES)]gltf.Model,
@@ -334,7 +350,10 @@ Status :: enum {
   RUNNING,
 }
 
-Leaf :: proc(app: ^App, e: ^Enemy) -> Status
+Leaf :: struct {
+  name: string,
+  run:  proc(app: ^App, e: ^Enemy) -> Status,
+}
 Sequence :: distinct []Behavior
 Selector :: distinct []Behavior
 Behavior :: union {
@@ -344,30 +363,31 @@ Behavior :: union {
 }
 
 MELEE := Behavior(Selector{
-  Sequence{is_dead, die},
-  Sequence{in_range, attack},
-  Sequence{sees_player, chase},
-  patrol,
+  Sequence{Leaf{"is_dead", is_dead}, Leaf{"die", die}},
+  Sequence{Leaf{"in_range", in_range}, Leaf{"attack", attack}},
+  Sequence{Leaf{"sees_player", sees_player}, Leaf{"chase", chase}},
+  Leaf{"patrol", patrol},
 })
 
 RANGED := Behavior(Selector{
-  Sequence{is_dead, die},
-  Sequence{too_close, retreat},
-  Sequence{in_range, attack},
-  Sequence{sees_player, chase},
-  patrol,
+  Sequence{Leaf{"is_dead", is_dead}, Leaf{"die", die}},
+  Sequence{Leaf{"too_close", too_close}, Leaf{"retreat", retreat}},
+  Sequence{Leaf{"in_range", in_range}, Leaf{"attack", attack}},
+  Sequence{Leaf{"sees_player", sees_player}, Leaf{"chase", chase}},
+  Leaf{"patrol", patrol},
 })
 
 BOSS := Behavior(Selector{
-  Sequence{is_dead, die},
-  Sequence{in_range, attack},
-  Sequence{enraged, charge},
-  chase,
+  Sequence{Leaf{"is_dead", is_dead}, Leaf{"die", die}},
+  Sequence{Leaf{"in_range", in_range}, Leaf{"attack", attack}},
+  Sequence{Leaf{"enraged", enraged}, Leaf{"charge", charge}},
+  Leaf{"chase", chase},
 })
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
+  app.debug = DEBUG
   w := &app.window
   if !platform.init(w, 1280, 720, "Third Person") do return
   if !render.init(&app.renderer, "Third Person", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
@@ -403,6 +423,7 @@ shutdown :: proc(app: ^App) {
   delete(app.pickups)
   delete(app.projectiles)
   delete(app.props)
+  delete(app.bodies)
   for &m in app.heroes do gltf.destroy(&m, &app.renderer)
   for &m in app.foes do gltf.destroy(&m, &app.renderer)
   for &pair in app.weapons do for &m in pair do gltf.destroy(&m, &app.renderer)
@@ -447,6 +468,7 @@ clear_scene :: proc(app: ^App) {
   clear(&app.pickups)
   clear(&app.projectiles)
   clear(&app.props)
+  clear(&app.bodies)
   crowd.shutdown(&app.crowd)
   nav.destroy(&app.navmesh)
   world.teardown(&app.scene)
@@ -492,13 +514,13 @@ build_level :: proc(app: ^App, level: int) {
     node := world.spawn(&app.scene, box.center)
     render.attach(&app.renderer, render.SlotHandle(node.index), render.primitive(&app.renderer, .CUBE, .GRAY))
     world.scale(&app.scene, node, box.half_extents)
-    physics.body_create(&app.phys, box.center, collider = physics.BoxCollider{half_extents = box.half_extents})
+    append(&app.bodies, physics.body_create(&app.phys, box.center, collider = physics.BoxCollider{half_extents = box.half_extents}))
     bake.append_triangles(&builder, render.positions(cube, context.temp_allocator), cube.indices, linalg.matrix4_from_trs_f32(box.center, 1, box.half_extents), is_obstacle = true)
   }
   for side in 0 ..< 4 {
     angle := f32(side) * math.PI * 0.5
     center := ARENA * [3]f32{math.cos(angle), 0, math.sin(angle)}
-    physics.body_create(&app.phys, center + {0, 2, 0}, collider = physics.BoxCollider{half_extents = {0.5 + abs(center.z), 2, 0.5 + abs(center.x)}})
+    append(&app.bodies, physics.body_create(&app.phys, center + {0, 2, 0}, collider = physics.BoxCollider{half_extents = {0.5 + abs(center.z), 2, 0.5 + abs(center.x)}}))
   }
   data, baked := bake.build(&builder, allocator = context.temp_allocator)
   if !baked || !nav.init(&app.navmesh, data) || !crowd.init(&app.crowd, 16, 1.2, &app.navmesh) {
@@ -523,14 +545,15 @@ build_level :: proc(app: ^App, level: int) {
   app.fireball = {mesh = app.renderer.builtin_meshes[.SPHERE], material = fire_material}
 
   hero := HEROES[app.hero]
-  start := [3]f32{0, BODY_HEIGHT / 2, 0}
+  start := [3]f32{0, BODY_HALF_HEIGHT, 0}
   p := &app.player
   p.node = world.spawn(&app.scene, start)
-  p.body = physics.body_create(&app.phys, start, collider = physics.CylinderCollider{radius = BODY_RADIUS, height = BODY_HEIGHT}, mass = 70, user = world.Handle(p.node))
+  p.body = physics.body_create(&app.phys, start, collider = physics.CylinderCollider{radius = BODY_RADIUS, half_height = BODY_HALF_HEIGHT}, mass = 70, user = world.Handle(p.node))
+  append(&app.bodies, p.body)
   params := physics.body_params(&app.phys, p.body)
   params.enable_rotation = false
   params.friction = 0
-  p.actor = actor_create(app, &app.heroes[app.hero], hero.attack, {0, -BODY_HEIGHT / 2, 0}, parent = p.node)
+  p.actor = actor_create(app, &app.heroes[app.hero], hero.attack, {0, -BODY_HALF_HEIGHT, 0}, parent = p.node)
   show_props(app, p.actor, hero.props)
   p.health = hero.health
   p.facing = math.PI
@@ -558,7 +581,7 @@ spawn_ground :: proc(app: ^App) {
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, ARENA * 2)
-  physics.body_create(&app.phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {ARENA, 0.5, ARENA}})
+  append(&app.bodies, physics.body_create(&app.phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {ARENA, 0.5, ARENA}}))
 }
 
 spawn_sun :: proc(app: ^App, intensity: f32) {
@@ -665,6 +688,7 @@ actor_stage :: proc(app: ^App, a: ^Actor) {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
+  if input.key_pressed(&app.input, .F1) do app.debug = !app.debug
   switch app.state {
   case .SELECT:
     update_select(app, dt)
@@ -705,13 +729,14 @@ update_play :: proc(app: ^App, dt: f32) {
   update_player(app, dt)
   physics.step(&app.phys, dt)
   world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
-  app.feet = physics.body(&app.phys, app.player.body).position - {0, BODY_HEIGHT / 2, 0}
+  app.feet = physics.body(&app.phys, app.player.body).position - {0, BODY_HALF_HEIGHT, 0}
   crowd.update(&app.crowd, dt)
   update_enemies(app, dt)
   update_projectiles(app, dt)
   update_pickups(app, dt)
   app.orbit.target = app.feet + {0, 1.8, 0}
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  if app.debug do draw_debug(app)
   if app.result_timer == 0 && len(app.enemies) == 0 && app.player.health > 0 {
     actor_play(&app.player, .CHEER)
     finish(app, true)
@@ -761,7 +786,7 @@ move_direction :: proc(app: ^App) -> [3]f32 {
 }
 
 on_ground :: proc(app: ^App) -> bool {
-  feet := physics.body(&app.phys, app.player.body).position - {0, BODY_HEIGHT / 2 + 0.01, 0}
+  feet := physics.body(&app.phys, app.player.body).position - {0, BODY_HALF_HEIGHT + 0.01, 0}
   return physics.raycast(&app.phys, geometry.Ray{origin = feet, direction = {0, -1, 0}}, 0.1, first_hit = true).hit
 }
 
@@ -823,6 +848,7 @@ update_enemies :: proc(app: ^App, dt: f32) {
     e.cooldown -= dt
     e.repath -= dt
     if e.health <= 0 do e.dying += dt
+    e.traced = 0
     if app.player.health > 0 || e.health <= 0 do tick(brain(e.kind), app, e)
     agent := crowd.agent(&app.crowd, e.agent)
     world.translate(&app.scene, e.model, agent.position)
@@ -883,7 +909,12 @@ brain :: proc(kind: EnemyKind) -> Behavior {
 tick :: proc(b: Behavior, app: ^App, e: ^Enemy) -> Status {
   switch node in b {
   case Leaf:
-    return node(app, e)
+    status := node.run(app, e)
+    if e.traced < len(e.trace) {
+      e.trace[e.traced] = {node.name, status}
+      e.traced += 1
+    }
+    return status
   case Sequence:
     for child in node do if status := tick(child, app, e); status != .SUCCESS do return status
     return .SUCCESS
@@ -1011,6 +1042,37 @@ update_pickups :: proc(app: ^App, dt: f32) {
 }
 
 
+draw_debug :: proc(app: ^App) {
+  for h in app.bodies {
+    body := physics.body(&app.phys, h) or_continue
+    draw_collider(app, body)
+  }
+  render.debug_circle(&app.renderer, app.feet + {0, 0.05, 0}, {0, 1, 0}, REACH, render.DEBUG_RED)
+  for &e in app.enemies {
+    agent := crowd.agent(&app.crowd, e.agent)
+    lift := [3]f32{0, 0.1, 0}
+    render.debug_circle(&app.renderer, agent.position + lift, {0, 1, 0}, agent.params.radius, render.DEBUG_YELLOW)
+    from := agent.position + lift
+    for corner in agent.corners[:agent.corner_count] {
+      render.debug_segment(&app.renderer, from, corner + lift, render.DEBUG_CYAN)
+      from = corner + lift
+    }
+  }
+}
+
+draw_collider :: proc(app: ^App, body: physics.Body) {
+  switch shape in body.collider {
+  case physics.BoxCollider:
+    render.debug_cube(&app.renderer, body.position, body.rotation, shape.half_extents, render.DEBUG_GREEN)
+  case physics.SphereCollider:
+    render.debug_sphere(&app.renderer, body.position, shape.radius, render.DEBUG_GREEN)
+  case physics.CylinderCollider:
+    up := linalg.quaternion_mul_vector3(body.rotation, [3]f32{0, shape.half_height, 0})
+    render.debug_circle(&app.renderer, body.position + up, up, shape.radius, render.DEBUG_GREEN)
+    render.debug_circle(&app.renderer, body.position - up, up, shape.radius, render.DEBUG_GREEN)
+  }
+}
+
 build_panel :: proc(app: ^App) {
   gui := &app.gui
   p := &app.panel
@@ -1098,12 +1160,17 @@ hud :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand) {
     text(commands, fmt.tprintf("%v %.0fs", power, time), {40, y}, 18, {140, 230, 140, 255})
     y += 24
   }
-  text(commands, "WASD run   Space jump   Left click attack   Right drag look", {40, y + 8}, 16, {200, 200, 210, 255})
+  text(commands, "WASD run   Space jump   Left click attack   Right drag look   F1 debug", {40, y + 8}, 16, {200, 200, 210, 255})
   for &e in app.enemies {
     if e.health <= 0 do continue
     head := enemy_position(app, &e) + {0, 2.4 * FOES[e.kind].scale, 0}
     point := render.world_to_screen(&app.renderer, head) or_continue
     bar(commands, point - {30, 0}, {60, 7}, e.health / FOES[e.kind].health, {230, 200, 60, 255})
+    if !app.debug do continue
+    for t, i in e.trace[:e.traced] {
+      color := TRACE_COLORS[t.status]
+      text(commands, fmt.tprintf("%s %v", t.name, t.status), point + {-30, -16 * f32(e.traced - i) - 4}, 13, color)
+    }
   }
 }
 

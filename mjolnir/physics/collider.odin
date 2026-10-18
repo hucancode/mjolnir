@@ -14,10 +14,10 @@ BoxCollider :: struct {
   half_extents: [3]f32,
 }
 
-// CylinderCollider is a cylinder whose axis is local Y.
+// CylinderCollider is a cylinder whose axis is local Y, half_height above and below its center.
 CylinderCollider :: struct {
-  radius: f32,
-  height: f32,
+  radius:      f32,
+  half_height: f32,
 }
 
 // Collider is the shape of a Body: sphere, box or cylinder.
@@ -41,7 +41,7 @@ collider_calculate_aabb :: proc(
     half_extents = sh.half_extents
   case CylinderCollider:
     // Conservative: the cylinder's bounding box
-    half_extents = {sh.radius, sh.height * 0.5, sh.radius}
+    half_extents = {sh.radius, sh.half_height, sh.radius}
   case:
     return {}
   }
@@ -56,7 +56,7 @@ collider_bounding_radius :: proc(self: ^Collider) -> f32 {
   case BoxCollider:
     return linalg.length(sh.half_extents)
   case CylinderCollider:
-    h := sh.height * 0.5
+    h := sh.half_height
     return math.sqrt(sh.radius * sh.radius + h * h)
   }
   return 0
@@ -70,7 +70,7 @@ collider_min_extent :: proc(self: ^Collider) -> f32 {
   case BoxCollider:
     return min(sh.half_extents.x, sh.half_extents.y, sh.half_extents.z) * 2.0
   case CylinderCollider:
-    return min(sh.radius, sh.height * 0.5) * 2.0
+    return min(sh.radius, sh.half_height) * 2.0
   }
   return 1.0
 }
@@ -88,7 +88,7 @@ collider_inv_inertia :: proc(self: ^Collider, inv_mass: f32) -> [3]f32 {
     return 3.0 * inv_mass / [3]f32{v.y + v.z, v.x + v.z, v.x + v.y}
   case CylinderCollider:
     r2 := sh.radius * sh.radius
-    inv_ix := 12.0 * inv_mass / (3.0 * r2 + sh.height * sh.height)
+    inv_ix := 12.0 * inv_mass / (3.0 * r2 + 4.0 * sh.half_height * sh.half_height)
     return {inv_ix, 2.0 * inv_mass / r2, inv_ix}
   }
   return inv_mass

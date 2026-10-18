@@ -31,7 +31,7 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
         }
 
         colliders := [3]Collider {
-          CylinderCollider{radius = 1.0, height = 2.0},
+          CylinderCollider{radius = 1.0, half_height = 1.0},
           BoxCollider{half_extents = {1.0, 1.0, 1.0}},
           SphereCollider{radius = 1.0},
         }

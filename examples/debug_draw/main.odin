@@ -93,7 +93,7 @@ update :: proc(app: ^App, dt: f32) {
   render.debug_aabb(&app.renderer, {-7, -1, -1}, {-5, 1, 1}, render.DEBUG_GREEN)
 
   rot := linalg.quaternion_angle_axis_f32(t, {0, 1, 0})
-  render.debug_cube(&app.renderer, {-2, 1, 0}, rotation = rot, size = {1.5, 1.5, 1.5}, color = render.DEBUG_MAGENTA)
+  render.debug_cube(&app.renderer, {-2, 1, 0}, rotation = rot, half_extents = 0.75, color = render.DEBUG_MAGENTA)
 
   r := 1.0 + 0.3 * math.sin(t * 2)
   render.debug_sphere(&app.renderer, {2, 1, 0}, radius = r, color = render.DEBUG_CYAN)

@@ -618,7 +618,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   when false {
     render.debug_sphere(&app.renderer, {0, 5, 0}, 5, render.DEBUG_WHITE, life = 5)
-    render.debug_cube(&app.renderer, {2, 3, 0}, size = {1, 1, 1}, color = render.DEBUG_CYAN, life = 5)
+    render.debug_cube(&app.renderer, {2, 3, 0}, half_extents = 0.5, color = render.DEBUG_CYAN, life = 5)
     render.debug_arrow(&app.renderer, {0, 0, 0}, {3, 3, 0}, render.DEBUG_YELLOW, life = 5)
     render.debug_axes(&app.renderer, {0, 0, 0}, scale = 2)
   }

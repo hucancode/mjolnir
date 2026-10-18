@@ -152,7 +152,7 @@ test_sphere_cylinder :: proc(
 ) {
   inv_rot := linalg.quaternion_inverse(rot_cylinder)
   local_sphere := geometry.qmv(inv_rot, pos_sphere - pos_cylinder)
-  half_height := cylinder.height * 0.5
+  half_height := cylinder.half_height
   radial := [3]f32{local_sphere.x, 0, local_sphere.z}
   radial_dist := linalg.length(radial)
   radial_dir := radial_dist > math.F32_EPSILON ? radial / radial_dist : [3]f32{1, 0, 0}
@@ -216,7 +216,7 @@ test_box_cylinder :: proc(
   hit: bool,
 ) {
   obb := geometry.Obb{center = pos_box, half_extents = box.half_extents, rotation = rot_box}
-  axis := geometry.qy(rot_cylinder) * (cylinder.height * 0.5)
+  axis := geometry.qy(rot_cylinder) * cylinder.half_height
   seg_start := pos_cylinder - axis
   seg_end := pos_cylinder + axis
   min_dist_sq := f32(math.F32_MAX)
@@ -260,8 +260,8 @@ test_cylinder_cylinder :: proc(
   penetration: f32,
   hit: bool,
 ) {
-  axis_a := geometry.qy(rot_a) * (cylinder_a.height * 0.5)
-  axis_b := geometry.qy(rot_b) * (cylinder_b.height * 0.5)
+  axis_a := geometry.qy(rot_a) * cylinder_a.half_height
+  axis_b := geometry.qy(rot_b) * cylinder_b.half_height
   p0_a := pos_a - axis_a
   p0_b := pos_b - axis_b
   d1 := 2 * axis_a
@@ -720,7 +720,7 @@ cylinder_cap_manifold :: proc(
   cyl_pos: [3]f32,
   cyl_rot: quaternion128,
   radius: f32,
-  height: f32,
+  half_height: f32,
   plane_point: [3]f32, // point on the opposing face plane
   plane_normal: [3]f32, // toward the cylinder
   margin: f32,
@@ -729,7 +729,7 @@ cylinder_cap_manifold :: proc(
   cap_dot := linalg.dot(axis, plane_normal)
   if math.abs(cap_dot) < 0.966 do return // cos(15°)
   cap_sign: f32 = cap_dot > 0 ? -1 : 1
-  cap_center := cyl_pos + axis * (cap_sign * height * 0.5)
+  cap_center := cyl_pos + axis * (cap_sign * half_height)
   t1 := linalg.normalize(linalg.orthogonal(axis))
   t2 := linalg.cross(axis, t1)
   points: [MAX_MANIFOLD_POINTS]ManifoldPoint
@@ -764,7 +764,7 @@ collide_box_cylinder :: proc(
   m = point_manifold(test_box_cylinder(pos_box, rot_box, box, pos_cyl, rot_cyl, cyl)) or_return
   // Cap resting on a box face: replace the point with penetrating rim samples
   // against the face plane through the box-side point.
-  cylinder_cap_manifold(&m, pos_cyl, rot_cyl, cyl.radius, cyl.height, m.points[0].point, m.normal, margin)
+  cylinder_cap_manifold(&m, pos_cyl, rot_cyl, cyl.radius, cyl.half_height, m.points[0].point, m.normal, margin)
   return m, true
 }
 
@@ -789,14 +789,14 @@ collide_cylinders :: proc(
     radial_vec := to_b - axis_a * axial_dist
     radial_dist := linalg.length(radial_vec)
     radius_sum := cyl_a.radius + cyl_b.radius
-    half_sum := (cyl_a.height + cyl_b.height) * 0.5
+    half_sum := cyl_a.half_height + cyl_b.half_height
     radial_pen := radius_sum - radial_dist
     axial_pen := half_sum - math.abs(axial_dist)
     if radial_pen < -margin || axial_pen < -margin do return
     if axial_pen < radial_pen {
       normal := axial_dist > 0 ? axis_a : -axis_a
       r := min(cyl_a.radius, cyl_b.radius)
-      cap_a := pos_a + normal * (cyl_a.height * 0.5)
+      cap_a := pos_a + normal * cyl_a.half_height
       center := cap_a - normal * (axial_pen * 0.5)
       if radial_dist > math.F32_EPSILON {
         // Overlap circle centers differ; bias toward the overlap region
@@ -818,10 +818,10 @@ collide_cylinders :: proc(
       return
     }
     radial_dir := radial_dist > math.F32_EPSILON ? radial_vec / radial_dist : [3]f32{1, 0, 0}
-    min_a := -cyl_a.height * 0.5
-    max_a := cyl_a.height * 0.5
-    min_b := axial_dist - cyl_b.height * 0.5
-    max_b := axial_dist + cyl_b.height * 0.5
+    min_a := -cyl_a.half_height
+    max_a := cyl_a.half_height
+    min_b := axial_dist - cyl_b.half_height
+    max_b := axial_dist + cyl_b.half_height
     lo := max(min_a, min_b)
     hi := min(max_a, max_b)
     contact_radial := pos_a + radial_dir * (cyl_a.radius - radial_pen * 0.5)

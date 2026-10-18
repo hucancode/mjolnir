@@ -115,20 +115,21 @@ debug_aabb :: proc(
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
-  debug_cube(self, (lo + hi) * 0.5, 1, hi - lo, color, life, bypass_depth)
+  debug_cube(self, (lo + hi) * 0.5, 1, (hi - lo) * 0.5, color, life, bypass_depth)
 }
 
-// debug_cube queues a wireframe cube at center with the given rotation and size.
+// debug_cube queues a wireframe box at center with the given rotation, half_extents along each
+// axis (as physics.BoxCollider and a cube primitive scaled by them).
 debug_cube :: proc(
   self: ^Renderer,
   center: [3]f32,
   rotation: quaternion128 = 1,
-  size: [3]f32 = {1, 1, 1},
+  half_extents: [3]f32 = {0.5, 0.5, 0.5},
   color: [4]f32 = DEBUG_WHITE,
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
-  h := size * 0.5
+  h := half_extents
   base := [8][3]f32 {
     {-h.x, -h.y, -h.z},
     { h.x, -h.y, -h.z},

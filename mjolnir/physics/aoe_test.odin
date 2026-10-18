@@ -126,7 +126,7 @@ test_physics_cylinder_overlap :: proc(t: ^testing.T) {
   phys: World
   init(&phys, thread_count = 1)
   defer shutdown(&phys)
-  body_handle := body_create(&phys, {}, collider = CylinderCollider{radius = 2.0, height = 4.0}, mass = 1.0)
+  body_handle := body_create(&phys, {}, collider = CylinderCollider{radius = 2.0, half_height = 2.0}, mass = 1.0)
   step(&phys, 0.0)
   results := make([dynamic]BodyHandle)
   defer delete(results)

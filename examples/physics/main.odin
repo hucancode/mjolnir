@@ -94,7 +94,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     collider: physics.Collider
     piece_mesh, piece_material := rand_cylinder_mesh, white
     switch i % 3 {
-    case 0: collider = physics.CylinderCollider{radius = 1.0, height = 2.0}
+    case 0: collider = physics.CylinderCollider{radius = 1.0, half_height = 1.0}
     case 1: collider = physics.BoxCollider{half_extents = {1.0, 1.0, 1.0}}; piece_mesh, piece_material = cube_mesh, app.renderer.builtin_materials[.RED]
     case 2: collider = physics.SphereCollider{radius = 1.0}; piece_mesh = rand_sphere_mesh
     }
