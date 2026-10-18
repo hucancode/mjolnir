@@ -1,11 +1,13 @@
 package debugui
 
+import "../anchor"
 import "../input"
 import "../render"
 import "core:math"
 import mu "vendor:microui"
 
 // Context is the debug UI: build widgets on its microui context (mu) between begin and end.
+// Widgets sit in a reference frame (1024x768 by default) that feed fits to the window.
 Context :: struct {
   mu:      mu.Context,
   using _: Context_State,
@@ -15,6 +17,11 @@ Context :: struct {
 Context_State :: struct {
   // microui's builtin font and icon atlas
   atlas:    render.TextureHandle,
+  // the frame widgets are laid out in, and it fitted to the window on the last feed
+  reference: [2]f32,
+  frame:    anchor.Frame,
+  // the frame size each window was last placed in
+  windows:  map[mu.Id][2]f32,
   // buttons pressed over the UI, owned by it through release
   buttons:  input.ButtonSet,
   // begin opened mu this tick; end closes it
@@ -24,10 +31,13 @@ Context_State :: struct {
   commands: [dynamic]render.RenderCommand,
 }
 
-// init prepares the debug UI and uploads its atlas to r. Call it once render.ready, before
-// render.setup if the application tears maps down, so the atlas outlives render.teardown.
-init :: proc(self: ^Context, r: ^render.Renderer) -> bool {
+// init prepares the debug UI, laid out in a `reference` frame, and uploads its atlas to r. Call
+// it once render.ready, before render.setup if the application tears maps down, so the atlas
+// outlives render.teardown.
+init :: proc(self: ^Context, r: ^render.Renderer, reference := [2]f32{1024, 768}) -> bool {
   mu.init(&self.mu)
+  self.reference = reference
+  self.frame = anchor.frame(reference, reference)
   self.mu.text_width = mu.default_atlas_text_width
   self.mu.text_height = mu.default_atlas_text_height
   ok: bool
@@ -37,10 +47,46 @@ init :: proc(self: ^Context, r: ^render.Renderer) -> bool {
 
 // shutdown frees what the debug UI holds; render.shutdown frees its atlas.
 shutdown :: proc(self: ^Context) {
+  delete(self.windows)
   delete(self.vertices)
   delete(self.indices)
   delete(self.commands)
   self^ = {}
+}
+
+// window opens a microui window, as mu.window does, with `rect` in the reference frame: it
+// starts there, and when the window size changes it holds to the edges `pin` says
+// (one choice per axis; stretch widens it). Close it with end_window, which `if` blocks do for you.
+@(deferred_in_out = window_end)
+window :: proc(self: ^Context, title: string, rect: mu.Rect, pin: anchor.Anchor = {}, opt := mu.Options{}) -> bool {
+  id := mu.get_id(&self.mu, title)
+  from, placed := self.windows[id]
+  r := rect
+  if !placed {
+    f := anchor.fit(to_anchor_rect(rect), pin, self.reference, self.frame.size)
+    r = from_anchor_rect(f)
+  } else if from != self.frame.size {
+    if cnt := mu.get_container(&self.mu, title, opt); cnt != nil {
+      cnt.rect = from_anchor_rect(anchor.fit(to_anchor_rect(cnt.rect), pin, from, self.frame.size))
+    }
+  }
+  self.windows[id] = self.frame.size
+  return mu.begin_window(&self.mu, title, r, opt)
+}
+
+@(private = "file")
+window_end :: proc(self: ^Context, _: string, _: mu.Rect, _: anchor.Anchor, _: mu.Options, ok: bool) {
+  if ok do mu.end_window(&self.mu)
+}
+
+@(private = "file")
+to_anchor_rect :: proc(r: mu.Rect) -> anchor.Rect {
+  return {{f32(r.x), f32(r.y)}, {f32(r.w), f32(r.h)}}
+}
+
+@(private = "file")
+from_anchor_rect :: proc(r: anchor.Rect) -> mu.Rect {
+  return {i32(math.round(r.pos.x)), i32(math.round(r.pos.y)), i32(math.round(r.size.x)), i32(math.round(r.size.y))}
 }
 
 // begin returns the microui context for this tick, opening it on the first call. Build
@@ -96,7 +142,7 @@ end :: proc(self: ^Context) -> []render.RenderCommand {
       // a zero clip would mean the whole framebuffer to render: skip what it hides
       hidden = c.rect.w <= 0 || c.rect.h <= 0
       append(&runs, Run{
-        clip = [4]f32{f32(c.rect.x), f32(c.rect.y), f32(c.rect.w), f32(c.rect.h)},
+        clip = [4]f32{f32(c.rect.x), f32(c.rect.y), f32(c.rect.w), f32(c.rect.h)} * self.frame.scale,
         first_vertex = len(self.vertices),
         first_index = len(self.indices),
       })
@@ -126,8 +172,8 @@ end :: proc(self: ^Context) -> []render.RenderCommand {
 @(private = "file")
 quad :: proc(self: ^Context, dst, src: mu.Rect, color: mu.Color) {
   atlas_size := [2]f32{mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT}
-  p0 := [2]f32{f32(dst.x), f32(dst.y)}
-  p1 := [2]f32{f32(dst.x + dst.w), f32(dst.y + dst.h)}
+  p0 := [2]f32{f32(dst.x), f32(dst.y)} * self.frame.scale
+  p1 := [2]f32{f32(dst.x + dst.w), f32(dst.y + dst.h)} * self.frame.scale
   uv0 := [2]f32{f32(src.x), f32(src.y)} / atlas_size
   uv1 := [2]f32{f32(src.x + src.w), f32(src.y + src.h)} / atlas_size
   rgba := [4]u8{color.r, color.g, color.b, color.a}
@@ -141,13 +187,16 @@ quad :: proc(self: ^Context, dst, src: mu.Rect, color: mu.Color) {
   append(&self.indices, base, base + 1, base + 2, base, base + 2, base + 3)
 }
 
-// feed passes one input tick to the debug UI and captures the mouse and keyboard it uses
+// feed passes one input tick to the debug UI, fits its reference frame to r's window and
+// captures the mouse and keyboard it uses
 // (input.State.mouse_captured / keyboard_captured). Call it first among input consumers on
 // the update tick.
-feed :: proc(self: ^Context, s: ^input.State) {
+feed :: proc(self: ^Context, s: ^input.State, r: ^render.Renderer) {
   ctx := &self.mu
   hovered := ctx.hover_root != nil
-  x, y := i32(math.round(s.cursor.x)), i32(math.round(s.cursor.y))
+  self.frame = anchor.frame(self.reference, render.window_size(r))
+  cursor := anchor.to_reference(s.cursor, self.frame)
+  x, y := i32(math.round(cursor.x)), i32(math.round(cursor.y))
   mu.input_mouse_move(ctx, x, y)
   for b in input.MouseButton {
     // a press over the debug UI belongs to it until the tick after release

@@ -58,7 +58,7 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
   spawn_primitive(app, .CUBE,     .RED,    {-2.5, 0.5, 0})
   spawn_primitive(app, .SPHERE,   .GREEN,  {2.5, 0.5, 0},  0.7)
   spawn_primitive(app, .CYLINDER, .BLUE,   {0, 1.0, 2.5},  0.5)
@@ -80,7 +80,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
-  debugui.feed(&app.debug, &app.input)
+  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   app.time += dt
@@ -102,7 +102,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "Ortho Main", {700, 20, 280, 280}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Ortho Main", {700, 20, 280, 280}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.label(ctx, "Ortho width"); mu.slider(ctx, &ortho_width, 2.0, 30.0)
     mu.label(ctx, "Ortho height"); mu.slider(ctx, &ortho_height, 2.0, 30.0)
     mu.label(ctx, "Cam height"); mu.slider(ctx, &cam_height, 2.0, 30.0)

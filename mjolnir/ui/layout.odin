@@ -1,5 +1,6 @@
 package ui
 
+import "../anchor"
 import "../containers"
 import "../font"
 import "core:slice"
@@ -12,10 +13,14 @@ ALIGN_FACTOR := [Align]f32 {
   .END    = 1,
 }
 
-// layout lays every node out in `viewport`, where the roots sit as absolute
-// children: a fixed sequence of passes over the nodes in tree order. Widths
-// resolve before text wraps, heights after.
-layout :: proc(self: ^UI, viewport: Rect, f: ^font.Font) {
+// layout lays every node out in `reference`, a frame of your choosing (1024x768, say), then
+// fits it to `window`: scaled up or down until one axis matches, the other axis's leftover
+// space going to the roots by their pin. Rects, clips and lines come out in window pixels.
+// A fixed sequence of passes over the nodes in tree order: widths resolve before text wraps,
+// heights after.
+layout :: proc(self: ^UI, reference, window: [2]f32, f: ^font.Font) {
+  self.reference = reference
+  self.frame = anchor.frame(reference, window)
   n := int(self.slots.high_water)
   resize(&self.rects, n)
   resize(&self.clips, n)
@@ -27,11 +32,19 @@ layout :: proc(self: ^UI, viewport: Rect, f: ^font.Font) {
   resize(&self.child_count, n)
   build_tree(self)
   fit_axis(self, f, 0)
-  size_axis(self, viewport, 0)
+  size_axis(self, 0)
   wrap_text(self, f)
   fit_axis(self, f, 1)
-  size_axis(self, viewport, 1)
-  place(self, viewport, f)
+  size_axis(self, 1)
+  place(self, f)
+  to_window(self)
+}
+
+// A root's rect fitted to the window frame by its pin.
+@(private = "file")
+fit_root :: proc(self: ^UI, i: u32) -> Rect {
+  nd := item(self, i)
+  return anchor.fit({nd.offset, self.rects[i].size}, nd.pin, self.reference, self.frame.size)
 }
 
 @(private = "file")
@@ -164,14 +177,17 @@ resolve :: proc(self: ^UI, i: u32, axis: int, space: f32) -> f32 {
   return 0
 }
 
-// Sizes along `axis`, parents before children. Along a parent's flow axis
+// Sizes along `axis`, parents before children; roots stretch by their pin. Along a parent's flow axis
 // its GROW children share what the others leave, by weight; across it, and
 // for absolute children, GROW fills the content box.
 @(private = "file")
-size_axis :: proc(self: ^UI, viewport: Rect, axis: int) {
+size_axis :: proc(self: ^UI, axis: int) {
   for i in self.topo {
     nd := item(self, i)
-    if parent_of(self, i) < 0 do self.rects[i].size[axis] = resolve(self, i, axis, viewport.size[axis])
+    if parent_of(self, i) < 0 {
+      self.rects[i].size[axis] = resolve(self, i, axis, self.reference[axis])
+      self.rects[i].size[axis] = fit_root(self, i).size[axis]
+    }
     space := self.rects[i].size[axis] - padding(nd, axis)
     kids := children_of(self, i)
     for c in kids do self.rects[c].size[axis] = resolve(self, c, axis, space)
@@ -238,13 +254,13 @@ wrap_text :: proc(self: ^UI, f: ^font.Font) {
 // children; then the shown nodes into draw_order by depth, tree order
 // breaking ties.
 @(private = "file")
-place :: proc(self: ^UI, viewport: Rect, f: ^font.Font) {
+place :: proc(self: ^UI, f: ^font.Font) {
   for i in self.topo {
     nd := item(self, i)
     r := &self.rects[i]
     if parent_of(self, i) < 0 {
-      r.pos = viewport.pos + (viewport.size - r.size) * nd.anchor + nd.offset
-      self.clips[i] = viewport
+      r.pos = fit_root(self, i).pos
+      self.clips[i] = {{}, self.frame.size}
       self.shown[i] = !nd.hidden
       self.depth_z[i] = nd.z
     }
@@ -299,6 +315,22 @@ place :: proc(self: ^UI, viewport: Rect, f: ^font.Font) {
   for key in keys {
     i := shown[u32(key)]
     append(&self.draw_order, NodeHandle(containers.slots_handle(&self.slots, i)))
+  }
+}
+
+// Rects, clips and lines from reference units to window pixels.
+@(private = "file")
+to_window :: proc(self: ^UI) {
+  s := self.frame.scale
+  for i in self.topo {
+    self.rects[i] = anchor.to_window(self.rects[i], self.frame)
+    self.clips[i] = anchor.to_window(self.clips[i], self.frame)
+    size := item(self, i).font_size * s
+    for &line in self.lines[self.line_ranges[i][0]:][:self.line_ranges[i][1]] {
+      line.pos *= s
+      line.width *= s
+      line.size = size
+    }
   }
 }
 

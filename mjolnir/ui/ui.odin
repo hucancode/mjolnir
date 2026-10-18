@@ -1,5 +1,6 @@
 package ui
 
+import "../anchor"
 import "../containers"
 import "core:strings"
 
@@ -39,10 +40,14 @@ Position :: enum u8 {
   ABSOLUTE, // placed by anchor and offset in the parent's rect
 }
 
+// Pin is how a root holds to the window edges (anchor.Anchor): {.RIGHT, .BOTTOM}, or
+// {.STRETCH, .STRETCH} to fill it.
+Pin :: anchor.Anchor
+
 // Node is one UI node. The application sets its layout inputs; ui writes its
 // rect, clip and text lines on layout.
 Node :: struct {
-  // the node this one sits in; none for a root, which sits in the viewport
+  // the node this one sits in; none for a root, which sits in the reference frame at `offset`
   parent:      NodeHandle,
   size:        [2]Size,
   padding:     [4]f32, // left, top, right, bottom
@@ -51,10 +56,13 @@ Node :: struct {
   // where the flow children (and text lines) sit in the content box, per axis
   align:       [2]Align,
   position:    Position,
-  // ABSOLUTE: the point at `anchor` (0..1 of each size) of this node sits on
+  // ABSOLUTE (not roots, see pin): the point at `anchor` (0..1 of each size) of this node sits on
   // the same point of the parent's rect; {1, 0} pins the top-right corners
   anchor:      [2]f32,
-  // added to the placed position, flow or absolute
+  // roots: where the node holds when the window differs from the reference frame, one choice
+  // per axis (stretch widens it). Default is top-left.
+  pin:         Pin,
+  // added to the placed position, flow or absolute; for a root, its top-left in the reference frame
   offset:      [2]f32,
   // children are clipped to this node's rect
   clip:        bool,
@@ -75,17 +83,16 @@ Node :: struct {
   wrap:        bool,
 }
 
-// Rect is an axis-aligned rectangle: top-left `pos` and `size`, in pixels.
-Rect :: struct {
-  pos, size: [2]f32,
-}
+// Rect is an axis-aligned rectangle: top-left `pos` and `size`.
+Rect :: anchor.Rect
 
 // Line is one laid-out line of a text node: text[start:end], `width` wide, its
-// top-left at `pos`.
+// top-left at `pos`, to draw at font size `size`, all in window pixels.
 Line :: struct {
   start, end: int,
   pos:        [2]f32,
   width:      f32,
+  size:       f32,
 }
 
 // UI is a node tree with its layout output and input state. Set up with init, free with shutdown.
@@ -99,6 +106,8 @@ UI :: struct {
 UI_State :: struct {
   // indexed by NodeHandle.index; slots says which are live
   nodes:        []Node,
+  reference:    [2]f32, // the reference frame of the last layout
+  frame:        anchor.Frame, // ...fitted to the window
   slots:        containers.Slots,
   next_order:   i32,
   rects:        [dynamic]Rect,
@@ -190,7 +199,7 @@ set_text :: proc(self: ^UI, handle: NodeHandle, text: string) {
   n.text = strings.clone(text)
 }
 
-// rect returns the laid-out rect of a live node; zero before its first layout.
+// rect returns the laid-out rect of a live node in window pixels; zero before its first layout.
 rect :: proc(self: ^UI, handle: NodeHandle) -> Rect {
   return self.rects[handle.index] if int(handle.index) < len(self.rects) else {}
 }

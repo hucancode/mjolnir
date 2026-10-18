@@ -54,7 +54,7 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
 
   half := f32(GRID - 1) * 0.5 * SPACING
   render.camera_look_at(render.main_camera(&app.renderer), {0, 0, half * 2.4}, {0, 0, 0})
@@ -109,7 +109,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
-  debugui.feed(&app.debug, &app.input)
+  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
@@ -138,14 +138,14 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "Environment", {700, 20, 280, 180}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Environment", {700, 20, 280, 180}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.label(ctx, "Sun intensity")
     mu.slider(ctx, &sun_intensity, 0.0, 5.0)
     mu.label(ctx, "IBL intensity")
     mu.slider(ctx, &ibl_intensity, 0.0, 2.0)
     mu.checkbox(ctx, "Skybox", &skybox_on)
   }
-  if mu.window(ctx, "PBR Range", {700, 210, 280, 220}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "PBR Range", {700, 210, 280, 220}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.label(ctx, "Metallic min (rows bottom)")
     mu.slider(ctx, &metallic_min, 0.0, 1.0)
     mu.label(ctx, "Metallic max (rows top)")

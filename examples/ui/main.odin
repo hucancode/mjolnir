@@ -37,6 +37,7 @@ TEXT_COLOR :: [4]u8{235, 235, 245, 255}
 BUTTON_COLOR :: [4]u8{200, 80, 80, 255}
 BUTTON_HOVER :: [4]u8{230, 120, 90, 255}
 BUTTON_PRESSED :: [4]u8{110, 200, 110, 255}
+REFERENCE :: [2]f32{900, 700}
 LIST_ITEMS :: 12
 LIST_ITEM_HEIGHT :: 28
 LIST_GAP :: 4
@@ -113,14 +114,15 @@ build_ui :: proc(app: ^App) {
     app.looks[item] = {{50, 60, 90, 255} if i % 2 == 0 else {40, 48, 72, 255}, render.NO_TEXTURE}
     text(app, item, fmt.tprintf("Item %d", i + 1))
   }
-  hint := ui.node_create(&app.gui, {position = .ABSOLUTE, anchor = {1, 0}, offset = {-16, 16}, padding = {10, 6, 10, 6}})
+  screen := ui.node_create(&app.gui, {size = {{.PERCENT, 1}, {.PERCENT, 1}}, pin = {.STRETCH, .STRETCH}})
+  hint := ui.node_create(&app.gui, {parent = screen, position = .ABSOLUTE, anchor = {1, 0}, offset = {-16, 16}, padding = {10, 6, 10, 6}})
   app.looks[hint] = {{0, 0, 0, 160}, render.NO_TEXTURE}
   text(app, hint, "drag: orbit   wheel over list: scroll", 14)
   if star_texture, ok := render.texture_create(&app.renderer, #load("../../assets/gold-star.png")); ok {
-    image := ui.node_create(&app.gui, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, size = {{.FIXED, 128}, {.FIXED, 128}}})
+    image := ui.node_create(&app.gui, {parent = screen, position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, size = {{.FIXED, 128}, {.FIXED, 128}}})
     app.looks[image] = {{255, 255, 255, 255}, star_texture}
   }
-  app.star = ui.node_create(&app.gui, {position = .ABSOLUTE, anchor = {0, 1}, offset = {16, -16}, size = {{.FIXED, 140}, {.FIXED, 140}}})
+  app.star = ui.node_create(&app.gui, {parent = screen, position = .ABSOLUTE, anchor = {0, 1}, offset = {16, -16}, size = {{.FIXED, 140}, {.FIXED, 140}}})
 }
 
 should_close :: proc(app: ^App) -> bool {
@@ -133,7 +135,7 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   size := platform.framebuffer_size(&app.window)
   dpi := platform.dpi_scale(&app.window)
-  ui.layout(&app.gui, {size = {f32(size.x), f32(size.y)} / dpi}, &app.font)
+  ui.layout(&app.gui, REFERENCE, {f32(size.x), f32(size.y)} / dpi, &app.font)
   ui.update_input(&app.gui, &app.input)
   if ui.clicked(&app.gui, app.button) {
     app.clicks += 1
@@ -175,7 +177,7 @@ draw_hud :: proc(app: ^App) {
     }
     n := ui.node(&app.gui, h)
     for line in ui.lines(&app.gui, h) {
-      text := render.DrawTextCommand{text = n.text[line.start:line.end], position = line.pos, size = n.font_size, color = TEXT_COLOR}
+      text := render.DrawTextCommand{text = n.text[line.start:line.end], position = line.pos, size = line.size, color = TEXT_COLOR}
       append(&commands, render.RenderCommand{text, i32(z), clip})
     }
   }

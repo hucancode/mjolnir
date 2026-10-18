@@ -78,7 +78,7 @@ frame :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer, {1100, 760}) do return .FAIL
   render.setup(&app.renderer)
   app.current = -1
   app.requested = -1
@@ -130,7 +130,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
-  debugui.feed(&app.debug, &app.input)
+  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
@@ -168,7 +168,7 @@ run_test_step :: proc(app: ^App) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "Level Management", {20, 20, 320, 340}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Level Management", {20, 20, 320, 340}, {}, {.NO_CLOSE}) {
     levels := LEVELS
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, fmt.tprintf("Level:     %s", levels[app.current].name if app.current >= 0 else "none"))

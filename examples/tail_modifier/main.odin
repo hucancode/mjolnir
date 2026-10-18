@@ -83,7 +83,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer, {900, 700}) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {0, 4, -4}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
   ground := world.spawn(&app.scene, {0, GROUND_Y, 0})
@@ -110,7 +110,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
-  debugui.feed(&app.debug, &app.input)
+  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
@@ -168,7 +168,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "Tail Modifier", {20, 300, 320, 320}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Tail Modifier", {20, 20, 320, 320}, {}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Auto animate", &app.auto_animate)
     if app.auto_animate {

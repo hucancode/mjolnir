@@ -88,7 +88,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer, {800, 600}) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
 
@@ -130,7 +130,7 @@ update :: proc(app: ^App, dt: f32) {
   defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.window, &app.input)
-  debugui.feed(&app.debug, &app.input)
+  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
@@ -186,7 +186,7 @@ cross_fade_walk_run :: proc(app: ^App) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "Animation Layering", {480, 20, 320, 490}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Animation Layering", {480, 20, 320, 490}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Base layer (Walk <-> Run)")
     mu.checkbox(ctx, "Auto blend", &app.auto_blend)

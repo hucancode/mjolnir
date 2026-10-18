@@ -72,7 +72,7 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer, {1280, 800}) do return .FAIL
   app.renderer.skybox_intensity = 0
   render.camera_look_at(render.main_camera(&app.renderer), {0, 5, 10}, {0, 2, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 2, 0})
@@ -114,7 +114,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
-  debugui.feed(&app.debug, &app.input)
+  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
@@ -137,7 +137,7 @@ debug_ui :: proc(app: ^App) {
   em := render.emitter(&app.renderer, app.emitter)
   if em == nil do return
 
-  if mu.window(ctx, "Texture", {20, 20, 220, 760}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Texture", {20, 20, 220, 760}, {}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Enabled", &app.enabled)
     for file, i in TEXTURE_FILES {
@@ -146,7 +146,7 @@ debug_ui :: proc(app: ^App) {
     }
   }
 
-  if mu.window(ctx, "Emission & Lifetime", {900, 20, 320, 600}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Emission & Lifetime", {900, 20, 320, 600}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Emission rate")
     mu.slider(ctx, &app.emission_rate, 1, 300)

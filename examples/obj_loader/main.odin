@@ -57,8 +57,7 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
-
+  if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
 
   app.material = render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1}))
 
@@ -98,7 +97,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
-  debugui.feed(&app.debug, &app.input)
+  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
@@ -120,7 +119,7 @@ show_model :: proc(app: ^App, index: int) {
   render.attach(&app.renderer, render.SlotHandle(app.display.index), render.MeshAttachment{mesh = model.mesh, material = app.material, cast_shadow = true})
   world.translate(&app.scene, app.display, -center)
 
-  cam_dist := radius * 1.8
+  cam_dist := radius
   cam := render.main_camera(&app.renderer)
   render.camera_set_perspective(cam, 1.2, max(0.1, cam_dist * 0.01), cam_dist * 5.0)
   render.camera_look_at(cam, {cam_dist, cam_dist * 0.7, cam_dist}, {0, 0, 0})
@@ -134,7 +133,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "OBJ Loader", {720, 20, 260, 200}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "OBJ Loader", {720, 20, 260, 200}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     labels := OBJ_LABELS
     mu.label(ctx, fmt.tprintf("Current: %s", labels[app.current]))
     mu.label(ctx, "")

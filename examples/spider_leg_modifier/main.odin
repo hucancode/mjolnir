@@ -108,7 +108,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer, {900, 700}) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {0, 30, 15}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
 
@@ -150,7 +150,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
-  debugui.feed(&app.debug, &app.input)
+  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
@@ -220,7 +220,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "Spider Legs", {500, 20, 340, 480}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Spider Legs", {500, 20, 340, 480}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Body motion")
     mu.checkbox(ctx, "Animate body", &app.animate_body)

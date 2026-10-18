@@ -69,7 +69,7 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
-  if !debugui.init(&app.debug, r) do return .FAIL
+  if !debugui.init(&app.debug, r, {1000, 700}) do return .FAIL
   render.camera_look_at(render.main_camera(r), {0, 5, 8}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(r), {0, 0, 0})
 
@@ -114,7 +114,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
-  debugui.feed(&app.debug, &app.input)
+  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
@@ -201,7 +201,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "Cartoon Snake", {20, 20, 260, 220}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Cartoon Snake", {20, 20, 260, 220}, {}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Up / W slithers, Left / Right turn")
     mu.label(ctx, "Speed"); mu.slider(ctx, &cruise_speed, 0.5, 5)

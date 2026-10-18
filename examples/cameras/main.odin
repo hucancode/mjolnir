@@ -58,7 +58,7 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {0, 6, 12}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
   orbit_distance = mu.Real(app.orbit.distance)
@@ -100,7 +100,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
-  debugui.feed(&app.debug, &app.input)
+  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   app.time += dt
@@ -127,7 +127,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "Cameras", {700, 20, 280, 360}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Cameras", {700, 20, 280, 360}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.label(ctx, "Controller:")
     mu.layout_row(ctx, {90, 90, 90}, 0)
     if .SUBMIT in mu.button(ctx, "Orbit")  do switch_mode(app, .ORBIT)

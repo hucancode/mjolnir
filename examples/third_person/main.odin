@@ -1071,7 +1071,8 @@ draw_collider :: proc(app: ^App, body: physics.Body) {
 build_panel :: proc(app: ^App) {
   gui := &app.gui
   p := &app.panel
-  p.root = ui.node_create(gui, {position = .ABSOLUTE, anchor = {0.5, 0.5}, direction = .COLUMN, padding = {28, 24, 28, 24}, gap = 14, align = {.CENTER, .CENTER}, hidden = true})
+  screen := ui.node_create(gui, {size = {{.PERCENT, 1}, {.PERCENT, 1}}, pin = {.STRETCH, .STRETCH}})
+  p.root = ui.node_create(gui, {parent = screen, position = .ABSOLUTE, anchor = {0.5, 0.5}, direction = .COLUMN, padding = {28, 24, 28, 24}, gap = 14, align = {.CENTER, .CENTER}, hidden = true})
   p.title = ui.node_create(gui, {parent = p.root, text = "Victory", font_size = 40})
   p.stats = ui.node_create(gui, {parent = p.root, font_size = 20})
   row := ui.node_create(gui, {parent = p.root, gap = 12})
@@ -1099,7 +1100,7 @@ exit_result :: proc(app: ^App) {
 
 update_result :: proc(app: ^App, dt: f32) -> Screen {
   size := platform.framebuffer_size(&app.window)
-  ui.layout(&app.gui, {size = {f32(size.x), f32(size.y)} / platform.dpi_scale(&app.window)}, &app.font)
+  ui.layout(&app.gui, {1280, 720}, {f32(size.x), f32(size.y)} / platform.dpi_scale(&app.window), &app.font)
   ui.update_input(&app.gui, &app.input)
   actor_update(app, &app.player, &app.heroes[app.hero], dt)
   for &e in app.enemies do actor_update(app, &e, &app.foes[e.kind], dt)
@@ -1143,7 +1144,7 @@ draw_hud :: proc(app: ^App) {
         append(&commands, render.RenderCommand{shape = render.DrawQuadCommand{position = r.pos, size = r.size, color = color}, z_order = i32(z) + 100})
       }
       for line in ui.lines(&app.gui, h) {
-        label := render.DrawTextCommand{text = n.text[line.start:line.end], position = line.pos, size = n.font_size, color = 255}
+        label := render.DrawTextCommand{text = n.text[line.start:line.end], position = line.pos, size = line.size, color = 255}
         append(&commands, render.RenderCommand{shape = label, z_order = i32(z) + 100})
       }
     }

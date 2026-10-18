@@ -85,7 +85,7 @@ spawn_field :: proc(
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer, {1100, 720}) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {0, 12, 3}, {0, 2, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 2, 0})
   app.renderer.skybox_intensity = 0
@@ -130,7 +130,7 @@ update :: proc(app: ^App, dt: f32) {
   defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.window, &app.input)
-  debugui.feed(&app.debug, &app.input)
+  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
@@ -169,7 +169,7 @@ field_panel :: proc(app: ^App, ctx: ^mu.Context, name: string, f: ^Field) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "Forcefields", {780, 20, 300, 520}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Forcefields", {780, 20, 300, 550}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     field_panel(app, ctx, "Repel (blue)", &app.repel)
     field_panel(app, ctx, "Attract (green)", &app.attract)
   }
