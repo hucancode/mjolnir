@@ -120,16 +120,16 @@ cell_world_pos :: proc(col: i32, row: i32) -> [3]f32 {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return .FAIL
-  ground := app.renderer.builtin_meshes[.QUAD_XZ]
+  app.renderer.skybox_intensity = 0
+  ground := render.mesh_create(&app.renderer, render.make_cylinder(segments = 64, height = 0.2, radius = RADIUS * 3.0))
   dark_mat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0}))
-  floor := world.spawn(&app.scene)
+  floor := world.spawn(&app.scene, {0, -0.1, 0})
   render.attach(&app.renderer, render.SlotHandle(floor.index), render.MeshAttachment{mesh = ground, material = dark_mat, cast_shadow = false})
-  world.scale(&app.scene, floor, RADIUS * 6.0)
   spot := world.spawn(&app.scene, {0, 10, 0})
   render.attach(&app.renderer, render.SlotHandle(spot.index), render.light_create(&app.renderer, render.make_spot_light({1, 1, 1}, 500, 16.0, math.PI * 0.35)))
   world.rotate(&app.scene, spot, -math.PI * 0.45, {1, 0, 0})
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 14, 14}, {0, 8, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 8, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 17, 17}, {0, 8, 0})
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 10, 0})
   for c, i in COLOR_RGB {
     app.state.transparent_material[i] = render.material_create(&app.renderer, render.make_material(type = .TRANSPARENT, base_color_factor = {c.x, c.y, c.z, PIECE_ALPHA}))
     app.state.opaque_material[i] = render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0}))
@@ -296,4 +296,3 @@ on_key :: proc(app: ^App, key: input.Key) {
     app.state.fall_timer = app.state.fall_period
   }
 }
-

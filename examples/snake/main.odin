@@ -100,6 +100,7 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return .FAIL
+  app.renderer.skybox_intensity = 0
   half := f32(GRID) * CELL * 0.5
   wall_t :: 0.2
   wall_h :: 0.5
@@ -112,7 +113,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   spawn_wall(app, {half + wall_t, wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
   spawn_wall(app, {-(half + wall_t), wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
 
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 18, 13}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 12, 3}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
   spot := world.spawn(&app.scene, {0, 10, 4})
@@ -243,4 +244,3 @@ step_game :: proc(app: ^App, dt: f32) {
   }
   place_node(app, app.game.head_node, next, SEGMENT_Y)
 }
-
