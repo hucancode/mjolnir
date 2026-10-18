@@ -120,7 +120,7 @@ update :: proc(app: ^App, dt: f32) {
   if app.rig != nil do animate(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  if app.rig != nil do render.stage_bones(&app.renderer, render.SlotHandle(app.snake_node.index), app.animator.palette)
+  if app.rig != nil do for sk in app.snake.skinned do render.stage_bones(&app.renderer, render.SlotHandle(sk.node.index), app.animator.palette)
   render.update(&app.renderer, dt)
 }
 
