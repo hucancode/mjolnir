@@ -8,7 +8,8 @@ MaterialShader :: distinct u32
 
 // material_shader_create makes a material shader from a user fragment shader; the vertex stage
 // is render's mesh stage. Its materials draw in the forward pass, after the built-in forward
-// types, over the lit image: depth-tested without writing depth, blended by `blend`. They cast
+// types, over the lit image: depth-tested, blended by `blend`, and writing depth when `blend` is .NONE
+// (so opaque meshes hide each other, not only the scene behind them). They cast
 // no shadow, are not occlusion-culled and see no lights (shade them from the material and the
 // view). There is room for MAX_MATERIAL_SHADERS at once. A backend uses only its own source:
 // `frag_spirv` on Vulkan, `frag_wgsl` on WebGPU.
@@ -44,7 +45,7 @@ material_shader_create :: proc(
     cull          = cull,
     color_formats = material_pass_formats(.FORWARD),
     blend         = blend,
-    depth         = material_pass_depth(.FORWARD),
+    depth         = material_pass_depth(.FORWARD, opaque = blend == .NONE),
   }
   pipeline := dev.graphics_pipeline_create(&self.gpu, desc) or_return
   self.custom_material_pipelines[slot] = pipeline

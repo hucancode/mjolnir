@@ -8,7 +8,7 @@ import "rhi"
 MaterialPass :: enum {
   // writes the G-buffer and depth, lit by the lighting pass
   GBUFFER,
-  // alpha-blends into the lit image, depth-tested without writing
+  // alpha-blends into the lit image, depth-tested; only opaque custom shaders write depth
   FORWARD,
 }
 
@@ -39,10 +39,11 @@ material_pass_formats :: proc(pass: MaterialPass) -> []TextureFormat {
   return formats
 }
 
-// The depth the pipelines of a pass test: the G-buffer writes it, the forward pass reads.
+// The depth the pipelines of a pass test: the G-buffer writes it, the forward pass reads, unless
+// the pipeline is opaque (a custom shader without blending), which writes it too.
 @(private)
-material_pass_depth :: proc(pass: MaterialPass) -> rhi.DepthState {
-  return {write = pass == .GBUFFER, compare = .LESS_EQUAL}
+material_pass_depth :: proc(pass: MaterialPass, opaque := false) -> rhi.DepthState {
+  return {write = pass == .GBUFFER || opaque, compare = .LESS_EQUAL}
 }
 
 // The vertex stream of mesh draws: the vertex, then on a device that cannot tag draws with a
@@ -121,7 +122,7 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
   colors := make([]rhi.ColorTarget, len(targets), context.temp_allocator)
   load: rhi.LoadOp = .CLEAR if pass == .GBUFFER else .LOAD
   for a, i in targets do colors[i] = {texture = images[a][f], load = load, clear = {0, 0, 0, 1}}
-  depth := rhi.DepthTarget{texture = images[.DEPTH][f], load = load, clear = 1, store = true, read_only = pass == .FORWARD}
+  depth := rhi.DepthTarget{texture = images[.DEPTH][f], load = load, clear = 1, store = true}
   dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors, depth = depth})
   if pass == .FORWARD do particles_draw(self, cmd, f, cam)
   types := MATERIAL_PASS_TYPES[pass]
