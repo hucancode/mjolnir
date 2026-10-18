@@ -16,17 +16,14 @@ import "../../mjolnir/world"
 Model :: struct {
   label:  string,
   data:   []u8,
-  scale:  f32,
-  offset: [3]f32,
-  rot_x:  f32,
 }
 
 MODELS := [?]Model{
-  {"Mjolnir",        #load("../../assets/Mjolnir.glb"),        0.3,   {0, -1, 0},    math.PI * -0.3},
-  {"Suzanne",        #load("../../assets/Suzanne.glb"),        1.0,   {0, 0, 0},     0},
-  {"Duck",           #load("../../assets/Duck.glb"),           0.4,   {0, -1, 0},    0},
-  {"Damaged Helmet", #load("../../assets/DamagedHelmet.glb"),  1.0,   {0, 0, 0},     0},
-  {"SciFi Helmet",   #load("../../assets/SciFiHelmet.glb"),    1.0,   {0, -1, 0},    0},
+  {"Mjolnir",        #load("../../assets/Mjolnir.glb")},
+  {"Suzanne",        #load("../../assets/Suzanne.glb")},
+  {"Duck",           #load("../../assets/Duck.glb")},
+  {"Damaged Helmet", #load("../../assets/DamagedHelmet.glb")},
+  {"SciFi Helmet",   #load("../../assets/SciFiHelmet.glb")},
 }
 
 dir_intensity: mu.Real = 1.0
@@ -73,13 +70,14 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 0.2, 3.5}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 0.24, 4.2}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
   app.renderer.sun = {enabled = true, cast_shadow = true, color = {1, 0.98, 0.95}, intensity = f32(dir_intensity), direction = {0, 0, -1}, shadow_distance = 15}
 
   app.turntable = world.spawn(&app.scene)
   app.mount = world.spawn(&app.scene, parent = app.turntable)
+  world.translate(&app.scene, app.mount, 0, -1, 0)
   show_model(app, 0)
   return .READY
 }
@@ -103,9 +101,6 @@ show_model :: proc(app: ^App, index: int) {
   gltf.destroy(&app.model, &app.renderer)
   app.model_index = index
   m := MODELS[index]
-  world.translate(&app.scene, app.mount, m.offset)
-  world.rotate(&app.scene, app.mount, m.rot_x, linalg.VECTOR3F32_X_AXIS)
-  world.scale(&app.scene, app.mount, m.scale)
   app.model = gltf.model_create(&app.renderer, m.data)
   app.instance = gltf.instance_create(&app.model, &app.scene, &app.renderer, parent = app.mount)
 }
@@ -133,7 +128,7 @@ frame :: proc(app: ^App) -> bool {
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "PBR Lighting", {550, 20, 220, 400}, {.NO_CLOSE}) {
     mu.label(ctx, "Sun intensity")
-    mu.slider(ctx, &dir_intensity, 0.0, 5.0)
+    mu.slider(ctx, &dir_intensity, 0.0, 20.0)
     mu.label(ctx, "IBL intensity")
     mu.slider(ctx, &ibl_intensity, 0.0, 2.0)
     mu.checkbox(ctx, "Skybox", &skybox_on)

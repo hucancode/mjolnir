@@ -408,7 +408,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
       append(&models, gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.instance.roots)
       for handle in gltf_nodes.instance.roots {
-        world.translate(&app.scene, handle, 0, 1, 3)
+        world.translate(&app.scene, handle, 0, 0.5, 3)
         world.scale(&app.scene, handle, 0.5)
       }
     }
@@ -419,7 +419,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
       append(&models, gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.instance.roots)
       for handle in gltf_nodes.instance.roots {
-        world.translate(&app.scene, handle, -3, 1, 0)
+        world.translate(&app.scene, handle, -3, 0, 0)
       }
     }
   }
