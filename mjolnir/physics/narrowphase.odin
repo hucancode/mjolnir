@@ -961,8 +961,8 @@ narrowphase_pair :: proc(world: ^World, handle_a, handle_b: BodyHandle, out: ^[d
 
 @(private = "file")
 CollisionContext :: struct {
-  dynamic_pairs: []geometry.BVHOverlapPair(BroadPhaseEntry),
-  static_pairs:  []geometry.BVHCrossPair(BroadPhaseEntry, BroadPhaseEntry),
+  dynamic_pairs: []geometry.BVHOverlapPair(BodyHandle),
+  static_pairs:  []geometry.BVHCrossPair(BodyHandle, BodyHandle),
   contacts:      [][dynamic]Contact, // per task
 }
 
@@ -971,8 +971,8 @@ CollisionContext :: struct {
 // are concatenated in task order.
 @(private)
 collision_detection :: proc(world: ^World) {
-  dynamic_pairs := make([dynamic]geometry.BVHOverlapPair(BroadPhaseEntry), context.temp_allocator)
-  static_pairs := make([dynamic]geometry.BVHCrossPair(BroadPhaseEntry, BroadPhaseEntry), context.temp_allocator)
+  dynamic_pairs := make([dynamic]geometry.BVHOverlapPair(BodyHandle), context.temp_allocator)
+  static_pairs := make([dynamic]geometry.BVHCrossPair(BodyHandle, BodyHandle), context.temp_allocator)
   geometry.bvh_find_all_overlaps(&world.dynamic_bvh, &dynamic_pairs)
   geometry.bvh_find_cross_overlaps(&world.dynamic_bvh, &world.static_bvh, &static_pairs)
   ctx := CollisionContext {
@@ -987,10 +987,10 @@ collision_detection :: proc(world: ^World) {
     #no_bounds_check for i in start ..< end {
       if i < n_dyn {
         pair := ctx.dynamic_pairs[i]
-        narrowphase_pair(world, pair.a.handle, pair.b.handle, out)
+        narrowphase_pair(world, pair.a, pair.b, out)
       } else {
         pair := ctx.static_pairs[i - n_dyn]
-        narrowphase_pair(world, pair.a.handle, pair.b.handle, out)
+        narrowphase_pair(world, pair.a, pair.b, out)
       }
     }
   })

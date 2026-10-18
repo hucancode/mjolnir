@@ -130,7 +130,7 @@ ccd_step_body :: proc(
   idx_a: int,
   dt: f32,
   ccd_handled: []bool,
-  static_candidates: ^[dynamic]BroadPhaseEntry,
+  static_candidates: ^[dynamic]BodyHandle,
 ) -> (tested: bool, candidate_count: int) {
   if !is_dynamic(body_a) || body_a.is_sleeping do return
   collider_a := &body_a.collider
@@ -147,7 +147,7 @@ ccd_step_body :: proc(
   geometry.bvh_query_aabb(&world.static_bvh, swept_aabb, static_candidates)
   candidate_count = len(static_candidates)
   for candidate in static_candidates {
-    body_b := lookup(world, candidate.handle) or_continue
+    body_b := lookup(world, candidate) or_continue
     toi, hit := swept_test(collider_a, &body_b.collider, body_a.position, body_b.position, body_a.rotation, body_b.rotation, motion)
     if hit do earliest_toi = min(earliest_toi, toi)
   }
@@ -177,7 +177,7 @@ ccd :: proc(world: ^World, dt: f32, ccd_handled: []bool) -> (bodies_tested, tota
   }
   parallel_for(world, body_range(world), &ctx, proc(world: ^World, ctx: rawptr, task, start, end: int) {
     ctx := (^CCDContext)(ctx)
-    candidates := make([dynamic]BroadPhaseEntry, 0, 64)
+    candidates := make([dynamic]BodyHandle, 0, 64)
     defer delete(candidates)
     #no_bounds_check for i in start ..< end {
       if !containers.slots_live(&world.body_slots, u32(i)) do continue

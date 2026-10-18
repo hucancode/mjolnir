@@ -157,8 +157,8 @@ World_State :: struct {
   body_slots:           containers.Slots,
   prev_warmstart:       map[u64]ContactWarmstart,
   // Moving bodies (dynamic + kinematic) and static bodies
-  dynamic_bvh:          geometry.BVH(BroadPhaseEntry),
-  static_bvh:           geometry.BVH(BroadPhaseEntry),
+  dynamic_bvh:          geometry.BVH(BodyHandle),
+  static_bvh:           geometry.BVH(BodyHandle),
   // Set when bodies are created or change BVH; the next step or query
   // rebuilds that BVH
   dynamic_bvh_dirty:    bool,
@@ -175,12 +175,6 @@ World_State :: struct {
   solver_color_count:   int,
 }
 
-@(private)
-BroadPhaseEntry :: struct {
-  handle: BodyHandle,
-  bounds: geometry.Aabb,
-}
-
 // init prepares the world and its thread pool.
 // thread_count: worker threads for step; 0 = one per physical CPU core minus
 // one (the caller's thread joins in while waiting), 1 = no pool. The solver
@@ -190,11 +184,6 @@ init :: proc(self: ^World, gravity := [3]f32{0, -9.81, 0}, thread_count := 0) ->
   containers.slots_init(&self.body_slots, MAX_BODIES)
   self.bodies = make([]Body, MAX_BODIES)
   self.gravity = gravity
-  bounds_func :: #force_inline proc(entry: BroadPhaseEntry) -> geometry.Aabb {
-    return entry.bounds
-  }
-  self.dynamic_bvh.bounds_func = bounds_func
-  self.static_bvh.bounds_func = bounds_func
   self.thread_count = thread_count > 0 ? thread_count : default_thread_count()
   if self.thread_count > 1 {
     thread.pool_init(&self.thread_pool, context.allocator, self.thread_count)
@@ -450,36 +439,38 @@ perf :: proc(self: ^World) -> PerfFrame {
 @(private)
 refresh_broadphase :: proc(self: ^World) -> (rebuilt_dynamic, rebuilt_static: bool) {
   if !self.dynamic_bvh_dirty && !self.static_bvh_dirty do return
-  dynamic_entries := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  static_entries := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+  dynamic_entries := make([dynamic]BodyHandle, context.temp_allocator)
+  static_entries := make([dynamic]BodyHandle, context.temp_allocator)
+  dynamic_bounds := make([dynamic]geometry.Aabb, context.temp_allocator)
+  static_bounds := make([dynamic]geometry.Aabb, context.temp_allocator)
   c: u32
   for i in containers.slots_next(&self.body_slots, &c) {
     body, handle := &self.bodies[i], body_handle(self, i)
     if body.is_sensor do continue
     update_cached_aabb(body)
     if body.moving {
-      append(&dynamic_entries, BroadPhaseEntry{handle, fat_aabb(body)})
+      append(&dynamic_entries, handle)
+      append(&dynamic_bounds, fat_aabb(body))
     } else {
-      append(&static_entries, BroadPhaseEntry{handle, body.cached_aabb})
+      append(&static_entries, handle)
+      append(&static_bounds, body.cached_aabb)
     }
   }
-  build :: proc(self: ^World, bvh: ^geometry.BVH(BroadPhaseEntry), entries: []BroadPhaseEntry) {
-    clear(&bvh.nodes)
-    clear(&bvh.primitives)
+  build :: proc(self: ^World, bvh: ^geometry.BVH(BodyHandle), entries: []BodyHandle, bounds: []geometry.Aabb) {
     if self.thread_count > 1 {
-      geometry.bvh_build_parallel(bvh, entries, &self.thread_pool, 4, 1000)
+      geometry.bvh_build_parallel(bvh, entries, bounds, &self.thread_pool, 4, 1000)
     } else {
-      geometry.bvh_build(bvh, entries, 4)
+      geometry.bvh_build(bvh, entries, bounds, 4)
     }
   }
   if self.dynamic_bvh_dirty {
-    build(self, &self.dynamic_bvh, dynamic_entries[:])
+    build(self, &self.dynamic_bvh, dynamic_entries[:], dynamic_bounds[:])
     self.dynamic_bvh_dirty = false
     self.dynamic_bvh_stale = 0
     rebuilt_dynamic = true
   }
   if self.static_bvh_dirty {
-    build(self, &self.static_bvh, static_entries[:])
+    build(self, &self.static_bvh, static_entries[:], static_bounds[:])
     self.static_bvh_dirty = false
     rebuilt_static = true
   }
@@ -570,18 +561,18 @@ step_kill :: proc(self: ^World) {
 @(private)
 step_sensors :: proc(self: ^World) {
   clear(&self.sensor_overlaps)
-  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+  candidates := make([dynamic]BodyHandle, context.temp_allocator)
   c: u32
   for i in containers.slots_next(&self.body_slots, &c) {
     sensor, sensor_handle := &self.bodies[i], body_handle(self, i)
     if !sensor.is_sensor do continue
-    for bvh in ([2]^geometry.BVH(BroadPhaseEntry){&self.dynamic_bvh, &self.static_bvh}) {
+    for bvh in ([2]^geometry.BVH(BodyHandle){&self.dynamic_bvh, &self.static_bvh}) {
       clear(&candidates)
       geometry.bvh_query_aabb(bvh, sensor.cached_aabb, &candidates)
       for candidate in candidates {
-        body := lookup(self, candidate.handle) or_continue
+        body := lookup(self, candidate) or_continue
         _, hit := collide_bodies(sensor, body)
-        if hit do append(&self.sensor_overlaps, SensorOverlap{sensor_handle, candidate.handle})
+        if hit do append(&self.sensor_overlaps, SensorOverlap{sensor_handle, candidate})
       }
     }
   }

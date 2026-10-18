@@ -63,10 +63,9 @@ parallel_for :: proc(world: ^World, n: int, ctx: rawptr, fn: RangeProc, min_item
 bvh_refit :: proc(world: ^World) {
   parallel_for(world, len(world.dynamic_bvh.primitives), nil, proc(world: ^World, _: rawptr, _, start, end: int) {
     #no_bounds_check for i in start ..< end {
-      entry := &world.dynamic_bvh.primitives[i]
-      body := lookup(world, entry.handle) or_continue
+      body := lookup(world, world.dynamic_bvh.primitives[i]) or_continue
       if body.is_sleeping do continue
-      entry.bounds = fat_aabb(body)
+      world.dynamic_bvh.bounds[i] = fat_aabb(body)
     }
   })
   geometry.bvh_refit(&world.dynamic_bvh)

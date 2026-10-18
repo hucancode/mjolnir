@@ -4,6 +4,8 @@ package geometry
 
 import "core:log"
 import "core:math"
+import "core:math/linalg"
+import "core:math/rand"
 import "core:slice"
 import "core:testing"
 import "core:time"
@@ -14,8 +16,10 @@ BVHTestItem :: struct {
   bounds: Aabb,
 }
 
-test_bvh_item_bounds :: proc(item: BVHTestItem) -> Aabb {
-  return item.bounds
+test_bounds :: proc(items: []BVHTestItem) -> []Aabb {
+  bounds := make([]Aabb, len(items), context.temp_allocator)
+  for item, i in items do bounds[i] = item.bounds
+  return bounds
 }
 
 make_test_item :: proc(id: i32, center: [3]f32, size: f32) -> BVHTestItem {
@@ -29,10 +33,9 @@ make_test_item :: proc(id: i32, center: [3]f32, size: f32) -> BVHTestItem {
 @(test)
 test_bvh_build_empty :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   empty_items: []BVHTestItem
-  bvh_build(&bvh, empty_items)
+  bvh_build(&bvh, empty_items, test_bounds(empty_items))
   testing.expect(t, len(bvh.nodes) == 0, "Empty BVH should have no nodes")
   testing.expect(
     t,
@@ -44,10 +47,9 @@ test_bvh_build_empty :: proc(t: ^testing.T) {
 @(test)
 test_bvh_build_single_item :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   items := []BVHTestItem{make_test_item(1, {0, 0, 0}, 2)}
-  bvh_build(&bvh, items)
+  bvh_build(&bvh, items, test_bounds(items))
   testing.expect(t, len(bvh.nodes) == 1, "Single item BVH should have 1 node")
   testing.expect(
     t,
@@ -56,12 +58,12 @@ test_bvh_build_single_item :: proc(t: ^testing.T) {
   )
   testing.expect(
     t,
-    bvh.nodes[0].left_child == -1,
+    bvh.nodes[0].count > 0,
     "Single item node should be a leaf",
   )
   testing.expect(
     t,
-    bvh.nodes[0].primitive_count == 1,
+    bvh.nodes[0].count == 1,
     "Single item node should have 1 primitive",
   )
 }
@@ -69,7 +71,6 @@ test_bvh_build_single_item :: proc(t: ^testing.T) {
 @(test)
 test_bvh_build_multiple_items :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   items := []BVHTestItem {
     make_test_item(1, {-5, 0, 0}, 2),
@@ -79,7 +80,7 @@ test_bvh_build_multiple_items :: proc(t: ^testing.T) {
     make_test_item(5, {0, 0, -5}, 2),
     make_test_item(6, {0, 0, 5}, 2),
   }
-  bvh_build(&bvh, items, 2)
+  bvh_build(&bvh, items, test_bounds(items), 2)
   testing.expect(
     t,
     len(bvh.nodes) > 1,
@@ -98,7 +99,6 @@ test_bvh_build_multiple_items :: proc(t: ^testing.T) {
 @(test)
 test_bvh_query_aabb :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
@@ -107,7 +107,7 @@ test_bvh_query_aabb :: proc(t: ^testing.T) {
     make_test_item(4, {0, 0, 10}, 2),
     make_test_item(5, {20, 20, 20}, 2),
   }
-  bvh_build(&bvh, items)
+  bvh_build(&bvh, items, test_bounds(items))
   // Query near origin
   query_bounds := Aabb {
     min = {-5, -5, -5},
@@ -140,7 +140,6 @@ test_bvh_query_aabb :: proc(t: ^testing.T) {
 test_bvh_query_ray :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 5 * time.Second)
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
@@ -149,7 +148,7 @@ test_bvh_query_ray :: proc(t: ^testing.T) {
     make_test_item(4, {0, 5, 0}, 2),
     make_test_item(5, {0, 0, 5}, 2),
   }
-  bvh_build(&bvh, items)
+  bvh_build(&bvh, items, test_bounds(items))
   // Ray along X axis
   ray := Ray {
     origin    = {-10, 0, 0},
@@ -182,21 +181,89 @@ test_bvh_query_ray :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_bvh_matches_brute_force :: proc(t: ^testing.T) {
+  rand.reset(7)
+  make_items :: proc(n: int, spread: f32) -> []BVHTestItem {
+    items := make([]BVHTestItem, n)
+    for &item, i in items {
+      c := [3]f32{rand.float32_range(-spread, spread), rand.float32_range(-spread, spread), rand.float32_range(-spread, spread)}
+      item = make_test_item(i32(i), c, rand.float32_range(0.5, 6))
+    }
+    return items
+  }
+  items_a, items_b := make_items(700, 40), make_items(300, 40)
+  defer delete(items_a)
+  defer delete(items_b)
+  a, b: BVH(BVHTestItem)
+  defer bvh_destroy(&a)
+  defer bvh_destroy(&b)
+  bvh_build(&a, items_a, test_bounds(items_a))
+  bvh_build(&b, items_b, test_bounds(items_b), 1)
+  testing.expect(t, bvh_validate(&a) && bvh_validate(&b))
+
+  self_pairs := make([dynamic]BVHOverlapPair(BVHTestItem))
+  defer delete(self_pairs)
+  bvh_find_all_overlaps(&a, &self_pairs)
+  expected := 0
+  for i in 0 ..< len(items_a) do for j in i + 1 ..< len(items_a) {
+    if aabb_intersects(items_a[i].bounds, items_a[j].bounds) do expected += 1
+  }
+  testing.expect_value(t, len(self_pairs), expected)
+  seen := make(map[[2]i32]bool)
+  defer delete(seen)
+  for p in self_pairs {
+    key := [2]i32{min(p.a.id, p.b.id), max(p.a.id, p.b.id)}
+    testing.expect(t, key not_in seen, "pair reported twice")
+    seen[key] = true
+  }
+
+  cross := make([dynamic]BVHCrossPair(BVHTestItem, BVHTestItem))
+  defer delete(cross)
+  bvh_find_cross_overlaps(&a, &b, &cross)
+  expected = 0
+  for x in items_a do for y in items_b {
+    if aabb_intersects(x.bounds, y.bounds) do expected += 1
+  }
+  testing.expect_value(t, len(cross), expected)
+
+  results := make([dynamic]BVHTestItem)
+  defer delete(results)
+  for _ in 0 ..< 50 {
+    c := [3]f32{rand.float32_range(-40, 40), rand.float32_range(-40, 40), rand.float32_range(-40, 40)}
+    q := Aabb{c - 5, c + 5}
+    bvh_query_aabb(&a, q, &results)
+    expected = 0
+    for x in items_a do if aabb_intersects(x.bounds, q) do expected += 1
+    testing.expect_value(t, len(results), expected)
+    dir := linalg.normalize([3]f32{rand.float32_range(-1, 1), rand.float32_range(-1, 1), rand.float32_range(-1, 1)})
+    bvh_query_ray(&a, Ray{origin = c, direction = dir}, 30, &results)
+    expected = 0
+    for x in items_a {
+      inv := 1 / dir
+      t1, t2 := (x.bounds.min - c) * inv, (x.bounds.max - c) * inv
+      lo, hi := linalg.min(t1, t2), linalg.max(t1, t2)
+      near, far := max(lo.x, lo.y, lo.z), min(hi.x, hi.y, hi.z)
+      if near <= far && near <= 30 && far >= 0 do expected += 1
+    }
+    testing.expect_value(t, len(results), expected)
+  }
+}
+
+@(test)
 test_bvh_refit :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
     make_test_item(2, {5, 0, 0}, 2),
     make_test_item(3, {0, 5, 0}, 2),
   }
-  bvh_build(&bvh, items)
+  bvh_build(&bvh, items, test_bounds(items))
   // Store original root bounds
   original_bounds := bvh.nodes[0].bounds
   // Modify primitives
-  bvh.primitives[0] = make_test_item(1, {10, 10, 10}, 2)
-  bvh.primitives[1] = make_test_item(2, {15, 0, 0}, 2)
+  bvh.bounds[0] = make_test_item(1, {10, 10, 10}, 2).bounds
+  bvh.bounds[1] = make_test_item(2, {15, 0, 0}, 2).bounds
   // Refit the tree
   bvh_refit(&bvh)
   // Check that bounds have been updated
@@ -218,7 +285,6 @@ test_bvh_refit :: proc(t: ^testing.T) {
 @(test)
 test_bvh_validate :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
@@ -226,24 +292,23 @@ test_bvh_validate :: proc(t: ^testing.T) {
     make_test_item(3, {0, 5, 0}, 2),
     make_test_item(4, {0, 0, 5}, 2),
   }
-  bvh_build(&bvh, items)
+  bvh_build(&bvh, items, test_bounds(items))
   // Valid tree should pass validation
   valid := bvh_validate(&bvh)
   testing.expect(t, valid, "Properly built BVH should be valid")
   // Corrupt the tree and check it fails validation
   if len(bvh.nodes) > 0 {
-    original_count := bvh.nodes[0].primitive_count
-    bvh.nodes[0].primitive_count = -1
+    original_count := bvh.nodes[0].count
+    bvh.nodes[0].count = -1
     corrupted_valid := bvh_validate(&bvh)
     testing.expect(t, !corrupted_valid, "Corrupted BVH should fail validation")
-    bvh.nodes[0].primitive_count = original_count
+    bvh.nodes[0].count = original_count
   }
 }
 
 @(test)
 test_bvh_stats :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
@@ -252,7 +317,7 @@ test_bvh_stats :: proc(t: ^testing.T) {
     make_test_item(4, {0, 0, 5}, 2),
     make_test_item(5, {10, 10, 10}, 2),
   }
-  bvh_build(&bvh, items, 2)
+  bvh_build(&bvh, items, test_bounds(items), 2)
   stats := bvh_get_stats(&bvh)
   testing.expect(t, stats.total_nodes > 0, "Should have nodes")
   testing.expect(t, stats.leaf_nodes > 0, "Should have leaf nodes")
@@ -272,7 +337,6 @@ test_bvh_stats :: proc(t: ^testing.T) {
 @(test)
 test_bvh_large_dataset :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   // Create a large dataset
   item_count := 1000
@@ -284,7 +348,7 @@ test_bvh_large_dataset :: proc(t: ^testing.T) {
     z := f32((i / 100) % 10) * 2 - 10
     items[i] = make_test_item(i32(i), {x, y, z}, 1)
   }
-  bvh_build(&bvh, items)
+  bvh_build(&bvh, items, test_bounds(items))
   // Verify all items are in the BVH
   testing.expect(t, len(bvh.primitives) == item_count, "Should have all items")
   testing.expect(t, bvh_validate(&bvh), "Large BVH should be valid")
@@ -319,7 +383,6 @@ test_bvh_large_dataset :: proc(t: ^testing.T) {
 @(test)
 test_bvh_sah_splitting :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   // Create items that should benefit from SAH splitting
   items := []BVHTestItem {
@@ -330,7 +393,7 @@ test_bvh_sah_splitting :: proc(t: ^testing.T) {
     make_test_item(5, {4, 0, 0}, 1),
     make_test_item(6, {100, 100, 100}, 1),
   }
-  bvh_build(&bvh, items, 2)
+  bvh_build(&bvh, items, test_bounds(items), 2)
   testing.expect(
     t,
     bvh_validate(&bvh),
@@ -361,7 +424,6 @@ test_bvh_sah_splitting :: proc(t: ^testing.T) {
 @(test)
 test_bvh_edge_cases :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   // Test with identical positions
   items := []BVHTestItem {
@@ -369,7 +431,7 @@ test_bvh_edge_cases :: proc(t: ^testing.T) {
     make_test_item(2, {0, 0, 0}, 1),
     make_test_item(3, {0, 0, 0}, 1),
   }
-  bvh_build(&bvh, items)
+  bvh_build(&bvh, items, test_bounds(items))
   testing.expect(
     t,
     bvh_validate(&bvh),
@@ -394,7 +456,6 @@ test_bvh_edge_cases :: proc(t: ^testing.T) {
 @(test)
 test_bvh_degenerate_cases :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   // Test with zero-volume items
   items := []BVHTestItem {
@@ -402,7 +463,7 @@ test_bvh_degenerate_cases :: proc(t: ^testing.T) {
     make_test_item(2, {1, 0, 0}, 0),
     make_test_item(3, {0, 1, 0}, 0),
   }
-  bvh_build(&bvh, items)
+  bvh_build(&bvh, items, test_bounds(items))
   testing.expect(
     t,
     bvh_validate(&bvh),
@@ -424,7 +485,6 @@ test_bvh_degenerate_cases :: proc(t: ^testing.T) {
 @(test)
 test_bvh_memory_management :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   // Test multiple builds don't leak memory
   for _ in 0 ..< 3 {
@@ -433,7 +493,7 @@ test_bvh_memory_management :: proc(t: ^testing.T) {
       make_test_item(2, {1, 0, 0}, 1),
       make_test_item(3, {0, 1, 0}, 1),
     }
-    bvh_build(&bvh, items)
+    bvh_build(&bvh, items, test_bounds(items))
     testing.expect(
       t,
       len(bvh.primitives) == 3,
@@ -450,7 +510,6 @@ test_bvh_memory_management :: proc(t: ^testing.T) {
 @(test)
 test_bvh_precision :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   // Test with very small and very large coordinates
   items := []BVHTestItem {
@@ -458,7 +517,7 @@ test_bvh_precision :: proc(t: ^testing.T) {
     make_test_item(2, {1000000, 1000000, 1000000}, 1000),
     make_test_item(3, {-1000000, -1000000, -1000000}, 1000),
   }
-  bvh_build(&bvh, items)
+  bvh_build(&bvh, items, test_bounds(items))
   testing.expect(
     t,
     bvh_validate(&bvh),
@@ -487,9 +546,8 @@ bvh_build_benchmark :: proc(t: ^testing.T) {
     items := items_ptr^
     for _ in 0 ..< options.rounds {
       bvh: BVH(BVHTestItem)
-      bvh.bounds_func = test_bvh_item_bounds
       defer bvh_destroy(&bvh)
-      bvh_build(&bvh, items)
+      bvh_build(&bvh, items, test_bounds(items))
       options.processed += len(items) * size_of(BVHTestItem)
     }
     return nil
@@ -530,7 +588,6 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bvh_ptr := new(BVH(BVHTestItem))
-    bvh_ptr.bounds_func = test_bvh_item_bounds
     item_count := 50000
     items := make([]BVHTestItem, item_count)
     for i in 0 ..< item_count {
@@ -539,7 +596,7 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
       z := f32((i / 40000) % 200 - 100) * 1.8
       items[i] = make_test_item(i32(i), {x, y, z}, 1.2)
     }
-    bvh_build(bvh_ptr, items)
+    bvh_build(bvh_ptr, items, test_bounds(items))
     delete(items)
     options.input = slice.bytes_from_ptr(
       bvh_ptr,
@@ -599,7 +656,6 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bvh_ptr := new(BVH(BVHTestItem))
-    bvh_ptr.bounds_func = test_bvh_item_bounds
     item_count := 50000
     items := make([]BVHTestItem, item_count)
     for i in 0 ..< item_count {
@@ -608,7 +664,7 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
       z := f32((i / 3600) % 60 - 30) * 2.5
       items[i] = make_test_item(i32(i), {x, y, z}, 1.8)
     }
-    bvh_build(bvh_ptr, items)
+    bvh_build(bvh_ptr, items, test_bounds(items))
     delete(items)
     options.input = slice.bytes_from_ptr(
       bvh_ptr,
@@ -667,7 +723,6 @@ bvh_empty_query_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bvh_ptr := new(BVH(BVHTestItem))
-    bvh_ptr.bounds_func = test_bvh_item_bounds
     item_count := 5000
     items := make([]BVHTestItem, item_count)
     for i in 0 ..< item_count {
@@ -676,7 +731,7 @@ bvh_empty_query_benchmark :: proc(t: ^testing.T) {
       z := f32((i / 2500) % 50 - 75) * 1.5
       items[i] = make_test_item(i32(i), {x, y, z}, 1)
     }
-    bvh_build(bvh_ptr, items)
+    bvh_build(bvh_ptr, items, test_bounds(items))
     delete(items)
     options.input = slice.bytes_from_ptr(
       bvh_ptr,
@@ -735,7 +790,6 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bvh_ptr := new(BVH(BVHTestItem))
-    bvh_ptr.bounds_func = test_bvh_item_bounds
     item_count := 3000
     items := make([]BVHTestItem, item_count)
     for i in 0 ..< item_count {
@@ -744,7 +798,7 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
       z := f32((i / 900) % 30 - 15) * 4
       items[i] = make_test_item(i32(i), {x, y, z}, 2.5)
     }
-    bvh_build(bvh_ptr, items)
+    bvh_build(bvh_ptr, items, test_bounds(items))
     delete(items)
     options.input = slice.bytes_from_ptr(
       bvh_ptr,
@@ -760,10 +814,10 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
     for i in 0 ..< options.rounds {
       random_offset := f32(i % 100 - 50) * 0.1
       for j in 0 ..< min(len(bvh_ptr.primitives), 100) {
-        bvh_ptr.primitives[j].bounds.min.x += random_offset
-        bvh_ptr.primitives[j].bounds.min.y += random_offset
-        bvh_ptr.primitives[j].bounds.max.x += random_offset
-        bvh_ptr.primitives[j].bounds.max.y += random_offset
+        bvh_ptr.bounds[j].min.x += random_offset
+        bvh_ptr.bounds[j].min.y += random_offset
+        bvh_ptr.bounds[j].max.x += random_offset
+        bvh_ptr.bounds[j].max.y += random_offset
       }
       bvh_refit(bvh_ptr)
       options.processed += len(bvh_ptr.primitives) * size_of(BVHTestItem)
@@ -829,8 +883,7 @@ bvh_build_sequential_benchmark :: proc(t: ^testing.T) {
     input := cast(^BuildInput)raw_data(options.input)
     for _ in 0 ..< options.rounds {
       bvh: BVH(BVHTestItem)
-      bvh.bounds_func = test_bvh_item_bounds
-      bvh_build(&bvh, input.items)
+      bvh_build(&bvh, input.items, test_bounds(input.items))
       options.processed += len(input.items) * size_of(BVHTestItem)
       bvh_destroy(&bvh)
     }
@@ -899,8 +952,7 @@ bvh_build_parallel_benchmark :: proc(t: ^testing.T) {
     input := cast(^BuildParallelInput)raw_data(options.input)
     for _ in 0 ..< options.rounds {
       bvh: BVH(BVHTestItem)
-      bvh.bounds_func = test_bvh_item_bounds
-      bvh_build_parallel(&bvh, input.items, &input.pool)
+      bvh_build_parallel(&bvh, input.items, test_bounds(input.items), &input.pool)
       options.processed += len(input.items) * size_of(BVHTestItem)
       bvh_destroy(&bvh)
     }
@@ -939,27 +991,19 @@ bvh_build_parallel_benchmark :: proc(t: ^testing.T) {
 @(private = "file")
 bvh_validate :: proc(self: ^BVH($T)) -> bool {
   if len(self.nodes) == 0 do return true
-  for i in 0 ..< len(self.nodes) {
-    node := self.nodes[i]
-    if node.left_child >= 0 {
-      // Internal node checks
-      if node.right_child < 0 do return false
-      if node.primitive_count != -1 do return false
-      if node.left_child >= i32(len(self.nodes)) do return false
-      if node.right_child >= i32(len(self.nodes)) do return false
-      left := self.nodes[node.left_child]
-      right := self.nodes[node.right_child]
-      // Check bounds contain children (with some tolerance)
+  for node, i in self.nodes {
+    if node.count == 0 {
+      if node.offset <= i32(i) + 1 || node.offset >= i32(len(self.nodes)) do return false
+      left := self.nodes[i + 1]
+      right := self.nodes[node.offset]
       if !aabb_contains_approx(node.bounds, left.bounds, 1e-3) do return false
       if !aabb_contains_approx(node.bounds, right.bounds, 1e-3) do return false
     } else {
-      // Leaf node checks
-      if node.primitive_count <= 0 do return false
-      if node.primitive_start < 0 do return false
-      if node.primitive_start + node.primitive_count > i32(len(self.primitives)) do return false
+      if node.count < 0 || node.offset < 0 do return false
+      if node.offset + node.count > i32(len(self.primitives)) do return false
     }
   }
-  return true
+  return len(self.bounds) == len(self.primitives)
 }
 
 @(private = "file")
@@ -984,7 +1028,6 @@ BVHStats :: struct {
   internal_nodes:   i32,
   total_primitives: i32,
   max_leaf_size:    i32,
-  empty_leaves:     i32,
 }
 
 @(private = "file")
@@ -992,12 +1035,10 @@ bvh_get_stats :: proc(self: ^BVH($T)) -> BVHStats {
   stats: BVHStats
   for node in self.nodes {
     stats.total_nodes += 1
-    if node.left_child < 0 {
+    if node.count > 0 {
       stats.leaf_nodes += 1
-      stats.total_primitives += node.primitive_count
-      stats.max_leaf_size =
-        stats.max_leaf_size > node.primitive_count ? stats.max_leaf_size : node.primitive_count
-      if node.primitive_count == 0 do stats.empty_leaves += 1
+      stats.total_primitives += node.count
+      stats.max_leaf_size = max(stats.max_leaf_size, node.count)
     } else {
       stats.internal_nodes += 1
     }

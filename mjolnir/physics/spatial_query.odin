@@ -19,17 +19,17 @@ RayHit :: struct {
 @(private = "file")
 raycast_candidates :: proc(
   self: ^World,
-  candidates: []BroadPhaseEntry,
+  candidates: []BodyHandle,
   ray: geometry.Ray,
   closest: ^RayHit,
   first_hit: bool,
 ) -> (found: bool) {
   for candidate in candidates {
-    body := lookup(self, candidate.handle) or_continue
+    body := lookup(self, candidate) or_continue
     t, normal, hit := raycast_collider(ray, &body.collider, body.position, body.rotation, closest.t)
     if hit && t < closest.t {
       closest^ = {
-        body   = candidate.handle,
+        body   = candidate,
         t      = t,
         point  = ray.origin + ray.direction * t,
         normal = normal,
@@ -52,8 +52,8 @@ raycast :: proc(
 ) -> RayHit {
   refresh_broadphase(self)
   closest := RayHit{t = max_dist}
-  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  for bvh in ([2]^geometry.BVH(BroadPhaseEntry){&self.dynamic_bvh, &self.static_bvh}) {
+  candidates := make([dynamic]BodyHandle, context.temp_allocator)
+  for bvh in ([2]^geometry.BVH(BodyHandle){&self.dynamic_bvh, &self.static_bvh}) {
     clear(&candidates)
     geometry.bvh_query_ray(bvh, ray, max_dist, &candidates)
     if raycast_candidates(self, candidates[:], ray, &closest, first_hit) && first_hit do break
@@ -74,14 +74,14 @@ overlap :: proc(
   refresh_broadphase(self)
   shape := collider
   bounds := collider_calculate_aabb(&shape, position, rotation)
-  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  for bvh in ([2]^geometry.BVH(BroadPhaseEntry){&self.dynamic_bvh, &self.static_bvh}) {
+  candidates := make([dynamic]BodyHandle, context.temp_allocator)
+  for bvh in ([2]^geometry.BVH(BodyHandle){&self.dynamic_bvh, &self.static_bvh}) {
     clear(&candidates)
     geometry.bvh_query_aabb(bvh, bounds, &candidates)
     for candidate in candidates {
-      body := lookup(self, candidate.handle) or_continue
+      body := lookup(self, candidate) or_continue
       if _, hit := collide(&shape, position, rotation, &body.collider, body.position, body.rotation); hit {
-        append(results, candidate.handle)
+        append(results, candidate)
       }
     }
   }

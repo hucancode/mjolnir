@@ -1,498 +1,328 @@
 package geometry
 
 import "base:intrinsics"
-import "core:log"
+import "base:runtime"
 import "core:math"
-import "core:mem"
-import "core:slice"
+import "core:math/linalg"
 import "core:sync"
 import "core:thread"
-import "core:time"
 
-// BVHNode is a flattened BVH node; a leaf has left_child < 0 and owns primitive_count primitives from primitive_start.
+// BVHNode is one 32-byte node of the depth-first node array. A leaf (count > 0) owns the primitives
+// [offset, offset+count). An inner node (count == 0) has its left child at the next index and its
+// right child at offset.
 BVHNode :: struct {
-  bounds:          Aabb,
-  left_child:      i32,
-  right_child:     i32,
-  primitive_start: i32,
-  primitive_count: i32,
+  bounds: Aabb,
+  offset: i32,
+  count:  i32,
 }
 
-// BVH is a bounding volume hierarchy over items of type T, bounded by bounds_func.
+// BVH is a bounding volume hierarchy over items of type T. bounds[i] is the box of primitives[i];
+// the caller moves bounds and calls bvh_refit.
 BVH :: struct($T: typeid) {
-  nodes:       [dynamic]BVHNode,
-  primitives:  [dynamic]T,
-  bounds_func: proc(t: T) -> Aabb,
-  using _:     BVH_Levels,
-}
-
-// Level-order traversal data for parallel refit
-@(private)
-BVH_Levels :: struct {
-  node_levels: [dynamic][dynamic]i32,
-  max_depth:   i32,
+  nodes:      [dynamic]BVHNode,
+  primitives: [dynamic]T,
+  bounds:     [dynamic]Aabb,
 }
 
 // bvh_destroy frees the memory held by bvh.
 bvh_destroy :: proc(self: ^BVH($T)) {
   delete(self.nodes)
   delete(self.primitives)
-  for &level in self.node_levels {
-    delete(level)
-  }
-  delete(self.node_levels)
+  delete(self.bounds)
 }
 
 @(private = "file")
-BVHBuildNode :: struct {
-  bounds:     Aabb,
-  left:       ^BVHBuildNode,
-  right:      ^BVHBuildNode,
-  prim_start: i32,
-  prim_count: i32,
-}
+BVH_BINS :: 16
+@(private = "file")
+BVH_MAX_DEPTH :: 48 // deeper subtrees split by count, keeping traversal stacks bounded
+@(private = "file")
+BVH_STACK :: 64
+@(private = "file")
+PARALLEL_BUILD_THRESHOLD :: 1000
+@(private = "file")
+PARALLEL_TASK_THRESHOLD :: 250
+@(private = "file")
+PARALLEL_DEPTH_THRESHOLD :: 4
 
 @(private = "file")
-BVHPrimitive :: struct {
-  index:    i32,
-  bounds:   Aabb,
-  centroid: [3]f32,
-}
-
-// Parallel BVH build configuration
-@(private = "file")
-PARALLEL_BUILD_THRESHOLD :: 1000 // Min items for parallelism
-@(private = "file")
-PARALLEL_TASK_THRESHOLD :: 250 // Min items to spawn subtasks
-@(private = "file")
-PARALLEL_DEPTH_THRESHOLD :: 4 // Max depth for parallel tasks
-
-// Task data for parallel recursive build
-@(private = "file")
-BVH_Build_Task_Data :: struct {
-  prims:         []BVHPrimitive,
-  start:         i32,
-  end:           i32,
-  max_leaf_size: i32,
-  allocator:     mem.Allocator,
-  result_ptr:    ^^BVHBuildNode, // Pointer to the result pointer for atomic writes
-  depth:         i32,
-  thread_pool:   ^thread.Pool,
-}
-
-// bvh_build rebuilds bvh over items; leaves hold at most max_leaf_size items.
-bvh_build :: proc(self: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
-  if self == nil do return
-  if self.bounds_func == nil do return
-  clear(&self.nodes)
-  clear(&self.primitives)
-  if len(items) == 0 do return
-  reserve(&self.primitives, len(items))
-  append(&self.primitives, ..items)
-  arena: mem.Dynamic_Arena
-  mem.dynamic_arena_init(&arena)
-  defer mem.dynamic_arena_destroy(&arena)
-  arena_allocator := mem.dynamic_arena_allocator(&arena)
-  build_prims := make([]BVHPrimitive, len(items), arena_allocator)
-  for item, i in items {
-    bounds := self.bounds_func(item)
-    build_prims[i] = BVHPrimitive {
-      index    = i32(i),
-      bounds   = bounds,
-      centroid = aabb_center(bounds),
-    }
-  }
-  root := build_recursive(
-    build_prims[:],
-    0,
-    i32(len(items)),
-    max_leaf_size,
-    arena_allocator,
-  )
-  for prim, i in build_prims {
-    self.primitives[i] = items[prim.index]
-  }
-  flatten_bvh(self, root)
-}
-
-@(private)
-build_recursive :: proc(
-  prims: []BVHPrimitive,
-  start, end: i32,
-  max_leaf_size: i32,
-  allocator: mem.Allocator,
-) -> ^BVHBuildNode {
-  node := new(BVHBuildNode, allocator)
-  node.bounds = AABB_UNDEFINED
-  for i in start ..< end {
-    node.bounds = aabb_union(node.bounds, prims[i].bounds)
-  }
-  prim_count := end - start
-  if prim_count <= max_leaf_size {
-    node.prim_start = start
-    node.prim_count = prim_count
-    node.bounds = AABB_UNDEFINED
-    for i in start ..< end {
-      node.bounds = aabb_union(node.bounds, prims[i].bounds)
-    }
-    return node
-  }
-  axis, split_pos := split_sah(prims[start:end], node.bounds, allocator)
-  if axis < 0 || split_pos <= 0 || split_pos >= prim_count {
-    node.prim_start = start
-    node.prim_count = prim_count
-    node.bounds = AABB_UNDEFINED
-    for i in start ..< end {
-      node.bounds = aabb_union(node.bounds, prims[i].bounds)
-    }
-    return node
-  }
-  mid := start + split_pos
-  node.left = build_recursive(prims, start, mid, max_leaf_size, allocator)
-  node.right = build_recursive(prims, mid, end, max_leaf_size, allocator)
-  node.prim_start = -1
-  node.prim_count = 0
-  node.bounds = aabb_union(node.left.bounds, node.right.bounds)
-  return node
-}
-
-@(private = "file")
-SAHBin :: struct {
+BuildPrim :: struct {
   bounds: Aabb,
-  count:  i32,
+  index:  i32,
 }
 
-@(private)
-split_sah_binned :: proc(
-  prims: []BVHPrimitive,
-  node_bounds: Aabb,
-  allocator: mem.Allocator,
-) -> (
-  axis: i32,
-  split_pos: i32,
-) {
-  NUM_BINS :: 16
-  if len(prims) <= 8 {
-    return split_median(prims, node_bounds)
-  }
-  best_cost := f32(F32_MAX)
-  best_axis := -1
-  best_split_bin := -1
-  extent := node_bounds.max - node_bounds.min
-  #unroll for ax in 0 ..< 3 {
-    if extent[ax] < 0.0001 {
-    } else {
-    bins := make([]SAHBin, NUM_BINS, context.temp_allocator)
-    for &bin in bins {
-      bin.bounds = AABB_UNDEFINED
-      bin.count = 0
-    }
-    bin_scale := f32(NUM_BINS) / extent[ax]
-    for prim in prims {
-      bin_idx := i32((prim.centroid[ax] - node_bounds.min[ax]) * bin_scale)
-      bin_idx = clamp(bin_idx, 0, NUM_BINS - 1)
-      bins[bin_idx].count += 1
-      bins[bin_idx].bounds = aabb_union(bins[bin_idx].bounds, prim.bounds)
-    }
-    left_counts := make([]i32, NUM_BINS - 1, context.temp_allocator)
-    left_bounds_array := make([]Aabb, NUM_BINS - 1, context.temp_allocator)
-    running_count: i32 = 0
-    running_bounds := AABB_UNDEFINED
-    for i in 0 ..< NUM_BINS - 1 {
-      running_count += bins[i].count
-      running_bounds = aabb_union(running_bounds, bins[i].bounds)
-      left_counts[i] = running_count
-      left_bounds_array[i] = running_bounds
-    }
-    right_counts := make([]i32, NUM_BINS - 1, context.temp_allocator)
-    right_bounds_array := make([]Aabb, NUM_BINS - 1, context.temp_allocator)
-    running_count = 0
-    running_bounds = AABB_UNDEFINED
-    for i := NUM_BINS - 1; i > 0; i -= 1 {
-      running_count += bins[i].count
-      running_bounds = aabb_union(running_bounds, bins[i].bounds)
-      right_counts[i - 1] = running_count
-      right_bounds_array[i - 1] = running_bounds
-    }
-    for i in 0 ..< NUM_BINS - 1 {
-      if left_counts[i] == 0 || right_counts[i] == 0 do continue
-      cost := sah_cost(left_bounds_array[i], left_counts[i], right_bounds_array[i], right_counts[i], node_bounds)
-      if cost < best_cost {
-        best_cost = cost
-        best_axis = ax
-        best_split_bin = i
-      }
-    }
-    }
-  }
-  if best_axis < 0 || best_split_bin < 0 {
-    return split_median(prims, node_bounds)
-  }
-  bin_scale := f32(NUM_BINS) / (node_bounds.max[best_axis] - node_bounds.min[best_axis])
-  split_threshold := node_bounds.min[best_axis] + f32(best_split_bin + 1) / bin_scale
-  split_idx := 0
-  for i in 0 ..< len(prims) {
-    if prims[i].centroid[best_axis] < split_threshold {
-      if i != split_idx {
-        prims[split_idx], prims[i] = prims[i], prims[split_idx]
-      }
-      split_idx += 1
-    }
-  }
-  if split_idx == 0 || split_idx >= len(prims) {
-    return split_median(prims, node_bounds)
-  }
-  return i32(best_axis), i32(split_idx)
+@(private = "file")
+bin_of :: #force_inline proc "contextless" (c, lo, scale: f32) -> int {
+  return clamp(int((c - lo) * scale), 0, BVH_BINS - 1)
 }
 
-@(private)
-split_sah :: proc(
-  prims: []BVHPrimitive,
-  node_bounds: Aabb,
-  allocator: mem.Allocator,
-) -> (
-  axis: i32,
-  split_pos: i32,
-) {
-  return split_sah_binned(prims, node_bounds, allocator)
-}
-
-@(private)
-split_median :: proc(
-  prims: []BVHPrimitive,
-  node_bounds: Aabb,
-) -> (
-  axis: i32,
-  split_pos: i32,
-) {
-  extent := node_bounds.max - node_bounds.min
-  best_axis := 0
-  if extent[1] > extent[0] do best_axis = 1
-  if extent[2] > extent[best_axis] do best_axis = 2
-  if best_axis == 0 {
-    slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
-      return a.centroid[0] < b.centroid[0]
-    })
-  } else if best_axis == 1 {
-    slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
-      return a.centroid[1] < b.centroid[1]
-    })
-  } else {
-    slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
-      return a.centroid[2] < b.centroid[2]
-    })
+// Bounds of the prims and of their centers.
+@(private = "file")
+build_extents :: proc(prims: []BuildPrim) -> (bounds, centers: Aabb) {
+  bounds, centers = AABB_UNDEFINED, AABB_UNDEFINED
+  for &p in prims {
+    c := aabb_center(p.bounds)
+    bounds = aabb_union(bounds, p.bounds)
+    centers.min = linalg.min(centers.min, c)
+    centers.max = linalg.max(centers.max, c)
   }
-  return i32(best_axis), i32(len(prims) / 2)
-}
-
-@(private)
-sah_cost :: proc(
-  left_bounds: Aabb,
-  left_count: i32,
-  right_bounds: Aabb,
-  right_count: i32,
-  parent_bounds: Aabb,
-) -> f32 {
-  TRAVERSAL_COST :: 1.0
-  INTERSECTION_COST :: 1.0
-  parent_area := aabb_surface_area(parent_bounds)
-  left_area := aabb_surface_area(left_bounds)
-  right_area := aabb_surface_area(right_bounds)
-  if parent_area == 0 do return F32_MAX
-  p_left := left_area / parent_area
-  p_right := right_area / parent_area
-  return(
-    TRAVERSAL_COST +
-    INTERSECTION_COST *
-      (p_left * f32(left_count) + p_right * f32(right_count)) \
-  )
-}
-
-@(private)
-count_build_nodes :: proc(node: ^BVHBuildNode) -> i32 {
-  if node == nil do return 0
-  return 1 + count_build_nodes(node.left) + count_build_nodes(node.right)
-}
-
-@(private)
-flatten_bvh :: proc(self: ^BVH($T), root: ^BVHBuildNode) {
-  node_count := count_build_nodes(root)
-  resize(&self.nodes, int(node_count))
-  next_node_idx: i32 = 0
-  flatten_node(self, root, &next_node_idx)
-  compute_bvh_levels(self)
-}
-
-@(private)
-flatten_node :: proc(
-  self: ^BVH($T),
-  build_node: ^BVHBuildNode,
-  next_idx: ^i32,
-) -> i32 {
-  node_idx := next_idx^
-  next_idx^ += 1
-  node := BVHNode {
-    bounds = build_node.bounds,
-  }
-  if build_node.prim_count > 0 {
-    node.left_child = -1
-    node.right_child = -1
-    node.primitive_start = build_node.prim_start
-    node.primitive_count = build_node.prim_count
-  } else {
-    node.primitive_start = -1
-    node.primitive_count = -1
-    node.left_child = flatten_node(self, build_node.left, next_idx)
-    node.right_child = flatten_node(self, build_node.right, next_idx)
-  }
-  self.nodes[node_idx] = node
-  return node_idx
-}
-
-// bvh_query_aabb replaces results with the items whose bounds overlap query_bounds.
-bvh_query_aabb :: proc(
-  self: ^BVH($T),
-  query_bounds: Aabb,
-  results: ^[dynamic]T,
-) {
-  if self == nil || results == nil do return
-  clear(results)
-  if len(self.nodes) == 0 do return
-
-  BVH_MAX_STACK_DEPTH :: 64
-  stack: [BVH_MAX_STACK_DEPTH]i32
-  stack_size := 1
-  stack[0] = 0
-
-  for stack_size > 0 {
-    stack_size -= 1
-    node_idx := stack[stack_size]
-    node := &self.nodes[node_idx]
-
-    if !aabb_intersects(node.bounds, query_bounds) do continue
-
-    if node.primitive_count > 0 {
-      prim_start := node.primitive_start
-      prim_end := node.primitive_start + node.primitive_count
-
-      when intrinsics.type_has_field(T, "bounds") {
-        #no_bounds_check for i in prim_start ..< prim_end {
-          if aabb_intersects(self.primitives[i].bounds, query_bounds) {
-            append(results, self.primitives[i])
-          }
-        }
-      } else {
-        if self.bounds_func == nil do continue
-        for i in prim_start ..< prim_end {
-          prim := self.primitives[i]
-          prim_bounds := self.bounds_func(prim)
-          if aabb_intersects(prim_bounds, query_bounds) {
-            append(results, prim)
-          }
-        }
-      }
-    } else {
-      stack[stack_size] = node.left_child
-      stack_size += 1
-      stack[stack_size] = node.right_child
-      stack_size += 1
-    }
-  }
-}
-
-@(private)
-ray_aabb_intersection_safe :: proc(
-  origin: [3]f32,
-  direction: [3]f32,
-  aabb: Aabb,
-) -> (
-  t_near, t_far: f32,
-) {
-  t_min := [3]f32{-F32_MAX, -F32_MAX, -F32_MAX}
-  t_max := [3]f32{F32_MAX, F32_MAX, F32_MAX}
-  #unroll for i in 0 ..< 3 {
-    if math.abs(direction[i]) < 1e-6 {
-      if origin[i] < aabb.min[i] || origin[i] > aabb.max[i] {
-        return F32_MAX, -F32_MAX
-      }
-    } else {
-      inv_d := 1.0 / direction[i]
-      t1 := (aabb.min[i] - origin[i]) * inv_d
-      t2 := (aabb.max[i] - origin[i]) * inv_d
-      t_min[i] = min(t1, t2)
-      t_max[i] = max(t1, t2)
-    }
-  }
-  t_near = max(t_min.x, t_min.y, t_min.z)
-  t_far = min(t_max.x, t_max.y, t_max.z)
-  if t_far < t_near do return F32_MAX, -F32_MAX
   return
 }
 
-// bvh_query_ray replaces results with the items whose bounds the ray crosses within max_dist.
-bvh_query_ray :: proc(
+// Partitions prims in place around the cheapest binned SAH split; returns the left count.
+@(private = "file")
+build_split :: proc(prims: []BuildPrim, centers: Aabb, depth: i32) -> int {
+  half := len(prims) / 2
+  extent := centers.max - centers.min
+  if depth >= BVH_MAX_DEPTH || max(extent.x, extent.y, extent.z) < 1e-4 do return half
+  scale := [3]f32{}
+  bin_bounds: [3][BVH_BINS]Aabb
+  bin_count: [3][BVH_BINS]i32
+  for ax in 0 ..< 3 {
+    if extent[ax] >= 1e-4 do scale[ax] = BVH_BINS / extent[ax]
+    for &b in bin_bounds[ax] do b = AABB_UNDEFINED
+  }
+  for &p in prims {
+    c := aabb_center(p.bounds)
+    #unroll for ax in 0 ..< 3 {
+      k := bin_of(c[ax], centers.min[ax], scale[ax])
+      bin_count[ax][k] += 1
+      bin_bounds[ax][k] = aabb_union(bin_bounds[ax][k], p.bounds)
+    }
+  }
+  best_cost := f32(F32_MAX)
+  best_axis, best_bin := -1, 0
+  for ax in 0 ..< 3 {
+    if scale[ax] == 0 do continue
+    right_area: [BVH_BINS]f32 // area of bins (i, BVH_BINS)
+    acc := AABB_UNDEFINED
+    for i := BVH_BINS - 1; i > 0; i -= 1 {
+      acc = aabb_union(acc, bin_bounds[ax][i])
+      right_area[i] = aabb_surface_area(acc)
+    }
+    left := AABB_UNDEFINED
+    n_left: i32
+    n_right := i32(len(prims))
+    for i in 0 ..< BVH_BINS - 1 {
+      left = aabb_union(left, bin_bounds[ax][i])
+      n_left += bin_count[ax][i]
+      n_right -= bin_count[ax][i]
+      if n_left == 0 || n_right == 0 do continue
+      cost := aabb_surface_area(left) * f32(n_left) + right_area[i + 1] * f32(n_right)
+      if cost < best_cost do best_cost, best_axis, best_bin = cost, ax, i
+    }
+  }
+  if best_axis < 0 do return half
+  lo, s := centers.min[best_axis], scale[best_axis]
+  split := 0
+  for j in 0 ..< len(prims) {
+    if bin_of(aabb_center(prims[j].bounds)[best_axis], lo, s) <= best_bin {
+      prims[split], prims[j] = prims[j], prims[split]
+      split += 1
+    }
+  }
+  return split
+}
+
+// Appends the subtree over prims (first primitive slot is base) to nodes in depth-first order.
+@(private = "file")
+build_range :: proc(prims: []BuildPrim, base, max_leaf, depth: i32, nodes: ^[dynamic]BVHNode) {
+  bounds, centers := build_extents(prims)
+  me := len(nodes)
+  if i32(len(prims)) <= max_leaf {
+    append(nodes, BVHNode{bounds, base, i32(len(prims))})
+    return
+  }
+  append(nodes, BVHNode{bounds = bounds})
+  mid := build_split(prims, centers, depth)
+  build_range(prims[:mid], base, max_leaf, depth + 1, nodes)
+  nodes[me].offset = i32(len(nodes))
+  build_range(prims[mid:], base + i32(mid), max_leaf, depth + 1, nodes)
+}
+
+// bvh_build rebuilds bvh over items with their bounds; leaves hold at most max_leaf_size items.
+bvh_build :: proc(self: ^BVH($T), items: []T, bounds: []Aabb, max_leaf_size: i32 = 4) {
+  assert(len(items) == len(bounds))
+  prims := build_prims(items, bounds)
+  defer delete(prims)
+  clear(&self.nodes)
+  reserve(&self.nodes, len(items))
+  if len(items) > 0 do build_range(prims, 0, max_leaf_size, 0, &self.nodes)
+  bvh_gather(self, items, prims)
+}
+
+@(private = "file")
+build_prims :: proc(items: []$T, bounds: []Aabb) -> []BuildPrim {
+  prims := make([]BuildPrim, len(items))
+  for &p, i in prims do p = {bounds[i], i32(i)}
+  return prims
+}
+
+// Stores items and bounds in the order the build left prims.
+@(private = "file")
+bvh_gather :: proc(self: ^BVH($T), items: []T, prims: []BuildPrim) {
+  resize(&self.primitives, len(items))
+  resize(&self.bounds, len(items))
+  for p, i in prims {
+    self.primitives[i] = items[p.index]
+    self.bounds[i] = p.bounds
+  }
+}
+
+@(private = "file")
+BuildTask :: struct {
+  prims:    []BuildPrim,
+  base:     i32,
+  max_leaf: i32,
+  depth:    i32,
+  pool:     ^thread.Pool,
+  nodes:    [dynamic]BVHNode, // heap allocated: tasks run on threads that do not share the caller's allocator
+  done:     bool,
+}
+
+// Builds a subtree into task.nodes (offsets relative to that array); the top levels fork onto the pool.
+@(private = "file")
+build_task :: proc(task: ^BuildTask) {
+  defer sync.atomic_store(&task.done, true)
+  task.nodes.allocator = runtime.heap_allocator()
+  if task.depth >= PARALLEL_DEPTH_THRESHOLD || len(task.prims) < PARALLEL_TASK_THRESHOLD {
+    build_range(task.prims, task.base, task.max_leaf, task.depth, &task.nodes)
+    return
+  }
+  bounds, centers := build_extents(task.prims)
+  mid := build_split(task.prims, centers, task.depth)
+  left := task^
+  left.prims, left.depth, left.nodes, left.done = task.prims[:mid], task.depth + 1, nil, false
+  right := task^
+  right.prims, right.base, right.depth, right.nodes, right.done =
+    task.prims[mid:], task.base + i32(mid), task.depth + 1, nil, false
+  thread.pool_add_task(task.pool, runtime.nil_allocator(), proc(t: thread.Task) {
+    build_task((^BuildTask)(t.data))
+  }, &left, 0)
+  build_task(&right)
+  for !sync.atomic_load(&left.done) {
+    if queued, ok := thread.pool_pop_waiting(task.pool); ok {
+      thread.pool_do_work(task.pool, queued)
+    } else {
+      intrinsics.cpu_relax()
+    }
+  }
+  append(&task.nodes, BVHNode{bounds = bounds, offset = 1 + i32(len(left.nodes))})
+  for sub in ([2]^BuildTask{&left, &right}) {
+    at := i32(len(task.nodes))
+    for n in sub.nodes {
+      n := n
+      if n.count == 0 do n.offset += at
+      append(&task.nodes, n)
+    }
+    delete(sub.nodes)
+  }
+}
+
+// bvh_build_parallel builds the BVH on the thread pool, falling back to a sequential build for small inputs.
+bvh_build_parallel :: proc(
   self: ^BVH($T),
-  ray: Ray,
-  max_dist: f32,
-  results: ^[dynamic]T,
+  items: []T,
+  bounds: []Aabb,
+  thread_pool: ^thread.Pool,
+  max_leaf_size: i32 = 4,
+  parallel_threshold: int = PARALLEL_BUILD_THRESHOLD,
 ) {
+  if len(items) < parallel_threshold || thread_pool == nil || !thread_pool.is_running || len(thread_pool.threads) == 0 {
+    bvh_build(self, items, bounds, max_leaf_size)
+    return
+  }
+  assert(len(items) == len(bounds))
+  prims := build_prims(items, bounds)
+  defer delete(prims)
+  root := BuildTask {
+    prims    = prims,
+    max_leaf = max_leaf_size,
+    pool     = thread_pool,
+  }
+  build_task(&root)
+  clear(&self.nodes)
+  append(&self.nodes, ..root.nodes[:])
+  delete(root.nodes)
+  bvh_gather(self, items, prims)
+}
+
+// bvh_refit recomputes node bounds bottom-up after bounds changed, keeping the tree shape.
+bvh_refit :: proc(self: ^BVH($T)) {
+  #no_bounds_check for i := len(self.nodes) - 1; i >= 0; i -= 1 {
+    node := &self.nodes[i]
+    if node.count > 0 {
+      node.bounds = AABB_UNDEFINED
+      for b in self.bounds[node.offset:node.offset + node.count] do node.bounds = aabb_union(node.bounds, b)
+    } else {
+      node.bounds = aabb_union(self.nodes[i + 1].bounds, self.nodes[node.offset].bounds)
+    }
+  }
+}
+
+// bvh_query_aabb replaces results with the items whose bounds overlap query_bounds.
+bvh_query_aabb :: proc(self: ^BVH($T), query_bounds: Aabb, results: ^[dynamic]T) {
   clear(results)
   if len(self.nodes) == 0 do return
-
-  BVH_MAX_STACK_DEPTH :: 64
-  stack: [BVH_MAX_STACK_DEPTH]i32
-  stack_size := 1
-  stack[0] = 0
-
-  for stack_size > 0 {
-    stack_size -= 1
-    node_idx := stack[stack_size]
-    node := &self.nodes[node_idx]
-
-    t_near, t_far := ray_aabb_intersection_safe(
-      ray.origin,
-      ray.direction,
-      node.bounds,
-    )
-    if t_near > max_dist || t_far < 0 do continue
-
-    if node.primitive_count > 0 {
-      prim_start := node.primitive_start
-      prim_end := node.primitive_start + node.primitive_count
-
-      when intrinsics.type_has_field(T, "bounds") {
-        #no_bounds_check for i in prim_start ..< prim_end {
-          prim := self.primitives[i]
-          prim_t_near, prim_t_far := ray_aabb_intersection_safe(
-            ray.origin,
-            ray.direction,
-            prim.bounds,
-          )
-          if prim_t_near <= max_dist && prim_t_far >= 0 {
-            append(results, prim)
-          }
-        }
-      } else {
-        if self.bounds_func == nil do continue
-        for i in prim_start ..< prim_end {
-          prim := self.primitives[i]
-          prim_bounds := self.bounds_func(prim)
-          prim_t_near, prim_t_far := ray_aabb_intersection_safe(
-            ray.origin,
-            ray.direction,
-            prim_bounds,
-          )
-          if prim_t_near <= max_dist && prim_t_far >= 0 {
-            append(results, prim)
-          }
-        }
+  stack: [BVH_STACK]i32
+  top, i := 0, i32(0)
+  for {
+    node := &self.nodes[i]
+    if aabb_intersects(node.bounds, query_bounds) {
+      if node.count == 0 {
+        stack[top] = node.offset
+        top += 1
+        i += 1
+        continue
       }
-    } else {
-      stack[stack_size] = node.left_child
-      stack_size += 1
-      stack[stack_size] = node.right_child
-      stack_size += 1
+      #no_bounds_check for j in node.offset ..< node.offset + node.count {
+        if aabb_intersects(self.bounds[j], query_bounds) do append(results, self.primitives[j])
+      }
     }
+    if top == 0 do break
+    top -= 1
+    i = stack[top]
+  }
+}
+
+// Slab test with a precomputed inverse direction; hit when near <= far, near <= max_dist and far >= 0.
+@(private = "file")
+ray_hits :: #force_inline proc "contextless" (origin, inv_dir: [3]f32, box: Aabb, max_dist: f32) -> bool {
+  t1 := (box.min - origin) * inv_dir
+  t2 := (box.max - origin) * inv_dir
+  lo, hi := linalg.min(t1, t2), linalg.max(t1, t2)
+  t_near := max(lo.x, lo.y, lo.z)
+  t_far := min(hi.x, hi.y, hi.z)
+  return t_near <= t_far && t_near <= max_dist && t_far >= 0
+}
+
+// bvh_query_ray replaces results with the items whose bounds the ray crosses within max_dist.
+bvh_query_ray :: proc(self: ^BVH($T), ray: Ray, max_dist: f32, results: ^[dynamic]T) {
+  clear(results)
+  if len(self.nodes) == 0 do return
+  // Near-zero components act as parallel to the slab: tiny, so the slab is crossed far away or never.
+  inv_dir: [3]f32
+  #unroll for ax in 0 ..< 3 {
+    d := ray.direction[ax]
+    inv_dir[ax] = 1 / (abs(d) < 1e-6 ? math.copy_sign(f32(1e-6), d) : d)
+  }
+  stack: [BVH_STACK]i32
+  top, i := 0, i32(0)
+  for {
+    node := &self.nodes[i]
+    if ray_hits(ray.origin, inv_dir, node.bounds, max_dist) {
+      if node.count == 0 {
+        stack[top] = node.offset
+        top += 1
+        i += 1
+        continue
+      }
+      #no_bounds_check for j in node.offset ..< node.offset + node.count {
+        if ray_hits(ray.origin, inv_dir, self.bounds[j], max_dist) do append(results, self.primitives[j])
+      }
+    }
+    if top == 0 do break
+    top -= 1
+    i = stack[top]
   }
 }
 
@@ -501,50 +331,6 @@ RayHit :: struct($T: typeid) {
   primitive: T,
   t:         f32,
   hit:       bool,
-}
-
-// bvh_refit recomputes node bounds bottom-up after items moved, keeping the tree shape.
-bvh_refit :: proc(self: ^BVH($T)) {
-  for i := len(self.nodes) - 1; i >= 0; i -= 1 {
-    node := &self.nodes[i]
-    if node.left_child < 0 {
-      node.bounds = AABB_UNDEFINED
-      for j in node.primitive_start ..< node.primitive_start + node.primitive_count {
-        prim_bounds := self.bounds_func(self.primitives[j])
-        node.bounds = aabb_union(node.bounds, prim_bounds)
-      }
-    } else {
-      left_bounds := self.nodes[node.left_child].bounds
-      right_bounds := self.nodes[node.right_child].bounds
-      node.bounds = aabb_union(left_bounds, right_bounds)
-    }
-  }
-}
-
-@(private)
-compute_bvh_levels :: proc(self: ^BVH($T)) {
-  if len(self.nodes) == 0 do return
-  for &level in self.node_levels {
-    delete(level)
-  }
-  clear(&self.node_levels)
-  queue := make([dynamic]struct{idx: i32, depth: i32}, context.temp_allocator)
-  append(&queue, struct{idx: i32, depth: i32}{idx = 0, depth = 0})
-  self.max_depth = 0
-  for len(queue) > 0 {
-    current := queue[0]
-    ordered_remove(&queue, 0)
-    for i32(len(self.node_levels)) <= current.depth {
-      append(&self.node_levels, make([dynamic]i32))
-    }
-    append(&self.node_levels[current.depth], current.idx)
-    self.max_depth = max(self.max_depth, current.depth)
-    node := &self.nodes[current.idx]
-    if node.left_child >= 0 {
-      append(&queue, struct{idx: i32, depth: i32}{idx = node.left_child, depth = current.depth + 1})
-      append(&queue, struct{idx: i32, depth: i32}{idx = node.right_child, depth = current.depth + 1})
-    }
-  }
 }
 
 // BVHOverlapPair is a pair of overlapping primitives found by bvh_find_all_overlaps.
@@ -560,441 +346,42 @@ BVHCrossPair :: struct($T: typeid, $U: typeid) {
 }
 
 // bvh_find_all_overlaps finds all overlapping pairs within a single BVH in O(N + K).
-bvh_find_all_overlaps :: proc(
-  self: ^BVH($T),
-  results: ^[dynamic]BVHOverlapPair(T),
-) {
+bvh_find_all_overlaps :: proc(self: ^BVH($T), results: ^[dynamic]BVHOverlapPair(T)) {
   clear(results)
   if len(self.nodes) == 0 do return
-  if self.bounds_func == nil do return
-
-  find_overlaps_recursive(self, 0, 0, results)
-}
-
-@(private)
-find_overlaps_recursive :: proc(
-  self: ^BVH($T),
-  node_a_idx: i32,
-  node_b_idx: i32,
-  results: ^[dynamic]BVHOverlapPair(T),
-) {
-  node_a := &self.nodes[node_a_idx]
-  node_b := &self.nodes[node_b_idx]
-
-  if !aabb_intersects(node_a.bounds, node_b.bounds) do return
-
-  a_is_leaf := node_a.primitive_count > 0
-  b_is_leaf := node_b.primitive_count > 0
-
-  if a_is_leaf && b_is_leaf {
-    prim_a_start := node_a.primitive_start
-    prim_a_end := node_a.primitive_start + node_a.primitive_count
-    prim_b_start := node_b.primitive_start
-    prim_b_end := node_b.primitive_start + node_b.primitive_count
-
-    when intrinsics.type_has_field(T, "bounds") {
-      #no_bounds_check for i in prim_a_start ..< prim_a_end {
-        prim_a := self.primitives[i]
-        bounds_a := prim_a.bounds
-
-        // If same node, start after current index to avoid duplicates
-        j_start := prim_b_start if node_a_idx != node_b_idx else i + 1
-
-        #no_bounds_check for j in j_start ..< prim_b_end {
-          prim_b := self.primitives[j]
-          bounds_b := prim_b.bounds
-
-          if aabb_intersects(bounds_a, bounds_b) {
-            append(results, BVHOverlapPair(T){a = prim_a, b = prim_b})
-          }
-        }
-      }
-    } else {
-      for i in prim_a_start ..< prim_a_end {
-        prim_a := self.primitives[i]
-        bounds_a := self.bounds_func(prim_a)
-
-        // If same node, start after current index to avoid duplicates
-        j_start := prim_b_start if node_a_idx != node_b_idx else i + 1
-
-        for j in j_start ..< prim_b_end {
-          prim_b := self.primitives[j]
-          bounds_b := self.bounds_func(prim_b)
-
-          if aabb_intersects(bounds_a, bounds_b) {
-            append(results, BVHOverlapPair(T){a = prim_a, b = prim_b})
-          }
-        }
-      }
-    }
-    return
-  }
-
-  if a_is_leaf {
-    find_overlaps_recursive(self, node_a_idx, node_b.left_child, results)
-    find_overlaps_recursive(self, node_a_idx, node_b.right_child, results)
-  } else if b_is_leaf {
-    find_overlaps_recursive(self, node_a.left_child, node_b_idx, results)
-    find_overlaps_recursive(self, node_a.right_child, node_b_idx, results)
-  } else {
-    if node_a_idx == node_b_idx {
-      find_overlaps_recursive(self, node_a.left_child, node_a.left_child, results)
-      find_overlaps_recursive(self, node_a.left_child, node_a.right_child, results)
-      find_overlaps_recursive(self, node_a.right_child, node_a.right_child, results)
-    } else {
-      find_overlaps_recursive(self, node_a.left_child, node_b.left_child, results)
-      find_overlaps_recursive(self, node_a.left_child, node_b.right_child, results)
-      find_overlaps_recursive(self, node_a.right_child, node_b.left_child, results)
-      find_overlaps_recursive(self, node_a.right_child, node_b.right_child, results)
-    }
-  }
+  overlaps(self, self, 0, 0, true, (^[dynamic]BVHCrossPair(T, T))(results))
 }
 
 // bvh_find_cross_overlaps finds all overlapping pairs between two BVHs in O(N + M + K).
-bvh_find_cross_overlaps :: proc(
-  self: ^BVH($T),
-  bvh_b: ^BVH($U),
-  results: ^[dynamic]BVHCrossPair(T, U),
-) {
+bvh_find_cross_overlaps :: proc(self: ^BVH($T), bvh_b: ^BVH($U), results: ^[dynamic]BVHCrossPair(T, U)) {
   clear(results)
   if len(self.nodes) == 0 || len(bvh_b.nodes) == 0 do return
-  find_cross_overlaps_recursive(self, bvh_b, 0, 0, results)
+  overlaps(self, bvh_b, 0, 0, false, results)
 }
 
-@(private)
-find_cross_overlaps_recursive :: proc(
-  self: ^BVH($T),
-  bvh_b: ^BVH($U),
-  node_a_idx: i32,
-  node_b_idx: i32,
-  results: ^[dynamic]BVHCrossPair(T, U),
-) {
-  node_a := &self.nodes[node_a_idx]
-  node_b := &bvh_b.nodes[node_b_idx]
-
-  if !aabb_intersects(node_a.bounds, node_b.bounds) do return
-
-  a_is_leaf := node_a.primitive_count > 0
-  b_is_leaf := node_b.primitive_count > 0
-
-  if a_is_leaf && b_is_leaf {
-    prim_a_start := node_a.primitive_start
-    prim_a_end := node_a.primitive_start + node_a.primitive_count
-    prim_b_start := node_b.primitive_start
-    prim_b_end := node_b.primitive_start + node_b.primitive_count
-
-    when intrinsics.type_has_field(T, "bounds") &&
-         intrinsics.type_has_field(U, "bounds") {
-      #no_bounds_check for i in prim_a_start ..< prim_a_end {
-        prim_a := self.primitives[i]
-        bounds_a := prim_a.bounds
-
-        #no_bounds_check for j in prim_b_start ..< prim_b_end {
-          prim_b := bvh_b.primitives[j]
-          bounds_b := prim_b.bounds
-
-          if aabb_intersects(bounds_a, bounds_b) {
-            append(results, BVHCrossPair(T, U){a = prim_a, b = prim_b})
-          }
-        }
-      }
-    } else when intrinsics.type_has_field(T, "bounds") {
-      #no_bounds_check for i in prim_a_start ..< prim_a_end {
-        prim_a := self.primitives[i]
-        bounds_a := prim_a.bounds
-
-        for j in prim_b_start ..< prim_b_end {
-          prim_b := bvh_b.primitives[j]
-          bounds_b := bvh_b.bounds_func(prim_b)
-
-          if aabb_intersects(bounds_a, bounds_b) {
-            append(results, BVHCrossPair(T, U){a = prim_a, b = prim_b})
-          }
-        }
-      }
-    } else when intrinsics.type_has_field(U, "bounds") {
-      for i in prim_a_start ..< prim_a_end {
-        prim_a := self.primitives[i]
-        bounds_a := self.bounds_func(prim_a)
-
-        #no_bounds_check for j in prim_b_start ..< prim_b_end {
-          prim_b := bvh_b.primitives[j]
-          bounds_b := prim_b.bounds
-
-          if aabb_intersects(bounds_a, bounds_b) {
-            append(results, BVHCrossPair(T, U){a = prim_a, b = prim_b})
-          }
-        }
-      }
-    } else {
-      for i in prim_a_start ..< prim_a_end {
-        prim_a := self.primitives[i]
-        bounds_a := self.bounds_func(prim_a)
-
-        for j in prim_b_start ..< prim_b_end {
-          prim_b := bvh_b.primitives[j]
-          bounds_b := bvh_b.bounds_func(prim_b)
-
-          if aabb_intersects(bounds_a, bounds_b) {
-            append(results, BVHCrossPair(T, U){a = prim_a, b = prim_b})
-          }
-        }
+// Tree-vs-tree descent; the larger node splits first. With same, a is b and each pair is reported once.
+@(private = "file")
+overlaps :: proc(a: ^BVH($T), b: ^BVH($U), ia, ib: i32, same: bool, out: ^[dynamic]BVHCrossPair(T, U)) {
+  na, nb := &a.nodes[ia], &b.nodes[ib]
+  if !aabb_intersects(na.bounds, nb.bounds) do return
+  a_leaf, b_leaf := na.count > 0, nb.count > 0
+  if a_leaf && b_leaf {
+    #no_bounds_check for i in na.offset ..< na.offset + na.count {
+      box := a.bounds[i]
+      for j in (i + 1 if same && ia == ib else nb.offset) ..< nb.offset + nb.count {
+        if aabb_intersects(box, b.bounds[j]) do append(out, BVHCrossPair(T, U){a.primitives[i], b.primitives[j]})
       }
     }
-    return
-  }
-
-  if a_is_leaf {
-    find_cross_overlaps_recursive(self, bvh_b, node_a_idx, node_b.left_child, results)
-    find_cross_overlaps_recursive(self, bvh_b, node_a_idx, node_b.right_child, results)
-  } else if b_is_leaf {
-    find_cross_overlaps_recursive(self, bvh_b, node_a.left_child, node_b_idx, results)
-    find_cross_overlaps_recursive(self, bvh_b, node_a.right_child, node_b_idx, results)
+  } else if same && ia == ib {
+    l, r := ia + 1, na.offset
+    overlaps(a, b, l, l, true, out)
+    overlaps(a, b, r, r, true, out)
+    overlaps(a, b, l, r, true, out)
+  } else if b_leaf || (!a_leaf && aabb_surface_area(na.bounds) >= aabb_surface_area(nb.bounds)) {
+    overlaps(a, b, ia + 1, ib, same, out)
+    overlaps(a, b, na.offset, ib, same, out)
   } else {
-    find_cross_overlaps_recursive(self, bvh_b, node_a.left_child, node_b.left_child, results)
-    find_cross_overlaps_recursive(self, bvh_b, node_a.left_child, node_b.right_child, results)
-    find_cross_overlaps_recursive(self, bvh_b, node_a.right_child, node_b.left_child, results)
-    find_cross_overlaps_recursive(self, bvh_b, node_a.right_child, node_b.right_child, results)
+    overlaps(a, b, ia, ib + 1, same, out)
+    overlaps(a, b, ia, nb.offset, same, out)
   }
-}
-
-// Parallel BVH Building Implementation
-
-// Phase 1: Parallel primitive preparation (simplified - sequential for now)
-// TODO: Can be parallelized using SIMD in the future
-@(private)
-parallel_prepare_primitives :: proc(
-  items: []$T,
-  bounds_func: proc(t: T) -> Aabb,
-  pool: ^thread.Pool,
-  num_threads: int,
-  allocator: mem.Allocator,
-) -> []BVHPrimitive {
-  build_prims := make([]BVHPrimitive, len(items), allocator)
-
-  // For now, compute sequentially since thread tasks can't handle polymorphic types easily
-  // This is still fast (< 5% of total build time)
-  for item, i in items {
-    bounds := bounds_func(item)
-    build_prims[i] = BVHPrimitive {
-      index    = i32(i),
-      bounds   = bounds,
-      centroid = aabb_center(bounds),
-    }
-  }
-
-  return build_prims
-}
-
-// Task procedure for parallel recursive build
-@(private)
-bvh_build_task :: proc(task: thread.Task) {
-  data := (^BVH_Build_Task_Data)(task.data)
-
-  node := new(BVHBuildNode, data.allocator)
-  node.bounds = AABB_UNDEFINED
-
-  for i in data.start ..< data.end {
-    node.bounds = aabb_union(node.bounds, data.prims[i].bounds)
-  }
-
-  prim_count := data.end - data.start
-
-  if prim_count <= data.max_leaf_size {
-    node.prim_start = data.start
-    node.prim_count = prim_count
-    node.bounds = AABB_UNDEFINED
-    for i in data.start ..< data.end {
-      node.bounds = aabb_union(node.bounds, data.prims[i].bounds)
-    }
-    sync.atomic_store(data.result_ptr, node)
-    return
-  }
-
-  axis, split_pos := split_sah(data.prims[data.start:data.end], node.bounds, data.allocator)
-
-  if axis < 0 || split_pos <= 0 || split_pos >= prim_count {
-    node.prim_start = data.start
-    node.prim_count = prim_count
-    node.bounds = AABB_UNDEFINED
-    for i in data.start ..< data.end {
-      node.bounds = aabb_union(node.bounds, data.prims[i].bounds)
-    }
-    sync.atomic_store(data.result_ptr, node)
-    return
-  }
-
-  mid := data.start + split_pos
-
-  if data.depth >= PARALLEL_DEPTH_THRESHOLD || prim_count < PARALLEL_TASK_THRESHOLD {
-    node.left = build_recursive(
-      data.prims,
-      data.start,
-      mid,
-      data.max_leaf_size,
-      data.allocator,
-    )
-    node.right = build_recursive(
-      data.prims,
-      mid,
-      data.end,
-      data.max_leaf_size,
-      data.allocator,
-    )
-    node.prim_start = -1
-    node.prim_count = 0
-    node.bounds = aabb_union(node.left.bounds, node.right.bounds)
-    sync.atomic_store(data.result_ptr, node)
-    return
-  }
-
-  left_result: ^BVHBuildNode = nil
-  right_result: ^BVHBuildNode = nil
-
-  left_task_data := BVH_Build_Task_Data {
-    prims         = data.prims,
-    start         = data.start,
-    end           = mid,
-    max_leaf_size = data.max_leaf_size,
-    allocator     = data.allocator,
-    result_ptr    = &left_result,
-    depth         = data.depth + 1,
-    thread_pool   = data.thread_pool,
-  }
-
-  right_task_data := BVH_Build_Task_Data {
-    prims         = data.prims,
-    start         = mid,
-    end           = data.end,
-    max_leaf_size = data.max_leaf_size,
-    allocator     = data.allocator,
-    result_ptr    = &right_result,
-    depth         = data.depth + 1,
-    thread_pool   = data.thread_pool,
-  }
-
-  thread.pool_add_task(
-    data.thread_pool,
-    mem.nil_allocator(),
-    bvh_build_task,
-    &left_task_data,
-    0,
-  )
-  thread.pool_add_task(
-    data.thread_pool,
-    mem.nil_allocator(),
-    bvh_build_task,
-    &right_task_data,
-    0,
-  )
-  for sync.atomic_load(&left_result) == nil || sync.atomic_load(&right_result) == nil {
-    if queued_task, ok := thread.pool_pop_waiting(data.thread_pool); ok {
-      thread.pool_do_work(data.thread_pool, queued_task)
-      continue
-    }
-    time.sleep(time.Microsecond * 100)
-  }
-
-  node.left = left_result
-  node.right = right_result
-  node.prim_start = -1
-  node.prim_count = 0
-  node.bounds = aabb_union(node.left.bounds, node.right.bounds)
-  sync.atomic_store(data.result_ptr, node)
-}
-
-// Phase 2: Parallel recursive build
-@(private)
-parallel_build_recursive :: proc(
-  prims: []BVHPrimitive,
-  max_leaf_size: i32,
-  allocator: mem.Allocator,
-  pool: ^thread.Pool,
-) -> ^BVHBuildNode {
-  result: ^BVHBuildNode = nil
-
-  task_data := BVH_Build_Task_Data {
-    prims         = prims,
-    start         = 0,
-    end           = i32(len(prims)),
-    max_leaf_size = max_leaf_size,
-    allocator     = allocator,
-    result_ptr    = &result,
-    depth         = 0,
-    thread_pool   = pool,
-  }
-
-  thread.pool_add_task(
-    pool,
-    mem.nil_allocator(),
-    bvh_build_task,
-    &task_data,
-    0,
-  )
-
-  for sync.atomic_load(&result) == nil {
-    if queued_task, ok := thread.pool_pop_waiting(pool); ok {
-      thread.pool_do_work(pool, queued_task)
-      continue
-    }
-    time.sleep(time.Microsecond * 100)
-  }
-
-  return result
-}
-
-// bvh_build_parallel builds the BVH on the thread pool, falling back to a sequential build for small inputs.
-bvh_build_parallel :: proc(
-  self: ^BVH($T),
-  items: []T,
-  thread_pool: ^thread.Pool,
-  max_leaf_size: i32 = 4,
-  parallel_threshold: int = PARALLEL_BUILD_THRESHOLD,
-) {
-  if self == nil do return
-  if self.bounds_func == nil do return
-
-  clear(&self.nodes)
-  clear(&self.primitives)
-  if len(items) == 0 do return
-
-  if len(items) < parallel_threshold || thread_pool == nil || !thread_pool.is_running || len(thread_pool.threads) == 0 {
-    bvh_build(self, items, max_leaf_size)
-    return
-  }
-
-  reserve(&self.primitives, len(items))
-  append(&self.primitives, ..items)
-
-  // Setup per-thread arenas for thread-safe memory allocation
-  num_threads := len(thread_pool.threads)
-  if num_threads == 0 do num_threads = 1
-
-  arena: mem.Dynamic_Arena
-  mem.dynamic_arena_init(&arena)
-  defer mem.dynamic_arena_destroy(&arena)
-  arena_mutex: mem.Mutex_Allocator
-  mem.mutex_allocator_init(&arena_mutex, mem.dynamic_arena_allocator(&arena))
-  arena_allocator := mem.mutex_allocator(&arena_mutex)
-
-  build_prims := parallel_prepare_primitives(
-    items,
-    self.bounds_func,
-    thread_pool,
-    num_threads,
-    arena_allocator,
-  )
-
-  root := parallel_build_recursive(
-    build_prims[:],
-    max_leaf_size,
-    arena_allocator,
-    thread_pool,
-  )
-
-  for prim, i in build_prims {
-    self.primitives[i] = items[prim.index]
-  }
-
-  flatten_bvh(self, root)
 }
