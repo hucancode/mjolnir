@@ -27,7 +27,7 @@ LEG_CHAINS := [LEG_COUNT]struct {
 }
 HIP_LIMIT :: animation.JointLimit{{math.PI / 6, math.PI / 2, math.PI / 6}}
 JOINT_LIMIT :: animation.JointLimit{{math.PI / 2, math.PI / 2, math.PI / 2}}
-BODY_HEIGHT :: 2
+GROUND_TOP :: 0.1
 
 Tripod :: struct {
   lift_height:   mu.Real,
@@ -59,6 +59,8 @@ App :: struct {
   body_lerp_rate: f32,
   body_max_speed: f32,
   body_position:  [3]f32,
+  body_height:    f32,
+  grounded:       bool,
 }
 
 main :: proc() {
@@ -71,7 +73,8 @@ main :: proc() {
   app.body_speed = 0.05
   app.body_lerp_rate = 2
   app.body_max_speed = 4
-  app.body_position = {0, BODY_HEIGHT, 0}
+  app.body_height = 2
+  app.body_position = {0, app.body_height, 0}
   w := &app.window
   if !platform.init(w, 900, 700, "Spider Leg") do return
   if !render.init(&app.renderer, "Spider Leg", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
@@ -157,10 +160,27 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   if app.rig != nil do walk(app, dt)
   world.update(&app.scene)
-  if app.rig != nil do pose_legs(app, dt)
+  calibrating := app.rig != nil && !app.grounded
+  if calibrating do ground_body(app)
+  if app.rig != nil && !calibrating do pose_legs(app, dt)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  if app.rig != nil do for s in app.spider.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), app.animator.palette)
+  if app.rig != nil && !calibrating do for s in app.spider.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), app.animator.palette)
   render.update(&app.renderer, dt)
+}
+
+// ground_body lowers the body so the lowest foot rest position touches the ground.
+// Runs once, on the first frame, before any leg is posed (needs world matrices).
+ground_body :: proc(app: ^App) {
+  skel := &app.rig.skeleton
+  mesh_m := world.world_matrix(&app.scene, app.spider_mesh)
+  lowest := f32(1e9)
+  for chain in LEG_CHAINS {
+    offset, _ := animation.rest_offset(skel, chain.root, chain.tip)
+    p, _ := animation.rest_position(skel, chain.root)
+    lowest = min(lowest, (mesh_m * [4]f32{p.x, p.y, p.z, 1}).y + offset.y)
+  }
+  app.body_height += GROUND_TOP - lowest
+  app.grounded = true
 }
 
 walk :: proc(app: ^App, dt: f32) {
@@ -182,11 +202,11 @@ move_body :: proc(app: ^App, dt: f32) {
   if app.animate_body {
     app.time += dt
     x := f32(app.body_amplitude) * math.sin(app.time * f32(app.body_speed) * 2 * math.PI)
-    app.body_position = {x, BODY_HEIGHT, 0}
+    app.body_position = {x, app.body_height, 0}
     app.body_target = {mu.Real(x), 0}
     return
   }
-  target := [3]f32{f32(app.body_target.x), BODY_HEIGHT, f32(app.body_target.y)}
+  target := [3]f32{f32(app.body_target.x), app.body_height, f32(app.body_target.y)}
   step := linalg.lerp(app.body_position, target, 1 - math.exp(-app.body_lerp_rate * dt)) - app.body_position
   max_step := app.body_max_speed * dt
   if length := linalg.length(step); length > max_step do step *= max_step / length

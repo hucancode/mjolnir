@@ -92,8 +92,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   ground := world.spawn(&app.scene, {0, -3, 0})
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 30.0)
-  light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1, 0.9, 0.8}, 600, 20.0, true)))
 
   app.snake_model = gltf.model_create(&app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
   app.snake = gltf.instance_create(&app.snake_model, &app.scene, &app.renderer)

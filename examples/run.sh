@@ -36,10 +36,11 @@ fi
 
 # Build test
 binary_name="visual_$(basename "$test_dir")"
-echo "Building $test_dir with FRAME_LIMIT=$frame_limit"
+parallel="${PARALLEL_UPDATE:-false}"
+echo "Building $test_dir with FRAME_LIMIT=$frame_limit USE_PARALLEL_UPDATE=$parallel"
 odin build "$test_dir" -out:"bin/$binary_name" \
     -debug \
-    -define:USE_PARALLEL_UPDATE=false \
+    -define:USE_PARALLEL_UPDATE="$parallel" \
     -define:ENABLE_VALIDATION_LAYERS=true \
     -define:RENDER_FPS=5 \
     -define:FRAME_LIMIT="$frame_limit"

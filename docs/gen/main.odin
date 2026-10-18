@@ -150,15 +150,78 @@ drop_private_using :: proc(sig: string) -> string {
 load_pkg :: proc(path: string) -> Pkg {
 	// test files are #+private, so `odin doc` leaves their symbols out
 	doc, raw := parse_doc(run("odin", "doc", path))
+	aliases := proc_aliases(path)
 	sections: [dynamic]Section
 	for r in raw {
 		syms: [dynamic]Sym
+		seen: map[string]int
 		for s in r.syms {
-			append(&syms, Sym{sig = drop_private_using(s.sig), doc = strings.join(s.doc[:], "\n")})
+			sig := drop_private_using(s.sig)
+			sig = rename_alias(sig, aliases, &seen)
+			sig = expand_reexport(sig)
+			append(&syms, Sym{sig = sig, doc = strings.join(s.doc[:], "\n")})
 		}
 		if len(syms) > 0 {append(&sections, Section{name = r.name, syms = syms[:]})}
 	}
 	return {path = path, doc = strings.join(doc[:], "\n"), sections = sections[:]}
+}
+
+// The names of the package's `alias :: target` procedure aliases, by target: `odin doc` lists an
+// alias under its target's name, so the reference names the repeats after the aliases.
+proc_aliases :: proc(path: string) -> map[string][dynamic]string {
+	aliases: map[string][dynamic]string
+	infos, err := os.read_all_directory_by_path(path, context.allocator)
+	if err != nil {return aliases}
+	for fi in infos {
+		if !strings.has_suffix(fi.name, ".odin") || strings.has_suffix(fi.name, "_test.odin") {continue}
+		source := read(fi.fullpath)
+		for line in strings.split_lines_iterator(&source) {
+			parts := strings.split(line, " :: ", context.temp_allocator)
+			if len(parts) != 2 || !is_ident(parts[0]) || !is_ident(parts[1]) {continue}
+			// lower case on both sides: a procedure, not a type or constant
+			if parts[0][0] < 'a' || parts[0][0] > 'z' || parts[1][0] < 'a' || parts[1][0] > 'z' {continue}
+			if parts[1] not_in aliases {aliases[parts[1]] = {}}
+			append(&aliases[parts[1]], parts[0])
+		}
+	}
+	return aliases
+}
+
+is_ident :: proc(s: string) -> bool {
+	if len(s) == 0 {return false}
+	for c in s {
+		if !(c == '_' || (c >= '0' && c <= '9') || (c | 0x20 >= 'a' && c | 0x20 <= 'z')) {return false}
+	}
+	return true
+}
+
+// The n-th repeat of a target's signature names its n-th alias.
+rename_alias :: proc(sig: string, aliases: map[string][dynamic]string, seen: ^map[string]int) -> string {
+	end := strings.index(sig, " :: ")
+	if end < 0 {return sig}
+	name := sig[:end]
+	names, ok := aliases[name]
+	if !ok {return sig}
+	n := seen[name]
+	seen[name] = n + 1
+	if n == 0 || n > len(names) {return sig}
+	return strings.concatenate({names[n - 1], sig[end:]})
+}
+
+// `X :: rhi.Y`, a type render takes from rhi, shows what Y is.
+expand_reexport :: proc(sig: string) -> string {
+	@(static) rhi: map[string]string
+	end := strings.index(sig, " :: rhi.")
+	if end < 0 {return sig}
+	if len(rhi) == 0 {
+		_, raw := parse_doc(run("odin", "doc", "mjolnir/render/rhi"))
+		for r in raw do for s in r.syms {
+			if i := strings.index(s.sig, " :: "); i >= 0 {rhi[s.sig[:i]] = s.sig[i:]}
+		}
+	}
+	definition, ok := rhi[sig[end + len(" :: rhi."):]]
+	if !ok {return sig}
+	return strings.concatenate({sig[:end], definition})
 }
 
 load_examples :: proc() -> []Example {

@@ -49,8 +49,10 @@ texture_destroy :: proc(self: ^Renderer, handle: TextureHandle) {
 NO_TEXTURE :: 0
 
 // texture_create makes a 2D texture that lives until texture_destroy or teardown, from either
-//   raw pixels, size.x by size.y texels of format (A8 samples as white with alpha = the pixel):
-//     texture_create(r, pixels: []u8, size: [2]u32, format = .RGBA8_SRGB) -> (TextureHandle, ok)
+//   raw pixels, size.x by size.y texels of format (A8 samples as white with alpha = the pixel);
+//   `storage` lets a compute shader write it too (StorageImage), its pixels nil or not, in
+//   .RGBA8_UNORM, .RGBA16F or .R32F:
+//     texture_create(r, pixels: []u8, size: [2]u32, format = .RGBA8_SRGB, storage = false) -> (TextureHandle, ok)
 //   an encoded image (png, jpg, hdr, ...) held in memory; RGBA32F decodes it as linear HDR:
 //     texture_create(r, data: []u8, format = .RGBA8_SRGB, generate_mips = false) -> (TextureHandle, ok)
 texture_create :: proc {
@@ -64,11 +66,20 @@ texture_create_pixels :: proc(
   pixels: []u8,
   size: [2]u32,
   format: TextureFormat = .RGBA8_SRGB,
+  storage := false,
 ) -> (
   handle: TextureHandle,
   ok: bool,
 ) #optional_ok {
-  return allocate_texture(self, {extent = size, format = format, usage = {.SAMPLED}}, pixels)
+  if !storage do return allocate_texture(self, {extent = size, format = format, usage = {.SAMPLED}}, pixels)
+  if format != .RGBA8_UNORM && format != .RGBA16F && format != .R32F {
+    log.errorf("A storage texture is RGBA8_UNORM, RGBA16F or R32F, not %v", format)
+    return 0, false
+  }
+  guard(self)
+  handle = allocate_texture(self, {extent = size, format = format, usage = {.SAMPLED, .STORAGE}}, pixels) or_return
+  self.storage_formats[handle] = format
+  return handle, true
 }
 
 @(private = "file")

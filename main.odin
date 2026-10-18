@@ -116,7 +116,7 @@ update :: proc(app: ^App, dt: f32) {
   if app.free_cam do fly_camera(app, dt)
   else {
     if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-      orbit := render.orbit_from_camera(cam)
+      orbit := render.orbit_from_camera(cam, {0, 1, 0})
       drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
       render.orbit_drag(&orbit, drag, app.input.scroll.y)
       render.camera_orbit(cam, orbit)

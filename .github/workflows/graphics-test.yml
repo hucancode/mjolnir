@@ -90,4 +90,5 @@ jobs:
           name: graphics-test-artifacts
           path: |
             artifacts
+            artifacts-parallel
             game_output.log

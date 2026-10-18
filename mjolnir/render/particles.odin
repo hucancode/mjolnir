@@ -80,7 +80,9 @@ emitter_create :: proc(self: ^Renderer, e: Emitter) -> (handle: EmitterHandle, o
   return EmitterHandle(i), true
 }
 
-// emitter returns the emitter of `handle`, to edit in place; every slot it is attached to follows.
+// emitter returns the emitter of `handle`, to edit in place; every slot it is attached to
+// follows. The pointer is valid for this tick: getting it marks the data for upload, so get
+// it again next tick.
 emitter :: proc(self: ^Renderer, handle: EmitterHandle) -> (^Emitter, bool) #optional_ok {
   return resource(self, &self.emitter_slots, .EMITTERS, Emitter, u32(handle))
 }
@@ -104,7 +106,8 @@ force_field_create :: proc(self: ^Renderer, f: ForceField) -> (handle: ForceFiel
   return ForceFieldHandle(i), true
 }
 
-// force_field returns the force field of `handle`, to edit in place.
+// force_field returns the force field of `handle`, to edit in place; the pointer is valid for
+// this tick: getting it marks the data for upload, so get it again next tick.
 force_field :: proc(self: ^Renderer, handle: ForceFieldHandle) -> (^ForceField, bool) #optional_ok {
   return resource(self, &self.force_field_slots, .FORCE_FIELDS, ForceField, u32(handle))
 }

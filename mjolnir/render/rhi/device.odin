@@ -413,6 +413,8 @@ Procs :: struct($Device: typeid, $Window: typeid) {
   // Caps.multi_draw_indirect_count: up to max_count draws, the count read at count_offset
   cmd_draw_indexed_indirect_count: proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset: int, count_buffer: Buffer, count_offset: int, max_count, stride: u32),
   cmd_dispatch:                  proc(d: ^Device, cmd: CommandList, x, y, z: u32),
+  // the group counts are three u32 at `offset` of an INDIRECT buffer
+  cmd_dispatch_indirect:         proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset: int),
   cmd_fill_buffer:               proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset, size: int),
   cmd_copy_buffer:               proc(d: ^Device, cmd: CommandList, src: Buffer, src_offset: int, dst: Buffer, dst_offset, size: int),
   // one dependency: every barrier, and `discards`, textures about to be written whole whose old

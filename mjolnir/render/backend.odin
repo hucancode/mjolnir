@@ -29,5 +29,7 @@ TextureFormat :: rhi.TextureFormat
 // BlendMode and CullMode configure a material shader (material_shader_create).
 BlendMode :: rhi.BlendMode
 CullMode :: rhi.CullMode
+// Topology is how a draw shader's vertices make primitives.
+Topology :: rhi.Topology
 // Timing is one pass's GPU time (gpu_timings).
 Timing :: rhi.Timing

@@ -7,10 +7,11 @@ SPV_SHADERS := $(patsubst $(SHADER_DIR)/%/shader.vert,$(SHADER_DIR)/%/vert.spv,$
                $(patsubst $(SHADER_DIR)/%/shader.frag,$(SHADER_DIR)/%/frag.spv,$(FRAG_SHADERS))
 COMP_SHADERS := $(shell find $(SHADER_DIR) -name "*.comp")
 SPV_COMPUTE_SHADERS := $(patsubst %.comp,%.spv,$(COMP_SHADERS))
-# User shaders of the examples (render.post_shader_create, render.material_shader_create):
-# name.frag compiles to name.frag.spv against the engine's includes.
+# User shaders of the examples (render.post_shader_create, render.material_shader_create,
+# render.compute_shader_create, render.draw_shader_create): name.frag compiles to
+# name.frag.spv against the engine's includes.
 SHADER_INCLUDE := $(SHADER_DIR)/include
-EXAMPLE_SHADERS := $(wildcard examples/*/*.vert examples/*/*.frag)
+EXAMPLE_SHADERS := $(wildcard examples/*/*.vert examples/*/*.frag examples/*/*.comp)
 SPV_EXAMPLE_SHADERS := $(addsuffix .spv,$(EXAMPLE_SHADERS))
 
 run: shader

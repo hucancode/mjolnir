@@ -68,7 +68,7 @@ mesh_vertex_streams :: proc(self: ^Renderer, position_only := false) -> []rhi.Ve
 @(private)
 material_init :: proc(self: ^Renderer) -> bool {
   common := wgsl("shader/wgpu/common.wgsl")
-  mesh := wgsl_join(common, wgsl("shader/wgpu/mesh.wgsl"))
+  mesh := wgsl_join(common, wgsl("shader/wgpu/mesh.wgsl"), wgsl("shader/wgpu/mesh_vertex.wgsl"))
   pulled := wgsl_join(common, wgsl("shader/wgpu/mesh_pulled.wgsl"))
   sources := #partial [MaterialType]rhi.ShaderSource {
     .PBR = {
@@ -125,7 +125,10 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
   for a, i in targets do colors[i] = {texture = images[a][f], load = load, clear = {0, 0, 0, 1}}
   depth := rhi.DepthTarget{texture = images[.DEPTH][f], load = load, clear = 1, store = true}
   dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors, depth = depth})
-  if pass == .FORWARD do particles_draw(self, cmd, f, cam)
+  if pass == .FORWARD {
+    gpu_draws_record(self, cmd, f, cam)
+    particles_draw(self, cmd, f, cam)
+  }
   types := MATERIAL_PASS_TYPES[pass]
   keys := make([dynamic]u32, context.temp_allocator)
   pipelines := make([dynamic]rhi.Pipeline, context.temp_allocator)

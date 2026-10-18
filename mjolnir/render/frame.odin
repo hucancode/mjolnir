@@ -34,6 +34,11 @@ Barrier :: enum {
   // the cull recorded after the frame on one queue: it rewrites the lists and pyramids that
   // draws and the previous cull read, from depth the frame wrote
   FRAME_TO_CULL,
+  // your work (gpu.odin): after the uploads and the previous frame's draws and copies, between
+  // two of its steps, and before what draws, samples or copies back its results
+  FRAME_TO_GPU_WORK,
+  GPU_WORK,
+  GPU_WORK_TO_DRAW,
 }
 
 @(private = "file")
@@ -91,6 +96,18 @@ BARRIERS := [Barrier]rhi.Barrier {
   .SKIN_TO_DRAW = {
     src_stage = {.COMPUTE_SHADER}, dst_stage = {.VERTEX_SHADER},
     src_access = {.SHADER_WRITE}, dst_access = {.SHADER_READ},
+  },
+  .FRAME_TO_GPU_WORK = {
+    src_stage = {.DRAW_INDIRECT, .VERTEX_SHADER, .FRAGMENT_SHADER, .COMPUTE_SHADER, .TRANSFER}, dst_stage = {.COMPUTE_SHADER, .TRANSFER},
+    src_access = {.SHADER_WRITE, .TRANSFER_WRITE}, dst_access = {.SHADER_READ, .SHADER_WRITE, .TRANSFER_WRITE},
+  },
+  .GPU_WORK = {
+    src_stage = {.COMPUTE_SHADER, .TRANSFER}, dst_stage = {.DRAW_INDIRECT, .COMPUTE_SHADER, .TRANSFER},
+    src_access = {.SHADER_WRITE, .TRANSFER_WRITE}, dst_access = {.INDIRECT_READ, .SHADER_READ, .SHADER_WRITE, .TRANSFER_WRITE},
+  },
+  .GPU_WORK_TO_DRAW = {
+    src_stage = {.COMPUTE_SHADER, .TRANSFER}, dst_stage = {.DRAW_INDIRECT, .VERTEX_SHADER, .FRAGMENT_SHADER, .COMPUTE_SHADER, .TRANSFER},
+    src_access = {.SHADER_WRITE, .TRANSFER_WRITE}, dst_access = {.INDIRECT_READ, .SHADER_READ, .TRANSFER_READ},
   },
   .FRAME_TO_CULL = {
     src_stage = {.DRAW_INDIRECT, .COMPUTE_SHADER, .TRANSFER, .LATE_FRAGMENT_TESTS}, dst_stage = {.COMPUTE_SHADER, .TRANSFER},
@@ -204,6 +221,10 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
     dev.cmd_flush_uploads(&self.gpu, cmd)
   }
   compute := dev.cmd_begin(&self.gpu, .COMPUTE, 0) if async else cmd
+  {
+    scope(self, cmd, "gpu work")
+    gpu_work_record(self, cmd, f)
+  }
   // before everything that draws a skinned node, so on the graphics list
   {
     scope(self, cmd, "skinning")

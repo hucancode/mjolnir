@@ -64,6 +64,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   cmd_draw_indexed_indirect       = rhi_cmd_draw_indexed_indirect,
   cmd_draw_indexed_indirect_count = rhi_cmd_draw_indexed_indirect_count,
   cmd_dispatch                    = rhi_cmd_dispatch,
+  cmd_dispatch_indirect           = rhi_cmd_dispatch_indirect,
   cmd_fill_buffer                 = rhi_cmd_fill_buffer,
   cmd_copy_buffer                 = rhi_cmd_copy_buffer,
   cmd_barrier                     = rhi_cmd_barrier,
@@ -755,6 +756,10 @@ rhi_cmd_draw_indexed_indirect_count :: proc(
 
 rhi_cmd_dispatch :: proc(b: ^Backend, cmd: rhi.CommandList, x, y, z: u32) {
   wgpu.ComputePassEncoderDispatchWorkgroups(b.cmds[cmd].compute, x, y, z)
+}
+
+rhi_cmd_dispatch_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset: int) {
+  wgpu.ComputePassEncoderDispatchWorkgroupsIndirect(b.cmds[cmd].compute, b.buffers.items[buffer], u64(offset))
 }
 
 // Outside any pass; zeroes the range (WebGPU fills nothing else).

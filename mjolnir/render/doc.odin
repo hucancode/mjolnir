@@ -1,6 +1,7 @@
-// Draws your scene: meshes, lights, particles, post effects, debug lines and a 2D overlay. Create
-// meshes, materials, textures, lights, emitters and cameras, attach them to slots (one per world
-// node), feed node transforms each tick and call frame.
+// Draws your scene: meshes, lights, particles, post effects, debug lines and a 2D overlay, and
+// runs your own GPU programs (buffers, compute and draw shaders). Create meshes, materials,
+// textures, lights, emitters and cameras, attach them to slots (one per world node), feed node
+// transforms each tick and call frame.
 package render
 
 // Architecture. render is the renderer: deferred shading with GPU culling, on a GPU backend picked

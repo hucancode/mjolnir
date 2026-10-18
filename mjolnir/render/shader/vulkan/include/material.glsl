@@ -1,8 +1,9 @@
-// The interface of a user material fragment shader (render.material_shader_create): the
-// mesh vertex stage's outputs, the color output, the scene buffers it reads and the
-// bindless textures. A custom material is drawn in the forward pass over the lit image,
-// depth-tested without writing depth. Read your own values from node_material().params
-// (render.Material.params), the time from camera_view().time and the image size from
+// The interface of a user material shader (render.material_shader_create): the scene buffers
+// it reads, the bindless textures and, for a fragment shader, the mesh vertex stage's outputs
+// and the color output. A custom material is drawn in the forward pass over the lit image,
+// depth-tested, writing depth when its shader does not blend. Read your own values from
+// node_material().params (render.Material.params), the time from camera_view().time, the sun
+// from camera_view().sun_direction and .sun_radiance and the image size from
 // camera_view().extent.
 //
 //     #version 450
@@ -13,7 +14,11 @@
 //         out_color = m.base_color_factor * pulse;
 //     }
 //
-// Compile with glslc -I <this directory>.
+// A vertex shader that moves the mesh's vertices defines MATERIAL_VERTEX first: it reads
+// in_position, in_normal, in_color, in_uv and in_tangent (model space) and ends with
+// material_vertex(position, normal).
+//
+// Compile with glslc --target-env=vulkan1.3 -I <this directory>.
 
 #extension GL_EXT_nonuniform_qualifier : require
 
@@ -98,6 +103,39 @@ layout(push_constant) uniform MeshPush {
     uint camera_index;
 };
 
+#ifdef MATERIAL_VERTEX
+// model space
+layout(location = 0) in vec3 in_position;
+layout(location = 1) in vec3 in_normal;
+layout(location = 2) in vec4 in_color;
+layout(location = 3) in vec2 in_uv;
+layout(location = 4) in vec4 in_tangent;
+
+layout(location = 0) out vec3 out_position;
+layout(location = 1) out vec4 out_color;
+layout(location = 2) out vec3 out_normal;
+layout(location = 3) out vec2 out_uv;
+layout(location = 4) out vec4 out_tangent;
+layout(location = 5) flat out uint out_node_index;
+
+// The material of the drawn node.
+Material node_material() {
+    return materials[nodes[gl_InstanceIndex].material_id];
+}
+
+// Emits the vertex at model-space position and normal, moved by its node and seen by the camera.
+void material_vertex(vec3 position, vec3 normal) {
+    mat4 world = nodes[gl_InstanceIndex].world_matrix;
+    vec4 world_position = world * vec4(position, 1.0);
+    out_position = world_position.xyz;
+    out_color = in_color;
+    out_normal = normalize(mat3(world) * normal);
+    out_uv = in_uv;
+    out_tangent = vec4(normalize(mat3(world) * in_tangent.xyz), in_tangent.w);
+    out_node_index = uint(gl_InstanceIndex);
+    gl_Position = views[camera_index].view_projection * world_position;
+}
+#else
 // world space
 layout(location = 0) in vec3 in_position;
 layout(location = 1) in vec4 in_color;
@@ -112,6 +150,7 @@ layout(location = 0) out vec4 out_color;
 Material node_material() {
     return materials[nodes[in_node_index].material_id];
 }
+#endif
 
 // The drawing camera's view.
 View camera_view() {

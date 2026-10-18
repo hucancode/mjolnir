@@ -64,6 +64,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   cmd_draw_indexed_indirect       = rhi_cmd_draw_indexed_indirect,
   cmd_draw_indexed_indirect_count = rhi_cmd_draw_indexed_indirect_count,
   cmd_dispatch                    = rhi_cmd_dispatch,
+  cmd_dispatch_indirect           = rhi_cmd_dispatch_indirect,
   cmd_fill_buffer                 = rhi_cmd_fill_buffer,
   cmd_copy_buffer                 = rhi_cmd_copy_buffer,
   cmd_barrier                     = rhi_cmd_barrier,
@@ -999,6 +1000,10 @@ rhi_cmd_draw_indexed_indirect_count :: proc(
 
 rhi_cmd_dispatch :: proc(b: ^Backend, handle: rhi.CommandList, x, y, z: u32) {
   vk.CmdDispatch(cmd_get(b, handle).cb, x, y, z)
+}
+
+rhi_cmd_dispatch_indirect :: proc(b: ^Backend, handle: rhi.CommandList, buffer: rhi.Buffer, offset: int) {
+  vk.CmdDispatchIndirect(cmd_get(b, handle).cb, b.buffers.items[buffer].buffer, vk.DeviceSize(offset))
 }
 
 rhi_cmd_fill_buffer :: proc(b: ^Backend, handle: rhi.CommandList, buffer: rhi.Buffer, offset, size: int) {

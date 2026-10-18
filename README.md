@@ -9,7 +9,8 @@ Mjolnir is a minimalistic game engine to help people enjoy game programming.
 ![](./readme/4-more-shader.png)
 
 # Get Started
-To use Mjolnir in your odin code, run `make shader` to compile shaders to SPIR-V and then copy `mjolnir` directory to your project and start using mjolnir API.
+To use Mjolnir in your odin code, run `make shader` to compile shaders to SPIR-V (the `.spv` files are generated, not committed; it needs `glslc` from the Vulkan SDK) and then copy `mjolnir` directory to your project and start using mjolnir API.
+Build with `-define:RENDER_BACKEND=wgpu` for the WebGPU backend, and `make web EXAMPLE=<name>` for the browser.
 See `examples` for common use cases, and [document](https://hucancode.github.io/mjolnir) for more informations.
 
 # Notable features
@@ -23,3 +24,4 @@ See `examples` for common use cases, and [document](https://hucancode.github.io/
 - Physics
 - Recast/Detour
 - Behavior Tree, Finite State Machine
+- General Purpose GPU (WIP)

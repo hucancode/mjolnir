@@ -10,7 +10,7 @@
 //     #include "post.glsl"
 //     void main() { out_color = post_input(v_uv) * vec4(tint, 1) * strength; }
 //
-// Compile with glslc -I <this directory>.
+// Compile with glslc --target-env=vulkan1.3 -I <this directory>.
 
 #extension GL_EXT_nonuniform_qualifier : require
 

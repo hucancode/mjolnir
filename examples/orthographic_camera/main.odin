@@ -64,11 +64,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   spawn_primitive(app, .CYLINDER, .BLUE,   {0, 1.0, 2.5},  0.5)
   spawn_primitive(app, .CONE,     .YELLOW, {0, 0.8, -2.5}, 0.5)
   app.spinner = spawn_primitive(app, .CUBE, .MAGENTA, {0, 1.5, 0}, 0.4)
-
   spawn_primitive(app, .QUAD_XZ, .GRAY, {0, 0, 0}, 6.0, cast_shadow = false)
-
-  point := world.spawn(&app.scene, {3, 8, 3})
-  render.attach(&app.renderer, render.SlotHandle(point.index), render.light_create(&app.renderer, render.make_point_light({1.0, 0.95, 0.8}, 1500, 25.0, false)))
   return .READY
 }
 

@@ -81,8 +81,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   ground := world.spawn(&app.scene, {0, -2, 0})
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
-  light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1, 1, 1}, 600, 20.0, true)))
   return .READY
 }
 

@@ -119,10 +119,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.camera_look_at(render.main_camera(&app.renderer), {0, 12, 3}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
 
-  spot := world.spawn(&app.scene, {0, 10, 4})
-  render.attach(&app.renderer, render.SlotHandle(spot.index), render.light_create(&app.renderer, render.make_spot_light({0.2, 0.95, 0.85}, 500, 16.0, math.PI * 0.35)))
-  world.rotate(&app.scene, spot, -math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
-
   app.game.head_node = spawn_primitive(app, .CUBE, .YELLOW)
   world.scale(&app.scene, app.game.head_node, SEGMENT_SCALE)
   app.game.food_node = spawn_primitive(app, .SPHERE, .RED)

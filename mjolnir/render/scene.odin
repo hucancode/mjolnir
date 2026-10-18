@@ -186,6 +186,16 @@ Renderer_State :: struct {
   ui_font_atlas_size:     [2]f32,
   dpi_scale:              f32,
   mutex:                  sync.Recursive_Mutex,
+  // your GPU programs (gpu.odin): [handle - 1], zero where free; work staged for the next
+  // frame; the draws frames draw, stale once drawn or a tick ended
+  gpu_buffers:            [dynamic]GpuBuffer,
+  gpu_shaders:            [dynamic]GpuShader,
+  gpu_work:               [dynamic]GpuWork,
+  gpu_draws:              [dynamic]GpuDraw,
+  gpu_draws_stale:        bool,
+  gpu_layouts:            map[GpuLayoutKey]rhi.BindLayout,
+  // the format of each texture made with texture_create(storage = true)
+  storage_formats:        map[TextureHandle]TextureFormat,
   // ready ran init_resources
   initialized:            bool,
 }
@@ -339,6 +349,7 @@ teardown :: proc(self: ^Renderer) {
   rewind(self, &self.force_field_placement_slots, .FORCE_FIELD_PLACEMENTS)
   self.shadow_casters = {}
   clear(&self.bursts)
+  gpu_reset(self)
   if !particles_reset(self) do log.error("teardown: cannot clear the particles")
 }
 
@@ -366,6 +377,7 @@ shutdown :: proc(self: ^Renderer) {
   delete(self.ui_indices)
   delete(self.effect_stack)
   delete(self.custom_post_pipelines)
+  gpu_shutdown(self)
   for inbox in self.debug_lines do delete(inbox)
   delete(self.bursts)
   for &slab in self.mesh_slabs do containers.slab_destroy(&slab)
@@ -484,6 +496,7 @@ update :: proc(self: ^Renderer, delta_time: f32) {
   sync.mutex_unlock(&self.debug_mutex)
   guard(self)
   self.ui_stale = true
+  self.gpu_draws_stale = true
   if delta_time <= 0 do return
   // flush_particles emits for it; particles_simulate consumes it
   self.particle_params.delta_time += delta_time
@@ -847,6 +860,8 @@ light_create :: proc(self: ^Renderer, l: Light) -> (handle: LightHandle, ok: boo
 }
 
 // light returns the light of `handle`, to edit in place; every slot it is attached to follows.
+// The pointer is valid for this tick: getting it marks the data for upload, so get it again
+// next tick.
 light :: proc(self: ^Renderer, handle: LightHandle) -> (^Light, bool) #optional_ok {
   return resource(self, &self.light_slots, .LIGHTS, Light, u32(handle))
 }
@@ -1257,6 +1272,7 @@ frame :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool
   // drawn again each frame until a stage_overlay replaces it
   self.ui_stale = true
   if submitted {
+    gpu_frame_done(self)
     // simulated: the next frame's time accumulates from zero
     self.particle_params.delta_time = 0
     // the backend has every write so far
@@ -1284,4 +1300,7 @@ destroy :: proc {
   material_shader_destroy,
   post_shader_destroy,
   geometry_destroy,
+  buffer_destroy,
+  compute_shader_destroy,
+  draw_shader_destroy,
 }

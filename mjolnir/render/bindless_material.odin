@@ -43,8 +43,8 @@ Material :: struct {
 }
 #assert(size_of(Material) == 96)
 
-// material returns the material of `handle`, to edit in place; the pointer is valid until the
-// next frame. Edits from another thread than frame's happen between lock and unlock.
+// material returns the material of `handle`, to edit in place; the pointer is valid for
+// this tick: getting it marks the data for upload, so get it again next tick.
 material :: proc(self: ^Renderer, handle: MaterialHandle) -> (^Material, bool) #optional_ok {
   if !containers.slots_live(&self.material_slots, u32(handle)) do return nil, false
   mark_dirty(self, .MATERIALS, int(handle))

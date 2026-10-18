@@ -26,6 +26,8 @@ ScenePass :: enum {
   DEBUG_LINE,
   // the skinning compute shader
   SKIN,
+  // your shaders (gpu.odin)
+  USER,
 }
 
 // The buffers render owns: first every Table, in its order (SceneBuffer(t) is table t's), then
@@ -113,6 +115,7 @@ SCENE_PASSES := [ScenePass]struct {
   .PARTICLE_DRAW     = {{.VIEWS, .PARTICLES, .PARTICLE_ALIVE}, {.VERTEX}, {}},
   .DEBUG_LINE        = {{.VIEWS, .DEBUG_LINES}, {.VERTEX}, {}},
   .SKIN              = {{.NODES, .MESHES, .BONES, .SKINNING, .VERTICES, .SKIN_OWNERS, .SKINNED_VERTICES}, {.COMPUTE}, {.SKINNED_VERTICES}},
+  .USER              = {{.VIEWS}, {.VERTEX, .FRAGMENT, .COMPUTE}, {}},
 }
 
 // Texture groups of a device without bindless: each slot is a texture of this kind.

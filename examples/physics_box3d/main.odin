@@ -98,6 +98,7 @@ body_create :: proc(app: ^App, type: b3.BodyType, position: [3]f32) -> b3.BodyId
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  app.renderer.skybox_intensity = 0
   rand_sphere := render.make_sphere()
   rand_cylinder := render.make_cylinder()
   for &v in rand_sphere.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
@@ -144,11 +145,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     append(&app.pieces, Piece{body, node})
   }
   log.infof("Created %d Box3D bodies", PIECE_COUNT)
-  render.camera_look_at(render.main_camera(&app.renderer), {30, 25, 30}, {0, 5, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {10, 15, 10}, {0, 5, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 5, 0})
-  light := world.spawn(&app.scene, {0, 20, 0})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_spot_light({0.8, 0.9, 1}, 5000, 25.0, math.PI * 0.25)))
-  world.rotate(&app.scene, light, -math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   return .READY
 }
 
