@@ -1,6 +1,7 @@
 package bake
 
 import "core:log"
+import "core:math/linalg"
 import "../detour"
 import "../recast"
 
@@ -11,17 +12,17 @@ NavGeometryBuilder :: struct {
   area_types: [dynamic]u8,
 }
 
-// append_triangles adds a triangle mesh to b. Triangles are walkable unless
-// `is_obstacle`. Every position is offset by `offset`.
+// append_triangles adds a triangle mesh to b, its positions moved by `transform` (a node's
+// world matrix, say). Triangles are walkable unless `is_obstacle`.
 append_triangles :: proc(
   self: ^NavGeometryBuilder,
   positions: [][3]f32,
   indices: []u32,
-  offset: [3]f32 = {0, 0, 0},
+  transform: matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY,
   is_obstacle: bool = false,
 ) {
   base := i32(len(self.vertices))
-  for p in positions do append(&self.vertices, p + offset)
+  for p in positions do append(&self.vertices, (transform * [4]f32{p.x, p.y, p.z, 1}).xyz)
   for i in indices do append(&self.indices, base + i32(i))
   area: u8 = u8(recast.RC_NULL_AREA) if is_obstacle else u8(recast.RC_WALKABLE_AREA)
   for _ in 0 ..< len(indices) / 3 do append(&self.area_types, area)

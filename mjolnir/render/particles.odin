@@ -38,6 +38,16 @@ Emitter :: struct #align(16) {
 // EmitterHandle identifies an emitter (emitter_create).
 EmitterHandle :: distinct u32
 
+// A one-shot emission (emit): count particles at slot, queued until the next flush, which gives
+// it placement row `row` for that frame only.
+@(private)
+Burst :: struct {
+  emitter: EmitterHandle,
+  slot:    u32,
+  count:   u32,
+  row:     u32,
+}
+
 // Where an emitter is attached. The emit pass reads the frame's new particles in placement
 // order: placement i takes [emit_first, the next placement's emit_first).
 @(private)
@@ -73,6 +83,14 @@ emitter_create :: proc(self: ^Renderer, e: Emitter) -> (handle: EmitterHandle, o
 // emitter returns the emitter of `handle`, to edit in place; every slot it is attached to follows.
 emitter :: proc(self: ^Renderer, handle: EmitterHandle) -> (^Emitter, bool) #optional_ok {
   return resource(self, &self.emitter_slots, .EMITTERS, Emitter, u32(handle))
+}
+
+// emit spawns count particles of emitter once, from slot's transform, on the next frame,
+// whatever its emission_rate (an emitter whose rate is 0 only bursts). A slot removed before
+// then emits nothing.
+emit :: proc(self: ^Renderer, emitter: EmitterHandle, slot: SlotHandle, count: u32) {
+  guard(self)
+  append(&self.bursts, Burst{emitter = emitter, slot = u32(slot), count = count})
 }
 
 // emitter_destroy frees the emitter; slots it stays attached to emit nothing.

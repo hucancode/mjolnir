@@ -37,7 +37,8 @@ App :: struct {
   debug:          debugui.Context,
   input:          input.State,
   orbit:          render.Orbit,
-  spider:         gltf.Scene,
+  spider_model:   gltf.Model,
+  spider:         gltf.Instance,
   spider_root:    world.NodeHandle,
   spider_mesh:    world.NodeHandle,
   rig:            ^animation.Rig,
@@ -95,11 +96,12 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   light := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
 
-  app.spider = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
+  app.spider_model = gltf.model_create(&app.renderer, #load("../../assets/spider.glb"))
+  app.spider = gltf.instance_create(&app.spider_model, &app.scene, &app.renderer)
   if len(app.spider.roots) == 0 || len(app.spider.skinned) == 0 do return .FAIL
   app.spider_root = app.spider.roots[0]
   app.spider_mesh = app.spider.skinned[0].node
-  app.rig = &app.spider.rigs[app.spider.skinned[0].rig]
+  app.rig = &app.spider_model.rigs[app.spider.skinned[0].rig]
   skel := &app.rig.skeleton
   animation.animator_init(&app.animator, app.rig)
   for chain, i in LEG_CHAINS {
@@ -123,7 +125,8 @@ leg_pole :: proc(foot: [3]f32, body_x: f32) -> [3]f32 {
 
 shutdown :: proc(app: ^App) {
   animation.destroy(&app.animator)
-  gltf.destroy(&app.spider, &app.scene, &app.renderer)
+  gltf.destroy(&app.spider, &app.scene)
+  gltf.destroy(&app.spider_model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)

@@ -24,7 +24,8 @@ App :: struct {
   input:          input.State,
   orbit:          render.Orbit,
   time:           f32,
-  fox:            gltf.Scene,
+  fox_model:      gltf.Model,
+  fox:            gltf.Instance,
   fox_node:       world.NodeHandle,
   rig:            ^anim.Rig,
   animator:       anim.Animator,
@@ -72,7 +73,8 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   anim.destroy(&app.animator)
-  gltf.destroy(&app.fox, &app.scene, &app.renderer)
+  gltf.destroy(&app.fox, &app.scene)
+  gltf.destroy(&app.fox_model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -96,13 +98,14 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.attach(&app.renderer, render.SlotHandle(app.target_cube.index), render.primitive(&app.renderer, .CUBE, .RED, cast_shadow = false))
   world.scale(&app.scene, app.target_cube, 0.25)
 
-  app.fox = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/Fox2.glb"))
+  app.fox_model = gltf.model_create(&app.renderer, #load("../../assets/Fox2.glb"))
+  app.fox = gltf.instance_create(&app.fox_model, &app.scene, &app.renderer)
   if len(app.fox.skinned) == 0 {
     log.error("Fox2.glb has no skinned mesh")
     return .FAIL
   }
   app.fox_node = app.fox.skinned[0].node
-  app.rig = &app.fox.rigs[app.fox.skinned[0].rig]
+  app.rig = &app.fox_model.rigs[app.fox.skinned[0].rig]
   anim.animator_init(&app.animator, app.rig)
   app.walk_layer = clip_layer(app, "Walk", 1, weight = 1)
   app.run_layer = clip_layer(app, "Run", 1)

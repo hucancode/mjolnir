@@ -34,8 +34,10 @@ App :: struct {
   cells:           [dynamic]Cell,
   meshes:          [dynamic]render.MeshHandle,
   materials:       [dynamic]render.MaterialHandle,
-  duck:            gltf.Scene,
-  character:       gltf.Scene,
+  duck_model:      gltf.Model,
+  duck:            gltf.Instance,
+  character_model: gltf.Model,
+  character:       gltf.Instance,
   animators:       [dynamic]anim.Animator,
   resets:          int,
   reset_requested: bool,
@@ -108,18 +110,20 @@ build_level :: proc(app: ^App) {
     append(&app.cells, cell)
   }
 
-  app.duck = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/Duck.glb"))
+  app.duck_model = gltf.model_create(&app.renderer, #load("../../assets/Duck.glb"))
+  app.duck = gltf.instance_create(&app.duck_model, &app.scene, &app.renderer)
   for h in app.duck.roots {
     world.scale(&app.scene, h, 1.3)
     world.translate(&app.scene, h, -3.5, 0, 4.5)
   }
-  app.character = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb"))
+  app.character_model = gltf.model_create(&app.renderer, #load("../../assets/CesiumMan.glb"))
+  app.character = gltf.instance_create(&app.character_model, &app.scene, &app.renderer)
   for h in app.character.roots {
     world.scale(&app.scene, h, 6.0)
     world.translate(&app.scene, h, 3.5, 0, 4.5)
   }
   for s in app.character.skinned {
-    rig := &app.character.rigs[s.rig]
+    rig := &app.character_model.rigs[s.rig]
     a: anim.Animator
     anim.animator_init(&a, rig)
     anim.play(&a, rig, "Anim_0")
@@ -131,8 +135,10 @@ build_level :: proc(app: ^App) {
 destroy_level :: proc(app: ^App) {
   for &a in app.animators do anim.destroy(&a)
   clear(&app.animators)
-  gltf.destroy(&app.duck, &app.scene, &app.renderer)
-  gltf.destroy(&app.character, &app.scene, &app.renderer)
+  gltf.destroy(&app.duck, &app.scene)
+  gltf.destroy(&app.duck_model, &app.renderer)
+  gltf.destroy(&app.character, &app.scene)
+  gltf.destroy(&app.character_model, &app.renderer)
   clear(&app.cells)
   clear(&app.meshes)
   clear(&app.materials)
@@ -189,7 +195,7 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   for h in app.duck.roots do world.rotate_by(&app.scene, h, dt * math.PI * 0.3)
   for h in app.character.roots do world.rotate_by(&app.scene, h, dt * math.PI * 0.3)
-  for s, i in app.character.skinned do anim.animator_update(&app.animators[i], &app.character.rigs[s.rig], dt)
+  for s, i in app.character.skinned do anim.animator_update(&app.animators[i], &app.character_model.rigs[s.rig], dt)
   when AUTOMATED_TEST do run_test_step(app)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

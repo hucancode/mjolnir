@@ -1,6 +1,7 @@
 package gltf
 
 import "../animation"
+import "../geometry"
 import "../render"
 import "../world"
 import "core:log"
@@ -8,7 +9,7 @@ import "core:math/linalg"
 import "core:strings"
 import "vendor:cgltf"
 
-// RigHandle identifies a rig of a Scene: its index in Scene.rigs.
+// RigHandle identifies a rig of a Model: its index in Model.rigs.
 RigHandle :: distinct u32
 
 // Joint is the world node of a rig's bone: what hangs under it (a sword in a hand) follows the
@@ -25,79 +26,126 @@ SkinnedNode :: struct {
   rig:  RigHandle,
 }
 
-// Scene is what scene_create made: the world nodes under `roots`, the render meshes, materials
-// and textures they draw, and the rigs. scene_destroy frees all of it.
-Scene :: struct {
-  roots:     [dynamic]world.NodeHandle,
+// Model is a glTF loaded once (model_create): its render meshes, materials and textures, its
+// rigs, and the node tree every instance_create spawns. It must outlive its instances.
+Model :: struct {
   rigs:      [dynamic]animation.Rig, // one per skin a mesh node uses, with every animation as a clip
-  skinned:   [dynamic]SkinnedNode,
-  joints:    [dynamic]Joint,
-  names:     [dynamic]string, // the node names, which world borrows
   meshes:    [dynamic]render.MeshHandle,
   materials: [dynamic]render.MaterialHandle,
   textures:  [dynamic]render.TextureHandle,
+  using _:   Model_Nodes,
 }
 
-// scene_destroy destroys the scene's nodes (roots and their descendants) and render
-// resources, and frees its rigs.
-scene_destroy :: proc(self: ^Scene, w: ^world.World, r: ^render.Renderer) {
-  for h in self.roots do world.destroy(w, h)
+@(private)
+Model_Nodes :: struct {
+  // parents before children
+  nodes:  [dynamic]ModelNode,
+  // the template node of each rig's bones
+  joints: [dynamic]ModelJoint,
+}
+
+// One glTF node as instance_create spawns it.
+@(private)
+ModelNode :: struct {
+  name:      string, // world borrows it
+  parent:    int, // -1 for a root
+  transform: world.Transform,
+  look:      render.MeshAttachment, // mesh 0 draws nothing
+  rig:       int, // the rig deforming its mesh, -1 for none
+}
+
+@(private)
+ModelJoint :: struct {
+  node: int,
+  rig:  RigHandle,
+  bone: u32,
+}
+
+// Instance is one copy of a Model in the world (instance_create): the nodes under `roots`, the
+// skinned ones and the joints of each rig.
+Instance :: struct {
+  roots:   [dynamic]world.NodeHandle,
+  skinned: [dynamic]SkinnedNode,
+  joints:  [dynamic]Joint,
+}
+
+// model_create loads a glTF held in memory, a .glb or a glTF whose buffers and images are all
+// embedded (the engine reads no files: #load it or platform.read_file it): a render mesh,
+// material and textures per glTF mesh a node uses (skinned where a skinned node uses it), and
+// one rig per skin with every glTF animation as its clips. Spawn it with instance_create.
+model_create :: proc(r: ^render.Renderer, data: []u8) -> (model: Model, ok: bool) #optional_ok {
+  result := load_data(r, data, &model)
+  if result != .success {
+    log.errorf("Failed to load glTF: %v", result)
+    model_destroy(&model, r)
+    return {}, false
+  }
+  return model, true
+}
+
+// model_destroy frees the model's render resources and rigs. Destroy its instances first.
+model_destroy :: proc(self: ^Model, r: ^render.Renderer) {
   for h in self.meshes do render.destroy(r, h)
   for h in self.materials do render.destroy(r, h)
   for h in self.textures do render.destroy(r, h)
   for &rig in self.rigs do animation.rig_destroy(&rig)
-  for name in self.names do delete(name)
-  delete(self.names)
-  delete(self.joints)
+  for n in self.nodes do delete(n.name)
   delete(self.rigs)
-  delete(self.roots)
-  delete(self.skinned)
   delete(self.meshes)
   delete(self.materials)
   delete(self.textures)
+  delete(self.nodes)
+  delete(self.joints)
   self^ = {}
 }
 
-// scene_create instantiates a glTF held in memory, a .glb or a glTF whose buffers and images are
-// all embedded (the engine reads no files: #load it or platform.read_file it): a render mesh,
-// material and textures per glTF mesh a node uses (skinned where a skinned node uses it), one
-// rig per skin with every glTF animation as its clips, and one world node per glTF node,
-// spawned under `parent` (the world root by default) with its look attached. A skinned node moves once
-// the app animates its rig (animation.animator_update) and stages the palette each tick
-// (render.stage_bones).
-scene_create :: proc(
+// instance_create spawns one world node per glTF node of the model under `parent` (the world
+// root by default), each drawing its mesh. A skinned node moves once the app animates its rig
+// (animation.animator_update) and stages the palette each tick (render.stage_bones).
+instance_create :: proc(
+  model: ^Model,
   w: ^world.World,
   r: ^render.Renderer,
-  data: []u8,
   parent: world.NodeHandle = {},
 ) -> (
-  scene: Scene,
+  instance: Instance,
   ok: bool,
 ) #optional_ok {
-  result := load_data(w, r, data, parent if parent != {} else w.root, &scene)
-  if result != .success {
-    log.errorf("Failed to load glTF: %v", result)
-    scene_destroy(&scene, w, r)
-    return {}, false
+  root := parent if parent != {} else w.root
+  nodes := make([]world.NodeHandle, len(model.nodes), context.temp_allocator)
+  for n, i in model.nodes {
+    handle := world.spawn(w, name = n.name, parent = root if n.parent < 0 else nodes[n.parent]) or_continue
+    nodes[i] = handle
+    world.set_local(w, handle, n.transform.position, n.transform.rotation, n.transform.scale)
+    if n.parent < 0 do append(&instance.roots, handle)
+    if n.look.mesh == 0 do continue
+    render.attach(r, render.SlotHandle(handle.index), n.look)
+    if n.rig >= 0 do append(&instance.skinned, SkinnedNode{node = handle, rig = RigHandle(n.rig)})
   }
-  return scene, true
+  for j in model.joints do if nodes[j.node] != {} {
+    append(&instance.joints, Joint{node = nodes[j.node], rig = j.rig, bone = j.bone})
+  }
+  return instance, len(instance.roots) > 0
+}
+
+// instance_destroy destroys the instance's nodes (roots and their descendants).
+instance_destroy :: proc(self: ^Instance, w: ^world.World) {
+  for h in self.roots do world.destroy(w, h)
+  delete(self.roots)
+  delete(self.skinned)
+  delete(self.joints)
+  self^ = {}
 }
 
 @(private = "file")
-load_data :: proc(
-  w: ^world.World,
-  r: ^render.Renderer,
-  bytes: []u8,
-  parent: world.NodeHandle,
-  scene: ^Scene,
-) -> cgltf.result {
+load_data :: proc(r: ^render.Renderer, bytes: []u8, model: ^Model) -> cgltf.result {
   options: cgltf.options
   data := cgltf.parse(options, raw_data(bytes), uint(len(bytes))) or_return
   defer cgltf.free(data)
   // no gltf path: a .glb's BIN chunk and data: URIs load, a buffer in another file fails
   if len(data.buffers) > 0 do cgltf.load_buffers(options, data, nil) or_return
   if len(data.nodes) == 0 do return .success
-  looks, looks_ok := load_meshes(r, data, scene, context.temp_allocator)
+  looks, looks_ok := load_meshes(r, data, model, context.temp_allocator)
   if !looks_ok do return .invalid_gltf
   // rig index per skin; -1 when no mesh node uses the skin or it failed to load
   skin_rigs := make([]int, len(data.skins), context.temp_allocator)
@@ -109,83 +157,61 @@ load_data :: proc(
     skin_rigs[i] = -1
     if !skin_used[i] do continue
     rig := rig_create(data, &skin) or_continue
-    skin_rigs[i] = len(scene.rigs)
-    append(&scene.rigs, rig)
+    skin_rigs[i] = len(model.rigs)
+    append(&model.rigs, rig)
   }
-  construct_scene(w, r, data, looks, skin_rigs, parent, scene)
+  load_nodes(data, looks, skin_rigs, model)
   return .success
 }
 
+// The node tree, parents first: model.nodes[template[i]] is glTF node i.
 @(private = "file")
-construct_scene :: proc(
-  w: ^world.World,
-  r: ^render.Renderer,
-  gltf_data: ^cgltf.data,
-  looks: []Maybe(render.MeshAttachment),
-  skin_rigs: []int,
-  parent: world.NodeHandle,
-  scene: ^Scene,
-) {
-  TraverseEntry :: struct {
-    idx:    u32,
-    parent: world.NodeHandle,
+load_nodes :: proc(data: ^cgltf.data, looks: []Maybe(render.MeshAttachment), skin_rigs: []int, model: ^Model) {
+  Entry :: struct {
+    idx:    int,
+    parent: int,
   }
-  stack := make([dynamic]TraverseEntry, 0, context.temp_allocator)
-  nodes := make([]world.NodeHandle, len(gltf_data.nodes), context.temp_allocator)
-  for &node, i in gltf_data.nodes do if node.parent == nil {
-    append(&stack, TraverseEntry{idx = u32(i), parent = parent})
+  stack := make([dynamic]Entry, 0, context.temp_allocator)
+  template := make([]int, len(data.nodes), context.temp_allocator)
+  for &node, i in data.nodes {
+    template[i] = -1
+    if node.parent == nil do append(&stack, Entry{idx = i, parent = -1})
   }
   for len(stack) > 0 {
     entry := pop(&stack)
-    gltf_node := &gltf_data.nodes[entry.idx]
-    name := strings.clone(string(gltf_node.name))
-    append(&scene.names, name)
-    node_handle := world.spawn(w, name = name, parent = entry.parent) or_continue
-    nodes[entry.idx] = node_handle
+    gltf_node := &data.nodes[entry.idx]
+    n := ModelNode{name = strings.clone(string(gltf_node.name)), parent = entry.parent, rig = -1}
     if gltf_node.has_matrix {
-      world.set_local_matrix(
-        w,
-        node_handle,
-        transmute(matrix[4, 4]f32)gltf_node.matrix_,
-      )
+      n.transform.position, n.transform.rotation, n.transform.scale = geometry.decompose_matrix(transmute(matrix[4, 4]f32)gltf_node.matrix_)
     } else {
       // cgltf fills absent components with identity values
-      world.set_local(
-        w,
-        node_handle,
-        gltf_node.translation,
-        transmute(quaternion128)gltf_node.rotation,
-        gltf_node.scale,
-      )
+      n.transform = {gltf_node.translation, transmute(quaternion128)gltf_node.rotation, gltf_node.scale}
     }
     if gltf_node.mesh != nil {
-      if look, has_look := looks[cgltf.mesh_index(gltf_data, gltf_node.mesh)].?; has_look {
-        render.attach(r, render.SlotHandle(node_handle.index), look)
-        if gltf_node.skin != nil {
-          if rig := skin_rigs[cgltf.skin_index(gltf_data, gltf_node.skin)]; rig >= 0 {
-            append(&scene.skinned, SkinnedNode{node = node_handle, rig = RigHandle(rig)})
-          }
-        }
+      if look, has_look := looks[cgltf.mesh_index(data, gltf_node.mesh)].?; has_look {
+        n.look = look
+        if gltf_node.skin != nil do n.rig = skin_rigs[cgltf.skin_index(data, gltf_node.skin)]
       }
     }
-    if entry.parent == parent do append(&scene.roots, node_handle)
-    for child_ptr in gltf_node.children {
-      child_idx := cgltf.node_index(gltf_data, child_ptr)
-      append(&stack, TraverseEntry{idx = u32(child_idx), parent = node_handle})
+    template[entry.idx] = len(model.nodes)
+    append(&model.nodes, n)
+    for child in gltf_node.children {
+      append(&stack, Entry{idx = int(cgltf.node_index(data, child)), parent = template[entry.idx]})
     }
   }
-  for &skin, i in gltf_data.skins do if rig := skin_rigs[i]; rig >= 0 {
+  for &skin, i in data.skins do if rig := skin_rigs[i]; rig >= 0 {
     for joint_node, bone in skin.joints {
-      node := nodes[cgltf.node_index(gltf_data, joint_node)]
-      if node != {} do append(&scene.joints, Joint{node = node, rig = RigHandle(rig), bone = u32(bone)})
+      if node := template[cgltf.node_index(data, joint_node)]; node >= 0 {
+        append(&model.joints, ModelJoint{node = node, rig = RigHandle(rig), bone = u32(bone)})
+      }
     }
   }
 }
 
-// pose_joints moves the joint nodes of `rig` to the animator's pose; call it after
+// pose_joints moves the instance's joint nodes of `rig` to the animator's pose; call it after
 // animation.animator_update so nodes under them follow the animation.
-pose_joints :: proc(self: ^Scene, w: ^world.World, rig: RigHandle, animator: ^animation.Animator) {
-  parents := self.rigs[rig].skeleton.parents
+pose_joints :: proc(self: ^Instance, w: ^world.World, model: ^Model, rig: RigHandle, animator: ^animation.Animator) {
+  parents := model.rigs[rig].skeleton.parents
   for j in self.joints do if j.rig == rig {
     local := animation.bone_matrix(animator, j.bone)
     if parent := parents[j.bone]; parent >= 0 {
@@ -195,7 +221,8 @@ pose_joints :: proc(self: ^Scene, w: ^world.World, rig: RigHandle, animator: ^an
   }
 }
 
-// destroy frees a Scene, as scene_destroy does.
+// destroy frees a Model or an Instance, as model_destroy and instance_destroy do.
 destroy :: proc {
-  scene_destroy,
+  model_destroy,
+  instance_destroy,
 }

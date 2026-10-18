@@ -15,7 +15,8 @@ App :: struct {
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
-  gltf:     gltf.Scene,
+  duck:     gltf.Model,
+  gltf:     gltf.Instance,
   orbit:    render.Orbit,
 }
 
@@ -42,14 +43,16 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {6, 4, 6}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
-  app.gltf = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/Duck.glb"))
+  app.duck = gltf.model_create(&app.renderer, #load("../../assets/Duck.glb"))
+  app.gltf = gltf.instance_create(&app.duck, &app.scene, &app.renderer)
   light := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
   return .READY
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.destroy(&app.gltf, &app.scene, &app.renderer)
+  gltf.destroy(&app.gltf, &app.scene)
+  gltf.destroy(&app.duck, &app.renderer)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)

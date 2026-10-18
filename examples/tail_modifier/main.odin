@@ -23,7 +23,8 @@ App :: struct {
   debug:           debugui.Context,
   input:           input.State,
   orbit:           render.Orbit,
-  snake:           gltf.Scene,
+  snake_model:     gltf.Model,
+  snake:           gltf.Instance,
   snake_node:      world.NodeHandle,
   rig:             ^anim.Rig,
   animator:        anim.Animator,
@@ -67,7 +68,8 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   anim.destroy(&app.animator)
-  gltf.destroy(&app.snake, &app.scene, &app.renderer)
+  gltf.destroy(&app.snake, &app.scene)
+  gltf.destroy(&app.snake_model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -90,10 +92,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   light := world.spawn(&app.scene, {-4, 10, 6})
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({0.6, 0.7, 1.0}, 1000, 25.0, false)))
 
-  app.snake = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
+  app.snake_model = gltf.model_create(&app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
+  app.snake = gltf.instance_create(&app.snake_model, &app.scene, &app.renderer)
   if len(app.snake.skinned) == 0 do return .FAIL
   app.snake_node = app.snake.skinned[0].node
-  app.rig = &app.snake.rigs[app.snake.skinned[0].rig]
+  app.rig = &app.snake_model.rigs[app.snake.skinned[0].rig]
   skel := &app.rig.skeleton
   anim.animator_init(&app.animator, app.rig)
   whole_body, _ := anim.bone_chain_down(skel, HEAD_BONE, u32(anim.bone_count(skel)), context.temp_allocator)

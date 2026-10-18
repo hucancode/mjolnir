@@ -29,10 +29,16 @@ portal_material_handle: render.MaterialHandle
 warrior_sprite: render.MaterialHandle
 warrior_time: f32
 
+// A glTF model and its one instance.
+Loaded :: struct {
+  model:    gltf.Model,
+  instance: gltf.Instance,
+}
+
 // A loaded glTF and one animator per skinned node in it.
 Character :: struct {
-  scene:     gltf.Scene,
-  animators: [dynamic]animation.Animator,
+  using loaded: Loaded,
+  animators:    [dynamic]animation.Animator,
 }
 
 // A node whose local transform plays a one-channel clip on top of `rest`.
@@ -49,13 +55,19 @@ NodeClip :: struct {
 }
 
 characters: [dynamic]Character
-models: [dynamic]gltf.Scene
+models: [dynamic]Loaded
 node_clips: [dynamic]NodeClip
 
-add_character :: proc(scene: gltf.Scene, clip: string) -> int {
-  c := Character{scene = scene}
-  for s in scene.skinned {
-    rig := &c.scene.rigs[s.rig]
+load_gltf :: proc(app: ^App, data: []u8) -> (loaded: Loaded, ok: bool) {
+  loaded.model = gltf.model_create(&app.renderer, data) or_return
+  loaded.instance = gltf.instance_create(&loaded.model, &app.scene, &app.renderer)
+  return loaded, true
+}
+
+add_character :: proc(loaded: Loaded, clip: string) -> int {
+  c := Character{loaded = loaded}
+  for s in loaded.instance.skinned {
+    rig := &c.model.rigs[s.rig]
     a: animation.Animator
     animation.animator_init(&a, rig)
     animation.play(&a, rig, clip)
@@ -115,7 +127,7 @@ update :: proc(app: ^App, dt: f32) {
     for key, pressed in input.next_key_edge(&app.input, &it) do on_key(app, key, pressed)
   }
   for &c in characters {
-    for s, i in c.scene.skinned do animation.animator_update(&c.animators[i], &c.scene.rigs[s.rig], dt)
+    for s, i in c.instance.skinned do animation.animator_update(&c.animators[i], &c.model.rigs[s.rig], dt)
   }
   for &nc in node_clips {
     m := animation.clip_player_update(&nc.player, &nc.clip, dt, nc.rest)
@@ -128,7 +140,7 @@ update :: proc(app: ^App, dt: f32) {
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   for &c in characters {
-    for s, i in c.scene.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), c.animators[i].palette)
+    for s, i in c.instance.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), c.animators[i].palette)
   }
   render.update(&app.renderer, dt)
 }
@@ -156,9 +168,13 @@ shutdown :: proc(app: ^App) {
   for &c in characters {
     for &a in c.animators do animation.destroy(&a)
     delete(c.animators)
-    gltf.destroy(&c.scene, &app.scene, &app.renderer)
+    gltf.destroy(&c.instance, &app.scene)
+    gltf.destroy(&c.model, &app.renderer)
   }
-  for &m in models do gltf.destroy(&m, &app.scene, &app.renderer)
+  for &m in models {
+    gltf.destroy(&m.instance, &app.scene)
+    gltf.destroy(&m.model, &app.renderer)
+  }
   delete(characters)
   delete(models)
   for &nc in node_clips do animation.clip_destroy(&nc.clip)
@@ -350,10 +366,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   when true {
     log.info("loading Hammer GLTF...")
-    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/Mjolnir.glb")); ok {
+    if gltf_nodes, ok := load_gltf(app, #load("assets/Mjolnir.glb")); ok {
       append(&models, gltf_nodes)
-      log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
-      for handle in gltf_nodes.roots {
+      log.infof("Loaded GLTF nodes: %v", gltf_nodes.instance.roots)
+      for handle in gltf_nodes.instance.roots {
         world.translate(&app.scene, handle, 3, 1, -2)
         world.scale(&app.scene, handle, 0.2)
       }
@@ -361,12 +377,12 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   when true {
     log.info("loading Warrior GLTF...")
-    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/Warrior.glb")); ok {
-      for armature in gltf_nodes.roots do world.translate(&app.scene, armature, 0, 0, 1)
+    if gltf_nodes, ok := load_gltf(app, #load("assets/Warrior.glb")); ok {
+      for armature in gltf_nodes.instance.roots do world.translate(&app.scene, armature, 0, 0, 1)
       character := add_character(gltf_nodes, "idle")
       // Attach a spinning cube to the hand.L bone of the first skinned mesh
-      for s, i in gltf_nodes.skinned {
-        bone := animation.bone_find(&gltf_nodes.rigs[s.rig].skeleton, "hand.L") or_continue
+      for s, i in gltf_nodes.instance.skinned {
+        bone := animation.bone_find(&gltf_nodes.model.rigs[s.rig].skeleton, "hand.L") or_continue
         hand_cube_handle := spawn(
           app,
           parent = s.node,
@@ -388,11 +404,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   when true {
     log.info("loading Damaged Helmet GLTF...")
-    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/DamagedHelmet.glb"));
-       ok {
+    if gltf_nodes, ok := load_gltf(app, #load("assets/DamagedHelmet.glb")); ok {
       append(&models, gltf_nodes)
-      log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
-      for handle in gltf_nodes.roots {
+      log.infof("Loaded GLTF nodes: %v", gltf_nodes.instance.roots)
+      for handle in gltf_nodes.instance.roots {
         world.translate(&app.scene, handle, 0, 1, 3)
         world.scale(&app.scene, handle, 0.5)
       }
@@ -400,21 +415,20 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   when true {
     log.info("loading Suzanne GLTF...")
-    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/Suzanne.glb")); ok {
+    if gltf_nodes, ok := load_gltf(app, #load("assets/Suzanne.glb")); ok {
       append(&models, gltf_nodes)
-      log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
-      for handle in gltf_nodes.roots {
+      log.infof("Loaded GLTF nodes: %v", gltf_nodes.instance.roots)
+      for handle in gltf_nodes.instance.roots {
         world.translate(&app.scene, handle, -3, 1, 0)
       }
     }
   }
   when true {
     log.info("loading SciFiHelmet GLTF...")
-    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/SciFiHelmet.glb"));
-       ok {
+    if gltf_nodes, ok := load_gltf(app, #load("assets/SciFiHelmet.glb")); ok {
       append(&models, gltf_nodes)
-      log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
-      for handle in gltf_nodes.roots {
+      log.infof("Loaded GLTF nodes: %v", gltf_nodes.instance.roots)
+      for handle in gltf_nodes.instance.roots {
         world.translate(&app.scene, handle, 3, 0, 3)
         world.scale(&app.scene, handle, 0.5)
       }
@@ -422,9 +436,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   when true {
     log.info("loading Fox GLTF...")
-    if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/Fox2.glb")); ok {
-      log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
-      for handle in gltf_nodes.roots {
+    if gltf_nodes, ok := load_gltf(app, #load("assets/Fox2.glb")); ok {
+      log.infof("Loaded GLTF nodes: %v", gltf_nodes.instance.roots)
+      for handle in gltf_nodes.instance.roots {
         world.translate(&app.scene, handle, 6, 0, 0)
       }
       add_character(gltf_nodes, "Run")

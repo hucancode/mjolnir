@@ -115,28 +115,25 @@ should_close :: proc(app: ^App) -> bool {
 build_level :: proc(app: ^App) -> bool {
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
+  quad, cube := render.make_quad(), render.make_cube()
+  defer render.destroy(quad)
+  defer render.destroy(cube)
   ground_material := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8))
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.QUAD_XZ], material = ground_material})
   world.scale(&app.scene, ground, WORLD_HALF * 2)
-  bake_shape(&builder, render.make_quad(), {}, {WORLD_HALF * 2, 1, WORLD_HALF * 2}, is_obstacle = false)
+  bake.append_triangles(&builder, render.positions(quad, context.temp_allocator), quad.indices, linalg.matrix4_scale_f32(WORLD_HALF * 2))
   obstacle_material := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6))
   for box in OBSTACLES {
     obstacle := world.spawn(&app.scene, box.center)
     render.attach(&app.renderer, render.SlotHandle(obstacle.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.CUBE], material = obstacle_material, cast_shadow = true})
     world.scale(&app.scene, obstacle, box.half_extents)
-    bake_shape(&builder, render.make_cube(), box.center, box.half_extents, is_obstacle = true)
+    bake.append_triangles(&builder, render.positions(cube, context.temp_allocator), cube.indices, linalg.matrix4_from_trs_f32(box.center, 1, box.half_extents), is_obstacle = true)
   }
   data := bake.build(&builder, allocator = context.temp_allocator) or_return
   return nav.init(&app.navmesh, data)
 }
 
-bake_shape :: proc(builder: ^bake.NavGeometryBuilder, shape: render.Geometry, center, scale: [3]f32, is_obstacle: bool) {
-  defer render.destroy(shape)
-  positions := render.positions(shape, context.temp_allocator)
-  for &p in positions do p *= scale
-  bake.append_triangles(builder, positions, shape.indices, center, is_obstacle)
-}
 
 show_navmesh :: proc(app: ^App) {
   positions, indices := nav.debug_triangles(&app.navmesh, context.temp_allocator)

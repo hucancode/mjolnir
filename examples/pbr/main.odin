@@ -46,7 +46,8 @@ App :: struct {
   sun:         render.LightHandle,
   turntable:   world.NodeHandle,
   mount:       world.NodeHandle,
-  model:       gltf.Scene,
+  model:       gltf.Model,
+  instance:    gltf.Instance,
   model_index: int,
 }
 
@@ -87,7 +88,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.destroy(&app.model, &app.scene, &app.renderer)
+  gltf.destroy(&app.instance, &app.scene)
+  gltf.destroy(&app.model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -100,13 +102,15 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 show_model :: proc(app: ^App, index: int) {
-  gltf.destroy(&app.model, &app.scene, &app.renderer)
+  gltf.destroy(&app.instance, &app.scene)
+  gltf.destroy(&app.model, &app.renderer)
   app.model_index = index
   m := MODELS[index]
   world.translate(&app.scene, app.mount, m.offset)
   world.rotate(&app.scene, app.mount, m.rot_x, linalg.VECTOR3F32_X_AXIS)
   world.scale(&app.scene, app.mount, m.scale)
-  app.model = gltf.scene_create(&app.scene, &app.renderer, m.data, parent = app.mount)
+  app.model = gltf.model_create(&app.renderer, m.data)
+  app.instance = gltf.instance_create(&app.model, &app.scene, &app.renderer, parent = app.mount)
 }
 
 update :: proc(app: ^App, dt: f32) {

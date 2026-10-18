@@ -16,7 +16,8 @@ App :: struct {
   scene:     world.World,
   renderer:  render.Renderer,
   input:     input.State,
-  gltf:      gltf.Scene,
+  model:     gltf.Model,
+  gltf:      gltf.Instance,
   animators: [dynamic]anim.Animator,
   orbit:     render.Orbit,
 }
@@ -43,7 +44,8 @@ main :: proc() {
 shutdown :: proc(app: ^App) {
   for &a in app.animators do anim.destroy(&a)
   delete(app.animators)
-  gltf.destroy(&app.gltf, &app.scene, &app.renderer)
+  gltf.destroy(&app.gltf, &app.scene)
+  gltf.destroy(&app.model, &app.renderer)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
@@ -58,9 +60,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {1.5, 1.5, 1.5}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
-  app.gltf = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb"))
+  app.model = gltf.model_create(&app.renderer, #load("../../assets/CesiumMan.glb"))
+  app.gltf = gltf.instance_create(&app.model, &app.scene, &app.renderer)
   for s in app.gltf.skinned {
-    rig := &app.gltf.rigs[s.rig]
+    rig := &app.model.rigs[s.rig]
     a: anim.Animator
     anim.animator_init(&a, rig)
     anim.play(&a, rig, "Anim_0")
@@ -80,7 +83,7 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   rot := dt * math.PI * 0.05
   for h in app.gltf.roots do world.rotate_by(&app.scene, h, rot)
-  for s, i in app.gltf.skinned do anim.animator_update(&app.animators[i], &app.gltf.rigs[s.rig], dt)
+  for s, i in app.gltf.skinned do anim.animator_update(&app.animators[i], &app.model.rigs[s.rig], dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   for s, i in app.gltf.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), app.animators[i].palette)

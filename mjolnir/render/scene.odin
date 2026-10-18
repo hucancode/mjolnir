@@ -91,6 +91,8 @@ Renderer_State :: struct {
   skin_slab:              containers.SlabAllocator,
   // simulated seconds; an emitter emits floor(rate * time) particles in total
   particle_time:          f64,
+  // emit's queue, and the bursts the last flush placed (row != 0)
+  bursts:                 [dynamic]Burst,
   // segments added since the last frame, per ring: [0] depth-tested, [1] drawn over the scene
   debug_lines:            [2][dynamic]DebugLineSegment,
   // segments each ring has taken in total (debug_line.odin)
@@ -329,6 +331,7 @@ teardown :: proc(self: ^Renderer) {
   rewind(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS)
   rewind(self, &self.force_field_placement_slots, .FORCE_FIELD_PLACEMENTS)
   self.shadow_casters = {}
+  clear(&self.bursts)
   if !particles_reset(self) do log.error("teardown: cannot clear the particles")
 }
 
@@ -357,6 +360,7 @@ shutdown :: proc(self: ^Renderer) {
   delete(self.effect_stack)
   delete(self.custom_post_pipelines)
   for inbox in self.debug_lines do delete(inbox)
+  delete(self.bursts)
   for &slab in self.mesh_slabs do containers.slab_destroy(&slab)
   containers.slab_destroy(&self.bone_matrix_slab)
   containers.slab_destroy(&self.skin_slab)
@@ -558,8 +562,16 @@ stage_transforms :: proc(self: ^Renderer, changes: []$T) {
 placed_at :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, $T: typeid, slot: u32) -> (index: u32, ok: bool) {
   rows := write_table(self, table, T)
   c: u32
-  for i in containers.slots_next(slots, &c) do if rows[i].node == slot do return i, true
+  for i in containers.slots_next(slots, &c) do if rows[i].node == slot && !burst_row(self, table, i) do return i, true
   return
+}
+
+// Whether row i of `table` is a burst's, which no attachment owns.
+@(private = "file")
+burst_row :: proc(self: ^Renderer, table: Table, i: u32) -> bool {
+  if table != .EMITTER_PLACEMENTS do return false
+  for b in self.bursts do if b.row == i do return true
+  return false
 }
 
 // Takes a placement row of `table` for `row`.
@@ -619,6 +631,7 @@ resource_destroy :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table
 stage_slot_removal :: proc(self: ^Renderer, slot: u32) {
   guard(self)
   unbind(self, slot)
+  #reverse for b, i in self.bursts do if b.row == 0 && b.slot == slot do ordered_remove(&self.bursts, i)
   if slot >= self.node_count do return
   release_bones(self, slot)
   batch_leave(self, slot)
@@ -1075,11 +1088,36 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   }
 }
 
+// Frees the rows of the bursts the last frame emitted and gives the queued ones a row each.
+@(private = "file")
+place_bursts :: proc(self: ^Renderer) {
+  kept := 0
+  for b in self.bursts {
+    if b.row != 0 {
+      containers.slots_free(&self.emitter_placement_slots, b.row)
+      clear_entry(self, .EMITTER_PLACEMENTS, b.row)
+      continue
+    }
+    row, ok := containers.slots_alloc(&self.emitter_placement_slots)
+    if !ok {
+      log.warnf("No room for more than %d placed emitters; the burst is dropped", MAX_EMITTERS - 1)
+      continue
+    }
+    write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[row] = {emitter = b.emitter, node = b.slot}
+    mark_dirty(self, .EMITTER_PLACEMENTS, int(row))
+    self.bursts[kept] = b
+    self.bursts[kept].row = row
+    kept += 1
+  }
+  resize(&self.bursts, kept)
+}
+
 // Emitter placements take consecutive ranges of the frame's new particles, which take
 // consecutive ring slots after the previous frame's. A placement emits what
 // floor(rate * particle_time) grew by, so it carries no fraction from frame to frame.
 @(private = "file")
 flush_particles :: proc(self: ^Renderer) {
+  place_bursts(self)
   emitters := write_table(self, .EMITTERS, Emitter)
   placements := write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[:self.emitter_placement_slots.high_water]
   p := &self.particle_params
@@ -1088,10 +1126,11 @@ flush_particles :: proc(self: ^Renderer) {
   t1 := t0 + f64(p.delta_time)
   self.particle_time = t1
   total: u32
-  for &pl in placements {
+  for &pl, i in placements {
     // a free row reads emitter 0, whose rate is 0
     rate := f64(max(emitters[pl.emitter].emission_rate, 0))
     emit := u32(u64(rate * t1) - u64(rate * t0))
+    for b in self.bursts do if b.row == u32(i) do emit = b.count
     pl.emit_first = total
     total += emit
   }

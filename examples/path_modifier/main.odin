@@ -28,7 +28,8 @@ App :: struct {
   debug:      debugui.Context,
   input:      input.State,
   orbit:      render.Orbit,
-  snake:      gltf.Scene,
+  snake_model:  gltf.Model,
+  snake:      gltf.Instance,
   rigs:       [dynamic]SnakeRig,
   points:     [CONTROL_POINTS][3]f32,
   spline:     animation.Spline([3]f32),
@@ -70,7 +71,8 @@ shutdown :: proc(app: ^App) {
   for &r in app.rigs do animation.destroy(&r.animator)
   delete(app.rigs)
   animation.destroy(&app.spline)
-  gltf.destroy(&app.snake, &app.scene, &app.renderer)
+  gltf.destroy(&app.snake, &app.scene)
+  gltf.destroy(&app.snake_model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -93,9 +95,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   light := world.spawn(&app.scene, {0, 10, 0})
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1, 0.9, 0.8}, 600, 20.0, true)))
 
-  app.snake = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
+  app.snake_model = gltf.model_create(&app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
+  app.snake = gltf.instance_create(&app.snake_model, &app.scene, &app.renderer)
   for s in app.snake.skinned {
-    rig := &app.snake.rigs[s.rig]
+    rig := &app.snake_model.rigs[s.rig]
     r: SnakeRig
     animation.animator_init(&r.animator, rig)
     whole_body, _ := animation.bone_chain_down(&rig.skeleton, "root", u32(animation.bone_count(&rig.skeleton)), context.temp_allocator)
@@ -136,7 +139,7 @@ update :: proc(app: ^App, dt: f32) {
   for s, i in app.snake.skinned {
     r := &app.rigs[i]
     if path, ok := animation.layer_params(&r.animator, r.path, animation.PathParams); ok do path^ = path_params(app)
-    animation.animator_update(&r.animator, &app.snake.rigs[s.rig], dt)
+    animation.animator_update(&r.animator, &app.snake_model.rigs[s.rig], dt)
   }
   draw_path(app)
   world.update(&app.scene)
