@@ -1,6 +1,6 @@
-// Third-person adventure: pick a hero, fight skeleton waves across levels, grab power-ups.
-// Characters and props: KayKit Character Pack Adventurers 1.0 and Skeletons 1.0 by Kay Lousberg
-// (www.kaylousberg.com, CC0). Particle textures: Kenney Particle Pack (www.kenney.nl, CC0).
+// Simple third-person adventure game
+// Characters and props: KayKit Character Pack Adventurers 1.0 and Skeletons 1.0 by Kay Lousberg (www.kaylousberg.com)
+// Particle textures: Kenney Particle Pack (www.kenney.nl)
 package main
 
 import "../../mjolnir"
