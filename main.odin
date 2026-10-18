@@ -519,8 +519,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
       }
     }
     when ENABLE_DIRECTIONAL_LIGHT {
-      dir_light_handle, _ := spawn(app, attachment = render.light_create(&app.renderer, render.make_directional_light(color = {0.2, 0.5, 0.9}, intensity = 3, shadow_radius = 20)))
-      world.rotate(&app.scene, dir_light_handle, -math.PI * 0.8, linalg.VECTOR3F32_X_AXIS)
+      app.renderer.sun = {enabled = true, cast_shadow = true, color = {0.2, 0.5, 0.9}, intensity = 3, direction = {0, -0.59, -0.81}, shadow_distance = 20}
+    } else {
+      app.renderer.sun.enabled = false
     }
   }
   when false {

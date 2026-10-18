@@ -236,14 +236,15 @@ load_nodes :: proc(r: ^render.Renderer, data: ^cgltf.data, looks: [][dynamic]ren
 }
 
 // A light of the file, in its units (lux, candela): the app scales it to the engine's with
-// render.light. A light with no range gets a default radius of 10.
+// render.light. A light with no range gets a default radius of 10. A directional light is
+// skipped: the scene's sun is render.Renderer.sun.
 @(private = "file")
 load_light :: proc(r: ^render.Renderer, light: ^cgltf.light, model: ^Model) -> Maybe(render.LightHandle) {
   reach := light.range if light.range > 0 else 10
   l: render.Light
   switch light.type {
   case .directional:
-    l = render.make_directional_light(light.color, light.intensity)
+    return nil
   case .point:
     l = render.make_point_light(light.color, light.intensity, reach)
   case .spot:

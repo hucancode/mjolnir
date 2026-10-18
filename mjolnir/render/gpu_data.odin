@@ -17,15 +17,16 @@ SHADOW_VIEW_BASE :: MAX_ACTIVE_CAMERAS
 @(private)
 MAX_VIEWS :: MAX_ACTIVE_CAMERAS + MAX_SHADOW_VIEWS
 
-// MAX_SHADOW_MAPS is how many shadow-casting lights cast shadows at once.
+// MAX_SHADOW_MAPS is how many shadow-casting point and spot lights cast shadows at once; the
+// sun's shadow comes on top.
 MAX_SHADOW_MAPS :: 16
 
 @(private)
 SHADOW_MAP_SIZE :: 512
 
-// a cube map renders six views
+// a cube map renders six views, and the sun's cascades come on top
 @(private)
-MAX_SHADOW_VIEWS :: MAX_SHADOW_MAPS * 6
+MAX_SHADOW_VIEWS :: MAX_SHADOW_MAPS * 6 + SHADOW_CASCADES
 
 // MAX_PARTICLES is how many particles live at once, across every emitter.
 MAX_PARTICLES :: 65536
@@ -99,11 +100,11 @@ MaterialType :: enum u32 {
 @(private)
 FIRST_FORWARD_TYPE :: MaterialType.TRANSPARENT
 
-// LightType selects how a Light shines. The environment's light is Renderer.ibl_intensity.
+// LightType selects how a Light shines. The sun is Renderer.sun, the environment's light
+// Renderer.ibl_intensity.
 LightType :: enum u32 {
   POINT,
   SPOT,
-  DIRECTIONAL,
 }
 
 // Vertex is the mesh vertex format.

@@ -92,8 +92,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
 
-  light := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
   app.target_cube = world.spawn(&app.scene, target_position(app))
   render.attach(&app.renderer, render.SlotHandle(app.target_cube.index), render.primitive(&app.renderer, .CUBE, .RED, cast_shadow = false))
   world.scale(&app.scene, app.target_cube, 0.25)

@@ -90,7 +90,7 @@ test_shadow_selection_grace_limited :: proc(t: ^testing.T) {
 @(test)
 test_shadow_views_in_placement_order :: proc(t: ^testing.T) {
 	// light handle i is row i; row 0 is none
-	lights := [?]Light{{}, {type = .SPOT}, {type = .POINT}, {type = .DIRECTIONAL}}
+	lights := [?]Light{{}, {type = .SPOT}, {type = .POINT}, {type = .POINT}}
 	placements := [?]LightPlacement {
 		{light = 1, shadow_map = 9}, // a stale view from the previous frame is cleared
 		{light = 2},
@@ -99,11 +99,14 @@ test_shadow_views_in_placement_order :: proc(t: ^testing.T) {
 	}
 	picked := [?]bool{true, false, true, true}
 	layers := assign_shadow_views(placements[:], lights[:], picked[:])
-	// one shadow view per face, in table order: the spot light's one, the directional
-	// light's cascades, then the point light's six
+	// one shadow view per face, in table order: the spot light's one, then the point lights' six each
 	testing.expect_value(t, placements[0].shadow_map, SHADOW_VIEW_BASE + 0)
 	testing.expect_value(t, placements[1].shadow_map, 0)
 	testing.expect_value(t, placements[2].shadow_map, SHADOW_VIEW_BASE + 1)
-	testing.expect_value(t, placements[3].shadow_map, SHADOW_VIEW_BASE + 1 + SHADOW_CASCADES)
-	testing.expect_value(t, layers, 1 + SHADOW_CASCADES + 6)
+	testing.expect_value(t, placements[3].shadow_map, SHADOW_VIEW_BASE + 1 + 6)
+	testing.expect_value(t, layers, 1 + 6 + 6)
+	// the sun's cascades come first
+	layers = assign_shadow_views(placements[:], lights[:], picked[:], SHADOW_CASCADES)
+	testing.expect_value(t, placements[0].shadow_map, SHADOW_VIEW_BASE + SHADOW_CASCADES)
+	testing.expect_value(t, layers, SHADOW_CASCADES + 1 + 6 + 6)
 }

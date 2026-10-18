@@ -123,8 +123,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   white_mat := app.renderer.builtin_materials[.WHITE]
   for i in 0 ..< 5 do spawn_mesh(app, cube_mesh, white_mat, {f32(i) * 4.0 - 8.0, 0.5, -7.0})
 
-  sun := world.spawn(&app.scene, {-3, 8, 6})
-  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9}, shadow_radius = 5.0)))
   lamp := world.spawn(&app.scene, {0, 3, 0})
   render.attach(&app.renderer, render.SlotHandle(lamp.index), render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2}, intensity = 200, radius = 8.0, cast_shadow = false)))
   return .READY

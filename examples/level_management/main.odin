@@ -97,15 +97,13 @@ build_level :: proc(app: ^App, index: int) -> bool {
   app.level = gltf.instance_create(&app.model, &app.scene, &app.renderer) or_return
   render.camera_look_at(render.main_camera(&app.renderer), l.target + {l.distance, l.distance * 0.1, 0}, l.target)
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), l.target)
-  if sun, has_sun := l.sun.?; has_sun {
-    light := world.spawn(&app.scene, sun)
-    render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.96, 0.9}, 1, l.shadow)))
-  }
+  app.renderer.sun = render.DEFAULT_SUN
+  app.renderer.sun.enabled = l.sun != nil
+  app.renderer.sun.shadow_distance = l.shadow
   for handle in app.model.lights {
     light := render.light(&app.renderer, handle) or_continue
     light.intensity *= l.scale
-    if light.type == .DIRECTIONAL do light.radius = l.shadow
-    else do light.radius = l.reach
+    light.radius = l.reach
   }
   app.current = index
   app.loads += 1

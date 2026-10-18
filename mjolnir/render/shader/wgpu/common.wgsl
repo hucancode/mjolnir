@@ -19,8 +19,6 @@ const MATERIAL_CUSTOM: u32 = 5u;
 // LightType
 const LIGHT_POINT: u32 = 0u;
 const LIGHT_SPOT: u32 = 1u;
-const LIGHT_DIRECTIONAL: u32 = 2u;
-const LIGHT_AMBIENT: u32 = 3u;
 
 // node flags
 const NODE_FLAG_VISIBLE: u32 = 1u;

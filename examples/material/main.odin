@@ -30,7 +30,6 @@ App :: struct {
   debug:            debugui.Context,
   input:            input.State,
   orbit:            render.Orbit,
-  sun:              render.LightHandle,
   sphere_materials: [GRID][GRID]render.MaterialHandle,
 }
 
@@ -87,10 +86,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   sun_heading := linalg.quaternion_angle_axis(math.PI * 0.65, linalg.VECTOR3F32_Y_AXIS)
   sun_elevation := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
-  sun := world.spawn(&app.scene, {0, 10, 0})
-  app.sun = render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, f32(sun_intensity), 12.0))
-  render.attach(&app.renderer, render.SlotHandle(sun.index), app.sun)
-  world.rotate(&app.scene, sun, sun_elevation * sun_heading)
+  app.renderer.sun = {enabled = true, cast_shadow = true, color = {1, 0.97, 0.92}, intensity = f32(sun_intensity), direction = linalg.quaternion_mul_vector3(sun_elevation * sun_heading, [3]f32{0, 0, -1}), shadow_distance = 12}
   return .READY
 }
 
@@ -124,7 +120,7 @@ update :: proc(app: ^App, dt: f32) {
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  render.light(&app.renderer, app.sun).intensity = f32(sun_intensity)
+  app.renderer.sun.intensity = f32(sun_intensity)
   app.renderer.ibl_intensity = f32(ibl_intensity)
   app.renderer.skybox_intensity = skybox_on ? 1 : 0
   for row in 0 ..< GRID do for col in 0 ..< GRID {

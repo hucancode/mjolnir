@@ -45,8 +45,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
   app.duck = gltf.model_create(&app.renderer, #load("../../assets/Duck.glb"))
   app.gltf = gltf.instance_create(&app.duck, &app.scene, &app.renderer)
-  light := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
   return .READY
 }
 

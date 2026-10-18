@@ -69,8 +69,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     anim.play(&a, rig, "Anim_0")
     append(&app.animators, a)
   }
-  light := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
   return .READY
 }
 

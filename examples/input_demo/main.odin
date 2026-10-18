@@ -34,7 +34,6 @@ App :: struct {
   cube:     world.NodeHandle,
   cube_pos: [3]f32,
   cube_yaw: f32,
-  light:    render.LightHandle,
   seen:     Seen,
 }
 
@@ -69,10 +68,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {0, 8, 12}, {0, 0.5, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0.5, 0})
-
-  app.light = render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, f32(light_intensity), 15.0))
-  sun := world.spawn(&app.scene, {4, 8, 4})
-  render.attach(&app.renderer, render.SlotHandle(sun.index), app.light)
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
@@ -139,7 +134,7 @@ update :: proc(app: ^App, dt: f32) {
   }
   world.translate(&app.scene, app.cube, app.cube_pos)
   world.rotate(&app.scene, app.cube, app.cube_yaw)
-  render.light(&app.renderer, app.light).intensity = f32(light_intensity)
+  app.renderer.sun.intensity = f32(light_intensity)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)

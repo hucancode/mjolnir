@@ -112,8 +112,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.repel = spawn_field(app, 2.5, -15.0, 8.0, 4.0, {0.1, 0.5, 1.0, 1}, 1.2, 1.0)
   app.attract = spawn_field(app, 3.5, 12.0, -5.0, 4.0, {0.2, 1.0, 0.4, 1}, 0.7, -1.0)
 
-  light := world.spawn(&app.scene, {3, 6, 3})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1}, shadow_radius = 10)))
   return .READY
 }
 

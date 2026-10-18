@@ -91,8 +91,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {-14, 8, 14}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
-  light := world.spawn(&app.scene, {-5, 12, 5})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.95, 0.9}, 1, 6.0)))
 
   spawn_box(app, {0, -GROUND_HALF_EXTENTS.y, 0}, GROUND_HALF_EXTENTS, .GRAY)
   thickness := WALL_THICKNESS

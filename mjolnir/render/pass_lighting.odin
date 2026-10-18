@@ -4,9 +4,9 @@ import "rhi"
 
 // Deferred lighting: one compute dispatch per camera reads the G-buffer and writes the
 // camera's lit image (FINAL_IMAGE) whole, a group per LIGHTING_TILE square tile. Each group
-// walks the light placements once and lists the visible lights reaching its tile (every
-// directional one, the point and spot ones whose sphere meets it), so a pixel reads the
-// G-buffer once however many lights cover it (shader/vulkan/lighting/lighting.comp, shader/wgpu/lighting.wgsl).
+// walks the light placements once and lists the visible lights reaching its tile (the point
+// and spot ones whose sphere meets it), so a pixel reads the G-buffer once however many lights
+// cover it. The sun is not listed: every pixel adds it from the push (shader/vulkan/lighting/lighting.comp, shader/wgpu/lighting.wgsl).
 // The image is a storage image: bindless at LIT_STORAGE_BASE + the camera's pyramid slot
 // (pyramids_bind), or a group-3 bind group per image (WebGPU).
 
@@ -31,7 +31,12 @@ LightingPush :: struct {
   // rows of the light placement table
   light_count:      u32,
   ibl_intensity:    f32,
-  _:                [2]u32,
+  // view of the sun's first shadow cascade, 0 for none
+  sun_shadow_map:   u32,
+  _:                u32,
+  // the sun's radiance (color * intensity, 0 when off) and the direction towards it
+  sun_radiance:     [4]f32,
+  sun_direction:    [4]f32,
 }
 
 @(private)
@@ -77,6 +82,11 @@ lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32)
     output_index     = LIT_STORAGE_BASE + camera_slot(cam) + f,
     light_count      = self.light_placement_slots.high_water,
     ibl_intensity    = self.ibl_intensity,
+    sun_shadow_map   = self.sun_shadow_map,
+  }
+  if self.sun.enabled && self.sun.intensity > 0 {
+    push.sun_radiance.rgb = self.sun.color * self.sun.intensity
+    push.sun_direction.xyz = -sun_direction(self.sun)
   }
   dev.cmd_begin_compute(&self.gpu, cmd)
   defer dev.cmd_end_compute(&self.gpu, cmd)

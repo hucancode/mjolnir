@@ -1,4 +1,4 @@
-// Point, spot, directional lights + shadows.
+// Point and spot lights, the sun + shadows.
 package main
 
 import "../../mjolnir"
@@ -21,8 +21,6 @@ App :: struct {
   debug:           debugui.Context,
   input:           input.State,
   orbit:           render.Orbit,
-  sun_node:        world.NodeHandle,
-  sun:             render.LightHandle,
   lights:          [dynamic]MovingLight,
   marker_material: render.MaterialHandle,
   elapsed:         f32,
@@ -111,10 +109,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .YELLOW))
   world.scale(&app.scene, cube, 0.6)
 
-  app.sun_node = world.spawn(&app.scene, {6, 10, 6})
-  world.rotate(&app.scene, app.sun_node, linalg.quaternion_between_two_vector3_f32({0, 0, -1}, linalg.normalize([3]f32{-6, -10, -6})))
-  app.sun = render.light_create(&app.renderer, render.make_directional_light(intensity = f32(dir_intensity), shadow_radius = 12.0))
-  render.attach(&app.renderer, render.SlotHandle(app.sun_node.index), app.sun)
+  app.renderer.sun.direction = {-6, -10, -6}
+  app.renderer.sun.shadow_distance = 12
 
   app.marker_material = render.material_create(&app.renderer, render.make_material(emissive_value = 4.0))
 
@@ -192,8 +188,8 @@ light_settings :: proc(l: MovingLight) -> render.Light {
 }
 
 apply_light_settings :: proc(app: ^App) {
-  world.set_visible(&app.scene, app.sun_node, dir_enabled)
-  render.light(&app.renderer, app.sun).intensity = f32(dir_intensity)
+  app.renderer.sun.enabled = dir_enabled
+  app.renderer.sun.intensity = f32(dir_intensity)
   for l in app.lights {
     world.set_visible(&app.scene, l.node, point_enabled if l.kind == .POINT else spot_enabled)
     render.light(&app.renderer, l.light)^ = light_settings(l)
@@ -248,7 +244,7 @@ debug_ui :: proc(app: ^App) {
     if .SUBMIT in mu.button(ctx, "+Point [P]") do spawn_light(app, .POINT)
     if .SUBMIT in mu.button(ctx, "+Spot [O]") do spawn_light(app, .SPOT)
     if .SUBMIT in mu.button(ctx, "Remove [Del]") do remove_random_light(app)
-    light_block(ctx, "Directional", &dir_enabled, &dir_intensity, 5, nil, nil)
+    light_block(ctx, "Sun light", &dir_enabled, &dir_intensity, 5, nil, nil)
     light_block(ctx, "Point lights", &point_enabled, &point_intensity, 500, &point_radius, nil)
     light_block(ctx, "Spot lights", &spot_enabled, &spot_intensity, 500, &spot_radius, &spot_outer_deg)
   }

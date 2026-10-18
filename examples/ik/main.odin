@@ -93,8 +93,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))
   world.scale(&app.scene, ground, [3]f32{40, 0.2, 40})
-  light := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
 
   app.spider_model = gltf.model_create(&app.renderer, #load("../../assets/spider.glb"))
   app.spider = gltf.instance_create(&app.spider_model, &app.scene, &app.renderer)

@@ -61,8 +61,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     world.scale(&app.scene, slab, 0.8)
   }
 
-  sun := world.spawn(&app.scene, {3, 6, 3})
-  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.9})))
   return .READY
 }
 

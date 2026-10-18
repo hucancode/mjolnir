@@ -591,9 +591,14 @@ spawn_ground :: proc(app: ^App) {
 }
 
 spawn_sun :: proc(app: ^App, intensity: f32) {
-  sun := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.92, 0.85}, intensity, shadow_radius = 25)))
-  world.rotate(&app.scene, sun, -math.PI * 0.7, linalg.VECTOR3F32_X_AXIS)
+  app.renderer.sun = {
+    enabled         = true,
+    cast_shadow     = true,
+    color           = {1, 0.92, 0.85},
+    intensity       = intensity,
+    direction       = linalg.quaternion_mul_vector3(linalg.quaternion_angle_axis(-math.PI * 0.7, linalg.VECTOR3F32_X_AXIS), [3]f32{0, 0, -1}),
+    shadow_distance = 25,
+  }
 }
 
 

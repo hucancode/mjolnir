@@ -25,7 +25,7 @@ MODELS := [?]Model{
   {"Mjolnir",        #load("../../assets/Mjolnir.glb"),        0.3,   {0, -1, 0},    math.PI * -0.3},
   {"Suzanne",        #load("../../assets/Suzanne.glb"),        1.0,   {0, 0, 0},     0},
   {"Duck",           #load("../../assets/Duck.glb"),           0.4,   {0, -1, 0},    0},
-  {"Damaged Helmet", #load("../../assets/DamagedHelmet.glb"),  1.0,   {0, 0, 0},     math.PI * 0.5},
+  {"Damaged Helmet", #load("../../assets/DamagedHelmet.glb"),  1.0,   {0, 0, 0},     0},
   {"SciFi Helmet",   #load("../../assets/SciFiHelmet.glb"),    1.0,   {0, -1, 0},    0},
 }
 
@@ -43,7 +43,6 @@ App :: struct {
   debug:       debugui.Context,
   input:       input.State,
   orbit:       render.Orbit,
-  sun:         render.LightHandle,
   turntable:   world.NodeHandle,
   mount:       world.NodeHandle,
   model:       gltf.Model,
@@ -77,9 +76,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.camera_look_at(render.main_camera(&app.renderer), {0, 0.2, 3.5}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
-  sun := world.spawn(&app.scene, {4, 6, 4})
-  app.sun = render.light_create(&app.renderer, render.make_directional_light({1, 0.98, 0.95}, f32(dir_intensity), 15.0))
-  render.attach(&app.renderer, render.SlotHandle(sun.index), app.sun)
+  app.renderer.sun = {enabled = true, cast_shadow = true, color = {1, 0.98, 0.95}, intensity = f32(dir_intensity), direction = {0, 0, -1}, shadow_distance = 15}
 
   app.turntable = world.spawn(&app.scene)
   app.mount = world.spawn(&app.scene, parent = app.turntable)
@@ -121,7 +118,7 @@ update :: proc(app: ^App, dt: f32) {
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  render.light(&app.renderer, app.sun).intensity = f32(dir_intensity)
+  app.renderer.sun.intensity = f32(dir_intensity)
   app.renderer.ibl_intensity = f32(ibl_intensity)
   app.renderer.skybox_intensity = skybox_on ? 1 : 0
   app.renderer.skybox_blur = f32(skybox_blur)

@@ -123,8 +123,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 spawn_scene :: proc(app: ^App) {
-  light := world.spawn(&app.scene, {-6, 14, 6})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.96, 0.9}, 1, 6.0)))
 
   spawn_scenery_box(app, {0, -GROUND_HALF.y, 0}, GROUND_HALF)
   spawn_scenery_box(app, {GROUND_HALF.x, WALL_HEIGHT, 0}, {WALL_THICK, WALL_HEIGHT, GROUND_HALF.z})
