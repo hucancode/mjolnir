@@ -44,6 +44,14 @@ jobs:
           # build.sh also builds wasm, which may fail on the runner; only the native lib is needed
           bash /home/runner/odin/vendor/box3d/src/build.sh || test -f /home/runner/odin/vendor/box3d/lib/linux-amd64/libbox3d.a
 
+      # libc-shim's strncpy writes one NUL at dst[count - n] instead of zero-padding, so cgltf's
+      # strings are unterminated on the web and every glTF fails as legacy_gltf (still in Odin master)
+      - name: Patch libc-shim strncpy
+        run: |
+          f=/home/runner/odin/vendor/libc-shim/string.odin
+          sed -i 's|^\tdst\[icount-cnt\] = 0$|\tfor i in cnt..<icount do dst[i] = 0|' $f
+          grep -q 'for i in cnt..<icount do dst\[i\] = 0' $f
+
       # render imports both backends, so vendor:wgpu is compiled even for the vulkan build
       - name: Get wgpu-native
         run: |

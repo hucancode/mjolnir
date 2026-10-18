@@ -45,7 +45,7 @@ EXAMPLE ?= cube
 web:
 	mkdir -p web
 	odin build examples/$(EXAMPLE) -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
-		-target-features:"atomics,bulk-memory" -extra-linker-flags:"--export-table" -out:web/$(EXAMPLE).wasm
+		-target-features:"atomics,bulk-memory" -no-thread-local -extra-linker-flags:"--export-table" -out:web/$(EXAMPLE).wasm
 	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js mjolnir/platform/web/index.html web/
 
 EXAMPLES := $(patsubst examples/%/main.odin,%,$(wildcard examples/*/main.odin))
@@ -142,7 +142,7 @@ doc-live:
 	@for name in $(EXAMPLES); do \
 		echo "wasm: $$name"; \
 		odin build examples/$$name -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
-			-target-features:"atomics,bulk-memory" -extra-linker-flags:"--export-table" \
+			-target-features:"atomics,bulk-memory" -no-thread-local -extra-linker-flags:"--export-table" \
 			-out:docs/build/live/$$name.wasm >/dev/null 2>&1 || echo "  skipped $$name (no web build)"; \
 	done
 
