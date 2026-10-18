@@ -103,14 +103,14 @@ fn geometric_normal(camera: View, pixel: vec2i, frag_pos: vec3f, depth: f32, fal
     return select(n, -n, dot(n, camera.position.xyz - frag_pos) < 0.0);
 }
 
-// Where a placed light sits and shines: its node's translation and normalized forward (+Z)
+// Where a placed light sits and shines: its node's translation and normalized forward (-Z)
 // axis, as scene.odin light_pose.
 fn light_position(p: LightPlacement) -> vec3f {
     return nodes[p.node].world_matrix[3].xyz;
 }
 
 fn light_forward(p: LightPlacement) -> vec3f {
-    let forward = nodes[p.node].world_matrix[2].xyz;
+    let forward = -nodes[p.node].world_matrix[2].xyz;
     return select(vec3f(0.0, -1.0, 0.0), normalize(forward), dot(forward, forward) > 1e-6);
 }
 

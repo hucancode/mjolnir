@@ -487,7 +487,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
           world.rotate(
             &app.scene,
             light_handle,
-            math.PI * 0.5,
+            -math.PI * 0.5,
             linalg.VECTOR3F32_X_AXIS,
           )
         } else {
@@ -520,7 +520,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     }
     when ENABLE_DIRECTIONAL_LIGHT {
       dir_light_handle, _ := spawn(app, attachment = render.light_create(&app.renderer, render.make_directional_light(color = {0.2, 0.5, 0.9}, intensity = 3, shadow_radius = 20)))
-      world.rotate(&app.scene, dir_light_handle, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
+      world.rotate(&app.scene, dir_light_handle, -math.PI * 0.8, linalg.VECTOR3F32_X_AXIS)
     }
   }
   when false {

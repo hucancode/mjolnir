@@ -127,7 +127,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   world.scale(&app.scene, floor, RADIUS * 6.0)
   spot := world.spawn(&app.scene, {0, 10, 0})
   render.attach(&app.renderer, render.SlotHandle(spot.index), render.light_create(&app.renderer, render.make_spot_light({1, 1, 1}, 500, 16.0, math.PI * 0.35)))
-  world.rotate(&app.scene, spot, math.PI * 0.55, {1, 0, 0})
+  world.rotate(&app.scene, spot, -math.PI * 0.45, {1, 0, 0})
   render.camera_look_at(render.main_camera(&app.renderer), {0, 14, 14}, {0, 8, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 8, 0})
   for c, i in COLOR_RGB {

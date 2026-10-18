@@ -51,7 +51,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   light := world.spawn(&app.scene, {10, 18, 10})
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, 3.0, 60.0, false)))
-  world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  world.rotate(&app.scene, light, -math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   render.camera_look_at(render.main_camera(&app.renderer), {14, 14, 14}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   app.size = GRID_SIZES[0]

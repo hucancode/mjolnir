@@ -6,9 +6,9 @@ import "core:mem"
 import "core:slice"
 import "vendor:cgltf"
 
-// load_meshes creates a render mesh, material and textures for every glTF mesh a node references,
-// and records them in model. looks[i] draws data.meshes[i]; it is nil for meshes no node uses or
-// that failed to upload. Meshes used by a skinned node carry skinning data. Images must be
+// load_meshes creates a render mesh and material, with their textures, for every primitive of the
+// glTF meshes a node references, and records them in model. looks[i] draws data.meshes[i], one
+// attachment per primitive; it is empty for meshes no node uses or that failed to upload. Meshes used by a skinned node carry skinning data. Images must be
 // embedded (a .glb's buffer views): render reads no files.
 @(private)
 load_meshes :: proc(
@@ -17,10 +17,10 @@ load_meshes :: proc(
   model: ^Model,
   allocator := context.allocator,
 ) -> (
-  looks: []Maybe(render.MeshAttachment),
+  looks: [][dynamic]render.MeshAttachment,
   ok: bool,
 ) {
-  looks = make([]Maybe(render.MeshAttachment), len(data.meshes), allocator)
+  looks = make([][dynamic]render.MeshAttachment, len(data.meshes), allocator)
   used := make([]bool, len(data.meshes), context.temp_allocator)
   skinned := make([]bool, len(data.meshes), context.temp_allocator)
   for &node in data.nodes do if node.mesh != nil {
@@ -35,18 +35,18 @@ load_meshes :: proc(
     for _, m in materials do append(&model.materials, m)
   }
   for &gltf_mesh, i in data.meshes do if used[i] {
-    if len(gltf_mesh.primitives) == 0 do return looks, false
-    // One material per mesh: the first primitive's, or plain white when it has none
-    // (material 0 means "none" and is never drawn).
-    material := r.builtin_materials[.WHITE]
-    if mat := gltf_mesh.primitives[0].material; mat != nil {
-      material = load_material(r, mat, &textures, &materials) or_return
+    looks[i] = make([dynamic]render.MeshAttachment, allocator)
+    for &prim in gltf_mesh.primitives {
+      if len(prim.attributes) == 0 do continue
+      // plain white when the primitive has no material (material 0 means "none" and is never drawn)
+      material := r.builtin_materials[.WHITE]
+      if prim.material != nil do material = load_material(r, prim.material, &textures, &materials) or_return
+      geometry := load_geometry(&prim, skinned[i])
+      log.infof("Processed mesh with %d vertices, %d indices", len(geometry.vertices), len(geometry.indices))
+      handle := render.mesh_create(r, geometry) or_continue
+      append(&model.meshes, handle)
+      append(&looks[i], render.MeshAttachment{mesh = handle, material = material, cast_shadow = true})
     }
-    geometry := load_geometry(&gltf_mesh, skinned[i])
-    log.infof("Processed mesh with %d vertices, %d indices", len(geometry.vertices), len(geometry.indices))
-    handle := render.mesh_create(r, geometry) or_continue
-    append(&model.meshes, handle)
-    looks[i] = render.MeshAttachment{mesh = handle, material = material, cast_shadow = true}
   }
   log.infof("glTF looks: %d textures, %d materials", len(textures), len(materials))
   return looks, true
@@ -130,32 +130,22 @@ load_material :: proc(
 }
 
 @(private = "file")
-load_geometry :: proc(gltf_mesh: ^cgltf.mesh, include_skinning: bool) -> render.Geometry {
-  vertices := make([dynamic]render.Vertex, 0, context.allocator)
-  indices := make([dynamic]u32, 0, context.allocator)
-  skinnings: [dynamic]render.SkinningData
-  if include_skinning do skinnings = make([dynamic]render.SkinningData, 0, context.allocator)
-  for &prim in gltf_mesh.primitives {
-    vertex_offset := u32(len(vertices))
-    count := int(prim.attributes[0].data.count)
-    resize(&vertices, len(vertices) + count)
-    prim_skinnings: []render.SkinningData
-    if include_skinning {
-      resize(&skinnings, len(skinnings) + count)
-      prim_skinnings = skinnings[len(skinnings) - count:]
-    }
-    load_vertex_attributes(&prim, vertices[len(vertices) - count:], prim_skinnings)
-    if prim.indices != nil {
-      first := len(indices)
-      resize(&indices, first + int(prim.indices.count))
-      _ = cgltf.accessor_unpack_indices(prim.indices, raw_data(indices[first:]), size_of(u32), prim.indices.count)
-      for &index in indices[first:] do index += vertex_offset
-    } else {
-      for i in 0 ..< count do append(&indices, vertex_offset + u32(i))
-    }
+load_geometry :: proc(prim: ^cgltf.primitive, include_skinning: bool) -> render.Geometry {
+  count := int(prim.attributes[0].data.count)
+  vertices := make([]render.Vertex, count)
+  indices: []u32
+  skinnings: []render.SkinningData
+  if include_skinning do skinnings = make([]render.SkinningData, count)
+  load_vertex_attributes(prim, vertices, skinnings)
+  if prim.indices != nil {
+    indices = make([]u32, int(prim.indices.count))
+    _ = cgltf.accessor_unpack_indices(prim.indices, raw_data(indices), size_of(u32), prim.indices.count)
+  } else {
+    indices = make([]u32, count)
+    for i in 0 ..< count do indices[i] = u32(i)
   }
   // nil skinnings without include_skinning
-  return render.make_geometry(vertices[:], indices[:], skinnings[:])
+  return render.make_geometry(vertices, indices, skinnings)
 }
 
 @(private = "file")

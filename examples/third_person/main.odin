@@ -491,7 +491,7 @@ enter_select :: proc(app: ^App) {
     show_props(app, app.lineup[i], hero.props)
   }
   app.spotlight = world.spawn(&app.scene)
-  world.rotate(&app.scene, app.spotlight, linalg.quaternion_between_two_vector3([3]f32{0, 0, 1}, linalg.normalize([3]f32{0, -4, -3})))
+  world.rotate(&app.scene, app.spotlight, linalg.quaternion_between_two_vector3([3]f32{0, 0, -1}, linalg.normalize([3]f32{0, -4, -3})))
   render.attach(&app.renderer, render.SlotHandle(app.spotlight.index), render.light_create(&app.renderer, render.make_spot_light({1, 0.85, 0.6}, 500, 12, math.PI * 0.1)))
   actor_play(&app.lineup[app.hero], .CHEER)
   render.camera_look_at(render.main_camera(&app.renderer), {0, 3, 9}, {0, 1.2, 0})
@@ -593,7 +593,7 @@ spawn_ground :: proc(app: ^App) {
 spawn_sun :: proc(app: ^App, intensity: f32) {
   sun := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.92, 0.85}, intensity, shadow_radius = 25)))
-  world.rotate(&app.scene, sun, math.PI * 0.3, linalg.VECTOR3F32_X_AXIS)
+  world.rotate(&app.scene, sun, -math.PI * 0.7, linalg.VECTOR3F32_X_AXIS)
 }
 
 

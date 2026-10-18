@@ -112,7 +112,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   world.scale(&app.scene, cube, 0.6)
 
   app.sun_node = world.spawn(&app.scene, {6, 10, 6})
-  world.rotate(&app.scene, app.sun_node, linalg.quaternion_between_two_vector3_f32({0, 0, 1}, linalg.normalize([3]f32{-6, -10, -6})))
+  world.rotate(&app.scene, app.sun_node, linalg.quaternion_between_two_vector3_f32({0, 0, -1}, linalg.normalize([3]f32{-6, -10, -6})))
   app.sun = render.light_create(&app.renderer, render.make_directional_light(intensity = f32(dir_intensity), shadow_radius = 12.0))
   render.attach(&app.renderer, render.SlotHandle(app.sun_node.index), app.sun)
 
@@ -218,7 +218,7 @@ update :: proc(app: ^App, dt: f32) {
     world.translate(&app.scene, l.node, pos)
     if l.kind == .SPOT {
       dir := linalg.normalize(SPOT_TARGET - pos)
-      world.rotate(&app.scene, l.node, linalg.quaternion_between_two_vector3(linalg.VECTOR3F32_Z_AXIS, dir))
+      world.rotate(&app.scene, l.node, linalg.quaternion_between_two_vector3(-linalg.VECTOR3F32_Z_AXIS, dir))
     }
   }
   apply_light_settings(app)

@@ -777,7 +777,7 @@ attachment :: proc(
 // SPOT_LIGHT_INNER_RATIO is the default ratio of a spot light's full-intensity cone to its falloff cone.
 SPOT_LIGHT_INNER_RATIO :: f32(0.75)
 
-// Light shines from every slot it is attached to, along the slot's +Z axis
+// Light shines from every slot it is attached to, along the slot's -Z axis, as a glTF light does
 // (make_*_light fill one; light_create stores it). Point lights ignore the angles.
 Light :: struct #align(16) {
   color:              [3]f32,
@@ -823,10 +823,10 @@ light_destroy :: proc(self: ^Renderer, handle: LightHandle) {
 }
 
 // Where a light at a node's transform sits and shines: its translation and normalized forward
-// (+Z) axis. The lighting shaders read a placed light the same way.
+// (-Z) axis. The lighting shaders read a placed light the same way.
 @(private)
 light_pose :: proc(world_matrix: matrix[4, 4]f32) -> (position, direction: [3]f32) {
-  forward := world_matrix[2].xyz
+  forward := -world_matrix[2].xyz
   return world_matrix[3].xyz, linalg.normalize(forward) if linalg.dot(forward, forward) > 1e-6 else {0, -1, 0}
 }
 

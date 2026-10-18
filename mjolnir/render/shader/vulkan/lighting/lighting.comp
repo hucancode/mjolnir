@@ -168,14 +168,14 @@ vec3 geometricNormal(View camera, ivec2 pixel, vec3 fragPos, float depth, vec3 f
     return dot(n, camera.position.xyz - fragPos) < 0.0 ? -n : n;
 }
 
-// Where a placed light sits and shines: its node's translation and normalized forward (+Z)
+// Where a placed light sits and shines: its node's translation and normalized forward (-Z)
 // axis, as scene.odin light_pose.
 vec3 lightPosition(LightPlacement p) {
     return nodes[p.node].world_matrix[3].xyz;
 }
 
 vec3 lightForward(LightPlacement p) {
-    vec3 forward = nodes[p.node].world_matrix[2].xyz;
+    vec3 forward = -nodes[p.node].world_matrix[2].xyz;
     return dot(forward, forward) > 1e-6 ? normalize(forward) : vec3(0.0, -1.0, 0.0);
 }
 

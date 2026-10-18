@@ -5,6 +5,7 @@ import "../geometry"
 import "../render"
 import "../world"
 import "core:log"
+import "core:math"
 import "core:math/linalg"
 import "core:strings"
 import "vendor:cgltf"
@@ -33,6 +34,7 @@ Model :: struct {
   meshes:    [dynamic]render.MeshHandle,
   materials: [dynamic]render.MaterialHandle,
   textures:  [dynamic]render.TextureHandle,
+  lights:    [dynamic]render.LightHandle, // KHR_lights_punctual, in the file's units (lux, candela)
   using _:   Model_Nodes,
 }
 
@@ -52,6 +54,7 @@ ModelNode :: struct {
   transform: world.Transform,
   look:      render.MeshAttachment, // mesh 0 draws nothing
   rig:       int, // the rig deforming its mesh, -1 for none
+  light:     Maybe(render.LightHandle),
 }
 
 @(private)
@@ -70,9 +73,9 @@ Instance :: struct {
 }
 
 // model_create loads a glTF held in memory, a .glb or a glTF whose buffers and images are all
-// embedded (the engine reads no files: #load it or platform.read_file it): a render mesh,
-// material and textures per glTF mesh a node uses (skinned where a skinned node uses it), and
-// one rig per skin with every glTF animation as its clips. Spawn it with instance_create.
+// embedded (the engine reads no files: #load it or platform.read_file it): a render mesh
+// and material per primitive of each glTF mesh a node uses, with their textures (skinned where a
+// skinned node uses it), a light per light node (model.lights, in the file's units), and one rig per skin with every glTF animation as its clips. Spawn it with instance_create.
 model_create :: proc(r: ^render.Renderer, data: []u8) -> (model: Model, ok: bool) #optional_ok {
   result := load_data(r, data, &model)
   if result != .success {
@@ -88,12 +91,14 @@ model_destroy :: proc(self: ^Model, r: ^render.Renderer) {
   for h in self.meshes do render.destroy(r, h)
   for h in self.materials do render.destroy(r, h)
   for h in self.textures do render.destroy(r, h)
+  for h in self.lights do render.light_destroy(r, h)
   for &rig in self.rigs do animation.rig_destroy(&rig)
   for n in self.nodes do delete(n.name)
   delete(self.rigs)
   delete(self.meshes)
   delete(self.materials)
   delete(self.textures)
+  delete(self.lights)
   delete(self.nodes)
   delete(self.joints)
   self^ = {}
@@ -118,6 +123,12 @@ instance_create :: proc(
     nodes[i] = handle
     world.set_local(w, handle, n.transform.position, n.transform.rotation, n.transform.scale)
     if n.parent < 0 do append(&instance.roots, handle)
+    if light, has_light := n.light.?; has_light {
+      // a light and a mesh share a slot only through a child node
+      slot := handle
+      if n.look.mesh != 0 do slot = world.spawn(w, parent = handle) or_continue
+      render.attach(r, render.SlotHandle(slot.index), light)
+    }
     if n.look.mesh == 0 do continue
     render.attach(r, render.SlotHandle(handle.index), n.look)
     if n.rig >= 0 do append(&instance.skinned, SkinnedNode{node = handle, rig = RigHandle(n.rig)})
@@ -160,13 +171,13 @@ load_data :: proc(r: ^render.Renderer, bytes: []u8, model: ^Model) -> cgltf.resu
     skin_rigs[i] = len(model.rigs)
     append(&model.rigs, rig)
   }
-  load_nodes(data, looks, skin_rigs, model)
+  load_nodes(r, data, looks, skin_rigs, model)
   return .success
 }
 
 // The node tree, parents first: model.nodes[template[i]] is glTF node i.
 @(private = "file")
-load_nodes :: proc(data: ^cgltf.data, looks: []Maybe(render.MeshAttachment), skin_rigs: []int, model: ^Model) {
+load_nodes :: proc(r: ^render.Renderer, data: ^cgltf.data, looks: [][dynamic]render.MeshAttachment, skin_rigs: []int, model: ^Model) {
   Entry :: struct {
     idx:    int,
     parent: int,
@@ -187,14 +198,30 @@ load_nodes :: proc(data: ^cgltf.data, looks: []Maybe(render.MeshAttachment), ski
       // cgltf fills absent components with identity values
       n.transform = {gltf_node.translation, transmute(quaternion128)gltf_node.rotation, gltf_node.scale}
     }
+    if gltf_node.light != nil do n.light = load_light(r, gltf_node.light, model)
+    prims: []render.MeshAttachment
     if gltf_node.mesh != nil {
-      if look, has_look := looks[cgltf.mesh_index(data, gltf_node.mesh)].?; has_look {
-        n.look = look
+      prims = looks[cgltf.mesh_index(data, gltf_node.mesh)][:]
+      if len(prims) > 0 {
+        n.look = prims[0]
         if gltf_node.skin != nil do n.rig = skin_rigs[cgltf.skin_index(data, gltf_node.skin)]
       }
     }
     template[entry.idx] = len(model.nodes)
     append(&model.nodes, n)
+    // a mesh's further primitives, each with its own material, hang under the node
+    for look in prims[min(1, len(prims)):] {
+      append(
+        &model.nodes,
+        ModelNode {
+          name = strings.clone(string(gltf_node.name)),
+          parent = template[entry.idx],
+          transform = {rotation = quaternion128(1), scale = 1},
+          look = look,
+          rig = n.rig,
+        },
+      )
+    }
     for child in gltf_node.children {
       append(&stack, Entry{idx = int(cgltf.node_index(data, child)), parent = template[entry.idx]})
     }
@@ -206,6 +233,29 @@ load_nodes :: proc(data: ^cgltf.data, looks: []Maybe(render.MeshAttachment), ski
       }
     }
   }
+}
+
+// A light of the file, in its units (lux, candela): the app scales it to the engine's with
+// render.light. A light with no range gets a default radius of 10.
+@(private = "file")
+load_light :: proc(r: ^render.Renderer, light: ^cgltf.light, model: ^Model) -> Maybe(render.LightHandle) {
+  reach := light.range if light.range > 0 else 10
+  l: render.Light
+  switch light.type {
+  case .directional:
+    l = render.make_directional_light(light.color, light.intensity)
+  case .point:
+    l = render.make_point_light(light.color, light.intensity, reach)
+  case .spot:
+    l = render.make_spot_light(light.color, light.intensity, reach, light.spot_outer_cone_angle)
+    l.angle_inner = light.spot_inner_cone_angle
+  case .invalid:
+    return nil
+  }
+  handle, ok := render.light_create(r, l)
+  if !ok do return nil
+  append(&model.lights, handle)
+  return handle
 }
 
 // pose_joints moves the instance's joint nodes of `rig` to the animator's pose; call it after

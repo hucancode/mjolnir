@@ -85,7 +85,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     render.attach(&app.renderer, render.SlotHandle(sphere.index), render.MeshAttachment{mesh = sphere_mesh, material = mat, cast_shadow = true})
   }
 
-  sun_heading := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
+  sun_heading := linalg.quaternion_angle_axis(math.PI * 0.65, linalg.VECTOR3F32_Y_AXIS)
   sun_elevation := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
   sun := world.spawn(&app.scene, {0, 10, 0})
   app.sun = render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, f32(sun_intensity), 12.0))

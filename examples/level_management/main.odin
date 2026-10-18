@@ -1,12 +1,13 @@
-// Destroying resources and reloading a level.
+// Unloading and reloading levels: Sponza and Amazon Lumberyard Bistro.
+// Sponza: Crytek, via Khronos glTF-Sample-Assets (Cryengine Limited License Agreement).
+// Bistro: Amazon Lumberyard Bistro v5.2 (CC BY 4.0), glTF conversion by neftaly/bistro-gltf; the
+// Exterior scene, textures capped at 512px.
 package main
 
 import "core:fmt"
 import "core:log"
-import "core:math"
 import mu "vendor:microui"
 import "../../mjolnir"
-import anim "../../mjolnir/animation"
 import "../../mjolnir/debugui"
 import "../../mjolnir/gltf"
 import "../../mjolnir/input"
@@ -16,12 +17,20 @@ import "../../mjolnir/world"
 
 AUTOMATED_TEST :: #config(AUTOMATED_TEST, false)
 
-GRID :: 5
-SPACING :: 2.5
+Level :: struct {
+  name:     string,
+  path:     string,
+  target:   [3]f32,
+  distance: f32,
+  sun:      Maybe([3]f32),
+  scale:    f32,
+  reach:    f32,
+  shadow:   f32,
+}
 
-Cell :: struct {
-  node: world.NodeHandle,
-  look: render.MeshAttachment,
+LEVELS :: [?]Level {
+  {"Sponza", "assets/Sponza.glb", {0, 3, 0}, 9, [3]f32{-4, 14, 6}, 1, 0, 18},
+  {"Bistro", "assets/Bistro.glb", {25, 8, 0}, 60, nil, 1e-5, 15, 120},
 }
 
 App :: struct {
@@ -31,16 +40,11 @@ App :: struct {
   debug:           debugui.Context,
   input:           input.State,
   orbit:           render.Orbit,
-  cells:           [dynamic]Cell,
-  meshes:          [dynamic]render.MeshHandle,
-  materials:       [dynamic]render.MaterialHandle,
-  duck_model:      gltf.Model,
-  duck:            gltf.Instance,
-  character_model: gltf.Model,
-  character:       gltf.Instance,
-  animators:       [dynamic]anim.Animator,
-  resets:          int,
-  reset_requested: bool,
+  model:           gltf.Model,
+  level:           gltf.Instance,
+  current:         int,
+  requested:       int,
+  loads:           int,
   test_frame:      int,
 }
 
@@ -78,105 +82,52 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.setup(&app.renderer)
-  build_level(app)
+  app.current = -1
+  app.requested = -1
+  if !build_level(app, 0) do return .FAIL
   return .READY
 }
 
-build_level :: proc(app: ^App) {
-  half := f32(GRID - 1) * 0.5 * SPACING
-  render.camera_look_at(render.main_camera(&app.renderer), {half + 4, half + 6, half * 2.4}, {0, half - 1, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, half - 1, 0})
-  light := world.spawn(&app.scene, {-6, 14, 6})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.96, 0.9}, 1, 8.0)))
-
-  ground := world.spawn(&app.scene, {0, -1, 0})
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
-  world.scale(&app.scene, ground, f32(GRID) * SPACING * 1.5)
-
-  column_shapes := [GRID]render.Geometry{render.make_sphere(), render.make_cone(), render.make_capsule(), render.make_cylinder(), render.make_torus()}
-  column_meshes: [GRID]render.MeshHandle
-  for shape, col in column_shapes {
-    column_meshes[col] = render.mesh_create(&app.renderer, shape) or_continue
-    append(&app.meshes, column_meshes[col])
+build_level :: proc(app: ^App, index: int) -> bool {
+  levels := LEVELS
+  l := levels[index]
+  data := platform.read_file(l.path) or_return
+  defer delete(data)
+  app.model = gltf.model_create(&app.renderer, data) or_return
+  app.level = gltf.instance_create(&app.model, &app.scene, &app.renderer) or_return
+  render.camera_look_at(render.main_camera(&app.renderer), l.target + {l.distance, l.distance * 0.1, 0}, l.target)
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), l.target)
+  if sun, has_sun := l.sun.?; has_sun {
+    light := world.spawn(&app.scene, sun)
+    render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.96, 0.9}, 1, l.shadow)))
   }
-  for row in 0 ..< GRID do for col in 0 ..< GRID {
-    t := f32(row) / f32(GRID - 1)
-    color := [4]f32{0.2 + 0.8 * f32(col) / f32(GRID - 1), 0.3, 1.0 - 0.8 * t, 1.0}
-    material := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = color, metallic_value = t, roughness_value = 1.0 - t)) or_continue
-    append(&app.materials, material)
-    node := world.spawn(&app.scene, {f32(col) * SPACING - half, f32(row) * SPACING, 0}) or_continue
-    cell := Cell{node = node, look = {mesh = column_meshes[col], material = material, cast_shadow = true}}
-    render.attach(&app.renderer, render.SlotHandle(node.index), cell.look)
-    append(&app.cells, cell)
+  for handle in app.model.lights {
+    light := render.light(&app.renderer, handle) or_continue
+    light.intensity *= l.scale
+    if light.type == .DIRECTIONAL do light.radius = l.shadow
+    else do light.radius = l.reach
   }
-
-  app.duck_model = gltf.model_create(&app.renderer, #load("../../assets/Duck.glb"))
-  app.duck = gltf.instance_create(&app.duck_model, &app.scene, &app.renderer)
-  for h in app.duck.roots {
-    world.scale(&app.scene, h, 1.3)
-    world.translate(&app.scene, h, -3.5, 0, 4.5)
-  }
-  app.character_model = gltf.model_create(&app.renderer, #load("../../assets/CesiumMan.glb"))
-  app.character = gltf.instance_create(&app.character_model, &app.scene, &app.renderer)
-  for h in app.character.roots {
-    world.scale(&app.scene, h, 6.0)
-    world.translate(&app.scene, h, 3.5, 0, 4.5)
-  }
-  for s in app.character.skinned {
-    rig := &app.character_model.rigs[s.rig]
-    a: anim.Animator
-    anim.animator_init(&a, rig)
-    anim.play(&a, rig, "Anim_0")
-    append(&app.animators, a)
-  }
-  log.infof("level built: %d materials, %d meshes (reset #%d)", len(app.materials), len(app.meshes), app.resets)
+  app.current = index
+  app.loads += 1
+  log.infof("level %s built: %d nodes, %d meshes, %d materials, %d textures (load #%d)", l.name, len(app.model.nodes), len(app.model.meshes), len(app.model.materials), len(app.model.textures), app.loads)
+  return true
 }
 
 destroy_level :: proc(app: ^App) {
-  for &a in app.animators do anim.destroy(&a)
-  clear(&app.animators)
-  gltf.destroy(&app.duck, &app.scene)
-  gltf.destroy(&app.duck_model, &app.renderer)
-  gltf.destroy(&app.character, &app.scene)
-  gltf.destroy(&app.character_model, &app.renderer)
-  clear(&app.cells)
-  clear(&app.meshes)
-  clear(&app.materials)
+  gltf.destroy(&app.level, &app.scene)
+  gltf.destroy(&app.model, &app.renderer)
   world.teardown(&app.scene)
   render.teardown(&app.renderer)
+  app.current = -1
 }
 
 shutdown :: proc(app: ^App) {
   destroy_level(app)
-  delete(app.animators)
-  delete(app.cells)
-  delete(app.meshes)
-  delete(app.materials)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
-}
-
-destroy_materials :: proc(app: ^App) {
-  for &cell in app.cells {
-    cell.look.material = app.renderer.builtin_materials[.GRAY]
-    render.attach(&app.renderer, render.SlotHandle(cell.node.index), cell.look)
-  }
-  for m in app.materials do render.destroy(&app.renderer, m)
-  log.infof("destroyed %d materials -> builtin GRAY", len(app.materials))
-  clear(&app.materials)
-}
-
-destroy_meshes :: proc(app: ^App) {
-  for &cell in app.cells {
-    cell.look.mesh = app.renderer.builtin_meshes[.CUBE]
-    render.attach(&app.renderer, render.SlotHandle(cell.node.index), cell.look)
-  }
-  for m in app.meshes do render.destroy(&app.renderer, m)
-  log.infof("destroyed %d meshes -> builtin CUBE", len(app.meshes))
-  clear(&app.meshes)
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -186,46 +137,48 @@ update :: proc(app: ^App, dt: f32) {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  if app.reset_requested {
-    app.reset_requested = false
-    app.resets += 1
+  if app.requested >= 0 {
+    index := app.requested
+    app.requested = -1
     destroy_level(app)
-    build_level(app)
+    if index < len(LEVELS) do build_level(app, index)
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  for h in app.duck.roots do world.rotate_by(&app.scene, h, dt * math.PI * 0.3)
-  for h in app.character.roots do world.rotate_by(&app.scene, h, dt * math.PI * 0.3)
-  for s, i in app.character.skinned do anim.animator_update(&app.animators[i], &app.character_model.rigs[s.rig], dt)
   when AUTOMATED_TEST do run_test_step(app)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  for s, i in app.character.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), app.animators[i].palette)
   render.update(&app.renderer, dt)
 }
 
 run_test_step :: proc(app: ^App) {
   app.test_frame += 1
   switch app.test_frame {
-  case 5, 22:
-    destroy_materials(app)
-  case 10, 27:
-    destroy_meshes(app)
-  case 15, 32:
-    app.reset_requested = true
-  case 40:
+  case 5:
+    app.requested = 1
+  case 15:
+    app.requested = 0
+  case 25:
+    app.requested = app.current
+  case 35:
+    app.requested = len(LEVELS)
+  case 45:
     log.info("automated test sequence complete")
   }
 }
 
 panel :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "Level Management", {20, 20, 320, 260}, {.NO_CLOSE}) {
+  if mu.window(ctx, "Level Management", {20, 20, 320, 340}, {.NO_CLOSE}) {
+    levels := LEVELS
     mu.layout_row(ctx, {-1}, 0)
-    mu.label(ctx, fmt.tprintf("Grid materials: %d", len(app.materials)))
-    mu.label(ctx, fmt.tprintf("Grid meshes:    %d", len(app.meshes)))
-    mu.label(ctx, fmt.tprintf("Resets:         %d", app.resets))
-    if .SUBMIT in mu.button(ctx, "Destroy All Materials") do destroy_materials(app)
-    if .SUBMIT in mu.button(ctx, "Destroy All Meshes") do destroy_meshes(app)
-    if .SUBMIT in mu.button(ctx, "Reset Level") do app.reset_requested = true
+    mu.label(ctx, fmt.tprintf("Level:     %s", levels[app.current].name if app.current >= 0 else "none"))
+    mu.label(ctx, fmt.tprintf("Nodes:     %d", len(app.model.nodes)))
+    mu.label(ctx, fmt.tprintf("Meshes:    %d", len(app.model.meshes)))
+    mu.label(ctx, fmt.tprintf("Materials: %d", len(app.model.materials)))
+    mu.label(ctx, fmt.tprintf("Textures:  %d", len(app.model.textures)))
+    mu.label(ctx, fmt.tprintf("Loads:     %d", app.loads))
+    for l, i in levels do if .SUBMIT in mu.button(ctx, fmt.tprintf("Load %s", l.name)) do app.requested = i
+    if .SUBMIT in mu.button(ctx, "Reload Level") do app.requested = app.current
+    if .SUBMIT in mu.button(ctx, "Unload Level") do app.requested = len(LEVELS)
   }
 }
