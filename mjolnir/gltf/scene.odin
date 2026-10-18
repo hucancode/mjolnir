@@ -59,9 +59,10 @@ scene_destroy :: proc(self: ^Scene, w: ^world.World, r: ^render.Renderer) {
 }
 
 // scene_create instantiates a glTF held in memory, a .glb or a glTF whose buffers and images are
-// all embedded (the engine reads no files: #load it or platform.read_file it): render looks (see
-// load_meshes), one rig per skin (see rig_create) and one world node per glTF node, spawned
-// under `parent` (the world root by default) with its look attached. A skinned node moves once
+// all embedded (the engine reads no files: #load it or platform.read_file it): a render mesh,
+// material and textures per glTF mesh a node uses (skinned where a skinned node uses it), one
+// rig per skin with every glTF animation as its clips, and one world node per glTF node,
+// spawned under `parent` (the world root by default) with its look attached. A skinned node moves once
 // the app animates its rig (animation.animator_update) and stages the palette each tick
 // (render.stage_bones).
 scene_create :: proc(

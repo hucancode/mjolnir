@@ -10,6 +10,7 @@ import "vendor:cgltf"
 // and records them in scene. looks[i] draws data.meshes[i]; it is nil for meshes no node uses or
 // that failed to upload. Meshes used by a skinned node carry skinning data. Images must be
 // embedded (a .glb's buffer views): render reads no files.
+@(private)
 load_meshes :: proc(
   r: ^render.Renderer,
   data: ^cgltf.data,

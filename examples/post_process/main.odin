@@ -84,10 +84,9 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {6, 5, 10}, {0, 1.0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   when render.RENDER_BACKEND == "vulkan" {
@@ -128,7 +127,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9}, shadow_radius = 5.0)))
   lamp := world.spawn(&app.scene, {0, 3, 0})
   render.attach(&app.renderer, render.SlotHandle(lamp.index), render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2}, intensity = 200, radius = 8.0, cast_shadow = false)))
-  return true
+  return .READY
 }
 
 spawn_mesh :: proc(app: ^App, mesh: render.MeshHandle, material: render.MaterialHandle, position: [3]f32, cast_shadow := true) {
@@ -165,7 +164,7 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 

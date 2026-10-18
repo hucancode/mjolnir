@@ -55,9 +55,8 @@ shutdown :: proc(app: ^App) {
   free(app)
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {0, 1.5, 6}, {0, 1.5, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1.5, 0})
 
@@ -68,7 +67,7 @@ setup :: proc(app: ^App) -> bool {
   tex, tex_ok := render.texture_create(&app.renderer, #load("../../assets/Warrior_Sheet-Effect.png"))
   if !tex_ok {
     log.error("failed to load warrior sheet")
-    return true
+    return .FAIL
   }
 
   xs := [Mode]f32{.LOOP = -3.0, .PINGPONG = 0.0, .ONCE = 3.0}
@@ -82,7 +81,7 @@ setup :: proc(app: ^App) -> bool {
 
   light := world.spawn(&app.scene, {2, 6, 4})
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1}, shadow_radius = 8)))
-  return true
+  return .READY
 }
 
 should_close :: proc(app: ^App) -> bool {

@@ -83,11 +83,11 @@ should_close :: proc(app: ^App) -> bool {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  commands := make([dynamic]render.RenderCommand, context.temp_allocator)
-  label(app, &commands, fmt.tprintf("Score: %d", app.game.score), {20, 20}, 28, {255, 255, 255, 255})
-  label(app, &commands, fmt.tprintf("Best: %d", app.game.best), {20, 60}, 24, {255, 220, 100, 255})
-  pixels, size, changed := font.atlas(&app.font)
-  render.stage_overlay(&app.renderer, {commands = commands[:], atlas = pixels if changed else nil, atlas_size = size})
+  hud := [?]render.RenderCommand {
+    {shape = render.DrawTextCommand{text = fmt.tprintf("Score: %d", app.game.score), position = {20, 20}, size = 28, color = {255, 255, 255, 255}}},
+    {shape = render.DrawTextCommand{text = fmt.tprintf("Best: %d", app.game.best), position = {20, 60}, size = 24, color = {255, 220, 100, 255}}},
+  }
+  render.stage_overlay(&app.renderer, hud[:], &app.font)
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
@@ -97,10 +97,9 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
   return n
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return true
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return .FAIL
   half := f32(GRID) * CELL * 0.5
   wall_t :: 0.2
   wall_h :: 0.5
@@ -127,7 +126,7 @@ setup :: proc(app: ^App) -> bool {
 
   reset_game(app)
   log.info("Controls: WASD or arrows. Auto-restart on game over.")
-  return true
+  return .READY
 }
 
 spawn_wall :: proc(app: ^App, pos: [3]f32, sx, sy, sz: f32) {
@@ -245,9 +244,3 @@ step_game :: proc(app: ^App, dt: f32) {
   place_node(app, app.game.head_node, next, SEGMENT_Y)
 }
 
-label :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand, text: string, pos: [2]f32, size: f32, color: [4]u8) {
-  dpi := platform.dpi_scale(&app.window)
-  glyphs := make([dynamic]font.Glyph, context.temp_allocator)
-  font.glyphs(&app.font, text, pos * dpi, size * dpi, &glyphs)
-  append(commands, render.RenderCommand{shape = render.DrawTextCommand{glyphs = glyphs[:], color = color}})
-}

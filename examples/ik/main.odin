@@ -83,10 +83,9 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {0, 20, 20}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
@@ -97,7 +96,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
 
   app.spider = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
-  if len(app.spider.roots) == 0 || len(app.spider.skinned) == 0 do return true
+  if len(app.spider.roots) == 0 || len(app.spider.skinned) == 0 do return .FAIL
   app.spider_root = app.spider.roots[0]
   app.spider_mesh = app.spider.skinned[0].node
   app.rig = &app.spider.rigs[app.spider.skinned[0].rig]
@@ -115,7 +114,7 @@ setup :: proc(app: ^App) -> bool {
     ik := animation.IKParams{target = app.feet[i], pole = leg_pole(app.feet[i], 0), pole_weight = 1, space = .WORLD}
     app.legs[i] = animation.layer_create(&app.animator, app.rig, ik, bones)
   }
-  return true
+  return .READY
 }
 
 leg_pole :: proc(foot: [3]f32, body_x: f32) -> [3]f32 {
@@ -190,6 +189,6 @@ frame :: proc(app: ^App) -> bool {
       mu.slider(ctx, &app.leg_lift, 0, 6)
     }
   }
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

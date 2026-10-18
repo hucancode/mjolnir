@@ -2,6 +2,7 @@
 #+private
 package crowd
 
+import ".."
 import "../detour"
 import "base:runtime"
 import "core:log"
@@ -237,14 +238,14 @@ test_obstacle_avoidance_query_capacity :: proc(t: ^testing.T) {
 // ---------------------------------------------------------------
 
 // test_plane.navmesh is a 20x20 walkable plane centered at the origin, baked by navigation/bake
-build_test_navmesh :: proc(t: ^testing.T) -> (^detour.Nav_Mesh, bool) {
-	nav, ok := detour.load_navmesh(#load("test_plane.navmesh"))
-	if !ok do testing.fail_now(t, "loading the plane fixture failed")
+build_test_navmesh :: proc(t: ^testing.T) -> (^navigation.NavMesh, bool) {
+	nav := new(navigation.NavMesh)
+	if !navigation.init(nav, #load("test_plane.navmesh")) do testing.fail_now(t, "loading the plane fixture failed")
 	return nav, true
 }
 
-destroy_test_navmesh :: proc(nav: ^detour.Nav_Mesh) {
-	detour.nav_mesh_destroy(nav)
+destroy_test_navmesh :: proc(nav: ^navigation.NavMesh) {
+	navigation.destroy(nav)
 	free(nav)
 }
 
@@ -416,7 +417,7 @@ bench_proximity_grid_query :: proc(t: ^testing.T) {
 
 bench_crowd_state :: struct {
 	t:    ^testing.T,
-	nav:  ^detour.Nav_Mesh,
+	nav:  ^navigation.NavMesh,
 	crowd: ^Crowd,
 }
 

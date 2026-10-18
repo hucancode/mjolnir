@@ -62,17 +62,16 @@ main :: proc() {
   )
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return true
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return .FAIL
   ui.init(&app.gui)
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   build_ui(app)
   cube := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .BLUE))
   render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
-  return true
+  return .READY
 }
 
 shutdown :: proc(app: ^App) {
@@ -156,28 +155,25 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  s := platform.dpi_scale(&app.window)
   commands := make([dynamic]render.RenderCommand, context.temp_allocator)
   for h, z in app.gui.draw_order {
     r, c := ui.rect(&app.gui, h), ui.clip(&app.gui, h)
-    clip := [4]f32{c.pos.x, c.pos.y, c.size.x, c.size.y} * s
+    clip := [4]f32{c.pos.x, c.pos.y, c.size.x, c.size.y}
     if look, ok := app.looks[h]; ok {
-      append(&commands, render.RenderCommand{render.DrawQuadCommand{r.pos * s, r.size * s, look.color, look.texture}, i32(z), clip})
+      append(&commands, render.RenderCommand{render.DrawQuadCommand{r.pos, r.size, look.color, look.texture}, i32(z), clip})
     }
     if h == app.star {
-      vertices, indices := star_mesh(r.size * s * 0.5, {255, 215, 0, 255})
-      append(&commands, render.RenderCommand{render.DrawMeshCommand{r.pos * s, vertices, indices, render.NO_TEXTURE}, i32(z), clip})
+      vertices, indices := star_mesh(r.size * 0.5, {255, 215, 0, 255})
+      append(&commands, render.RenderCommand{render.DrawMeshCommand{r.pos, vertices, indices, render.NO_TEXTURE}, i32(z), clip})
     }
     n := ui.node(&app.gui, h)
     for line in ui.lines(&app.gui, h) {
-      glyphs := make([dynamic]font.Glyph, context.temp_allocator)
-      font.glyphs(&app.font, n.text[line.start:line.end], line.pos * s, n.font_size * s, &glyphs)
-      append(&commands, render.RenderCommand{render.DrawTextCommand{glyphs[:], TEXT_COLOR}, i32(z), clip})
+      text := render.DrawTextCommand{text = n.text[line.start:line.end], position = line.pos, size = n.font_size, color = TEXT_COLOR}
+      append(&commands, render.RenderCommand{text, i32(z), clip})
     }
   }
-  pixels, atlas_size, changed := font.atlas(&app.font)
-  render.stage_overlay(&app.renderer, {commands = commands[:], atlas = pixels if changed else nil, atlas_size = atlas_size})
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), s)
+  render.stage_overlay(&app.renderer, commands[:], &app.font)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 star_mesh :: proc(r: [2]f32, color: [4]u8) -> (vertices: []render.Vertex2D, indices: []u32) {

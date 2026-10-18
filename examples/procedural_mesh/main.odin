@@ -63,9 +63,8 @@ spawn_mesh :: proc(app: ^App, mesh_handle: render.MeshHandle, material: render.M
   return n
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {0, 6, 14}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
   light := world.spawn(&app.scene, {6, 12, 6})
@@ -83,7 +82,7 @@ setup :: proc(app: ^App) -> bool {
     spawn_mesh(app, render.mesh_create(&app.renderer, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0}),
     spawn_mesh(app, render.mesh_create(&app.renderer, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0}),
   }
-  return true
+  return .READY
 }
 
 build_wave :: proc(n: int, size: f32, amp: f32) -> render.Geometry {

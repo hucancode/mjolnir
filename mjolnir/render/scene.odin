@@ -283,7 +283,8 @@ mark_resources :: proc(self: ^Renderer) {
 // teardown ends a map in one go, waiting for the GPU: no particle stays alive, every slot
 // forgets its attachment and bone palette, and every camera, mesh, material, light, emitter, force field and
 // texture made since the last setup
-// (or init) is freed, the environment map too if it is one of them. What came before stays:
+// (or init) is freed; an environment map among them gives way to the default one. What came
+// before stays:
 // what init made (builtin meshes and materials, the main camera, render targets, pipelines)
 // and what the application made before setup. Handles to freed resources are stale.
 teardown :: proc(self: ^Renderer) {
@@ -299,7 +300,10 @@ teardown :: proc(self: ^Renderer) {
   containers.slots_rewind(&self.texture_slots)
   if u32(self.environment_map) >= self.texture_slots.mark {
     self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
+    if !ambient_load_environment(self) do log.error("teardown: cannot restore the default environment map")
   }
+  // the next text staged uploads the font atlas again
+  if u32(self.ui_font_atlas) >= self.texture_slots.mark do self.ui_font_atlas = 0
   containers.slots_rewind(&self.camera_slots)
   clear_entry(self, .MESHES, self.mesh_slots.mark, self.mesh_slots.high_water - self.mesh_slots.mark)
   containers.slots_rewind(&self.mesh_slots)
@@ -329,7 +333,8 @@ teardown :: proc(self: ^Renderer) {
 }
 
 // environment_map_load replaces the environment map with the equirectangular HDR image encoded
-// in `data` and precomputes image-based lighting from it. Without one, IBL and the skybox are black.
+// in `data` and precomputes image-based lighting from it. Until then render lights the scene
+// with a default one.
 environment_map_load :: proc(self: ^Renderer, data: []u8) -> bool {
   ok := ambient_load_environment(self, data)
   if !ok do log.warnf("Failed to load environment map")
@@ -372,7 +377,7 @@ shutdown :: proc(self: ^Renderer) {
 
 // Cameras that matched the old extent follow the new one.
 @(private)
-recreate_swapchain :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool {
+recreate_swapchain :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> bool {
   old := dev.extent(&self.gpu)
   dev.resize(&self.gpu, framebuffer_size) or_return
   extent := dev.extent(&self.gpu)
@@ -383,7 +388,6 @@ recreate_swapchain :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale:
   }
   post_process_release_images(self)
   post_process_create_images(self) or_return
-  self.dpi_scale = dpi_scale
   return true
 }
 
@@ -1155,10 +1159,12 @@ flush :: proc(self: ^Renderer, frame_index: u32) {
 }
 
 // frame renders and presents one frame. An out-of-date swapchain is rebuilt at
-// framebuffer_size. It returns false on a GPU error.
+// framebuffer_size; dpi_scale maps window coordinates (the overlay, cursor_ray) to its
+// pixels. It returns false on a GPU error.
 frame :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool {
   frame_index := current_frame(self)
   guard(self)
+  self.dpi_scale = dpi_scale
   tick_resource_pools(self)
   flush(self, frame_index)
   submitted, status := frame_run(self, framebuffer_size)
@@ -1174,7 +1180,7 @@ frame :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool
   case .OK:
     return true
   case .RESIZE:
-    return recreate_swapchain(self, framebuffer_size, dpi_scale)
+    return recreate_swapchain(self, framebuffer_size)
   case .ERROR:
   }
   return false

@@ -56,10 +56,9 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
   return n
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   spawn_primitive(app, .CUBE,     .RED,    {-2.5, 0.5, 0})
   spawn_primitive(app, .SPHERE,   .GREEN,  {2.5, 0.5, 0},  0.7)
   spawn_primitive(app, .CYLINDER, .BLUE,   {0, 1.0, 2.5},  0.5)
@@ -72,7 +71,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, render.SlotHandle(point.index), render.light_create(&app.renderer, render.make_point_light({1.0, 0.95, 0.8}, 1500, 25.0, false)))
   sun := world.spawn(&app.scene, {-6, 10, -4})
   render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light({1.0, 0.95, 0.9}, 4.0, 15.0)))
-  return true
+  return .READY
 }
 
 shutdown :: proc(app: ^App) {
@@ -107,6 +106,6 @@ frame :: proc(app: ^App) -> bool {
     mu.label(ctx, "Cam height"); mu.slider(ctx, &cam_height, 2.0, 30.0)
     mu.label(ctx, "Cam yaw (rad)"); mu.slider(ctx, &cam_yaw, -math.PI, math.PI)
   }
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

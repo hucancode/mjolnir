@@ -44,10 +44,9 @@ main :: proc() {
   )
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {0, 4, 10}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
@@ -60,7 +59,7 @@ setup :: proc(app: ^App) -> bool {
   app.toon, ok = render.material_shader_create(&app.renderer, toon_spirv, toon_wgsl, blend = .NONE)
   if !ok {
     log.error("Failed to create the toon shader")
-    return true
+    return .FAIL
   }
 
   ground := world.spawn(&app.scene)
@@ -80,7 +79,7 @@ setup :: proc(app: ^App) -> bool {
 
   sun := world.spawn(&app.scene, {-3, 8, 6})
   render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9}, intensity = 3, shadow_radius = 8.0)))
-  return true
+  return .READY
 }
 
 spawn_mesh :: proc(app: ^App, mesh: render.MeshHandle, material: render.MaterialHandle, position: [3]f32) {
@@ -127,6 +126,6 @@ frame :: proc(app: ^App) -> bool {
     mu.label(ctx, "Rim"); mu.slider(ctx, &rim, 0, 1)
     mu.label(ctx, "Shade"); mu.slider(ctx, &shade, 0, 1)
   }
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

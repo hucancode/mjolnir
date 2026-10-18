@@ -85,10 +85,9 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {9, 8, 9}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   app.renderer.ibl_intensity = 0.3
@@ -121,7 +120,7 @@ setup :: proc(app: ^App) -> bool {
 
   for i in 0 ..< STARTUP_LIGHTS do spawn_light(app, .SPOT if i == STARTUP_LIGHTS - 1 else .POINT)
   log.info("Lights: P spawns a point light, O a spot light, DELETE removes a random one")
-  return true
+  return .READY
 }
 
 shutdown :: proc(app: ^App) {
@@ -231,7 +230,7 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 

@@ -196,9 +196,8 @@ spawn :: proc(
 }
 
 // On the web the renderer's device arrives after main returns: build the scene once it is up.
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
   app.renderer.ibl_intensity = 0.3
   plain_material_handle := app.renderer.builtin_materials[render.Color.WHITE]
   cube_mesh_handle := app.renderer.builtin_meshes[render.Primitive.CUBE]
@@ -669,7 +668,7 @@ setup :: proc(app: ^App) -> bool {
     }
   }
   log.info("setup complete")
-  return true
+  return .READY
 }
 
 on_key :: proc(app: ^App, key: input.Key, pressed: bool) {

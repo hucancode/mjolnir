@@ -73,9 +73,8 @@ frame :: proc(app: ^App) -> bool {
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {35, 25, 35}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
@@ -94,7 +93,7 @@ setup :: proc(app: ^App) -> bool {
   data, baked := bake.build(&builder, allocator = context.temp_allocator)
   if !baked || !nav.init(&app.navmesh, data) {
     log.error("Failed to build navmesh")
-    return true
+    return .FAIL
   }
   show_navmesh(app)
 
@@ -106,7 +105,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, render.SlotHandle(app.goal_marker.index), render.primitive(&app.renderer, .SPHERE, .YELLOW))
   world.scale(&app.scene, app.goal_marker, 0.3)
   go_to(app, {20, 0, 20})
-  return true
+  return .READY
 }
 
 bake_shape :: proc(builder: ^bake.NavGeometryBuilder, shape: render.Geometry, center, scale: [3]f32, is_obstacle: bool) {

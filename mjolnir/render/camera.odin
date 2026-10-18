@@ -262,6 +262,17 @@ cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (ray: geometry.Ray, ok: b
   return {origin = cam.position, direction = dir}, true
 }
 
+// world_to_screen returns where position appears on screen through the main camera, in window
+// coordinates (those of cursor_ray and the overlay); false when it is behind the camera.
+world_to_screen :: proc(self: ^Renderer, position: [3]f32) -> (point: [2]f32, ok: bool) {
+  cam := main_camera(self) or_return
+  extent := self.camera_targets[self.main_camera].extent
+  clip := camera_projection_matrix(cam, extent) * camera_view_matrix(cam) * [4]f32{position.x, position.y, position.z, 1}
+  if clip.w <= 0 do return {}, false
+  ndc := clip.xy / clip.w
+  return (ndc + 1) * 0.5 * [2]f32{f32(extent[0]), f32(extent[1])} / self.dpi_scale, true
+}
+
 // camera returns the camera of handle, or false if it is not live.
 camera :: proc(self: ^Renderer, handle: CameraHandle) -> (^Camera, bool) #optional_ok {
   if !containers.slots_live(&self.camera_slots, u32(handle)) do return nil, false

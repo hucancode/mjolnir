@@ -3,6 +3,9 @@ package render
 
 @(private = "file")
 TEXTURE_LUT_GGX :: #load("assets/lut_ggx.png")
+// lights the scene until the application loads its own (environment_map_load)
+@(private = "file")
+DEFAULT_ENVIRONMENT :: #load("assets/environment.hdr")
 
 // face sizes of the image-based lighting cubes (pass_ibl.odin)
 ENV_CUBE_SIZE :: 512
@@ -14,12 +17,12 @@ ambient_init :: proc(self: ^Renderer) -> bool {
   self.ibl_intensity = 1.0
   self.skybox_intensity = 1.0
   self.skybox_blur = 0.25
-  return true
+  return ambient_load_environment(self)
 }
 
 // The irradiance and prefiltered cubes are precomputed from a temporary env cube made from
 // the equirectangular image encoded in data.
-ambient_load_environment :: proc(self: ^Renderer, data: []u8) -> (ok: bool) {
+ambient_load_environment :: proc(self: ^Renderer, data := DEFAULT_ENVIRONMENT) -> (ok: bool) {
   ambient_free_environment(self)
   defer if !ok do ambient_free_environment(self)
   self.environment_map = texture_create(self, data, .RGBA32F, true) or_return

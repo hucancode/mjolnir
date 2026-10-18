@@ -10,8 +10,8 @@ package mjolnir
 //   1  foundation: containers, geometry, input, font, navigation/detour, navigation/recast
 // Nothing above platform reads files or names a host: the engine takes and returns bytes
 // (#load them, or platform.read_file / write_file) and an opaque window handle.
-// An app builds its scene in Loop.setup once render.ready, and frees it in Loop.shutdown:
-// on the web the device arrives after init, and main returns as soon as run does.
+// An app builds its scene in Loop.setup, returning WAIT until render.ready, and frees it in
+// Loop.shutdown: on the web the device arrives after init, and main returns as soon as run does.
 //
 // API conventions, the same in every package:
 //   make_x returns a value (make_point_light, make_material, make_cube); x_create stores one

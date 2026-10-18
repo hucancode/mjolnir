@@ -2,7 +2,6 @@
 package main
 
 import "../../mjolnir"
-import geom "../../mjolnir/geometry"
 import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
@@ -57,10 +56,9 @@ main :: proc() {
   )
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {0, 6, 12}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   orbit_distance = mu.Real(app.orbit.distance)
@@ -80,7 +78,7 @@ setup :: proc(app: ^App) -> bool {
   app.runner = world.spawn(&app.scene, app.runner_pos)
   render.attach(&app.renderer, render.SlotHandle(app.runner.index), render.primitive(&app.renderer, .SPHERE, .CYAN))
   world.scale(&app.scene, app.runner, 0.6)
-  return true
+  return .READY
 }
 
 shutdown :: proc(app: ^App) {
@@ -143,7 +141,7 @@ frame :: proc(app: ^App) -> bool {
     mu.label(ctx, fmt.tprintf("Cam pos: %.1f %.1f %.1f", cam.position.x, cam.position.y, cam.position.z))
     mu.label(ctx, fmt.tprintf("Runner: %.1f %.1f %.1f", app.runner_pos.x, app.runner_pos.y, app.runner_pos.z))
   }
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
@@ -171,9 +169,9 @@ follow_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
 
 free_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
   s := &app.input
-  move := geom.qx(cam.rotation) * input.axis(s, .A, .D) + {0, 1, 0} * input.axis(s, .Q, .E) - geom.qz(cam.rotation) * input.axis(s, .S, .W)
+  move := render.camera_right(cam) * input.axis(s, .A, .D) + {0, 1, 0} * input.axis(s, .Q, .E) + render.camera_forward(cam) * input.axis(s, .S, .W)
   cam.position += move * f32(free_speed) * dt
   d := s.mouse_delta * 0.002
   cam.rotation = linalg.quaternion_angle_axis(-d.x, linalg.VECTOR3F32_Y_AXIS) * cam.rotation
-  cam.rotation = linalg.quaternion_angle_axis(-d.y, geom.qx(cam.rotation)) * cam.rotation
+  cam.rotation = linalg.quaternion_angle_axis(-d.y, render.camera_right(cam)) * cam.rotation
 }

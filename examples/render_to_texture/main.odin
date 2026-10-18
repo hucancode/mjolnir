@@ -59,9 +59,8 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
   return n
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {5, 3, 6}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
@@ -80,7 +79,7 @@ setup :: proc(app: ^App) -> bool {
   screen := world.spawn(&app.scene, {0, 2.5, -3.5})
   render.attach(&app.renderer, render.SlotHandle(screen.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.QUAD_XY], material = app.screen_material})
   world.scale(&app.scene, screen, 3.0)
-  return true
+  return .READY
 }
 
 update :: proc(app: ^App, dt: f32) {

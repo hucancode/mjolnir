@@ -3,6 +3,7 @@ package crowd
 import "core:math"
 import "core:math/linalg"
 import "../../containers"
+import ".."
 import "../detour"
 
 @(private = "file")
@@ -145,12 +146,13 @@ Crowd_State :: struct {
 	nav_query:                 detour.Nav_Mesh_Query,
 }
 
-// init prepares the crowd for up to max_agents agents on nav (a navigation.NavMesh's
-// detour_mesh), which must outlive the crowd. The crowd must not move after init; free it with
+// init prepares the crowd for up to max_agents agents on navmesh, which must outlive the
+// crowd. The crowd must not move after init; free it with
 // shutdown.
-init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, nav: ^detour.Nav_Mesh,
+init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh: ^navigation.NavMesh,
              allocator := context.allocator) -> bool {
 	context.allocator = allocator
+	nav := &navmesh.detour_mesh
 	self^ = {}
 
 	self.max_agents = max_agents

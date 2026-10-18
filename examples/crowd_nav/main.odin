@@ -77,26 +77,25 @@ main :: proc() {
   )
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {32, 28, 32}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {15, 25, 15})
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92})))
   if !build_level(app) {
     log.error("navmesh build failed")
-    return true
+    return .FAIL
   }
   show_navmesh(app)
-  if !crowd.init(&app.crowd, AGENT_COUNT, AGENT_RADIUS, &app.navmesh.detour_mesh) {
+  if !crowd.init(&app.crowd, AGENT_COUNT, AGENT_RADIUS, &app.navmesh) {
     log.error("crowd creation failed")
-    return true
+    return .FAIL
   }
   spawn_agents(app)
   send_to_random_goals(app)
-  return true
+  return .READY
 }
 
 shutdown :: proc(app: ^App) {
@@ -236,6 +235,6 @@ frame :: proc(app: ^App) -> bool {
     mu.layout_row(ctx, {-1}, 0)
     if .SUBMIT in mu.button(ctx, "Reassign targets") do send_to_random_goals(app)
   }
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

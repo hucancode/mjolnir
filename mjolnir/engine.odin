@@ -25,22 +25,31 @@ USE_PARALLEL_UPDATE :: #config(USE_PARALLEL_UPDATE, false)
 // FRAME_LIMIT stops run after this many frames; 0 means no limit (-define:FRAME_LIMIT=n).
 FRAME_LIMIT :: #config(FRAME_LIMIT, 0)
 
+// Setup is what Loop.setup reports: WAIT to be called again next iteration (render is not
+// ready yet), READY to start the loop, FAIL to stop it.
+Setup :: enum {
+  WAIT,
+  READY,
+  FAIL,
+}
+
 // Loop holds the application callbacks run drives; it knows nothing else.
 Loop :: struct($T: typeid) {
   app:          ^T,
   should_close: proc(app: ^T) -> bool, // polled once per iteration, main thread
   update:       proc(app: ^T, dt: f32), // UPDATE_FPS ticks; own thread with USE_PARALLEL_UPDATE
   frame:        proc(app: ^T) -> bool, // RENDER_FPS, main thread: poll events, render; false on error
-  // optional, main thread: retried each iteration until true, before the first update (wait
-  // for render.ready, build the scene); shutdown runs once after the last iteration
-  setup:        proc(app: ^T) -> bool,
+  // optional, main thread: called each iteration until it returns READY, before the first
+  // update (wait for render.ready, build the scene); FAIL stops the loop. shutdown runs once
+  // after the last iteration
+  setup:        proc(app: ^T) -> Setup,
   shutdown:     proc(app: ^T),
 }
 
-// run drives loop until should_close, FRAME_LIMIT frames, or too many consecutive frame
-// failures, then calls shutdown. Natively it returns then, on the calling thread (the one
-// that created the window); on the web it returns at once and the browser calls step each
-// animation frame.
+// run drives loop until should_close, setup fails, FRAME_LIMIT frames, or too many
+// consecutive frame failures, then calls shutdown. Natively it returns then, on the calling
+// thread (the one that created the window); on the web it returns at once and the browser
+// calls step each animation frame.
 run :: proc(loop: Loop($T)) {
   runner = {loop = transmute(Loop(byte))loop}
   platform.run(advance)
@@ -78,7 +87,16 @@ step :: proc(r: ^Runner) -> bool {
   loop := &r.loop
   if loop.should_close(loop.app) do return false
   if !r.started {
-    if loop.setup != nil && !loop.setup(loop.app) do return true
+    if loop.setup != nil {
+      switch loop.setup(loop.app) {
+      case .WAIT:
+        return true
+      case .FAIL:
+        log.error("Setup failed, exiting...")
+        return false
+      case .READY:
+      }
+    }
     r.started = true
     r.last_update = time.now()
     when USE_PARALLEL_UPDATE {

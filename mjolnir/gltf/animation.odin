@@ -10,6 +10,7 @@ import "vendor:cgltf"
 // rig_create builds a rig from a parsed glTF skin: its joint hierarchy as the skeleton,
 // and every animation in `data` as a clip over those joints. Free with
 // animation.rig_destroy.
+@(private)
 rig_create :: proc(data: ^cgltf.data, skin: ^cgltf.skin) -> (rig: animation.Rig, ok: bool) {
   n := len(skin.joints)
   parents := make([]i32, n, context.temp_allocator)

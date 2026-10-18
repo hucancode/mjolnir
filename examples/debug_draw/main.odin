@@ -42,9 +42,8 @@ main :: proc() {
   )
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
   light := world.spawn(&app.scene, {10, 18, 10})
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, 2.0, 60.0, cast_shadow = false)))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
@@ -59,7 +58,7 @@ setup :: proc(app: ^App) -> bool {
 
   render.camera_look_at(render.main_camera(&app.renderer), {12, 8, 14}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
-  return true
+  return .READY
 }
 
 shutdown :: proc(app: ^App) {

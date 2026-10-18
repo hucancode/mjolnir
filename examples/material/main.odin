@@ -53,10 +53,9 @@ main :: proc() {
   )
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   half := f32(GRID - 1) * 0.5 * SPACING
   render.camera_look_at(render.main_camera(&app.renderer), {half + 2, half + 4, half * 2.4}, {0, half - 1, 0})
@@ -92,7 +91,7 @@ setup :: proc(app: ^App) -> bool {
   app.sun = render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, f32(sun_intensity), 12.0))
   render.attach(&app.renderer, render.SlotHandle(sun.index), app.sun)
   world.rotate(&app.scene, sun, sun_elevation * sun_heading)
-  return true
+  return .READY
 }
 
 shutdown :: proc(app: ^App) {
@@ -159,6 +158,6 @@ frame :: proc(app: ^App) -> bool {
     mu.label(ctx, "Roughness max (cols right)")
     mu.slider(ctx, &roughness_max, 0.0, 1.0)
   }
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

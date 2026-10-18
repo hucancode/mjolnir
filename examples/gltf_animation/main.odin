@@ -54,9 +54,8 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {1.5, 1.5, 1.5}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
   app.gltf = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/CesiumMan.glb"))
@@ -69,7 +68,7 @@ setup :: proc(app: ^App) -> bool {
   }
   light := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
-  return true
+  return .READY
 }
 
 update :: proc(app: ^App, dt: f32) {

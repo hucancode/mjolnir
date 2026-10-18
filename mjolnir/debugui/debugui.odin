@@ -54,10 +54,9 @@ begin :: proc(self: ^Context) -> ^mu.Context {
   return &self.mu
 }
 
-// end closes this frame's UI and returns it as overlay commands drawn over everything else,
-// in framebuffer pixels (microui's window coordinates times dpi_scale); none when begin was
-// not called. Valid until the next end.
-end :: proc(self: ^Context, dpi_scale: f32) -> []render.RenderCommand {
+// end closes this frame's UI and returns it as overlay commands drawn over everything else;
+// none when begin was not called. Valid until the next end.
+end :: proc(self: ^Context) -> []render.RenderCommand {
   clear(&self.vertices)
   clear(&self.indices)
   clear(&self.commands)
@@ -77,7 +76,7 @@ end :: proc(self: ^Context, dpi_scale: f32) -> []render.RenderCommand {
   for variant in mu.next_command_iterator(&self.mu, &iter) {
     switch c in variant {
     case ^mu.Command_Rect:
-      if !hidden do quad(self, c.rect, mu.default_atlas[mu.DEFAULT_ATLAS_WHITE], c.color, dpi_scale)
+      if !hidden do quad(self, c.rect, mu.default_atlas[mu.DEFAULT_ATLAS_WHITE], c.color)
     case ^mu.Command_Text:
       if hidden do continue
       dst := mu.Rect{c.pos.x, c.pos.y, 0, 0}
@@ -85,7 +84,7 @@ end :: proc(self: ^Context, dpi_scale: f32) -> []render.RenderCommand {
         if ch & 0xc0 == 0x80 do continue
         src := mu.default_atlas[mu.DEFAULT_ATLAS_FONT + min(int(ch), 127)]
         dst.w, dst.h = src.w, src.h
-        quad(self, dst, src, c.color, dpi_scale)
+        quad(self, dst, src, c.color)
         dst.x += dst.w
       }
     case ^mu.Command_Icon:
@@ -93,12 +92,12 @@ end :: proc(self: ^Context, dpi_scale: f32) -> []render.RenderCommand {
       src := mu.default_atlas[c.id]
       x := c.rect.x + (c.rect.w - src.w) / 2
       y := c.rect.y + (c.rect.h - src.h) / 2
-      quad(self, {x, y, src.w, src.h}, src, c.color, dpi_scale)
+      quad(self, {x, y, src.w, src.h}, src, c.color)
     case ^mu.Command_Clip:
       // a zero clip would mean the whole framebuffer to render: skip what it hides
       hidden = c.rect.w <= 0 || c.rect.h <= 0
       append(&runs, Run{
-        clip = [4]f32{f32(c.rect.x), f32(c.rect.y), f32(c.rect.w), f32(c.rect.h)} * dpi_scale,
+        clip = [4]f32{f32(c.rect.x), f32(c.rect.y), f32(c.rect.w), f32(c.rect.h)},
         first_vertex = len(self.vertices),
         first_index = len(self.indices),
       })
@@ -126,10 +125,10 @@ end :: proc(self: ^Context, dpi_scale: f32) -> []render.RenderCommand {
 }
 
 @(private = "file")
-quad :: proc(self: ^Context, dst, src: mu.Rect, color: mu.Color, scale: f32) {
+quad :: proc(self: ^Context, dst, src: mu.Rect, color: mu.Color) {
   atlas_size := [2]f32{mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT}
-  p0 := [2]f32{f32(dst.x), f32(dst.y)} * scale
-  p1 := [2]f32{f32(dst.x + dst.w), f32(dst.y + dst.h)} * scale
+  p0 := [2]f32{f32(dst.x), f32(dst.y)}
+  p1 := [2]f32{f32(dst.x + dst.w), f32(dst.y + dst.h)}
   uv0 := [2]f32{f32(src.x), f32(src.y)} / atlas_size
   uv1 := [2]f32{f32(src.x + src.w), f32(src.y + src.h)} / atlas_size
   rgba := [4]u8{color.r, color.g, color.b, color.a}

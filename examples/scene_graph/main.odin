@@ -45,10 +45,9 @@ main :: proc() {
   )
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   render.camera_look_at(render.main_camera(&app.renderer), {0, 14, 18}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
@@ -80,7 +79,7 @@ setup :: proc(app: ^App) -> bool {
   app.moon = world.spawn(&app.scene, {1.5, 0, 0}, parent = app.planets[2])
   render.attach(&app.renderer, render.SlotHandle(app.moon.index), render.primitive(&app.renderer, .CUBE, .WHITE))
   world.scale(&app.scene, app.moon, 0.3)
-  return true
+  return .READY
 }
 
 shutdown :: proc(app: ^App) {
@@ -128,6 +127,6 @@ frame :: proc(app: ^App) -> bool {
     mu.label(ctx, "Spin speed")
     mu.slider(ctx, &spin_speed, 0.0, 6.0)
   }
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

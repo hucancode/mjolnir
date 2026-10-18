@@ -53,9 +53,8 @@ main :: proc() {
   )
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
   cube := render.MeshAttachment{mesh = app.renderer.builtin_meshes[.CUBE], material = app.renderer.builtin_materials[.CYAN]}
   for x in 0 ..< GRID_SIZE do for z in 0 ..< GRID_SIZE {
     position := [3]f32{(f32(x) - GRID_SIZE * 0.5) * GRID_SPACING, 0.5, (f32(z) - GRID_SIZE * 0.5) * GRID_SPACING}
@@ -71,7 +70,7 @@ setup :: proc(app: ^App) -> bool {
   render.camera_look_at(render.main_camera(&app.renderer), {10, 30, 10}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   log.infof("AOE test setup complete: %d cubes", GRID_SIZE * GRID_SIZE)
-  return true
+  return .READY
 }
 
 shutdown :: proc(app: ^App) {

@@ -79,10 +79,9 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {0, 4, -4}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
   ground := world.spawn(&app.scene, {0, GROUND_Y, 0})
@@ -92,7 +91,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({0.6, 0.7, 1.0}, 1000, 25.0, false)))
 
   app.snake = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
-  if len(app.snake.skinned) == 0 do return true
+  if len(app.snake.skinned) == 0 do return .FAIL
   app.snake_node = app.snake.skinned[0].node
   app.rig = &app.snake.rigs[app.snake.skinned[0].rig]
   skel := &app.rig.skeleton
@@ -100,7 +99,7 @@ setup :: proc(app: ^App) -> bool {
   whole_body, _ := anim.bone_chain_down(skel, HEAD_BONE, u32(anim.bone_count(skel)), context.temp_allocator)
   app.tail = anim.layer_create(&app.animator, app.rig, tail_params(app), whole_body)
   app.head_bone = anim.bone_find(skel, HEAD_BONE)
-  return true
+  return .READY
 }
 
 tail_params :: proc(app: ^App) -> anim.TailParams {
@@ -174,6 +173,6 @@ frame :: proc(app: ^App) -> bool {
     mu.label(ctx, "Damping"); mu.slider(ctx, &app.damping, 0, 1)
     mu.checkbox(ctx, "Stretch", &app.stretch)
   }
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

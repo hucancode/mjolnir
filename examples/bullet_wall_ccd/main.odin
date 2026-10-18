@@ -86,10 +86,9 @@ spawn_box :: proc(app: ^App, position, half_extents: [3]f32, color: render.Color
   world.scale(&app.scene, visual, half_extents)
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {-14, 8, 14}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {-5, 12, 5})
@@ -112,7 +111,7 @@ setup :: proc(app: ^App) -> bool {
   params.angular_damping = 0
   params.restitution = 0.1
   params.friction = 0.2
-  return true
+  return .READY
 }
 
 wall_z :: proc(wall: int) -> f32 {
@@ -158,7 +157,7 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 

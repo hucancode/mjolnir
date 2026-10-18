@@ -56,9 +56,8 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {0, 10, 0}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
@@ -84,7 +83,7 @@ setup :: proc(app: ^App) -> bool {
   world.scale(&app.scene, ground, 20.0)
   light := world.spawn(&app.scene, {0, 10, 0})
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1, 1, 1}, 600, 20.0, true)))
-  return true
+  return .READY
 }
 
 update :: proc(app: ^App, dt: f32) {

@@ -84,10 +84,9 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !debugui.init(&app.debug, &app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
 
@@ -100,7 +99,7 @@ setup :: proc(app: ^App) -> bool {
   app.fox = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/Fox2.glb"))
   if len(app.fox.skinned) == 0 {
     log.error("Fox2.glb has no skinned mesh")
-    return true
+    return .FAIL
   }
   app.fox_node = app.fox.skinned[0].node
   app.rig = &app.fox.rigs[app.fox.skinned[0].rig]
@@ -112,7 +111,7 @@ setup :: proc(app: ^App) -> bool {
     ik := anim.IKParams{target = target_position(app), pole = IK_POLE, pole_weight = 1, space = .WORLD}
     app.ik_layer = anim.layer_create(&app.animator, app.rig, ik, neck, weight = 0)
   }
-  return true
+  return .READY
 }
 
 clip_layer :: proc(app: ^App, name: string, speed: f32, bones: []u32 = nil, weight: f32 = 0) -> anim.LayerHandle {
@@ -150,7 +149,7 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 

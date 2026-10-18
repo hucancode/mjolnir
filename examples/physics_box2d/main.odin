@@ -92,9 +92,8 @@ body_create :: proc(app: ^App, type: b2.BodyType, position: [2]f32) -> b2.BodyId
   return b2.CreateBody(app.phys, def)
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
   rand_sphere := render.make_sphere()
@@ -145,7 +144,7 @@ setup :: proc(app: ^App) -> bool {
   light := world.spawn(&app.scene, {0, 20, 0})
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_spot_light({0.8, 0.9, 1}, 5000, 25.0, math.PI * 0.25)))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-  return true
+  return .READY
 }
 
 should_close :: proc(app: ^App) -> bool {

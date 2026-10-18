@@ -102,11 +102,11 @@ should_close :: proc(app: ^App) -> bool {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  commands := make([dynamic]render.RenderCommand, context.temp_allocator)
-  label(app, &commands, fmt.tprintf("Score: %d", app.state.score), {20, 20}, 32, {255, 255, 255, 255})
-  label(app, &commands, fmt.tprintf("High: %d", app.state.high_score), {20, 60}, 24, {255, 220, 100, 255})
-  pixels, size, changed := font.atlas(&app.font)
-  render.stage_overlay(&app.renderer, {commands = commands[:], atlas = pixels if changed else nil, atlas_size = size})
+  hud := [?]render.RenderCommand {
+    {shape = render.DrawTextCommand{text = fmt.tprintf("Score: %d", app.state.score), position = {20, 20}, size = 32, color = {255, 255, 255, 255}}},
+    {shape = render.DrawTextCommand{text = fmt.tprintf("High: %d", app.state.high_score), position = {20, 60}, size = 24, color = {255, 220, 100, 255}}},
+  }
+  render.stage_overlay(&app.renderer, hud[:], &app.font)
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
@@ -117,10 +117,9 @@ cell_world_pos :: proc(col: i32, row: i32) -> [3]f32 {
   return {RADIUS * math.cos(a), f32(row) * CELL + 0.5 * CELL, RADIUS * math.sin(a)}
 }
 
-setup :: proc(app: ^App) -> bool {
-  if !render.ready(&app.renderer) do return false
-  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return true
-  render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return .FAIL
   ground := app.renderer.builtin_meshes[.QUAD_XZ]
   dark_mat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0}))
   floor := world.spawn(&app.scene)
@@ -137,7 +136,7 @@ setup :: proc(app: ^App) -> bool {
   }
   app.state.fall_period = FALL_PERIOD
   reset_game(app)
-  return true
+  return .READY
 }
 
 reset_game :: proc(app: ^App) {
@@ -298,9 +297,3 @@ on_key :: proc(app: ^App, key: input.Key) {
   }
 }
 
-label :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand, text: string, pos: [2]f32, size: f32, color: [4]u8) {
-  dpi := platform.dpi_scale(&app.window)
-  glyphs := make([dynamic]font.Glyph, context.temp_allocator)
-  font.glyphs(&app.font, text, pos * dpi, size * dpi, &glyphs)
-  append(commands, render.RenderCommand{shape = render.DrawTextCommand{glyphs = glyphs[:], color = color}})
-}
