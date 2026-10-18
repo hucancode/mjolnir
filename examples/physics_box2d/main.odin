@@ -71,9 +71,9 @@ shutdown :: proc(app: ^App) {
   free(app)
 }
 
-spawn_visual :: proc(app: ^App, body_node: world.NodeHandle, mesh: render.MeshHandle, material: render.MaterialHandle) -> world.NodeHandle {
+spawn_visual :: proc(app: ^App, body_node: world.NodeHandle, look: render.MeshAttachment) -> world.NodeHandle {
   visual := world.spawn(&app.scene, parent = body_node)
-  render.attach(&app.renderer, render.SlotHandle(visual.index), render.MeshAttachment{mesh = mesh, material = material, cast_shadow = true})
+  render.attach(&app.renderer, render.SlotHandle(visual.index), look)
   return visual
 }
 
@@ -94,8 +94,6 @@ body_create :: proc(app: ^App, type: b2.BodyType, position: [2]f32) -> b2.BodyId
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  cube_mesh := app.renderer.builtin_meshes[.CUBE]
-  sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
   rand_sphere := render.make_sphere()
   rand_cylinder := render.make_cylinder()
   for &v in rand_sphere.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
@@ -103,18 +101,20 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   rand_sphere_mesh := render.mesh_create(&app.renderer, rand_sphere)
   rand_cylinder_mesh := render.mesh_create(&app.renderer, rand_cylinder)
   white := app.renderer.builtin_materials[.WHITE]
+  cylinder_look := render.MeshAttachment{mesh = rand_cylinder_mesh, material = white, cast_shadow = true}
+  sphere_look := render.MeshAttachment{mesh = rand_sphere_mesh, material = white, cast_shadow = true}
 
   ground := world.spawn(&app.scene, {0, -0.5, 0})
   ground_body := body_create(app, .staticBody, {0, -0.5})
   ground_box := b2.MakeBox(PLANE_WIDTH, 0.5)
   _ = b2.CreatePolygonShape(ground_body, shape_def(0), &ground_box)
-  ground_visual := spawn_visual(app, ground, cube_mesh, app.renderer.builtin_materials[.GRAY])
+  ground_visual := spawn_visual(app, ground, render.primitive(&app.renderer, .CUBE, .GRAY))
   world.scale(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
 
   ball := world.spawn(&app.scene, {SPHERE_X, SPHERE_RADIUS, 0})
   ball_body := body_create(app, .staticBody, {SPHERE_X, SPHERE_RADIUS})
   _ = b2.CreateCircleShape(ball_body, shape_def(0), &b2.Circle{radius = SPHERE_RADIUS})
-  ball_visual := spawn_visual(app, ball, sphere_mesh, app.renderer.builtin_materials[.MAGENTA])
+  ball_visual := spawn_visual(app, ball, render.primitive(&app.renderer, .SPHERE, .MAGENTA))
   world.scale(&app.scene, ball_visual, SPHERE_RADIUS)
 
   unit_box := b2.MakeBox(1, 1)
@@ -123,24 +123,24 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     pos := [3]f32{f32(x - NX/2) * 3.0, f32(y) * 3.0 + 10.0, 0}
     i := x * NY + y
     body := body_create(app, .dynamicBody, pos.xy)
-    piece_mesh, piece_material := rand_cylinder_mesh, white
+    look := cylinder_look
     switch i % 3 {
     case 0:
       _ = b2.CreatePolygonShape(body, shape_def(PIECE_BOX_DENSITY), &upright_cylinder_profile)
     case 1:
       _ = b2.CreatePolygonShape(body, shape_def(PIECE_BOX_DENSITY), &unit_box)
-      piece_mesh, piece_material = cube_mesh, app.renderer.builtin_materials[.RED]
+      look = render.primitive(&app.renderer, .CUBE, .RED)
     case 2:
       _ = b2.CreateCircleShape(body, shape_def(PIECE_CIRCLE_DENSITY), &b2.Circle{radius = 1.0})
-      piece_mesh = rand_sphere_mesh
+      look = sphere_look
     }
     node := world.spawn(&app.scene, pos)
-    spawn_visual(app, node, piece_mesh, piece_material)
+    spawn_visual(app, node, look)
     append(&app.pieces, Piece{body, node})
   }
   log.infof("Created %d Box2D bodies", PIECE_COUNT)
   render.camera_look_at(render.main_camera(&app.renderer), {30, 25, 30}, {0, 5, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 5, 0})
   light := world.spawn(&app.scene, {0, 20, 0})
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_spot_light({0.8, 0.9, 1}, 5000, 25.0, math.PI * 0.25)))
   world.rotate(&app.scene, light, -math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
@@ -152,6 +152,8 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured do render.orbit_drag(&app.orbit, 0, app.input.scroll.y)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)

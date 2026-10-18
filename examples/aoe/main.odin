@@ -55,7 +55,7 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  cube := render.MeshAttachment{mesh = app.renderer.builtin_meshes[.CUBE], material = app.renderer.builtin_materials[.CYAN]}
+  cube := render.primitive(&app.renderer, .CUBE, .CYAN, cast_shadow = false)
   for x in 0 ..< GRID_SIZE do for z in 0 ..< GRID_SIZE {
     position := [3]f32{(f32(x) - GRID_SIZE * 0.5) * GRID_SPACING, 0.5, (f32(z) - GRID_SIZE * 0.5) * GRID_SPACING}
     node := world.spawn(&app.scene, position) or_continue
@@ -65,10 +65,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   effector_material := render.material_create(&app.renderer, render.make_material(emissive_value = 5.0))
   app.effector = world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(app.effector.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.SPHERE], material = effector_material})
+  render.attach(&app.renderer, render.SlotHandle(app.effector.index), render.primitive(&app.renderer, .SPHERE, effector_material, cast_shadow = false))
   world.scale(&app.scene, app.effector, 0.5)
   render.camera_look_at(render.main_camera(&app.renderer), {10, 30, 10}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
   log.infof("AOE test setup complete: %d cubes", GRID_SIZE * GRID_SIZE)
   return .READY
 }
@@ -91,6 +91,8 @@ set_cube_half_extent :: proc(app: ^App, body: physics.BodyHandle, half_extent: f
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0

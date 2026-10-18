@@ -126,9 +126,13 @@ target_position :: proc(app: ^App) -> [3]f32 {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
+  debug_ui(app)
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
@@ -142,6 +146,7 @@ update :: proc(app: ^App, dt: f32) {
   world.translate(&app.scene, app.target_cube, target_position(app))
   if app.rig != nil do animate(app, dt)
   world.update(&app.scene)
+  if app.rig != nil do anim.animator_update(&app.animator, app.rig, dt, world.world_matrix(&app.scene, app.fox_node))
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   if app.rig != nil do for s in app.fox.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), app.animator.palette)
   render.update(&app.renderer, dt)
@@ -149,8 +154,6 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
@@ -166,7 +169,6 @@ animate :: proc(app: ^App, dt: f32) {
   if ik, ok := anim.layer_params(&app.animator, app.ik_layer, anim.IKParams); ok {
     ik.target, ik.pole = target_position(app), IK_POLE
   }
-  anim.animator_update(&app.animator, app.rig, dt, world.world_matrix(&app.scene, app.fox_node))
 }
 
 set_walk_run :: proc(app: ^App, duration: f32) {

@@ -62,7 +62,7 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {5, 3, 6}, {0, 1, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
 
   spawn_primitive(app, .QUAD_XZ, .GRAY, {0, 0, 0}, 6.0, cast_shadow = false)
 
@@ -77,12 +77,14 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.top_down_camera = render.camera_create(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
   app.screen_material = render.material_create(&app.renderer, render.make_material())
   screen := world.spawn(&app.scene, {0, 2.5, -3.5})
-  render.attach(&app.renderer, render.SlotHandle(screen.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.QUAD_XY], material = app.screen_material})
+  render.attach(&app.renderer, render.SlotHandle(screen.index), render.primitive(&app.renderer, .QUAD_XY, app.screen_material, cast_shadow = false))
   world.scale(&app.scene, screen, 3.0)
   return .READY
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
@@ -93,12 +95,12 @@ update :: proc(app: ^App, dt: f32) {
   world.rotate(&app.scene, app.spinner, app.time, linalg.VECTOR3F32_Y_AXIS)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
+  screen := render.material(&app.renderer, app.screen_material)
+  screen.albedo_texture = render.camera_image(&app.renderer, app.top_down_camera, .FINAL_IMAGE, previous_frame = true)
   render.update(&app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  screen := render.material(&app.renderer, app.screen_material)
-  screen.albedo_texture = render.camera_image(&app.renderer, app.top_down_camera, .FINAL_IMAGE, previous_frame = true)
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

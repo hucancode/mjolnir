@@ -7,6 +7,7 @@ import "../detour"
 import "base:runtime"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import "core:testing"
 import "core:time"
 
@@ -491,4 +492,46 @@ test_crowd_move_to_reaches_goal :: proc(t: ^testing.T) {
 	for _ in 0 ..< 100 do update(c, 0.1)
 	d := c.agents[idx.index].position - {5, 0, 5}
 	testing.expectf(t, d.x * d.x + d.z * d.z < 1.0, "agent should reach the goal, at %v", c.agents[idx.index].position)
+}
+
+@(test)
+test_crowd_stop_halts_agent :: proc(t: ^testing.T) {
+	nav, ok := build_test_navmesh(t)
+	if !ok do return
+	defer destroy_test_navmesh(nav)
+	cv: Crowd
+	c := &cv
+	init(c, 4, 0.6, nav)
+	defer shutdown(c)
+	idx, _ := agent_create(c, {-5, 0, 0}, default_agent_params())
+	move_to(c, idx, {5, 0, 0})
+	for _ in 0 ..< 10 do update(c, 0.1)
+	stop(c, idx)
+	for _ in 0 ..< 30 do update(c, 0.1)
+	halted := c.agents[idx.index].position
+	for _ in 0 ..< 10 do update(c, 0.1)
+	d := c.agents[idx.index].position - halted
+	testing.expectf(t, d.x * d.x + d.z * d.z < 0.01, "a stopped agent should stay put, moved %v", d)
+	testing.expectf(t, halted.x < 4, "a stopped agent should not reach its old goal, at %v", halted)
+}
+
+@(test)
+test_crowd_agent_poses_links_users :: proc(t: ^testing.T) {
+	nav, ok := build_test_navmesh(t)
+	if !ok do return
+	defer destroy_test_navmesh(nav)
+	cv: Crowd
+	c := &cv
+	init(c, 4, 0.6, nav)
+	defer shutdown(c)
+	linked, _ := agent_create(c, {0, 0, 0}, default_agent_params(), user = {index = 7, generation = 1})
+	agent_create(c, {3, 0, 3}, default_agent_params())
+	move_to(c, linked, {0, 0, 5})
+	for _ in 0 ..< 10 do update(c, 0.1)
+	poses := agent_poses(c)
+	testing.expect_value(t, len(poses), 1)
+	testing.expect_value(t, poses[0].user, Handle{index = 7, generation = 1})
+	testing.expect_value(t, poses[0].position, c.agents[linked.index].position)
+	forward := linalg.quaternion_mul_vector3(poses[0].rotation, [3]f32{0, 0, 1})
+	testing.expectf(t, forward.z > 0.9, "heading should turn +Z towards +Z travel, got %v", forward)
 }

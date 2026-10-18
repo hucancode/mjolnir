@@ -85,8 +85,11 @@ Move_Request_State :: enum u8 {
 // AgentHandle identifies an agent of a crowd (agent_create); stale after agent_destroy.
 AgentHandle :: distinct containers.Handle
 
+// Handle is the caller link an agent carries (Agent.user), e.g. the scene node it moves.
+Handle :: containers.Handle
+
 // Agent is one crowd member: where it is, how fast it moves, the next corners of its path
-// (corners[:corner_count]) and its goal.
+// (corners[:corner_count]), its goal and its caller link.
 Agent :: struct {
 	state:              AgentState,
 	position:           [3]f32,
@@ -95,7 +98,16 @@ Agent :: struct {
 	corners:            [MAX_CORNERS][3]f32,
 	corner_count:       int,
 	target:             [3]f32,
+	user:               Handle,
 	using _: Agent_Internal,
+}
+
+// AgentPose is an agent's position on the mesh and its heading, turning +Z (glTF's forward)
+// towards where it last moved, together with its user link.
+AgentPose :: struct {
+	user:     Handle,
+	position: [3]f32,
+	rotation: quaternion128,
 }
 
 @(private)
@@ -117,6 +129,8 @@ Agent_Internal :: struct {
 	target_pathq_ref:   Path_Queue_Ref,
 	target_replan:      bool,
 	target_replan_time: f32,
+	// yaw of the last velocity fast enough to face (agent_poses)
+	heading:            f32,
 	// bumped by agent_destroy; the slot's handles carry generation + 1, so the zero handle is none
 	generation:         u32,
 }
@@ -144,6 +158,8 @@ Crowd_State :: struct {
 	max_agent_radius:          f32,
 	velocity_sample_count:     int,
 	nav_query:                 detour.Nav_Mesh_Query,
+	// agent_poses' result
+	poses:                     [dynamic]AgentPose,
 }
 
 // init prepares the crowd for up to max_agents agents on navmesh, which must outlive the
@@ -214,12 +230,13 @@ shutdown :: proc(self: ^Crowd) {
 	obstacle_avoidance_query_destroy(&self.obstacle_query)
 	path_queue_destroy(&self.path_queue)
 	detour.nav_mesh_query_destroy(&self.nav_query)
+	delete(self.poses)
 	self^ = {}
 }
 
 // agent_create places a new agent at the mesh point nearest pos and returns its handle; false when
-// the crowd is full or pos is off the mesh.
-agent_create :: proc(self: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS) -> (agent: AgentHandle, ok: bool) {
+// the crowd is full or pos is off the mesh. `user` is its caller link (agent_poses).
+agent_create :: proc(self: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS, user: Handle = {}) -> (agent: AgentHandle, ok: bool) {
 	idx := -1
 	for i in 0..<self.max_agents {
 		if self.agents[i].state == .INVALID {
@@ -233,6 +250,8 @@ agent_create :: proc(self: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS) 
 	ag := &self.agents[idx]
 	ag.state = .WALKING
 	ag.params = params
+	ag.user = user
+	ag.heading = 0
 
 	nearest_status, nearest_ref, nearest_pt := detour.find_nearest_poly(&self.nav_query, pos,
 	                                                                      self.agent_placement_half_extents,
@@ -300,6 +319,17 @@ move_to :: proc(self: ^Crowd, handle: AgentHandle, pos: [3]f32, extents: [3]f32 
 	return request_move_target(self, idx, ref, snapped)
 }
 
+// stop drops the agent's goal: it slows to a halt where it is, until the next move_to.
+stop :: proc(self: ^Crowd, handle: AgentHandle) {
+	idx, ok := agent_index(self, handle)
+	if !ok do return
+	ag := &self.agents[idx]
+	path_corridor_reset(&ag.corridor, path_corridor_get_first_poly(&ag.corridor), ag.position)
+	ag.target = ag.position
+	ag.target_state = .None
+	ag.target_replan = false
+}
+
 // update advances every active agent by dt seconds.
 update :: proc(self: ^Crowd, dt: f32) {
 	self.velocity_sample_count = 0
@@ -332,14 +362,21 @@ update :: proc(self: ^Crowd, dt: f32) {
 		ag.disp = {0, 0, 0}
 		ag.dvel = {0, 0, 0}
 
+		ag.nneis = get_neighbours(ag.position, ag.params.height, ag.params.collision_query_range,
+		                          ag, ag.neis[:], DT_CROWDAGENT_MAX_NEIGHBOURS,
+		                          active_agents[:nactive], &self.grid)
+
+		// without a goal (stop) it only brakes
+		if ag.target_state == .None {
+			ag.corner_count = 0
+			ag.desired_speed = 0
+			continue
+		}
+
 		ag.corner_count = path_corridor_find_corners(&ag.corridor, ag.corners[:], ag.corner_flags[:],
 		                                          ag.corner_polys[:], MAX_CORNERS,
 		                                          &self.nav_query,
 		                                          &self.filters[ag.params.query_filter_type])
-
-		ag.nneis = get_neighbours(ag.position, ag.params.height, ag.params.collision_query_range,
-		                          ag, ag.neis[:], DT_CROWDAGENT_MAX_NEIGHBOURS,
-		                          active_agents[:nactive], &self.grid)
 
 		if .ANTICIPATE_TURNS in ag.params.update_flags {
 			calc_smooth_steer_direction(ag, &ag.dvel)
@@ -676,6 +713,18 @@ add_neighbour :: proc(idx: int, dist: f32, neis: []Neighbour, nneis: int, max_ne
 agent :: proc(self: ^Crowd, handle: AgentHandle) -> (ag: Agent, ok: bool) #optional_ok {
 	idx := agent_index(self, handle) or_return
 	return self.agents[idx], true
+}
+
+// agent_poses returns the pose of every active agent that has a `user` link, for copying onto
+// what it moves (world.set_world_poses); valid until the next call.
+agent_poses :: proc(self: ^Crowd) -> []AgentPose {
+	clear(&self.poses)
+	for &ag in self.agents {
+		if ag.state == .INVALID || ag.user == {} do continue
+		if linalg.length2(ag.velocity.xz) > 0.01 do ag.heading = math.atan2(ag.velocity.x, ag.velocity.z)
+		append(&self.poses, AgentPose{ag.user, ag.position, linalg.quaternion_angle_axis_f32(ag.heading, {0, 1, 0})})
+	}
+	return self.poses[:]
 }
 
 // agent_params returns the agent's parameters, to edit in place; update only reads them.

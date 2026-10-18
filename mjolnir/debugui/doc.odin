@@ -1,2 +1,3 @@
-// Quick debug windows (microui): build widgets each frame and hand them to render.stage_overlay.
+// Quick debug windows (microui): feed it input, build widgets and hand them to
+// render.stage_overlay, each tick in update.
 package debugui

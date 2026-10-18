@@ -84,10 +84,7 @@ lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32)
     ibl_intensity    = self.ibl_intensity,
     sun_shadow_map   = self.sun_shadow_map,
   }
-  if self.sun.enabled && self.sun.intensity > 0 {
-    push.sun_radiance.rgb = self.sun.color * self.sun.intensity
-    push.sun_direction.xyz = -sun_direction(self.sun)
-  }
+  push.sun_radiance, push.sun_direction = sun_light(self.sun)
   dev.cmd_begin_compute(&self.gpu, cmd)
   defer dev.cmd_end_compute(&self.gpu, cmd)
   pipeline_bind(

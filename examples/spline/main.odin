@@ -59,7 +59,7 @@ should_close :: proc(app: ^App) -> bool {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {0, 10, 0}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
 
   CONTROL_POINTS :: 10
   points: [CONTROL_POINTS][3]f32
@@ -87,6 +87,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {

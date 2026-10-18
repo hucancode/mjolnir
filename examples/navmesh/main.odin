@@ -76,22 +76,19 @@ frame :: proc(app: ^App) -> bool {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {35, 25, 35}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
 
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
-  quad, cube := render.make_quad(), render.make_cube()
-  defer render.destroy(quad)
-  defer render.destroy(cube)
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GREEN, cast_shadow = false))
   world.scale(&app.scene, ground, GROUND_HALF_SIZE)
-  bake.append_triangles(&builder, render.positions(quad, context.temp_allocator), quad.indices, linalg.matrix4_scale_f32(GROUND_HALF_SIZE))
+  bake.append_box(&builder, {0, -0.5, 0}, {GROUND_HALF_SIZE, 0.5, GROUND_HALF_SIZE})
   for box in OBSTACLES {
     obstacle := world.spawn(&app.scene, box.center)
     render.attach(&app.renderer, render.SlotHandle(obstacle.index), render.primitive(&app.renderer, .CUBE, .RED))
     world.scale(&app.scene, obstacle, box.half_extents)
-    bake.append_triangles(&builder, render.positions(cube, context.temp_allocator), cube.indices, linalg.matrix4_from_trs_f32(box.center, 1, box.half_extents), is_obstacle = true)
+    bake.append_box(&builder, box.center, box.half_extents, is_obstacle = true)
   }
   data, baked := bake.build(&builder, allocator = context.temp_allocator)
   if !baked || !nav.init(&app.navmesh, data) {
@@ -140,6 +137,8 @@ go_to :: proc(app: ^App, goal: [3]f32) {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0

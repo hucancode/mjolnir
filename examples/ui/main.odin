@@ -70,7 +70,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   cube := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .BLUE))
   render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
   return .READY
 }
 
@@ -128,6 +128,8 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   size := platform.framebuffer_size(&app.window)
   dpi := platform.dpi_scale(&app.window)
@@ -150,11 +152,16 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
+  draw_hud(app)
   render.update(&app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+draw_hud :: proc(app: ^App) {
   commands := make([dynamic]render.RenderCommand, context.temp_allocator)
   for h, z in app.gui.draw_order {
     r, c := ui.rect(&app.gui, h), ui.clip(&app.gui, h)
@@ -173,7 +180,6 @@ frame :: proc(app: ^App) -> bool {
     }
   }
   render.stage_overlay(&app.renderer, commands[:], &app.font)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 star_mesh :: proc(r: [2]f32, color: [4]u8) -> (vertices: []render.Vertex2D, indices: []u32) {

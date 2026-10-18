@@ -74,7 +74,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   for x, mode in xs {
     sprite := render.material_create(&app.renderer, render.make_material(.SPRITE, albedo_texture = tex, frame_columns = SHEET_COLUMNS, frame_rows = SHEET_ROWS)) or_continue
     node := world.spawn(&app.scene, {x, 1.5, 0}) or_continue
-    render.attach(&app.renderer, render.SlotHandle(node.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.QUAD_XY], material = sprite})
+    render.attach(&app.renderer, render.SlotHandle(node.index), render.primitive(&app.renderer, .QUAD_XY, sprite, cast_shadow = false))
     app.sprites[mode] = sprite
     world.scale(&app.scene, node, 2.5)
   }
@@ -87,6 +87,8 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured do render.orbit_drag(&app.orbit, 0, app.input.scroll.y)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)

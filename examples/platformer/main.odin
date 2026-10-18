@@ -234,7 +234,7 @@ sprite_look :: proc(app: ^App, sheet: Sheet, frame: u32) -> render.MaterialHandl
 
 spawn_sprite :: proc(app: ^App, look: render.MaterialHandle, position: [3]f32, size: f32 = 1, parent: world.NodeHandle = {}) -> world.NodeHandle {
   node := world.spawn(&app.scene, position, parent = parent)
-  render.attach(&app.renderer, render.SlotHandle(node.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.QUAD_XY], material = look})
+  render.attach(&app.renderer, render.SlotHandle(node.index), render.primitive(&app.renderer, .QUAD_XY, look, cast_shadow = false))
   world.scale(&app.scene, node, size / 2)
   return node
 }
@@ -378,6 +378,8 @@ keep_one_way_contact :: proc "c" (shape_a, shape_b: b2.ShapeId, manifold: ^b2.Ma
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   read_controls(app)
   app.time += dt
@@ -390,6 +392,7 @@ update :: proc(app: ^App, dt: f32) {
   follow_player(app)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
+  draw_hud(app)
   render.update(&app.renderer, dt)
 }
 
@@ -539,6 +542,10 @@ follow_player :: proc(app: ^App) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+draw_hud :: proc(app: ^App) {
   height := f32(platform.framebuffer_size(&app.window).y) / platform.dpi_scale(&app.window)
   white :: [4]u8{255, 255, 255, 255}
   hud := [?]render.RenderCommand {
@@ -546,5 +553,4 @@ frame :: proc(app: ^App) -> bool {
     {shape = render.DrawTextCommand{text = "You made it!" if app.won else "Arrows/WASD run, Space jumps", position = {20, 60}, size = 22, color = white}},
   }
   render.stage_overlay(&app.renderer, hud[:], &app.font)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

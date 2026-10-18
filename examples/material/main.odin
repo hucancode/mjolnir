@@ -58,9 +58,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   half := f32(GRID - 1) * 0.5 * SPACING
   render.camera_look_at(render.main_camera(&app.renderer), {0, 0, half * 2.4}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
-
-  sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
 
   base_color: [4]f32 = {0.85, 0.85, 0.9, 1}
   for row in 0 ..< GRID do for col in 0 ..< GRID {
@@ -72,12 +70,16 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     x := f32(col) * SPACING - half
     y := f32(row) * SPACING - half
     sphere := world.spawn(&app.scene, {x, y, 0})
-    render.attach(&app.renderer, render.SlotHandle(sphere.index), render.MeshAttachment{mesh = sphere_mesh, material = mat, cast_shadow = true})
+    render.attach(&app.renderer, render.SlotHandle(sphere.index), render.primitive(&app.renderer, .SPHERE, mat))
   }
 
   sun_heading := linalg.quaternion_angle_axis(math.PI * 0.65, linalg.VECTOR3F32_Y_AXIS)
   sun_elevation := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_Y_AXIS)
-  app.renderer.sun = {enabled = true, cast_shadow = true, color = {1, 0.97, 0.92}, intensity = f32(sun_intensity), direction = linalg.quaternion_mul_vector3(sun_elevation * sun_heading, [3]f32{0, 0, -1}), shadow_distance = 12}
+  sun := &app.renderer.sun
+  sun.color = {1, 0.97, 0.92}
+  sun.intensity = f32(sun_intensity)
+  sun.direction = linalg.quaternion_mul_vector3(sun_elevation * sun_heading, [3]f32{0, 0, -1})
+  sun.shadow_distance = 12
   return .READY
 }
 
@@ -104,8 +106,12 @@ axis_values :: proc(row, col: int) -> (metallic, roughness: f32) {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
+  debug_ui(app)
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
@@ -127,6 +133,10 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Environment", {700, 20, 280, 180}, {.NO_CLOSE}) {
     mu.label(ctx, "Sun intensity")
@@ -145,6 +155,4 @@ frame :: proc(app: ^App) -> bool {
     mu.label(ctx, "Roughness max (cols right)")
     mu.slider(ctx, &roughness_max, 0.0, 1.0)
   }
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

@@ -143,7 +143,7 @@ Orbit :: struct {
 }
 
 // orbit_from_camera returns the Orbit around target that reproduces the camera's position.
-orbit_from_camera :: proc(self: ^Camera, target: [3]f32 = {0, 0, 0}) -> Orbit {
+orbit_from_camera :: proc(self: ^Camera, target: [3]f32) -> Orbit {
   offset := self.position - target
   distance := max(linalg.length(offset), 0.001)
   return {
@@ -399,8 +399,12 @@ View :: struct {
   list_capacity:   u32,
   // render's clock in seconds (render.update)
   time:            f32,
+  // Renderer.sun as seen by every view: color * intensity (0 when off), and the direction
+  // towards it
+  sun_radiance:    [4]f32,
+  sun_direction:   [4]f32,
 }
-#assert(size_of(View) == 448)
+#assert(size_of(View) == 480)
 
 // A camera's images and depth pyramids, one set per frame in flight (pyramid_shape).
 @(private)

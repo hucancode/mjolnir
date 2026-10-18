@@ -90,7 +90,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {-14, 8, 14}, {0, 1, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
 
   spawn_box(app, {0, -GROUND_HALF_EXTENTS.y, 0}, GROUND_HALF_EXTENTS, .GRAY)
   thickness := WALL_THICKNESS
@@ -128,8 +128,12 @@ fire_bullet :: proc(app: ^App) {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
+  debug_ui(app)
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
@@ -154,8 +158,6 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 

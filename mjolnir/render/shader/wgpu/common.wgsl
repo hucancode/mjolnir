@@ -54,6 +54,9 @@ struct View {
     list_capacity: u32,
     // render's clock in seconds
     time: f32,
+    // Renderer.sun: color * intensity (0 when off), and the direction towards it
+    sun_radiance: vec4f,
+    sun_direction: vec4f,
 }
 
 struct Node {

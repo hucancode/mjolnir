@@ -73,8 +73,6 @@ should_close :: proc(app: ^App) -> bool {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  panel(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
@@ -129,8 +127,12 @@ shutdown :: proc(app: ^App) {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
+  debug_ui(app)
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
@@ -164,7 +166,7 @@ run_test_step :: proc(app: ^App) {
   }
 }
 
-panel :: proc(app: ^App) {
+debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Level Management", {20, 20, 320, 340}, {.NO_CLOSE}) {
     levels := LEVELS

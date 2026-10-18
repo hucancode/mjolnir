@@ -40,10 +40,9 @@ OBSTACLES := [?]Box {
 PALETTE := [?][4]f32{{1, 0.25, 0.25, 1}, {0.25, 1, 0.25, 1}, {0.4, 0.4, 1, 1}, {1, 0.95, 0.2, 1}, {0.25, 0.95, 0.95, 1}, {1, 0.3, 0.95, 1}}
 
 Agent :: struct {
-  id:     crowd.AgentHandle,
+  handle: crowd.AgentHandle,
   placed: bool,
   color:  [4]f32,
-  node:   world.NodeHandle,
 }
 
 App :: struct {
@@ -81,7 +80,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {32, 28, 32}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
   if !build_level(app) {
     log.error("navmesh build failed")
     return .FAIL
@@ -113,20 +112,17 @@ should_close :: proc(app: ^App) -> bool {
 build_level :: proc(app: ^App) -> bool {
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
-  quad, cube := render.make_quad(), render.make_cube()
-  defer render.destroy(quad)
-  defer render.destroy(cube)
   ground_material := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8))
   ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.QUAD_XZ], material = ground_material})
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, ground_material, cast_shadow = false))
   world.scale(&app.scene, ground, WORLD_HALF * 2)
-  bake.append_triangles(&builder, render.positions(quad, context.temp_allocator), quad.indices, linalg.matrix4_scale_f32(WORLD_HALF * 2))
+  bake.append_box(&builder, {0, -0.5, 0}, {WORLD_HALF * 2, 0.5, WORLD_HALF * 2})
   obstacle_material := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6))
   for box in OBSTACLES {
     obstacle := world.spawn(&app.scene, box.center)
-    render.attach(&app.renderer, render.SlotHandle(obstacle.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.CUBE], material = obstacle_material, cast_shadow = true})
+    render.attach(&app.renderer, render.SlotHandle(obstacle.index), render.primitive(&app.renderer, .CUBE, obstacle_material))
     world.scale(&app.scene, obstacle, box.half_extents)
-    bake.append_triangles(&builder, render.positions(cube, context.temp_allocator), cube.indices, linalg.matrix4_from_trs_f32(box.center, 1, box.half_extents), is_obstacle = true)
+    bake.append_box(&builder, box.center, box.half_extents, is_obstacle = true)
   }
   data := bake.build(&builder, allocator = context.temp_allocator) or_return
   return nav.init(&app.navmesh, data)
@@ -154,10 +150,11 @@ spawn_agents :: proc(app: ^App) {
   for &a, i in app.agents {
     angle := f32(i) / AGENT_COUNT * math.TAU
     position := (SPAWN_RADIUS - 4) * [3]f32{math.cos(angle), 0, math.sin(angle)}
-    a.id, a.placed = crowd.agent_create(&app.crowd, position, params)
+    node := world.spawn(&app.scene, position)
+    body := world.spawn(&app.scene, {0, AGENT_HEIGHT * 0.5, 0}, parent = node)
+    render.attach(&app.renderer, render.SlotHandle(body.index), render.MeshAttachment{mesh = capsule, material = materials[i % len(PALETTE)], cast_shadow = true})
+    a.handle, a.placed = crowd.agent_create(&app.crowd, position, params, user = world.Handle(node))
     a.color = PALETTE[i % len(PALETTE)]
-    a.node = world.spawn(&app.scene, position + {0, AGENT_HEIGHT * 0.5, 0})
-    render.attach(&app.renderer, render.SlotHandle(a.node.index), render.MeshAttachment{mesh = capsule, material = materials[i % len(PALETTE)], cast_shadow = true})
   }
 }
 
@@ -174,19 +171,23 @@ random_goal :: proc(app: ^App, away_from: [3]f32) -> [3]f32 {
 
 send_to_random_goals :: proc(app: ^App) {
   for a in app.agents {
-    if a.placed do crowd.move_to(&app.crowd, a.id, random_goal(app, crowd.agent(&app.crowd, a.id).position))
+    if a.placed do crowd.move_to(&app.crowd, a.handle, random_goal(app, crowd.agent(&app.crowd, a.handle).position))
   }
 }
 
 send_all_to :: proc(app: ^App, goal: [3]f32) {
   for a in app.agents {
-    if a.placed do crowd.move_to(&app.crowd, a.id, goal)
+    if a.placed do crowd.move_to(&app.crowd, a.handle, goal)
   }
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
+  debug_ui(app)
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
@@ -197,15 +198,8 @@ update :: proc(app: ^App, dt: f32) {
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   crowd.update(&app.crowd, dt)
-  for a in app.agents {
-    if !a.placed do continue
-    ag := crowd.agent(&app.crowd, a.id)
-    world.translate(&app.scene, a.node, ag.position + {0, AGENT_HEIGHT * 0.5, 0})
-    if linalg.length2(ag.velocity.xz) > 0.01 {
-      world.rotate(&app.scene, a.node, math.atan2(ag.velocity.x, ag.velocity.z), linalg.VECTOR3F32_Y_AXIS)
-    }
-    draw_corners(app, ag, a.color)
-  }
+  world.set_world_poses(&app.scene, crowd.agent_poses(&app.crowd))
+  for a in app.agents do if a.placed do draw_corners(app, crowd.agent(&app.crowd, a.handle), a.color)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
@@ -223,6 +217,10 @@ draw_corners :: proc(app: ^App, ag: crowd.Agent, color: [4]f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Crowd", {720, 20, 260, 200}, {.NO_CLOSE}) {
     mu.label(ctx, fmt.tprintf("Agents: %d", AGENT_COUNT))
@@ -230,6 +228,4 @@ frame :: proc(app: ^App) -> bool {
     mu.layout_row(ctx, {-1}, 0)
     if .SUBMIT in mu.button(ctx, "Reassign targets") do send_to_random_goals(app)
   }
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

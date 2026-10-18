@@ -116,35 +116,52 @@ material_destroy :: proc(self: ^Renderer, handle: MaterialHandle) {
   if containers.slots_free(&self.material_slots, u32(handle)) do clear_entry(self, .MATERIALS, u32(handle))
 }
 
-// primitive returns a builtin mesh (builtin_meshes) drawn with a builtin color material
-// (builtin_materials), ready to attach.
-primitive :: proc(
+// primitive returns a builtin mesh (builtin_meshes) ready to attach, drawn with either
+//   a builtin color material (builtin_materials):
+//     primitive(r, shape = .CUBE, color = .WHITE, cast_shadow = true) -> MeshAttachment
+//   a material of yours:
+//     primitive(r, shape, material: MaterialHandle, cast_shadow = true) -> MeshAttachment
+primitive :: proc {
+  primitive_color,
+  primitive_material,
+}
+
+@(private = "file")
+primitive_color :: proc(
   self: ^Renderer,
   shape: Primitive = .CUBE,
   color: Color = .WHITE,
   cast_shadow := true,
 ) -> MeshAttachment {
-  return {
-    mesh = self.builtin_meshes[shape],
-    material = self.builtin_materials[color],
-    cast_shadow = cast_shadow,
-  }
+  return primitive_material(self, shape, self.builtin_materials[color], cast_shadow)
+}
+
+@(private = "file")
+primitive_material :: proc(
+  self: ^Renderer,
+  shape: Primitive,
+  material: MaterialHandle,
+  cast_shadow := true,
+) -> MeshAttachment {
+  return {mesh = self.builtin_meshes[shape], material = material, cast_shadow = cast_shadow}
+}
+
+// COLOR_RGB is the base color of each builtin color material (builtin_materials).
+COLOR_RGB :: [Color][4]f32 {
+  .WHITE   = {1.0, 1.0, 1.0, 1.0},
+  .BLACK   = {0.0, 0.0, 0.0, 1.0},
+  .GRAY    = {0.3, 0.3, 0.3, 1.0},
+  .RED     = {1.0, 0.0, 0.0, 1.0},
+  .GREEN   = {0.0, 1.0, 0.0, 1.0},
+  .BLUE    = {0.0, 0.0, 1.0, 1.0},
+  .YELLOW  = {1.0, 1.0, 0.0, 1.0},
+  .CYAN    = {0.0, 1.0, 1.0, 1.0},
+  .MAGENTA = {1.0, 0.0, 1.0, 1.0},
 }
 
 @(private)
 init_builtin_materials :: proc(self: ^Renderer) {
-  colors := [Color][4]f32 {
-    .WHITE = {1.0, 1.0, 1.0, 1.0},
-    .BLACK = {0.0, 0.0, 0.0, 1.0},
-    .GRAY = {0.3, 0.3, 0.3, 1.0},
-    .RED = {1.0, 0.0, 0.0, 1.0},
-    .GREEN = {0.0, 1.0, 0.0, 1.0},
-    .BLUE = {0.0, 0.0, 1.0, 1.0},
-    .YELLOW = {1.0, 1.0, 0.0, 1.0},
-    .CYAN = {0.0, 1.0, 1.0, 1.0},
-    .MAGENTA = {1.0, 0.0, 1.0, 1.0},
-  }
-  for color, i in colors {
+  for color, i in COLOR_RGB {
     self.builtin_materials[i] = material_create(self, make_material(base_color_factor = color)) or_continue
   }
 }

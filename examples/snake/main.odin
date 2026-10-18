@@ -83,12 +83,15 @@ should_close :: proc(app: ^App) -> bool {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+draw_hud :: proc(app: ^App) {
   hud := [?]render.RenderCommand {
     {shape = render.DrawTextCommand{text = fmt.tprintf("Score: %d", app.game.score), position = {20, 20}, size = 28, color = {255, 255, 255, 255}}},
     {shape = render.DrawTextCommand{text = fmt.tprintf("Best: %d", app.game.best), position = {20, 60}, size = 24, color = {255, 220, 100, 255}}},
   }
   render.stage_overlay(&app.renderer, hud[:], &app.font)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, pos: [3]f32 = {}) -> world.NodeHandle {
@@ -114,7 +117,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   spawn_wall(app, {-(half + wall_t), wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
 
   render.camera_look_at(render.main_camera(&app.renderer), {0, 12, 3}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
 
   spot := world.spawn(&app.scene, {0, 10, 4})
   render.attach(&app.renderer, render.SlotHandle(spot.index), render.light_create(&app.renderer, render.make_spot_light({0.2, 0.95, 0.85}, 500, 16.0, math.PI * 0.35)))
@@ -191,12 +194,15 @@ on_key :: proc(app: ^App, key: input.Key) {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured do render.orbit_drag(&app.orbit, 0, app.input.scroll.y)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   step_game(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
+  draw_hud(app)
   render.update(&app.renderer, dt)
 }
 

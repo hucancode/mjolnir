@@ -54,7 +54,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   world.scale(&app.scene, occluder, 0.8)
 
   render.camera_look_at(render.main_camera(&app.renderer), {12, 8, 14}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
   return .READY
 }
 
@@ -70,6 +70,8 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0

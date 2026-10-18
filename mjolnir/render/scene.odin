@@ -179,6 +179,8 @@ Renderer_State :: struct {
   ui_vertex_count:        u32,
   ui_index_count:         u32,
   ui_batches:             [dynamic]UIBatch,
+  // the overlay was drawn or a tick ended since it was staged: the next stage_overlay replaces it
+  ui_stale:               bool,
   // sampled by text commands
   ui_font_atlas:          TextureHandle,
   ui_font_atlas_size:     [2]f32,
@@ -429,10 +431,12 @@ post_process_release_images :: proc(self: ^Renderer) {
   }
 }
 
-// lock holds off frame while another thread (USE_PARALLEL_UPDATE) edits renderer state: the
-// pointers material, light, emitter, force_field and camera return, effect_stack and the
-// settings. stage_*, and *_create / *_destroy of meshes, materials, textures, lights,
-// emitters and force fields lock themselves.
+// lock holds off frame while update edits the scene. With USE_PARALLEL_UPDATE update runs on
+// its own thread: make every edit there (world, physics, render, debug UI) and open update with
+//   render.lock(r); defer render.unlock(r)
+// so frame, which only polls events and renders, sees whole ticks. The pointers material, light,
+// emitter, force_field and camera return are then valid for the tick. Single-threaded, the lock
+// costs nothing.
 lock :: proc(self: ^Renderer) {
   sync.recursive_mutex_lock(&self.mutex)
 }
@@ -471,15 +475,16 @@ tick_resource_pools :: proc(self: ^Renderer) {
   containers.slots_tick(&self.camera_slots)
 }
 
-// Advance the render clock (shaders' time, debug line lifetimes) and the particle
-// simulation time. Call once per update tick; the next frame emits and
-// simulates everything accumulated since the previous one.
+// update advances the render clock (shaders' time, debug line lifetimes) and the particle
+// simulation time, and ends the tick's overlay (stage_overlay). Call it once per update tick,
+// last; the next frame emits and simulates everything accumulated since the previous one.
 update :: proc(self: ^Renderer, delta_time: f32) {
   sync.mutex_lock(&self.debug_mutex)
   self.time += delta_time
   sync.mutex_unlock(&self.debug_mutex)
-  if delta_time <= 0 do return
   guard(self)
+  self.ui_stale = true
+  if delta_time <= 0 do return
   // flush_particles emits for it; particles_simulate consumes it
   self.particle_params.delta_time += delta_time
 }
@@ -1115,6 +1120,15 @@ sun_direction :: proc(sun: Sun) -> [3]f32 {
   return linalg.normalize(d) if linalg.dot(d, d) > 1e-12 else {0, -1, 0}
 }
 
+// The sun's radiance (color * intensity, 0 when off) and the direction towards it.
+@(private)
+sun_light :: proc(sun: Sun) -> (radiance, toward: [4]f32) {
+  if !sun.enabled || sun.intensity <= 0 do return
+  radiance.rgb = sun.color * sun.intensity
+  toward.xyz = -sun_direction(sun)
+  return
+}
+
 @(private)
 sun_casts_shadow :: proc(sun: Sun) -> bool {
   return sun.enabled && sun.cast_shadow && sun.intensity > 0
@@ -1210,6 +1224,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       list_capacity       = CAMERA_LIST_CAPACITY,
       time                = self.time,
     }
+    v.sun_radiance, v.sun_direction = sun_light(self.sun)
     for a in CameraImage do v.images[a] = u32(targets.images[a][frame_index])
   }
 }
@@ -1239,8 +1254,8 @@ frame :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool
   tick_resource_pools(self)
   flush(self, frame_index)
   submitted, status := frame_run(self, framebuffer_size)
-  // the staged overlay is this frame's only
-  overlay_clear(self)
+  // drawn again each frame until a stage_overlay replaces it
+  self.ui_stale = true
   if submitted {
     // simulated: the next frame's time accumulates from zero
     self.particle_params.delta_time = 0

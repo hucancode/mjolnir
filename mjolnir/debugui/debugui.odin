@@ -17,7 +17,7 @@ Context_State :: struct {
   atlas:    render.TextureHandle,
   // buttons pressed over the UI, owned by it through release
   buttons:  input.ButtonSet,
-  // begin opened mu this frame; end closes it
+  // begin opened mu this tick; end closes it
   open:     bool,
   vertices: [dynamic]render.Vertex2D,
   indices:  [dynamic]u32,
@@ -43,9 +43,8 @@ shutdown :: proc(self: ^Context) {
   self^ = {}
 }
 
-// begin returns the microui context for this frame, opening it on the first call. Build
-// widgets with it on the render thread, then hand end's commands to render.stage_overlay.
-// With USE_PARALLEL_UPDATE, feed runs on the update thread against the same context.
+// begin returns the microui context for this tick, opening it on the first call. Build
+// widgets with it in update after feed, then hand end's commands to render.stage_overlay.
 begin :: proc(self: ^Context) -> ^mu.Context {
   if !self.open {
     mu.begin(&self.mu)
@@ -54,7 +53,7 @@ begin :: proc(self: ^Context) -> ^mu.Context {
   return &self.mu
 }
 
-// end closes this frame's UI and returns it as overlay commands drawn over everything else;
+// end closes this tick's UI and returns it as overlay commands drawn over everything else;
 // none when begin was not called. Valid until the next end.
 end :: proc(self: ^Context) -> []render.RenderCommand {
   clear(&self.vertices)

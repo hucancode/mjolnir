@@ -47,6 +47,8 @@ struct View {
     uint draw_list;
     uint list_capacity;
     float time; // render's clock in seconds
+    vec4 sun_radiance; // Renderer.sun: color * intensity, 0 when off
+    vec4 sun_direction; // towards the sun
 };
 
 // render.Material: a custom material reads params, and any other field it likes

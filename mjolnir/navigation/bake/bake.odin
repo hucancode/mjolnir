@@ -28,6 +28,30 @@ append_triangles :: proc(
   for _ in 0 ..< len(indices) / 3 do append(&self.area_types, area)
 }
 
+// append_box adds the six faces of a box to b, e.g. a ground slab or an obstacle. Faces are
+// walkable unless `is_obstacle` (the bake still drops the steep sides).
+append_box :: proc(self: ^NavGeometryBuilder, center, half_extents: [3]f32, is_obstacle: bool = false) {
+  faces := BOX_FACES
+  area: u8 = u8(recast.RC_NULL_AREA) if is_obstacle else u8(recast.RC_WALKABLE_AREA)
+  for face in faces {
+    base := i32(len(self.vertices))
+    for corner in face do append(&self.vertices, center + corner * half_extents)
+    append(&self.indices, base, base + 1, base + 2, base + 2, base + 3, base)
+    append(&self.area_types, area, area)
+  }
+}
+
+// The corners of each face of the unit box, wound as render's make_cube winds them.
+@(private = "file")
+BOX_FACES :: [6][4][3]f32 {
+  {{-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}},
+  {{-1, 1, -1}, {1, 1, -1}, {1, -1, -1}, {-1, -1, -1}},
+  {{1, 1, -1}, {-1, 1, -1}, {-1, 1, 1}, {1, 1, 1}},
+  {{1, -1, 1}, {-1, -1, 1}, {-1, -1, -1}, {1, -1, -1}},
+  {{1, -1, -1}, {1, 1, -1}, {1, 1, 1}, {1, -1, 1}},
+  {{-1, -1, 1}, {-1, 1, 1}, {-1, 1, -1}, {-1, -1, -1}},
+}
+
 // builder_destroy frees the builder arrays.
 builder_destroy :: proc(self: ^NavGeometryBuilder) {
   delete(self.vertices)

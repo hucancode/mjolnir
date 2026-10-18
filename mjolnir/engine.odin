@@ -37,8 +37,10 @@ Setup :: enum {
 Loop :: struct($T: typeid) {
   app:          ^T,
   should_close: proc(app: ^T) -> bool, // polled once per iteration, main thread
-  update:       proc(app: ^T, dt: f32), // UPDATE_FPS ticks; own thread with USE_PARALLEL_UPDATE
-  frame:        proc(app: ^T) -> bool, // RENDER_FPS, main thread: poll events, render; false on error
+  // UPDATE_FPS ticks, on its own thread with USE_PARALLEL_UPDATE: read input and make every
+  // edit here, under render.lock
+  update:       proc(app: ^T, dt: f32),
+  frame:        proc(app: ^T) -> bool, // RENDER_FPS, main thread: only poll events and render; false on error
   // optional, main thread: called each iteration until it returns READY, before the first
   // update (wait for render.ready, build the scene); FAIL stops the loop. shutdown runs once
   // after the last iteration

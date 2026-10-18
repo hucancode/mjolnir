@@ -47,17 +47,11 @@ State :: struct {
   high_score:           u32,
   game_over:            bool,
   has_active:           bool,
-  transparent_material: [len(render.Color)]render.MaterialHandle,
-  opaque_material:      [len(render.Color)]render.MaterialHandle,
+  transparent_material: [render.Color]render.MaterialHandle,
+  opaque_material:      [render.Color]render.MaterialHandle,
 }
 
 PIECE_ALPHA :: f32(0.5)
-
-COLOR_RGB := [len(render.Color)][3]f32 {
-  {1, 1, 1}, {0, 0, 0}, {0.3, 0.3, 0.3},
-  {1, 0, 0}, {0, 1, 0}, {0, 0, 1},
-  {1, 1, 0}, {0, 1, 1}, {1, 0, 1},
-}
 
 App :: struct {
   window:   platform.Platform,
@@ -102,12 +96,15 @@ should_close :: proc(app: ^App) -> bool {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+draw_hud :: proc(app: ^App) {
   hud := [?]render.RenderCommand {
     {shape = render.DrawTextCommand{text = fmt.tprintf("Score: %d", app.state.score), position = {20, 20}, size = 32, color = {255, 255, 255, 255}}},
     {shape = render.DrawTextCommand{text = fmt.tprintf("High: %d", app.state.high_score), position = {20, 60}, size = 24, color = {255, 220, 100, 255}}},
   }
   render.stage_overlay(&app.renderer, hud[:], &app.font)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 wrap_col :: proc(c: i32) -> i32 { return c %% GRID_W }
@@ -130,9 +127,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   world.rotate(&app.scene, spot, -math.PI * 0.45, {1, 0, 0})
   render.camera_look_at(render.main_camera(&app.renderer), {0, 17, 17}, {0, 8, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 10, 0})
-  for c, i in COLOR_RGB {
-    app.state.transparent_material[i] = render.material_create(&app.renderer, render.make_material(type = .TRANSPARENT, base_color_factor = {c.x, c.y, c.z, PIECE_ALPHA}))
-    app.state.opaque_material[i] = render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0}))
+  for c, i in render.COLOR_RGB {
+    app.state.transparent_material[i] = render.material_create(&app.renderer, render.make_material(type = .TRANSPARENT, base_color_factor = {c.r, c.g, c.b, PIECE_ALPHA}))
+    app.state.opaque_material[i] = render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = c))
   }
   app.state.fall_period = FALL_PERIOD
   reset_game(app)
@@ -159,11 +156,10 @@ spawn_piece :: proc(app: ^App) {
   for c in app.state.active_piece.cells do if c[1] > max_dr do max_dr = c[1]
   app.state.active_pos = {0, i32(GRID_H) - 1 - max_dr}
   if collides(app, app.state.active_piece, app.state.active_pos) { app.state.game_over = true; return }
-  cube := app.renderer.builtin_meshes[.CUBE]
   mat := app.state.transparent_material[app.state.active_piece.color]
   for i in 0 ..< PIECE_LEN {
     h := world.spawn(&app.scene)
-    render.attach(&app.renderer, render.SlotHandle(h.index), render.MeshAttachment{mesh = cube, material = mat, cast_shadow = true})
+    render.attach(&app.renderer, render.SlotHandle(h.index), render.primitive(&app.renderer, .CUBE, mat))
     app.state.active_cells[i] = h
     world.scale(&app.scene, h, 0.5 * CELL)
   }
@@ -214,7 +210,7 @@ lock_piece :: proc(app: ^App) {
     row := app.state.active_pos[1] + c[1]
     app.state.board[col][row] = app.state.active_cells[i]
     app.state.occupied[col][row] = true
-    render.attach(&app.renderer, render.SlotHandle(app.state.active_cells[i].index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.CUBE], material = opaque, cast_shadow = true})
+    render.attach(&app.renderer, render.SlotHandle(app.state.active_cells[i].index), render.primitive(&app.renderer, .CUBE, opaque))
   }
   app.state.has_active = false
   cleared := clear_lines(app)
@@ -252,6 +248,8 @@ drop_step :: proc(app: ^App) {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
@@ -261,6 +259,7 @@ update :: proc(app: ^App, dt: f32) {
   step_game(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
+  draw_hud(app)
   render.update(&app.renderer, dt)
 }
 

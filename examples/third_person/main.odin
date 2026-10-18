@@ -286,6 +286,7 @@ Projectile :: struct {
   friendly: bool,
   node:     world.NodeHandle,
   instance: gltf.Instance,
+  position: [3]f32,
   velocity: [3]f32,
   damage:   f32,
   life:     f32,
@@ -512,16 +513,13 @@ enter_level :: proc(app: ^App) {
   spawn_sun(app, 2.5)
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
-  quad, cube := render.make_quad(), render.make_cube()
-  defer render.destroy(quad)
-  defer render.destroy(cube)
-  bake.append_triangles(&builder, render.positions(quad, context.temp_allocator), quad.indices, linalg.matrix4_scale_f32(ARENA * 2))
+  bake.append_box(&builder, {0, -0.5, 0}, {ARENA * 2, 0.5, ARENA * 2})
   for box in LEVELS[level].obstacles {
     node := world.spawn(&app.scene, box.center)
     render.attach(&app.renderer, render.SlotHandle(node.index), render.primitive(&app.renderer, .CUBE, .GRAY))
     world.scale(&app.scene, node, box.half_extents)
     append(&app.bodies, physics.body_create(&app.phys, box.center, collider = physics.BoxCollider{half_extents = box.half_extents}))
-    bake.append_triangles(&builder, render.positions(cube, context.temp_allocator), cube.indices, linalg.matrix4_from_trs_f32(box.center, 1, box.half_extents), is_obstacle = true)
+    bake.append_box(&builder, box.center, box.half_extents, is_obstacle = true)
   }
   for side in 0 ..< 4 {
     angle := f32(side) * math.PI * 0.5
@@ -548,7 +546,7 @@ enter_level :: proc(app: ^App) {
     render.attach(&app.renderer, render.SlotHandle(glow.index), torch_light)
   }
   fire_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {1, 0.4, 0.1, 1}, emissive_value = 1.5))
-  app.fireball = {mesh = app.renderer.builtin_meshes[.SPHERE], material = fire_material}
+  app.fireball = render.primitive(&app.renderer, .SPHERE, fire_material, cast_shadow = false)
 
   hero := HEROES[app.hero]
   start := [3]f32{0, BODY_HALF_HEIGHT, 0}
@@ -609,8 +607,8 @@ spawn_enemy :: proc(app: ^App, kind: EnemyKind, position: [3]f32) {
   params.radius = 0.5 * foe.scale
   params.height = 2 * foe.scale
   params.max_speed = foe.speed
-  agent := crowd.agent_create(&app.crowd, at, params) or_else {}
-  e := Enemy{actor = actor_create(app, &app.foes[kind], foe.attack, at), kind = kind, agent = agent, health = foe.health}
+  e := Enemy{actor = actor_create(app, &app.foes[kind], foe.attack, at), kind = kind, health = foe.health}
+  e.agent = crowd.agent_create(&app.crowd, at, params, user = world.Handle(e.model)) or_else {}
   world.scale(&app.scene, e.model, foe.scale)
   for &weapon, i in app.weapons[kind] {
     if len(weapon.nodes) == 0 do continue
@@ -698,6 +696,8 @@ actor_stage :: proc(app: ^App, a: ^Actor) {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   if input.key_pressed(&app.input, .F1) do app.debug = !app.debug
   fsm.update(&app.screen, SCREENS, app, dt)
@@ -706,6 +706,7 @@ update :: proc(app: ^App, dt: f32) {
   for &a in app.lineup do actor_stage(app, &a)
   actor_stage(app, &app.player)
   for &e in app.enemies do actor_stage(app, &e)
+  draw_hud(app)
   render.update(&app.renderer, dt)
 }
 
@@ -734,6 +735,7 @@ update_level :: proc(app: ^App, dt: f32) -> Screen {
   world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
   app.feet = physics.body(&app.phys, app.player.body).position - {0, BODY_HALF_HEIGHT, 0}
   crowd.update(&app.crowd, dt)
+  world.set_world_poses(&app.scene, crowd.agent_poses(&app.crowd))
   update_enemies(app, dt)
   update_projectiles(app, dt)
   update_pickups(app, dt)
@@ -855,9 +857,8 @@ update_enemies :: proc(app: ^App, dt: f32) {
     clear(&e.trace)
     if app.player.health > 0 || e.health <= 0 do bt.tick(brain(e.kind), &Mob{app, e}, &e.trace)
     agent := crowd.agent(&app.crowd, e.agent)
-    world.translate(&app.scene, e.model, agent.position)
-    if e.health > 0 {
-      to := app.feet - agent.position if e.clip == .ATTACK || linalg.length(agent.velocity.xz) < 0.3 else agent.velocity
+    if e.health > 0 && (e.clip == .ATTACK || linalg.length(agent.velocity.xz) < 0.3) {
+      to := app.feet - agent.position
       world.rotate(&app.scene, e.model, math.atan2(to.x, to.z))
     }
     actor_move(e, linalg.length(agent.velocity.xz) > 0.3)
@@ -897,7 +898,7 @@ shoot :: proc(app: ^App, shot: Shot, from, direction: [3]f32, damage: f32, frien
     trail := world.spawn(&app.scene, parent = node)
     render.attach(&app.renderer, render.SlotHandle(trail.index), app.emitters[.MAGIC])
   }
-  append(&app.projectiles, Projectile{friendly = friendly, node = node, instance = instance, velocity = direction * 12, damage = damage, life = 2})
+  append(&app.projectiles, Projectile{friendly = friendly, node = node, instance = instance, position = from, velocity = direction * 12, damage = damage, life = 2})
 }
 
 brain :: proc(kind: EnemyKind) -> Behavior {
@@ -920,7 +921,7 @@ die :: proc(m: ^Mob) -> bt.Status {
   app, e := m.app, m.enemy
   if e.clip != .DEATH {
     actor_play(e, .DEATH)
-    halt(app, e)
+    crowd.stop(&app.crowd, e.agent)
   }
   return .RUNNING
 }
@@ -932,7 +933,7 @@ in_range :: proc(m: ^Mob) -> bool {
 
 attack :: proc(m: ^Mob) -> bt.Status {
   app, e := m.app, m.enemy
-  halt(app, e)
+  crowd.stop(&app.crowd, e.agent)
   if e.cooldown <= 0 {
     actor_play(e, .ATTACK)
     e.cooldown = FOES[e.kind].cooldown
@@ -990,26 +991,22 @@ charge :: proc(m: ^Mob) -> bt.Status {
   return chase(m)
 }
 
-halt :: proc(app: ^App, e: ^Enemy) {
-  crowd.move_to(&app.crowd, e.agent, enemy_position(app, e))
-}
-
 update_projectiles :: proc(app: ^App, dt: f32) {
   for i := len(app.projectiles) - 1; i >= 0; i -= 1 {
     shot := &app.projectiles[i]
     shot.life -= dt
-    world.translate_by(&app.scene, shot.node, shot.velocity * dt)
-    position := world.world_matrix(&app.scene, shot.node)[3].xyz
+    shot.position += shot.velocity * dt
+    world.translate(&app.scene, shot.node, shot.position)
     hit := false
     if shot.friendly {
       for &e in app.enemies {
         scale := FOES[e.kind].scale
-        if e.health <= 0 || linalg.length(position - enemy_position(app, &e) - {0, scale, 0}) > 0.8 * scale do continue
+        if e.health <= 0 || linalg.length(shot.position - enemy_position(app, &e) - {0, scale, 0}) > 0.8 * scale do continue
         hurt_enemy(app, &e, shot.damage)
         hit = true
         break
       }
-    } else if linalg.length(position - (app.feet + {0, 1.2, 0})) < 0.8 {
+    } else if linalg.length(shot.position - (app.feet + {0, 1.2, 0})) < 0.8 {
       hurt_player(app, shot.damage)
       hit = true
     }
@@ -1120,6 +1117,10 @@ update_result :: proc(app: ^App, dt: f32) -> Screen {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+draw_hud :: proc(app: ^App) {
   commands := make([dynamic]render.RenderCommand, context.temp_allocator)
   size := platform.framebuffer_size(&app.window)
   screen := [2]f32{f32(size.x), f32(size.y)} / platform.dpi_scale(&app.window)
@@ -1148,7 +1149,6 @@ frame :: proc(app: ^App) -> bool {
     }
   }
   render.stage_overlay(&app.renderer, commands[:], &app.font)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
 hud :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand) {

@@ -88,7 +88,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {0, 20, 20}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))
@@ -133,8 +133,12 @@ shutdown :: proc(app: ^App) {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
+  debug_ui(app)
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
@@ -142,6 +146,7 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   if app.rig != nil do walk(app, dt)
   world.update(&app.scene)
+  if app.rig != nil do animation.animator_update(&app.animator, app.rig, dt, world.world_matrix(&app.scene, app.spider_mesh))
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   if app.rig != nil do for s in app.spider.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), app.animator.palette)
   render.update(&app.renderer, dt)
@@ -163,11 +168,14 @@ walk :: proc(app: ^App, dt: f32) {
       render.debug_sphere(&app.renderer, pole, 0.3, {0.3, 0.5, 1, 1})
     }
   }
-  animation.animator_update(&app.animator, app.rig, dt, world.world_matrix(&app.scene, app.spider_mesh))
 }
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "IK", {480, 20, 300, 560}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
@@ -190,6 +198,4 @@ frame :: proc(app: ^App) -> bool {
       mu.slider(ctx, &app.leg_lift, 0, 6)
     }
   }
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

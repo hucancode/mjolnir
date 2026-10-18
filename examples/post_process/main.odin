@@ -88,7 +88,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {6, 5, 10}, {0, 1.0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1.0, 0})
   when render.RENDER_BACKEND == "vulkan" {
     vignette_spirv, vignette_wgsl := #load("vignette.frag.spv"), ""
   } else {
@@ -101,41 +101,41 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 30.0)
 
-  cube_mesh := app.renderer.builtin_meshes[.CUBE]
-  sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
-
   magenta_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.1, 0.8, 1}, emissive_value = 4.0))
-  spawn_mesh(app, sphere_mesh, magenta_emit, {-3.0, 1.2, 1.5})
+  spawn_mesh(app, .SPHERE, magenta_emit, {-3.0, 1.2, 1.5})
   cyan_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.1, 0.9, 1.0, 1}, emissive_value = 4.0))
-  spawn_mesh(app, sphere_mesh, cyan_emit, {0.0, 1.2, 1.5})
+  spawn_mesh(app, .SPHERE, cyan_emit, {0.0, 1.2, 1.5})
   yellow_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.9, 0.2, 1}, emissive_value = 4.0))
-  spawn_mesh(app, sphere_mesh, yellow_emit, {3.0, 1.2, 1.5})
+  spawn_mesh(app, .SPHERE, yellow_emit, {3.0, 1.2, 1.5})
 
   metal := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.9, 0.95, 1}, metallic_value = 1.0, roughness_value = 0.15))
-  spawn_mesh(app, sphere_mesh, metal, {0.5, 1.0, -1.5})
+  spawn_mesh(app, .SPHERE, metal, {0.5, 1.0, -1.5})
   rough := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.2, 0.6, 0.8, 1}, metallic_value = 0.0, roughness_value = 0.8))
-  spawn_mesh(app, cube_mesh, rough, {3.0, 1.0, -1.5})
+  spawn_mesh(app, .CUBE, rough, {3.0, 1.0, -1.5})
   orange := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.4, 0.1, 1}, emissive_value = 4.0))
-  spawn_mesh(app, cube_mesh, orange, {-3.0, 1.0, -1.5})
+  spawn_mesh(app, .CUBE, orange, {-3.0, 1.0, -1.5})
   glass := render.material_create(&app.renderer, render.make_material(.TRANSPARENT, base_color_factor = {0.2, 0.9, 0.4, 0.4}))
-  spawn_mesh(app, sphere_mesh, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
+  spawn_mesh(app, .SPHERE, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
 
-  white_mat := app.renderer.builtin_materials[.WHITE]
-  for i in 0 ..< 5 do spawn_mesh(app, cube_mesh, white_mat, {f32(i) * 4.0 - 8.0, 0.5, -7.0})
+  for i in 0 ..< 5 do spawn_mesh(app, .CUBE, app.renderer.builtin_materials[.WHITE], {f32(i) * 4.0 - 8.0, 0.5, -7.0})
 
   lamp := world.spawn(&app.scene, {0, 3, 0})
   render.attach(&app.renderer, render.SlotHandle(lamp.index), render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2}, intensity = 200, radius = 8.0, cast_shadow = false)))
   return .READY
 }
 
-spawn_mesh :: proc(app: ^App, mesh: render.MeshHandle, material: render.MaterialHandle, position: [3]f32, cast_shadow := true) {
+spawn_mesh :: proc(app: ^App, shape: render.Primitive, material: render.MaterialHandle, position: [3]f32, cast_shadow := true) {
   n := world.spawn(&app.scene, position)
-  render.attach(&app.renderer, render.SlotHandle(n.index), render.MeshAttachment{mesh = mesh, material = material, cast_shadow = cast_shadow})
+  render.attach(&app.renderer, render.SlotHandle(n.index), render.primitive(&app.renderer, shape, material, cast_shadow))
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
+  debug_ui(app)
+  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
@@ -161,8 +161,6 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 

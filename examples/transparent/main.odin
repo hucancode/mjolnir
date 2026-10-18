@@ -38,7 +38,7 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   render.camera_look_at(render.main_camera(&app.renderer), {6, 3, 6}, {0, 1, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
@@ -46,7 +46,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   red := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.95, 0.15, 0.15, 1}, roughness_value = 0.4))
   sphere_behind_glass := world.spawn(&app.scene, {0, 1, -2})
-  render.attach(&app.renderer, render.SlotHandle(sphere_behind_glass.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.SPHERE], material = red, cast_shadow = true})
+  render.attach(&app.renderer, render.SlotHandle(sphere_behind_glass.index), render.primitive(&app.renderer, .SPHERE, red))
 
   glass_colors := [4][4]f32{
     {0.2, 0.7, 1.0, 0.20},
@@ -57,7 +57,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   for color, i in glass_colors {
     glass := render.material_create(&app.renderer, render.make_material(.TRANSPARENT, base_color_factor = color))
     slab := world.spawn(&app.scene, {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4})
-    render.attach(&app.renderer, render.SlotHandle(slab.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.CUBE], material = glass})
+    render.attach(&app.renderer, render.SlotHandle(slab.index), render.primitive(&app.renderer, .CUBE, glass, cast_shadow = false))
     world.scale(&app.scene, slab, 0.8)
   }
 
@@ -76,6 +76,8 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 update :: proc(app: ^App, dt: f32) {
+  render.lock(&app.renderer)
+  defer render.unlock(&app.renderer)
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0

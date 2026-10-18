@@ -30,6 +30,8 @@ struct View {
     uint draw_list; // bindless draw lists the view appends to
     uint list_capacity; // draws per list
     float time; // render's clock in seconds
+    vec4 sun_radiance; // Renderer.sun: color * intensity, 0 when off
+    vec4 sun_direction; // towards the sun
 };
 
 struct Material {

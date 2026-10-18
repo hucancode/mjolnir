@@ -6,6 +6,7 @@ import "core:c"
 import "core:log"
 import "core:os"
 import "core:strings"
+import "core:sync"
 import "core:time"
 import "../input"
 import "vendor:glfw"
@@ -21,6 +22,11 @@ Platform :: struct {
 Platform_State :: struct {
   // device events since the last read_input
   input:    Accumulator,
+  // the framebuffer size and DPI scale as of the last poll_events
+  size:     [2]u32,
+  dpi:      f32,
+  // guards input, size and dpi: poll_events (main thread) writes them, the update thread reads
+  mutex:    sync.Mutex,
   context_: runtime.Context,
 }
 
@@ -46,6 +52,7 @@ init :: proc(self: ^Platform, width, height: u32, title: string) -> bool {
   glfw.SetCharCallback(self.window, char_callback)
   x, y := glfw.GetCursorPos(self.window)
   acc_cursor(&self.input, f32(x), f32(y))
+  query_window(self)
   return true
 }
 
@@ -62,27 +69,38 @@ should_close :: proc(self: ^Platform) -> bool {
 
 // poll_events collects the window events read_input then reports. Main thread only.
 poll_events :: proc(self: ^Platform) {
+  sync.guard(&self.mutex)
   glfw.PollEvents()
+  query_window(self)
 }
 
-// read_input takes this tick's input snapshot from the events polled so far.
+// read_input takes this tick's input snapshot from the events polled so far; safe beside
+// poll_events on another thread.
 read_input :: proc(self: ^Platform, s: ^input.State) {
+  sync.guard(&self.mutex)
   acc_drain(&self.input, s)
 }
 
-// framebuffer_size returns the framebuffer size in pixels.
+// framebuffer_size returns the framebuffer size in pixels as of the last poll_events.
 framebuffer_size :: proc(self: ^Platform) -> [2]u32 {
-  w, h := glfw.GetFramebufferSize(self.window)
-  return {u32(w), u32(h)}
+  sync.guard(&self.mutex)
+  return self.size
 }
 
-// dpi_scale returns the content scale (DPI factor) of the window.
+// dpi_scale returns the content scale (DPI factor) of the window as of the last poll_events.
 dpi_scale :: proc(self: ^Platform) -> f32 {
+  sync.guard(&self.mutex)
+  return self.dpi
+}
+
+// Reads the window's size and scale, which GLFW reports on the main thread only.
+@(private = "file")
+query_window :: proc(self: ^Platform) {
+  w, h := glfw.GetFramebufferSize(self.window)
+  self.size = {u32(w), u32(h)}
   sw, sh := glfw.GetWindowContentScale(self.window)
-  if sw != sh {
-    log.warnf("DPI scale x (%v) and y (%v) not the same, using x", sw, sh)
-  }
-  return sw
+  if sw != sh && sw != self.dpi do log.warnf("DPI scale x (%v) and y (%v) not the same, using x", sw, sh)
+  self.dpi = sw
 }
 
 // run calls step until it returns false, then returns.
