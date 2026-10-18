@@ -12,10 +12,9 @@ import "core:fmt"
 import "core:log"
 import "core:math"
 
-// How the app draws a node: ui lays nodes out, the app gives them a look.
 Look :: struct {
   color:   [4]u8,
-  texture: render.TextureHandle, // render.NO_TEXTURE for a flat color
+  texture: render.TextureHandle,
 }
 
 App :: struct {
@@ -31,14 +30,18 @@ App :: struct {
   list:     ui.NodeHandle,
   star:     ui.NodeHandle,
   clicks:   int,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  orbit:    render.Orbit,
 }
 
 TEXT_COLOR :: [4]u8{235, 235, 245, 255}
 BUTTON_COLOR :: [4]u8{200, 80, 80, 255}
 BUTTON_HOVER :: [4]u8{230, 120, 90, 255}
 BUTTON_PRESSED :: [4]u8{110, 200, 110, 255}
+LIST_ITEMS :: 12
+LIST_ITEM_HEIGHT :: 28
+LIST_GAP :: 4
+LIST_HEIGHT :: 120
+LIST_MAX_SCROLL :: LIST_ITEMS * LIST_ITEM_HEIGHT + (LIST_ITEMS - 1) * LIST_GAP - LIST_HEIGHT
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -47,8 +50,6 @@ main :: proc() {
   if !platform.init(w, 900, 700, "UI") do return
   if !render.init(&app.renderer, "UI", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   if !world.init(&app.scene) do return
-  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return
-  ui.init(&app.gui)
   mjolnir.run(
     mjolnir.Loop(App) {
       app = app,
@@ -61,15 +62,16 @@ main :: proc() {
   )
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
+  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return true
+  ui.init(&app.gui)
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   build_ui(app)
   cube := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .BLUE))
   render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 0, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   return true
 }
 
@@ -90,15 +92,12 @@ text :: proc(app: ^App, parent: ui.NodeHandle, s: string, size: f32 = 18, n: ui.
 }
 
 build_ui :: proc(app: ^App) {
-  // a column panel: title, a row with a button and a counter, wrapped text
-  // and a clipped list that scrolls with the wheel
   panel := ui.node_create(&app.gui, {direction = .COLUMN, padding = {16, 16, 16, 16}, gap = 12, offset = {32, 32}})
   app.looks[panel] = {{30, 30, 46, 220}, render.NO_TEXTURE}
   text(app, panel, "Mjolnir UI", 28)
   row := ui.node_create(&app.gui, {parent = panel, gap = 16, align = {.START, .CENTER}})
   app.button = ui.node_create(&app.gui, {parent = row, size = {{.FIXED, 160}, {.FIXED, 44}}, interactive = true, align = {.CENTER, .CENTER}})
   app.looks[app.button] = {BUTTON_COLOR, render.NO_TEXTURE}
-  // the label sits in the button: hovering or clicking it counts for the button
   text(app, app.button, "Click me!", 20)
   app.counter = text(app, row, "Clicks: 0")
   text(
@@ -108,18 +107,16 @@ build_ui :: proc(app: ^App) {
     16,
     {size = {{.FIXED, 360}, {}}, wrap = true},
   )
-  app.list = ui.node_create(&app.gui, {parent = panel, direction = .COLUMN, size = {{.FIXED, 360}, {.FIXED, 120}}, gap = 4, clip = true, interactive = true})
+  app.list = ui.node_create(&app.gui, {parent = panel, direction = .COLUMN, size = {{.FIXED, 360}, {.FIXED, LIST_HEIGHT}}, gap = LIST_GAP, clip = true, interactive = true})
   app.looks[app.list] = {{18, 18, 26, 255}, render.NO_TEXTURE}
-  for i in 0 ..< 12 {
-    item := ui.node_create(&app.gui, {parent = app.list, size = {{.GROW, 0}, {.FIXED, 28}}, padding = {8, 0, 8, 0}, align = {.START, .CENTER}})
+  for i in 0 ..< LIST_ITEMS {
+    item := ui.node_create(&app.gui, {parent = app.list, size = {{.GROW, 0}, {.FIXED, LIST_ITEM_HEIGHT}}, padding = {8, 0, 8, 0}, align = {.START, .CENTER}})
     app.looks[item] = {{50, 60, 90, 255} if i % 2 == 0 else {40, 48, 72, 255}, render.NO_TEXTURE}
     text(app, item, fmt.tprintf("Item %d", i + 1))
   }
-  // HUD corner: anchored to the window's top-right
   hint := ui.node_create(&app.gui, {position = .ABSOLUTE, anchor = {1, 0}, offset = {-16, 16}, padding = {10, 6, 10, 6}})
   app.looks[hint] = {{0, 0, 0, 160}, render.NO_TEXTURE}
   text(app, hint, "drag: orbit   wheel over list: scroll", 14)
-  // an image anchored bottom-right, and a star mesh bottom-left
   if star_texture, ok := render.texture_create(&app.renderer, #load("../../assets/gold-star.png")); ok {
     image := ui.node_create(&app.gui, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, size = {{.FIXED, 128}, {.FIXED, 128}}})
     app.looks[image] = {{255, 255, 255, 255}, star_texture}
@@ -133,7 +130,6 @@ should_close :: proc(app: ^App) -> bool {
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  // layout in window pixels, where the cursor is; frame scales to the framebuffer
   size := platform.framebuffer_size(&app.window)
   dpi := platform.dpi_scale(&app.window)
   ui.layout(&app.gui, {size = {f32(size.x), f32(size.y)} / dpi}, &app.font)
@@ -146,23 +142,18 @@ update :: proc(app: ^App, dt: f32) {
   look.color = BUTTON_PRESSED if ui.pressed(&app.gui, app.button) else BUTTON_HOVER if ui.hovered(&app.gui, app.button) else BUTTON_COLOR
   if ui.hovered(&app.gui, app.list) {
     list := ui.node(&app.gui, app.list)
-    list.scroll.y = clamp(list.scroll.y - app.input.scroll.y * 20, 0, 12 * 32 - 4 - 120)
+    list.scroll.y = clamp(list.scroll.y - app.input.scroll.y * 20, 0, LIST_MAX_SCROLL)
   }
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
 }
 
-// The app's half of the UI: every shown node, back to front, as overlay
-// commands in framebuffer pixels.
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   s := platform.dpi_scale(&app.window)
@@ -189,7 +180,6 @@ frame :: proc(app: ^App) -> bool {
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), s)
 }
 
-// A five-pointed star filling a box of half extent `r`, centered in it.
 star_mesh :: proc(r: [2]f32, color: [4]u8) -> (vertices: []render.Vertex2D, indices: []u32) {
   vertices = make([]render.Vertex2D, 11, context.temp_allocator)
   indices = make([]u32, 30, context.temp_allocator)

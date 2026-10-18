@@ -13,40 +13,43 @@ import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 
-App :: struct {
-  window:   platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  debug:    debugui.Context,
-  input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
-}
-
 CONTROL_POINTS :: 32
 PATH_DEBUG_SAMPLES :: 96
 
-snake:         gltf.Scene
-// one animator (and its path layer) per snake.skinned entry
-animators:     [dynamic]animation.Animator
-layer_indices: [dynamic]animation.LayerHandle
-path_buf:      [CONTROL_POINTS][3]f32
-spline:        animation.Spline([3]f32)
+SnakeRig :: struct {
+  animator: animation.Animator,
+  path:     animation.LayerHandle,
+}
 
-offset_val: mu.Real = 0
-speed_val:  mu.Real = 5
-fit_len:    mu.Real = 6
-radius:     mu.Real = 4
-height:     mu.Real = 2
-lobes:      mu.Real = 3
-prev_radius: mu.Real = 4
-prev_height: mu.Real = 2
-prev_lobes:  mu.Real = 3
-auto_play: bool = true
+App :: struct {
+  window:     platform.Platform,
+  scene:      world.World,
+  renderer:   render.Renderer,
+  debug:      debugui.Context,
+  input:      input.State,
+  orbit:      render.Orbit,
+  snake:      gltf.Scene,
+  rigs:       [dynamic]SnakeRig,
+  points:     [CONTROL_POINTS][3]f32,
+  spline:     animation.Spline([3]f32),
+  offset:     mu.Real,
+  speed:      mu.Real,
+  fit_length: mu.Real,
+  radius:     mu.Real,
+  height:     mu.Real,
+  lobes:      mu.Real,
+  auto_play:  bool,
+}
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
+  app.speed = 5
+  app.fit_length = 6
+  app.radius = 4
+  app.height = 2
+  app.lobes = 3
+  app.auto_play = true
   w := &app.window
   if !platform.init(w, 900, 650, "Path Modifier") do return
   if !render.init(&app.renderer, "Path Modifier", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
@@ -64,7 +67,10 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.destroy(&snake)
+  for &r in app.rigs do animation.destroy(&r.animator)
+  delete(app.rigs)
+  animation.destroy(&app.spline)
+  gltf.destroy(&app.snake, &app.scene, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -76,96 +82,79 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-regenerate_points :: proc() {
-  lobes_i := max(1, int(math.round(f32(lobes))))
-  for i in 0 ..< CONTROL_POINTS {
-    t := f32(i) / f32(CONTROL_POINTS)
-    u := t * math.PI * 2.0
-    path_buf[i] = {f32(radius) * math.cos(u), f32(height) * math.sin(u * f32(lobes_i)), f32(radius) * math.sin(u)}
-  }
-}
-
-rebuild_path :: proc(app: ^App) {
-  regenerate_points()
-  animation.destroy(&spline)
-  animation.spline_init_closed(&spline, path_buf[:])
-  for &a, i in animators do animation.path_points(&a, layer_indices[i], path_buf[:], closed = true)
-}
-
-apply_runtime_params :: proc(app: ^App) {
-  for &a, i in animators {
-    if p, ok := animation.layer_params(&a, layer_indices[i], animation.PathParams); ok do p^ = {offset = f32(offset_val), length = f32(fit_len), loop = true}
-  }
-}
-
-draw_path_debug :: proc(app: ^App) {
-  spline_len := animation.spline_arc_length(spline)
-  if spline_len <= 0 do return
-  prev := animation.spline_sample_uniform(spline, 0)
-  for i in 1 ..= PATH_DEBUG_SAMPLES {
-    s := f32(i) / f32(PATH_DEBUG_SAMPLES) * spline_len
-    cur := animation.spline_sample_uniform(spline, s)
-    render.debug_segment(&app.renderer, prev, cur, color = {1, 0.85, 0.1, 1}, bypass_depth = true)
-    prev = cur
-  }
-}
-
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {5, 3, 5}, {0, 0, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  snake = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
-  regenerate_points()
-  animation.spline_init_closed(&spline, path_buf[:])
-
-  for s in snake.skinned {
-    rig := &snake.rigs[s.rig]
-    a: animation.Animator
-    animation.animator_init(&a, rig)
-    chain, _ := animation.bone_chain_down(&rig.skeleton, "root", 14, context.temp_allocator)
-    idx, _ := animation.layer_create(&a, rig, animation.PathParams{offset = f32(offset_val), length = f32(fit_len), loop = true}, chain)
-    animation.path_points(&a, idx, path_buf[:], closed = true)
-    append(&animators, a)
-    append(&layer_indices, idx)
-  }
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   ground := world.spawn(&app.scene, {0, -3, 0})
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 30.0)
   light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1, 0.9, 0.8, 1}, 15.0, true)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1, 0.9, 0.8}, 600, 20.0, true)))
+
+  app.snake = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/stuffed_snake_rigged.glb"))
+  for s in app.snake.skinned {
+    rig := &app.snake.rigs[s.rig]
+    r: SnakeRig
+    animation.animator_init(&r.animator, rig)
+    whole_body, _ := animation.bone_chain_down(&rig.skeleton, "root", u32(animation.bone_count(&rig.skeleton)), context.temp_allocator)
+    r.path = animation.layer_create(&r.animator, rig, path_params(app), whole_body)
+    append(&app.rigs, r)
+  }
+  rebuild_path(app)
   return true
+}
+
+path_params :: proc(app: ^App) -> animation.PathParams {
+  return {offset = f32(app.offset), length = f32(app.fit_length), loop = true}
+}
+
+rebuild_path :: proc(app: ^App) {
+  lobes := max(1, math.round(f32(app.lobes)))
+  for &p, i in app.points {
+    u := f32(i) / CONTROL_POINTS * math.TAU
+    p = {f32(app.radius) * math.cos(u), f32(app.height) * math.sin(u * lobes), f32(app.radius) * math.sin(u)}
+  }
+  animation.destroy(&app.spline)
+  animation.spline_init_closed(&app.spline, app.points[:])
+  for &r in app.rigs do animation.path_points(&r.animator, r.path, app.points[:], closed = true)
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  if radius != prev_radius || height != prev_height || lobes != prev_lobes {
-    rebuild_path(app)
-    prev_radius = radius; prev_height = height; prev_lobes = lobes
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  path_length := animation.spline_arc_length(app.spline)
+  if app.auto_play && path_length > 0 {
+    app.offset = mu.Real(math.mod_f32(f32(app.offset) + f32(app.speed) * dt, path_length))
   }
-  spline_len := animation.spline_arc_length(spline)
-  if auto_play && spline_len > 0 {
-    offset_val = mu.Real(math.mod_f32(f32(offset_val) + f32(speed_val) * dt, spline_len))
-    if offset_val < 0 do offset_val += mu.Real(spline_len)
+  for s, i in app.snake.skinned {
+    r := &app.rigs[i]
+    if path, ok := animation.layer_params(&r.animator, r.path, animation.PathParams); ok do path^ = path_params(app)
+    animation.animator_update(&r.animator, &app.snake.rigs[s.rig], dt)
   }
-  apply_runtime_params(app)
-  for s, i in snake.skinned do animation.animator_update(&animators[i], &snake.rigs[s.rig], dt)
-  draw_path_debug(app)
+  draw_path(app)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  for s, i in snake.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), animators[i].palette)
+  for s, i in app.snake.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), app.rigs[i].animator.palette)
   render.update(&app.renderer, dt)
+}
+
+draw_path :: proc(app: ^App) {
+  path_length := animation.spline_arc_length(app.spline)
+  if path_length <= 0 do return
+  prev := animation.spline_sample_uniform(app.spline, 0)
+  for i in 1 ..= PATH_DEBUG_SAMPLES {
+    cur := animation.spline_sample_uniform(app.spline, f32(i) / PATH_DEBUG_SAMPLES * path_length)
+    render.debug_segment(&app.renderer, prev, cur, color = {1, 0.85, 0.1, 1}, bypass_depth = true)
+    prev = cur
+  }
 }
 
 frame :: proc(app: ^App) -> bool {
@@ -179,14 +168,14 @@ debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Path Modifier", {20, 20, 200, 380}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
-    mu.checkbox(ctx, "Auto play", &auto_play)
-    spline_len := animation.spline_arc_length(spline)
-    mu.label(ctx, "Offset")
-    if spline_len > 0 do mu.slider(ctx, &offset_val, 0, mu.Real(spline_len))
-    mu.label(ctx, "Speed"); mu.slider(ctx, &speed_val, 0, 10)
-    mu.label(ctx, "Fit length"); mu.slider(ctx, &fit_len, 0.5, 12)
-    mu.label(ctx, "Radius"); mu.slider(ctx, &radius, 1, 8)
-    mu.label(ctx, "Height"); mu.slider(ctx, &height, 0, 6)
-    mu.label(ctx, "Lobes"); mu.slider(ctx, &lobes, 1, 8)
+    mu.checkbox(ctx, "Auto play", &app.auto_play)
+    mu.label(ctx, "Offset"); mu.slider(ctx, &app.offset, 0, mu.Real(animation.spline_arc_length(app.spline)))
+    mu.label(ctx, "Speed"); mu.slider(ctx, &app.speed, 0, 10)
+    mu.label(ctx, "Fit length"); mu.slider(ctx, &app.fit_length, 0.5, 12)
+    reshaped: mu.Result_Set
+    mu.label(ctx, "Radius"); reshaped |= mu.slider(ctx, &app.radius, 1, 8)
+    mu.label(ctx, "Height"); reshaped |= mu.slider(ctx, &app.height, 0, 6)
+    mu.label(ctx, "Lobes"); reshaped |= mu.slider(ctx, &app.lobes, 1, 8)
+    if .CHANGE in reshaped do rebuild_path(app)
   }
 }

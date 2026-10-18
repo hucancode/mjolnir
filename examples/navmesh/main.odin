@@ -11,34 +11,38 @@ import "../../mjolnir/navigation/bake"
 import "core:log"
 import "core:math/linalg"
 
-end_pos: [3]f32
-current_path: [][3]f32
-end_marker_handle: world.NodeHandle
-agent_handle: world.NodeHandle
-agent_pos: [3]f32 = {-20, 0, -20}
-agent_speed: f32 = 5.0
-current_waypoint_idx: int
-path_completed: bool
+GROUND_HALF_SIZE :: 50
+AGENT_SPEED :: 5
+AGENT_HALF_HEIGHT :: 1
+WAYPOINT_REACHED :: 0.5
+PATH_SHOW_SECONDS :: 5
+MAX_PATH_POINTS :: 256
 
-ground_handle: world.NodeHandle
-obstacle_handles: [dynamic]world.NodeHandle
+Box :: struct {
+  center, half_extents: [3]f32,
+}
 
-nav_builder: bake.NavGeometryBuilder
-navmesh_node_handle: world.NodeHandle
-path_spawn_time: f32
-
-TAG_ENVIRONMENT :: u32(1 << 0)
-TAG_OBSTACLE :: u32(1 << 1)
-path_active: bool
-navmesh: nav.NavMesh
+OBSTACLES := [?]Box {
+  {{-10, 1.5, -10}, {2, 3, 2}},
+  {{10, 1.5, -10}, {2, 3, 2}},
+  {{-10, 1.5, 10}, {2, 3, 2}},
+  {{10, 1.5, 10}, {2, 3, 2}},
+  {{0, 2, 0}, {4, 4, 4}},
+}
 
 App :: struct {
-  window:   platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  window:         platform.Platform,
+  scene:          world.World,
+  renderer:       render.Renderer,
+  input:          input.State,
+  orbit:          render.Orbit,
+  navmesh:        nav.NavMesh,
+  agent:          world.NodeHandle,
+  agent_position: [3]f32,
+  goal_marker:    world.NodeHandle,
+  path:           [][3]f32,
+  next_waypoint:  int,
+  path_age:       f32,
 }
 
 main :: proc() {
@@ -69,174 +73,110 @@ frame :: proc(app: ^App) -> bool {
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
-spawn_mesh :: proc(app: ^App, mesh_handle: render.MeshHandle, material: render.MaterialHandle, pos: [3]f32 = {}) -> world.NodeHandle {
-  n := world.spawn(&app.scene, pos)
-  render.attach(&app.renderer, render.SlotHandle(n.index), render.MeshAttachment{mesh = mesh_handle, material = material, cast_shadow = true})
-  return n
-}
-
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  log.info("Navigation mesh demo setup with world integration")
-  bake.builder_destroy(&nav_builder)
   render.camera_look_at(render.main_camera(&app.renderer), {35, 25, 35}, {0, 0, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
-  create_demo_scene(app)
+  builder: bake.NavGeometryBuilder
+  defer bake.destroy(&builder)
+  ground := world.spawn(&app.scene)
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GREEN, cast_shadow = false))
+  world.scale(&app.scene, ground, GROUND_HALF_SIZE)
+  bake_shape(&builder, render.make_quad(), {}, {GROUND_HALF_SIZE, 1, GROUND_HALF_SIZE}, is_obstacle = false)
+  for box in OBSTACLES {
+    obstacle := world.spawn(&app.scene, box.center)
+    render.attach(&app.renderer, render.SlotHandle(obstacle.index), render.primitive(&app.renderer, .CUBE, .RED))
+    world.scale(&app.scene, obstacle, box.half_extents)
+    bake_shape(&builder, render.make_cube(), box.center, box.half_extents, is_obstacle = true)
+  }
+  data, baked := bake.build(&builder, allocator = context.temp_allocator)
+  if !baked || !nav.init(&app.navmesh, data) {
+    log.error("Failed to build navmesh")
+    return true
+  }
+  show_navmesh(app)
 
-  setup_navigation_mesh(app)
-  agent_pos = {-20, 0, -20}
-  end_pos = {20, 0, 20}
-  update_position_marker(app, &end_marker_handle, end_pos, {1, 0, 0, 1})
-  create_agent(app)
-  start_find_path(app)
+  app.agent_position = {-20, 0, -20}
+  app.agent = world.spawn(&app.scene, app.agent_position + {0, AGENT_HALF_HEIGHT, 0})
+  render.attach(&app.renderer, render.SlotHandle(app.agent.index), render.primitive(&app.renderer, .CYLINDER, .BLUE))
+  world.scale(&app.scene, app.agent, [3]f32{0.5, AGENT_HALF_HEIGHT, 0.5})
+  app.goal_marker = world.spawn(&app.scene)
+  render.attach(&app.renderer, render.SlotHandle(app.goal_marker.index), render.primitive(&app.renderer, .SPHERE, .YELLOW))
+  world.scale(&app.scene, app.goal_marker, 0.3)
+  go_to(app, {20, 0, 20})
   return true
 }
 
+bake_shape :: proc(builder: ^bake.NavGeometryBuilder, shape: render.Geometry, center, scale: [3]f32, is_obstacle: bool) {
+  defer render.destroy(shape)
+  positions := render.positions(shape, context.temp_allocator)
+  for &p in positions do p *= scale
+  bake.append_triangles(builder, positions, shape.indices, center, is_obstacle)
+}
+
+show_navmesh :: proc(app: ^App) {
+  positions, indices := nav.debug_triangles(&app.navmesh, context.temp_allocator)
+  mesh := render.mesh_create(&app.renderer, render.make_geometry_from_triangles(positions, indices))
+  material := render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {1.0, 0.8, 0.3, 0.3}))
+  overlay := world.spawn(&app.scene)
+  render.attach(&app.renderer, render.SlotHandle(overlay.index), render.MeshAttachment{mesh = mesh, material = material})
+}
+
 shutdown :: proc(app: ^App) {
+  delete(app.path)
+  nav.destroy(&app.navmesh)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
-  nav.destroy(&navmesh)
-  bake.builder_destroy(&nav_builder)
 }
 
-create_demo_scene :: proc(app: ^App) {
-  ground_geom := render.make_quad({0.2, 0.6, 0.2, 1.0})
-  for &v in ground_geom.vertices { v.position.x *= 50; v.position.z *= 50 }
-  bake.append_triangles(&nav_builder, render.positions(ground_geom, context.temp_allocator), ground_geom.indices)
-  ground_mesh := render.mesh_create(&app.renderer, ground_geom)
-  ground_mat := render.material_create(&app.renderer, render.make_material(metallic_value = 0.1, roughness_value = 0.8, emissive_value = 0.02))
-  ground_handle = spawn_mesh(app, ground_mesh, ground_mat)
-  world.tag(&app.scene, ground_handle, TAG_ENVIRONMENT)
-
-  obstacle_positions := [][3]f32{{-10, 1.5, -10}, {10, 1.5, -10}, {-10, 1.5, 10}, {10, 1.5, 10}, {0, 2, 0}}
-  obstacle_sizes := [][3]f32{{2, 3, 2}, {2, 3, 2}, {2, 3, 2}, {2, 3, 2}, {4, 4, 4}}
-  for pos, i in obstacle_positions {
-    size := obstacle_sizes[i]
-    g := render.make_cube({0.8, 0.2, 0.2, 1.0})
-    for &v in g.vertices { v.position.x *= size.x; v.position.y *= size.y; v.position.z *= size.z }
-    bake.append_triangles(&nav_builder, render.positions(g, context.temp_allocator), g.indices, pos, true)
-    mh := render.mesh_create(&app.renderer, g)
-    mat := render.material_create(&app.renderer, render.make_material(metallic_value = 0.3, roughness_value = 0.7, emissive_value = 0.1))
-    h := spawn_mesh(app, mh, mat, pos)
-    world.tag(&app.scene, h, TAG_OBSTACLE)
-    append(&obstacle_handles, h)
-  }
-  log.infof("Created demo scene with ground and %d obstacles", len(obstacle_handles))
-}
-
-create_agent :: proc(app: ^App) {
-  agent_geom := render.make_cylinder(16, 2, 0.5, {0.2, 0.5, 1.0, 1.0})
-  mh := render.mesh_create(&app.renderer, agent_geom)
-  mat := render.material_create(&app.renderer, render.make_material(metallic_value = 0.3, roughness_value = 0.6, emissive_value = 0.3))
-  agent_handle = spawn_mesh(app, mh, mat, agent_pos + {0, 1, 0})
-  world.set_name(&app.scene, agent_handle, "agent")
-}
-
-setup_navigation_mesh :: proc(app: ^App) {
-  if len(nav_builder.vertices) == 0 || len(nav_builder.indices) == 0 {
-    log.error("No source geometry available for navmesh generation"); return
-  }
-  data, ok := bake.build(&nav_builder, allocator = context.temp_allocator)
-  if !ok || !nav.init(&navmesh, data) {
-    log.error("Failed to build navmesh"); return
-  }
-  visualize_navmesh(app)
-}
-
-visualize_navmesh :: proc(app: ^App) {
-  world.destroy(&app.scene, navmesh_node_handle)
-  positions, indices := nav.debug_triangles(&navmesh, context.temp_allocator)
-  navmesh_geom := render.make_geometry_from_triangles(positions, indices)
-  log.infof("Built navmesh visualization geometry: %d vertices, %d indices", len(navmesh_geom.vertices), len(navmesh_geom.indices))
-  m, m_ok := render.mesh_create(&app.renderer, navmesh_geom)
-  if !m_ok { log.error("Failed to create navmesh visualization mesh"); return }
-  mat, mat_ok := render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {1.0, 0.8, 0.3, 0.3}))
-  if !mat_ok { log.error("Failed to create navmesh material"); return }
-  navmesh_node_handle = spawn_mesh(app, m, mat)
-}
-
-start_find_path :: proc(app: ^App) {
-  log.infof("Finding path from %v to %v", agent_pos, end_pos)
-  path := nav.find_path(&navmesh, agent_pos, end_pos, 256)
-  if path != nil && len(path) > 0 {
-    delete(current_path)
-    current_path = path
-    log.infof("Path found with %d waypoints", len(path))
-    path_spawn_time = 0
-    path_active = true
-    current_waypoint_idx = 0
-    path_completed = false
-  }
-}
-
-update_position_marker :: proc(app: ^App, handle: ^world.NodeHandle, pos: [3]f32, color: [4]f32) {
-  world.destroy(&app.scene, handle^)
-  g := render.make_sphere(12, 6, 0.3, color)
-  m := render.mesh_create(&app.renderer, g)
-  mat := render.material_create(&app.renderer, render.make_material(metallic_value = 0.2, roughness_value = 0.8, emissive_value = 0.5))
-  handle^ = spawn_mesh(app, m, mat, pos + {0, 0.2, 0})
-}
-
-draw_path_debug :: proc(app: ^App) {
-  if !path_active || len(current_path) < 2 do return
-  lift := [3]f32{0, 0.15, 0}
-  for i in 0 ..< len(current_path) - 1 {
-    render.debug_segment(&app.renderer, current_path[i] + lift, current_path[i + 1] + lift, {1.0, 0.8, 0.0, 1.0})
-  }
-}
-
-find_navmesh_point_from_mouse :: proc(app: ^App) -> ([3]f32, bool) {
-  ray, ok := render.cursor_ray(&app.renderer, app.input.cursor)
-  if !ok do return {}, false
-  return nav.raycast(&navmesh, ray)
-}
-
-demo_mouse_pressed :: proc(app: ^App) {
-  if app.input.mouse_captured || !input.mouse_pressed(&app.input, .RIGHT) do return
-  pos, valid := find_navmesh_point_from_mouse(app)
-  if !valid { log.warn("No valid navmesh position found at click location"); return }
-  end_pos = pos
-  log.infof("Destination set to: %v", pos)
-  update_position_marker(app, &end_marker_handle, pos, {1, 0, 0, 1})
-  start_find_path(app)
+go_to :: proc(app: ^App, goal: [3]f32) {
+  world.translate(&app.scene, app.goal_marker, goal)
+  path := nav.find_path(&app.navmesh, app.agent_position, goal, MAX_PATH_POINTS)
+  if len(path) == 0 do return
+  delete(app.path)
+  app.path = path
+  app.next_waypoint = 0
+  app.path_age = 0
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
-  }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  demo_mouse_pressed(app)
-  if path_active {
-    path_spawn_time += dt
-    if path_spawn_time >= 5.0 do path_active = false
-    else                       do draw_path_debug(app)
-  }
-  if len(current_path) > 0 && !path_completed && current_waypoint_idx < len(current_path) {
-    target := current_path[current_waypoint_idx]
-    diff := target - agent_pos
-    distance := linalg.length(diff)
-    if distance < 0.5 {
-      current_waypoint_idx += 1
-      if current_waypoint_idx >= len(current_path) { path_completed = true; log.info("Agent reached destination!") }
-    } else {
-      move := agent_speed * dt
-      if move > distance do move = distance
-      agent_pos += linalg.normalize(diff) * move
-      world.translate(&app.scene, agent_handle, agent_pos + {0, 1, 0})
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
+    if input.mouse_pressed(&app.input, .RIGHT) {
+      ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
+      if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do go_to(app, goal)
     }
   }
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  follow_path(app, dt)
+  app.path_age += dt
+  if app.path_age < PATH_SHOW_SECONDS do draw_path(app)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
+}
+
+follow_path :: proc(app: ^App, dt: f32) {
+  if app.next_waypoint >= len(app.path) do return
+  to_waypoint := app.path[app.next_waypoint] - app.agent_position
+  distance := linalg.length(to_waypoint)
+  if distance < WAYPOINT_REACHED {
+    app.next_waypoint += 1
+    return
+  }
+  app.agent_position += to_waypoint / distance * min(AGENT_SPEED * dt, distance)
+  world.translate(&app.scene, app.agent, app.agent_position + {0, AGENT_HALF_HEIGHT, 0})
+}
+
+draw_path :: proc(app: ^App) {
+  lift := [3]f32{0, 0.15, 0}
+  for i in 1 ..< len(app.path) {
+    render.debug_segment(&app.renderer, app.path[i - 1] + lift, app.path[i] + lift, {1.0, 0.8, 0.0, 1.0})
+  }
 }

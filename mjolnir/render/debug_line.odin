@@ -17,7 +17,7 @@ DebugLineSegment :: struct {
 #assert(size_of(DebugLineSegment) == 48)
 
 // Segments beyond DEBUG_RING per ring between two frames are dropped. life <= 0 shows the
-// segment until the next update.
+// segment for one frame.
 @(private)
 debug_line_add :: proc(self: ^Renderer, life: f32, bypass_depth: bool, segs: ..DebugLineSegment) {
   sync.mutex_lock(&self.debug_mutex)

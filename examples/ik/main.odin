@@ -14,41 +14,55 @@ import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 
-scene: gltf.Scene
-rig: ^animation.Rig
-animator: animation.Animator
-animation_time: f32 = 0
-spider_root_node: world.NodeHandle
-mesh_node: world.NodeHandle
-ground_plane: world.NodeHandle
-
-leg_targets: [6][3]f32
-leg_layers: [6]Maybe(animation.LayerHandle)
-
-body_amplitude: mu.Real = 2.5
-body_speed: mu.Real = 0.15
-leg_lift: mu.Real = 2.5
-ik_weight: mu.Real = 1.0
-paused: bool = false
-show_markers: bool = true
-manual_feet: bool = false
-foot_y: [6]mu.Real = {0, 0, 0, 0, 0, 0}
-
-LEG_NAMES := [6]string{"FR", "MR", "BR", "FL", "ML", "BL"}
+LEG_COUNT :: 6
+LEG_NAMES := [LEG_COUNT]string{"FR", "MR", "BR", "FL", "ML", "BL"}
+LEG_CHAINS := [LEG_COUNT]struct {
+  root, tip: string,
+} {
+  {"leg_front_r_0", "leg_front_r_5"},
+  {"leg_middle_r_0", "leg_middle_r_5"},
+  {"leg_back_r_0", "leg_back_r_5"},
+  {"leg_front_l_0", "leg_front_l_5"},
+  {"leg_middle_l_0", "leg_middle_l_5"},
+  {"leg_back_l_0", "leg_back_l_5"},
+}
+HIP_LIMIT :: animation.JointLimit{{math.PI / 6, math.PI / 2, math.PI / 6}}
+JOINT_LIMIT :: animation.JointLimit{{math.PI / 2, math.PI / 2, math.PI / 2}}
+POLE_HEIGHT :: 5
 
 App :: struct {
-  window:   platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  debug:    debugui.Context,
-  input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  window:         platform.Platform,
+  scene:          world.World,
+  renderer:       render.Renderer,
+  debug:          debugui.Context,
+  input:          input.State,
+  orbit:          render.Orbit,
+  spider:         gltf.Scene,
+  spider_root:    world.NodeHandle,
+  spider_mesh:    world.NodeHandle,
+  rig:            ^animation.Rig,
+  animator:       animation.Animator,
+  time:           f32,
+  feet:           [LEG_COUNT][3]f32,
+  legs:           [LEG_COUNT]animation.LayerHandle,
+  body_amplitude: mu.Real,
+  body_speed:     mu.Real,
+  leg_lift:       mu.Real,
+  ik_weight:      mu.Real,
+  paused:         bool,
+  show_markers:   bool,
+  manual_feet:    bool,
+  foot_y:         [LEG_COUNT]mu.Real,
 }
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
+  app.body_amplitude = 2.5
+  app.body_speed = 0.15
+  app.leg_lift = 2.5
+  app.ik_weight = 1
+  app.show_markers = true
   w := &app.window
   if !platform.init(w, 800, 600, "IK") do return
   if !render.init(&app.renderer, "IK", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
@@ -69,71 +83,48 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {0, 20, 20}, {0, 0, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
-  scene = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
-  if len(scene.roots) == 0 || len(scene.skinned) == 0 do return true
-  spider_root_node = scene.roots[0]
-  world.translate(&app.scene, spider_root_node, [3]f32{0, 5, 0})
-  mesh_node = scene.skinned[0].node
-  rig = &scene.rigs[scene.skinned[0].rig]
-  skel := &rig.skeleton
-  animation.animator_init(&animator, rig)
+  ground := world.spawn(&app.scene)
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))
+  world.scale(&app.scene, ground, [3]f32{40, 0.2, 40})
+  light := world.spawn(&app.scene)
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
 
-  leg_configs := []struct{root_name, tip_name: string}{
-    {"leg_front_r_0", "leg_front_r_5"},
-    {"leg_middle_r_0", "leg_middle_r_5"},
-    {"leg_back_r_0", "leg_back_r_5"},
-    {"leg_front_l_0", "leg_front_l_5"},
-    {"leg_middle_l_0", "leg_middle_l_5"},
-    {"leg_back_l_0", "leg_back_l_5"},
-  }
-
-  body_pos := [3]f32{0, 5, 0}
-  deg30 := f32(math.PI / 6.0)
-  deg90 := f32(math.PI / 2.0)
-
-  for i in 0 ..< 6 {
-    tip_local, has_tip := animation.rest_position(skel, leg_configs[i].tip_name)
+  app.spider = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
+  if len(app.spider.roots) == 0 || len(app.spider.skinned) == 0 do return true
+  app.spider_root = app.spider.roots[0]
+  app.spider_mesh = app.spider.skinned[0].node
+  app.rig = &app.spider.rigs[app.spider.skinned[0].rig]
+  skel := &app.rig.skeleton
+  animation.animator_init(&app.animator, app.rig)
+  for chain, i in LEG_CHAINS {
+    tip, has_tip := animation.rest_position(skel, chain.tip)
     if !has_tip {
-      log.warnf("Leg %d: tip %s missing", i, leg_configs[i].tip_name)
+      log.warnf("Leg %d: tip %s missing", i, chain.tip)
       continue
     }
-    leg_targets[i] = {tip_local.x + body_pos.x, 0, tip_local.z + body_pos.z}
-
-    pole_pos := [3]f32{0, 10, 0}
-    if root_local, has_root := animation.rest_position(skel, leg_configs[i].root_name); has_root {
-      root_world := root_local + body_pos
-      pole_pos = {root_world.x * 0.5, root_world.y + 10, root_world.z * 0.5}
-    }
-
-    bones, _ := animation.bone_chain(skel, leg_configs[i].root_name, leg_configs[i].tip_name, context.temp_allocator)
-    // the hip swings 30 degrees, the other joints 90
-    for b, k in bones do animation.bone_limits(&animator)[b] = {{deg30, deg90, deg30} if k == 0 else {deg90, deg90, deg90}}
-    ik := animation.IKParams{target = leg_targets[i], pole = pole_pos, pole_weight = 1, space = .WORLD}
-    if idx, ok := animation.layer_create(&animator, rig, ik, bones); ok {
-      leg_layers[i] = idx
-    } else {
-      log.errorf("IK layer add failed leg %d", i)
-    }
+    app.feet[i] = {tip.x, 0, tip.z}
+    bones, _ := animation.bone_chain(skel, chain.root, chain.tip, context.temp_allocator)
+    for b, k in bones do animation.bone_limits(&app.animator)[b] = HIP_LIMIT if k == 0 else JOINT_LIMIT
+    ik := animation.IKParams{target = app.feet[i], pole = leg_pole(app.feet[i], 0), pole_weight = 1, space = .WORLD}
+    app.legs[i] = animation.layer_create(&app.animator, app.rig, ik, bones)
   }
-
-  ground_plane = world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground_plane.index), render.primitive(&app.renderer, .CUBE, .GRAY))
-  world.scale(&app.scene, ground_plane, [3]f32{40, 0.2, 40})
-  light := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 1, 1, 1}, 10.0)))
   return true
 }
 
+leg_pole :: proc(foot: [3]f32, body_x: f32) -> [3]f32 {
+  return {(foot.x + body_x) * 0.5, POLE_HEIGHT, foot.z * 0.5}
+}
+
 shutdown :: proc(app: ^App) {
-  gltf.destroy(&scene)
+  animation.destroy(&app.animator)
+  gltf.destroy(&app.spider, &app.scene, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -145,44 +136,34 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  if !paused do animation_time += dt
-  amp := f32(body_amplitude)
-  spd := f32(body_speed)
-  lift := f32(leg_lift)
-
-  body_x := amp * math.sin(animation_time * spd * 2 * math.PI)
-  body_pos := [3]f32{body_x, 0, 0}
-  world.translate(&app.scene, spider_root_node, body_pos)
-
-  for i in 0 ..< 6 {
-    pole_pos := [3]f32{leg_targets[i].x * 0.5 + body_pos.x * 0.5, 5, leg_targets[i].z * 0.5}
-    target_pos := leg_targets[i]
-    if manual_feet {
-      target_pos.y += f32(foot_y[i])
-    } else {
-      target_pos.y += lift * math.max(math.sin(animation_time * spd * math.PI), 0)
-    }
-    if layer, ok := leg_layers[i].?; ok {
-      if p, ok := animation.layer_params(&animator, layer, animation.IKParams); ok do p.target, p.pole = target_pos, pole_pos
-      animation.layer_fade(&animator, layer, f32(ik_weight))
-    }
-    if show_markers {
-      render.debug_sphere(&app.renderer, target_pos, 0.5, {1, 0.2, 0.2, 1})
-      render.debug_sphere(&app.renderer, pole_pos, 0.3, {0.3, 0.5, 1, 1})
-    }
-  }
-  if rig != nil do animation.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, mesh_node))
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  if app.rig != nil do walk(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  if rig != nil do render.stage_bones(&app.renderer, render.SlotHandle(mesh_node.index), animator.palette)
+  if app.rig != nil do render.stage_bones(&app.renderer, render.SlotHandle(app.spider_mesh.index), app.animator.palette)
   render.update(&app.renderer, dt)
+}
+
+walk :: proc(app: ^App, dt: f32) {
+  if !app.paused do app.time += dt
+  phase := app.time * f32(app.body_speed) * math.PI
+  body_x := f32(app.body_amplitude) * math.sin(phase * 2)
+  world.translate(&app.scene, app.spider_root, [3]f32{body_x, 0, 0})
+  for foot, i in app.feet {
+    target := foot
+    target.y += f32(app.foot_y[i]) if app.manual_feet else f32(app.leg_lift) * max(math.sin(phase), 0)
+    pole := leg_pole(foot, body_x)
+    if ik, ok := animation.layer_params(&app.animator, app.legs[i], animation.IKParams); ok do ik.target, ik.pole = target, pole
+    animation.layer_fade(&app.animator, app.legs[i], f32(app.ik_weight))
+    if app.show_markers {
+      render.debug_sphere(&app.renderer, target, 0.5, {1, 0.2, 0.2, 1})
+      render.debug_sphere(&app.renderer, pole, 0.3, {0.3, 0.5, 1, 1})
+    }
+  }
+  animation.animator_update(&app.animator, app.rig, dt, world.world_matrix(&app.scene, app.spider_mesh))
 }
 
 frame :: proc(app: ^App) -> bool {
@@ -190,23 +171,23 @@ frame :: proc(app: ^App) -> bool {
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "IK", {480, 20, 300, 560}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
-    mu.checkbox(ctx, "Pause", &paused)
-    mu.checkbox(ctx, "Show markers", &show_markers)
+    mu.checkbox(ctx, "Pause", &app.paused)
+    mu.checkbox(ctx, "Show markers", &app.show_markers)
     mu.label(ctx, "Body amplitude")
-    mu.slider(ctx, &body_amplitude, 0.0, 6.0)
+    mu.slider(ctx, &app.body_amplitude, 0, 6)
     mu.label(ctx, "Body speed")
-    mu.slider(ctx, &body_speed, 0.0, 1.0)
+    mu.slider(ctx, &app.body_speed, 0, 1)
     mu.label(ctx, "IK weight")
-    mu.slider(ctx, &ik_weight, 0.0, 1.0)
-    mu.checkbox(ctx, "Manual feet Y", &manual_feet)
-    if manual_feet {
-      for i in 0 ..< 6 {
-        mu.label(ctx, fmt.tprintf("%s foot Y", LEG_NAMES[i]))
-        mu.slider(ctx, &foot_y[i], 0.0, 6.0)
+    mu.slider(ctx, &app.ik_weight, 0, 1)
+    mu.checkbox(ctx, "Manual feet Y", &app.manual_feet)
+    if app.manual_feet {
+      for name, i in LEG_NAMES {
+        mu.label(ctx, fmt.tprintf("%s foot Y", name))
+        mu.slider(ctx, &app.foot_y[i], 0, 6)
       }
     } else {
       mu.label(ctx, "Leg lift")
-      mu.slider(ctx, &leg_lift, 0.0, 6.0)
+      mu.slider(ctx, &app.leg_lift, 0, 6)
     }
   }
   render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})

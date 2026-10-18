@@ -6,13 +6,14 @@ import "core:mem"
 import "core:slice"
 import "vendor:cgltf"
 
-// load_meshes creates a render mesh, material and textures for every glTF mesh a node references.
-// looks[i] draws data.meshes[i]; it is nil for meshes no node uses or that failed to upload.
-// Meshes used by a skinned node carry skinning data. Images must be embedded (a .glb's buffer
-// views): render reads no files.
+// load_meshes creates a render mesh, material and textures for every glTF mesh a node references,
+// and records them in scene. looks[i] draws data.meshes[i]; it is nil for meshes no node uses or
+// that failed to upload. Meshes used by a skinned node carry skinning data. Images must be
+// embedded (a .glb's buffer views): render reads no files.
 load_meshes :: proc(
   r: ^render.Renderer,
   data: ^cgltf.data,
+  scene: ^Scene,
   allocator := context.allocator,
 ) -> (
   looks: []Maybe(render.MeshAttachment),
@@ -28,6 +29,10 @@ load_meshes :: proc(
   }
   textures := make(map[^cgltf.texture]render.TextureHandle, context.temp_allocator)
   materials := make(map[^cgltf.material]render.MaterialHandle, context.temp_allocator)
+  defer {
+    for _, t in textures do append(&scene.textures, t)
+    for _, m in materials do append(&scene.materials, m)
+  }
   for &gltf_mesh, i in data.meshes do if used[i] {
     if len(gltf_mesh.primitives) == 0 do return looks, false
     // One material per mesh: the first primitive's, or plain white when it has none
@@ -39,6 +44,7 @@ load_meshes :: proc(
     geometry := load_geometry(&gltf_mesh, skinned[i])
     log.infof("Processed mesh with %d vertices, %d indices", len(geometry.vertices), len(geometry.indices))
     handle := render.mesh_create(r, geometry) or_continue
+    append(&scene.meshes, handle)
     looks[i] = render.MeshAttachment{mesh = handle, material = material, cast_shadow = true}
   }
   log.infof("glTF looks: %d textures, %d materials", len(textures), len(materials))

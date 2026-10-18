@@ -22,17 +22,16 @@ metallic_min: mu.Real = 0.0
 metallic_max: mu.Real = 1.0
 roughness_min: mu.Real = 0.0
 roughness_max: mu.Real = 1.0
-sun_light: world.NodeHandle
-grid_materials: [GRID][GRID]render.MaterialHandle
 
 App :: struct {
-  window:   platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  debug:    debugui.Context,
-  input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  window:           platform.Platform,
+  scene:            world.World,
+  renderer:         render.Renderer,
+  debug:            debugui.Context,
+  input:            input.State,
+  orbit:            render.Orbit,
+  sun:              render.LightHandle,
+  sphere_materials: [GRID][GRID]render.MaterialHandle,
 }
 
 main :: proc() {
@@ -54,7 +53,6 @@ main :: proc() {
   )
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
@@ -62,7 +60,7 @@ setup :: proc(app: ^App) -> bool {
 
   half := f32(GRID - 1) * 0.5 * SPACING
   render.camera_look_at(render.main_camera(&app.renderer), {half + 2, half + 4, half * 2.4}, {0, half - 1, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
   plane_mesh := app.renderer.builtin_meshes[.QUAD_XZ]
@@ -81,18 +79,19 @@ setup :: proc(app: ^App) -> bool {
     mat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = base_color,
       metallic_value = m, roughness_value = r,
     ))
-    grid_materials[row][col] = mat
+    app.sphere_materials[row][col] = mat
     x := f32(col) * SPACING - half
     y := f32(row) * SPACING
     sphere := world.spawn(&app.scene, {x, y, 0})
     render.attach(&app.renderer, render.SlotHandle(sphere.index), render.MeshAttachment{mesh = sphere_mesh, material = mat, cast_shadow = true})
   }
 
-  q1 := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
-  q2 := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
-  sun_light = world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, render.SlotHandle(sun_light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, f32(sun_intensity)}, 12.0)))
-  world.rotate(&app.scene, sun_light, q2 * q1)
+  sun_heading := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
+  sun_elevation := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
+  sun := world.spawn(&app.scene, {0, 10, 0})
+  app.sun = render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, f32(sun_intensity), 12.0))
+  render.attach(&app.renderer, render.SlotHandle(sun.index), app.sun)
+  world.rotate(&app.scene, sun, sun_elevation * sun_heading)
   return true
 }
 
@@ -122,21 +121,16 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(sun_light.index), render.LightHandle)); ok {
-    l.color[3] = f32(sun_intensity)
-  }
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.light(&app.renderer, app.sun).intensity = f32(sun_intensity)
   app.renderer.ibl_intensity = f32(ibl_intensity)
   app.renderer.skybox_intensity = skybox_on ? 1 : 0
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
-    mat := render.material(&app.renderer, grid_materials[row][col]) or_continue
+    mat := render.material(&app.renderer, app.sphere_materials[row][col]) or_continue
     mat.metallic_value = m
     mat.roughness_value = r
   }

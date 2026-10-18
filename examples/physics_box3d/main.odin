@@ -17,10 +17,17 @@ NY :: #config(NY, 3)
 NZ :: #config(NZ, 5)
 PIECE_COUNT :: NX * NY * NZ
 PIECE_MASS :: 50.0
+PIECE_BOX_DENSITY :: PIECE_MASS / (2.0 * 2.0 * 2.0)
+PIECE_CYLINDER_DENSITY :: PIECE_MASS / (2.0 * math.PI)
+PIECE_SPHERE_DENSITY :: PIECE_MASS / (4.0 / 3.0 * math.PI)
+CYLINDER_HEIGHT :: 2.0
+CYLINDER_RADIUS :: 1.0
+CYLINDER_SIDES :: 16
 SPHERE_RADIUS :: 3.0
 PLANE_WIDTH :: max(10.0, NX * 0.8)
 PLANE_HEIGHT :: max(10.0, NZ * 0.8)
 KILL_Y :: -50.0
+BOX3D_SUBSTEPS :: 4
 
 Piece :: struct {
   body: b3.BodyId,
@@ -34,8 +41,7 @@ App :: struct {
   input:    input.State,
   phys:     b3.WorldId,
   pieces:   [dynamic]Piece,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  orbit:    render.Orbit,
 }
 
 main :: proc() {
@@ -69,13 +75,12 @@ shutdown :: proc(app: ^App) {
   free(app)
 }
 
-spawn_mesh :: proc(app: ^App, m: render.MeshHandle, mat: render.MaterialHandle, parent: world.NodeHandle) -> world.NodeHandle {
-  n := world.spawn(&app.scene, parent = parent)
-  render.attach(&app.renderer, render.SlotHandle(n.index), render.MeshAttachment{mesh = m, material = mat, cast_shadow = true})
-  return n
+spawn_visual :: proc(app: ^App, body_node: world.NodeHandle, mesh: render.MeshHandle, material: render.MaterialHandle) -> world.NodeHandle {
+  visual := world.spawn(&app.scene, parent = body_node)
+  render.attach(&app.renderer, render.SlotHandle(visual.index), render.MeshAttachment{mesh = mesh, material = material, cast_shadow = true})
+  return visual
 }
 
-// Matches the mjolnir/physics body defaults.
 shape_def :: proc(density: f32) -> b3.ShapeDef {
   def := b3.DefaultShapeDef()
   def.density = density
@@ -91,67 +96,59 @@ body_create :: proc(app: ^App, type: b3.BodyType, position: [3]f32) -> b3.BodyId
   return b3.CreateBody(app.phys, def)
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  ground_mesh := app.renderer.builtin_meshes[.CUBE]
-  ground_mat := app.renderer.builtin_materials[.GRAY]
-  sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
-  sphere_mat := app.renderer.builtin_materials[.MAGENTA]
   cube_mesh := app.renderer.builtin_meshes[.CUBE]
-  cube_mat := app.renderer.builtin_materials[.RED]
+  sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
   rand_sphere := render.make_sphere()
   rand_cylinder := render.make_cylinder()
   for &v in rand_sphere.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   for &v in rand_cylinder.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   rand_sphere_mesh := render.mesh_create(&app.renderer, rand_sphere)
   rand_cylinder_mesh := render.mesh_create(&app.renderer, rand_cylinder)
-  rand_mat := app.renderer.builtin_materials[.WHITE]
+  white := app.renderer.builtin_materials[.WHITE]
 
   ground := world.spawn(&app.scene, {0, -0.5, 0})
   ground_body := body_create(app, .staticBody, {0, -0.5, 0})
   ground_hull := b3.MakeBoxHull(PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   _ = b3.CreateHullShape(ground_body, shape_def(0), &ground_hull.base)
-  ground_visual := spawn_mesh(app, ground_mesh, ground_mat, ground)
+  ground_visual := spawn_visual(app, ground, cube_mesh, app.renderer.builtin_materials[.GRAY])
   world.scale(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   ball := world.spawn(&app.scene, {2.5, SPHERE_RADIUS, 0})
   ball_body := body_create(app, .staticBody, {2.5, SPHERE_RADIUS, 0})
   _ = b3.CreateSphereShape(ball_body, shape_def(0), &b3.Sphere{radius = SPHERE_RADIUS})
-  ball_visual := spawn_mesh(app, sphere_mesh, sphere_mat, ball)
+  ball_visual := spawn_visual(app, ball, sphere_mesh, app.renderer.builtin_materials[.MAGENTA])
   world.scale(&app.scene, ball_visual, SPHERE_RADIUS)
 
-  // Shared unit shapes; densities give every piece PIECE_MASS. CreateHullShape
-  // clones the hull, so the cylinder is freed after setup. The hull spans
-  // y in [yOffset, yOffset+height]; -1 centers it like the mesh.
   box_hull := b3.MakeBoxHull(1, 1, 1)
-  cylinder_hull := b3.CreateCylinder(2.0, 1.0, -1.0, 16)
+  centered_y_offset: f32 = -CYLINDER_HEIGHT / 2.0
+  cylinder_hull := b3.CreateCylinder(CYLINDER_HEIGHT, CYLINDER_RADIUS, centered_y_offset, CYLINDER_SIDES)
   defer b3.DestroyHull(cylinder_hull)
   for x in 0 ..< NX do for y in 0 ..< NY do for z in 0 ..< NZ {
     pos := [3]f32{f32(x - NX/2) * 3.0, f32(y) * 3.0 + 10.0, f32(z - NZ/2) * 3.0}
     i := (x * NY + y) * NZ + z
     body := body_create(app, .dynamicBody, pos)
-    // Unit-sized shapes match the unit builtin meshes, so visuals need no scale.
-    piece_mesh, piece_mat := rand_cylinder_mesh, rand_mat
+    piece_mesh, piece_material := rand_cylinder_mesh, white
     switch i % 3 {
     case 0:
-      _ = b3.CreateHullShape(body, shape_def(PIECE_MASS / (2.0 * math.PI)), cylinder_hull)
+      _ = b3.CreateHullShape(body, shape_def(PIECE_CYLINDER_DENSITY), cylinder_hull)
     case 1:
-      _ = b3.CreateHullShape(body, shape_def(PIECE_MASS / 8.0), &box_hull.base)
-      piece_mesh, piece_mat = cube_mesh, cube_mat
+      _ = b3.CreateHullShape(body, shape_def(PIECE_BOX_DENSITY), &box_hull.base)
+      piece_mesh, piece_material = cube_mesh, app.renderer.builtin_materials[.RED]
     case 2:
-      _ = b3.CreateSphereShape(body, shape_def(PIECE_MASS / (4.0 / 3.0 * math.PI)), &b3.Sphere{radius = 1.0})
+      _ = b3.CreateSphereShape(body, shape_def(PIECE_SPHERE_DENSITY), &b3.Sphere{radius = 1.0})
       piece_mesh = rand_sphere_mesh
     }
     node := world.spawn(&app.scene, pos)
-    spawn_mesh(app, piece_mesh, piece_mat, node)
+    spawn_visual(app, node, piece_mesh, piece_material)
     append(&app.pieces, Piece{body, node})
   }
   log.infof("Created %d Box3D bodies", PIECE_COUNT)
   render.camera_look_at(render.main_camera(&app.renderer), {30, 25, 30}, {0, 5, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   light := world.spawn(&app.scene, {0, 20, 0})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_spot_light({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_spot_light({0.8, 0.9, 1}, 5000, 25.0, math.PI * 0.25)))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   return true
 }
@@ -163,14 +160,11 @@ should_close :: proc(app: ^App) -> bool {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  b3.World_Step(app.phys, dt, 4)
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  b3.World_Step(app.phys, dt, BOX3D_SUBSTEPS)
   for i := len(app.pieces) - 1; i >= 0; i -= 1 {
     p := app.pieces[i]
     if !b3.Body_IsAwake(p.body) do continue

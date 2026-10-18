@@ -95,6 +95,20 @@ children :: proc(self: ^World, handle: NodeHandle) -> []NodeHandle {
   return children_of(self, handle.index)
 }
 
+// find returns the first node named `name` under `root` (the whole world by default), searching
+// depth first; false when none is.
+find :: proc(self: ^World, name: string, root: NodeHandle = {}) -> (handle: NodeHandle, ok: bool) #optional_ok {
+  stack := make([dynamic]NodeHandle, context.temp_allocator)
+  append(&stack, root if root != {} else self.root)
+  for len(stack) > 0 {
+    h := pop(&stack)
+    n := lookup(self, h) or_continue
+    if n.name == name && h != root do return h, true
+    append(&stack, ..children(self, h))
+  }
+  return
+}
+
 @(private)
 children_of :: #force_inline proc(self: ^World, i: u32) -> []NodeHandle {
   return self.children[self.child_first[i]:][:self.child_count[i]]

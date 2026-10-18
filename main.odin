@@ -49,6 +49,7 @@ NodeClip :: struct {
 }
 
 characters: [dynamic]Character
+models: [dynamic]gltf.Scene
 node_clips: [dynamic]NodeClip
 
 add_character :: proc(scene: gltf.Scene, clip: string) -> int {
@@ -103,12 +104,10 @@ update :: proc(app: ^App, dt: f32) {
   if app.free_cam do fly_camera(app, dt)
   else {
     if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-      yaw, pitch, dist := render.camera_orbit_state(cam)
-      if input.mouse_down(&app.input, .LEFT) {
-        yaw += app.input.mouse_delta.x * 0.02
-        pitch = clamp(pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-      }
-      render.camera_orbit(cam, yaw, pitch, clamp(dist - app.input.scroll.y * 2, 1, 200))
+      orbit := render.orbit_from_camera(cam)
+      drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+      render.orbit_drag(&orbit, drag, app.input.scroll.y)
+      render.camera_orbit(cam, orbit)
     }
   }
   if !app.input.keyboard_captured {
@@ -154,7 +153,16 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  for &c in characters do gltf.destroy(&c.scene)
+  for &c in characters {
+    for &a in c.animators do animation.destroy(&a)
+    delete(c.animators)
+    gltf.destroy(&c.scene, &app.scene, &app.renderer)
+  }
+  for &m in models do gltf.destroy(&m, &app.scene, &app.renderer)
+  delete(characters)
+  delete(models)
+  for &nc in node_clips do animation.clip_destroy(&nc.clip)
+  delete(node_clips)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
@@ -344,7 +352,7 @@ setup :: proc(app: ^App) -> bool {
   when true {
     log.info("loading Hammer GLTF...")
     if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/Mjolnir.glb")); ok {
-      defer gltf.destroy(&gltf_nodes)
+      append(&models, gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 3, 1, -2)
@@ -383,7 +391,7 @@ setup :: proc(app: ^App) -> bool {
     log.info("loading Damaged Helmet GLTF...")
     if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/DamagedHelmet.glb"));
        ok {
-      defer gltf.destroy(&gltf_nodes)
+      append(&models, gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 0, 1, 3)
@@ -394,7 +402,7 @@ setup :: proc(app: ^App) -> bool {
   when true {
     log.info("loading Suzanne GLTF...")
     if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/Suzanne.glb")); ok {
-      defer gltf.destroy(&gltf_nodes)
+      append(&models, gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, -3, 1, 0)
@@ -405,7 +413,7 @@ setup :: proc(app: ^App) -> bool {
     log.info("loading SciFiHelmet GLTF...")
     if gltf_nodes, ok := gltf.scene_create(&app.scene, &app.renderer, #load("assets/SciFiHelmet.glb"));
        ok {
-      defer gltf.destroy(&gltf_nodes)
+      append(&models, gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&app.scene, handle, 3, 0, 3)
@@ -432,11 +440,10 @@ setup :: proc(app: ^App) -> bool {
       // Create lights as children of the root, arranged in a circle
       radius: f32 = 8.0
       for i in 0 ..< LIGHT_COUNT {
-        color := [4]f32 {
+        color := [3]f32 {
           0.5 + 0.5 * math.sin(f32(i)),
           0.5 + 0.5 * math.cos(f32(i)),
           0.5 + 0.5 * math.sin(f32(i)),
-          0.5,
         }
         // Calculate fixed local position in a circle
         angle := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
@@ -455,14 +462,7 @@ setup :: proc(app: ^App) -> bool {
           spawn(
             app,
             parent = lights_root_handle,
-            attachment = render.light_create(&app.renderer, render.Light{
-              type        = .SPOT,
-              color       = color,
-              radius      = 14.0,
-              angle_inner = math.PI * 0.25 * 0.8,
-              angle_outer = math.PI * 0.25,
-              cast_shadow = true,
-            }),
+            attachment = render.light_create(&app.renderer, render.make_spot_light(color, 300, radius = 14, angle = math.PI * 0.25)),
           ) or_continue
           world.translate(
             &app.scene,
@@ -482,7 +482,7 @@ setup :: proc(app: ^App) -> bool {
           spawn(
             app,
             parent = lights_root_handle,
-            attachment = render.light_create(&app.renderer, render.Light{type = .POINT, color = color, radius = 14.0, cast_shadow = true}),
+            attachment = render.light_create(&app.renderer, render.make_point_light(color, 300, radius = 14)),
           ) or_continue
           world.translate(
             &app.scene,
@@ -506,7 +506,7 @@ setup :: proc(app: ^App) -> bool {
       }
     }
     when ENABLE_DIRECTIONAL_LIGHT {
-      dir_light_handle, _ := spawn(app, attachment = render.light_create(&app.renderer, render.make_directional_light(color = {0.2, 0.5, 0.9, 3.0}, shadow_radius = 20, cast_shadow = true)))
+      dir_light_handle, _ := spawn(app, attachment = render.light_create(&app.renderer, render.make_directional_light(color = {0.2, 0.5, 0.9}, intensity = 3, shadow_radius = 20)))
       world.rotate(&app.scene, dir_light_handle, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
     }
   }
@@ -683,6 +683,6 @@ on_key :: proc(app: ^App, key: input.Key, pressed: bool) {
 on_post_render :: proc(app: ^App) {
   if material, ok := render.material(&app.renderer, portal_material_handle);
      ok {
-    material.albedo_texture = render.camera_image(&app.renderer, portal_camera_handle, .FINAL_IMAGE)
+    material.albedo_texture = render.camera_image(&app.renderer, portal_camera_handle, .FINAL_IMAGE, previous_frame = true)
   }
 }

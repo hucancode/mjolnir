@@ -16,8 +16,7 @@ App :: struct {
   renderer:  render.Renderer,
   debug:     debugui.Context,
   input:     input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  orbit:     render.Orbit,
   toon:      render.MaterialShader,
   materials: [dynamic]render.MaterialHandle,
 }
@@ -45,15 +44,13 @@ main :: proc() {
   )
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {0, 4, 10}, {0, 1, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
-  // each backend embeds only its own source
   when render.RENDER_BACKEND == "vulkan" {
     toon_spirv, toon_wgsl := #load("toon.frag.spv"), ""
   } else {
@@ -78,12 +75,11 @@ setup :: proc(app: ^App) -> bool {
     append(&app.materials, mat)
     spawn_mesh(app, shapes[i], mat, {f32(i) * 2.5 - 3.75, 1.0, 0})
   }
-  // PBR for comparison, behind
   pbr := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.9, 0.95, 1}, roughness_value = 0.4))
   spawn_mesh(app, meshes[.SPHERE], pbr, {0, 1.0, -3.0})
 
   sun := world.spawn(&app.scene, {-3, 8, 6})
-  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9, 3}, shadow_radius = 8.0, cast_shadow = true)))
+  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9}, intensity = 3, shadow_radius = 8.0)))
   return true
 }
 
@@ -109,13 +105,10 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   for h in app.materials {
     m := render.material(&app.renderer, h) or_continue
     m.params[0] = {f32(bands), f32(rim), f32(shade), 0}

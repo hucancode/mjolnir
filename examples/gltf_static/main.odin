@@ -16,8 +16,7 @@ App :: struct {
   renderer: render.Renderer,
   input:    input.State,
   gltf:     gltf.Scene,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  orbit:    render.Orbit,
 }
 
 main :: proc() {
@@ -39,13 +38,11 @@ main :: proc() {
   )
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-  render.camera_look_at(render.main_camera(&app.renderer), {5, 6, 5}, {0, 5, 0})
-
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  render.camera_look_at(render.main_camera(&app.renderer), {6, 4, 6}, {0, 1, 0})
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
   app.gltf = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/Duck.glb"))
   light := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
@@ -53,7 +50,7 @@ setup :: proc(app: ^App) -> bool {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.destroy(&app.gltf)
+  gltf.destroy(&app.gltf, &app.scene, &app.renderer)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
@@ -67,13 +64,10 @@ should_close :: proc(app: ^App) -> bool {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   rot := dt * math.PI * 0.5
   for h in app.gltf.roots do world.rotate_by(&app.scene, h, rot)
   world.update(&app.scene)

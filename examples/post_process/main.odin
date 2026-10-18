@@ -16,12 +16,10 @@ App :: struct {
   renderer: render.Renderer,
   debug:    debugui.Context,
   input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
-  vignette:         render.PostShader,
+  orbit:    render.Orbit,
+  vignette: render.PostShader,
 }
 
-// The params of vignette.frag / vignette.wgsl, as their push block lays them out.
 VignetteParams :: struct {
   color:    [3]f32,
   radius:   f32,
@@ -86,14 +84,12 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {6, 5, 10}, {0, 1.0, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  // each backend embeds only its own source
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   when render.RENDER_BACKEND == "vulkan" {
     vignette_spirv, vignette_wgsl := #load("vignette.frag.spv"), ""
   } else {
@@ -106,7 +102,7 @@ setup :: proc(app: ^App) -> bool {
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 30.0)
 
-  cube_mesh   := app.renderer.builtin_meshes[.CUBE]
+  cube_mesh := app.renderer.builtin_meshes[.CUBE]
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
 
   magenta_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.1, 0.8, 1}, emissive_value = 4.0))
@@ -129,10 +125,9 @@ setup :: proc(app: ^App) -> bool {
   for i in 0 ..< 5 do spawn_mesh(app, cube_mesh, white_mat, {f32(i) * 4.0 - 8.0, 0.5, -7.0})
 
   sun := world.spawn(&app.scene, {-3, 8, 6})
-  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9, 1}, shadow_radius = 5.0, cast_shadow = true)))
+  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1.0, 0.95, 0.9}, shadow_radius = 5.0)))
   lamp := world.spawn(&app.scene, {0, 3, 0})
-  render.attach(&app.renderer, render.SlotHandle(lamp.index), render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2, 1}, radius = 8.0, cast_shadow = false)))
-  log.info("Post-process stack panel — toggle effects via debug UI")
+  render.attach(&app.renderer, render.SlotHandle(lamp.index), render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2}, intensity = 200, radius = 8.0, cast_shadow = false)))
   return true
 }
 
@@ -145,13 +140,10 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   clear(&app.renderer.effect_stack)
   if outline_on    do append(&app.renderer.effect_stack, render.OutlineEffect{thickness = f32(outline_thickness)})
   if fog_on        do append(&app.renderer.effect_stack, render.FogEffect{color = {0.55, 0.6, 0.7}, start = f32(fog_start), end = f32(fog_end)})

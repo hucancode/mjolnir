@@ -421,6 +421,15 @@ clip_time :: proc(self: ^Animator, layer: LayerHandle) -> (time: f32, ok: bool) 
   return self.state[l.state.start], true
 }
 
+// clip_done reports whether a ONCE clip layer reached its end; false for a playing or
+// non-clip layer.
+clip_done :: proc(self: ^Animator, layer: LayerHandle) -> bool {
+  if !valid_layer(self, layer) do return false
+  l := &self.layers[layer.index]
+  _ = l.params.(ClipParams) or_return
+  return self.state[l.state.start + 2] != 0
+}
+
 // clip_seek moves a clip layer to `time` seconds and plays it from there.
 clip_seek :: proc(self: ^Animator, layer: LayerHandle, time: f32) -> bool {
   if !valid_layer(self, layer) do return false

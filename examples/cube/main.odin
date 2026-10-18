@@ -13,8 +13,7 @@ App :: struct {
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  orbit:    render.Orbit,
 }
 
 main :: proc() {
@@ -36,14 +35,13 @@ main :: proc() {
   )
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   cube := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .RED))
   render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 0, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   return true
 }
 
@@ -61,13 +59,10 @@ should_close :: proc(app: ^App) -> bool {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)

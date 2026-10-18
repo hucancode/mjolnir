@@ -4,7 +4,6 @@ package main
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:slice"
 import mu "vendor:microui"
 import "../../mjolnir"
 import "../../mjolnir/debugui"
@@ -15,48 +14,63 @@ import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 
-scene: gltf.Scene
-rig: ^animation.Rig
-animator: animation.Animator
-animation_time: f32 = 0
-spider_root_node: world.NodeHandle
-spider_mesh_node: world.NodeHandle
-leg_layers: [6]Maybe(animation.LayerHandle)
-ground_plane: world.NodeHandle
+LEG_COUNT :: 6
+LEG_CHAINS := [LEG_COUNT]struct {
+  root, tip: string,
+} {
+  {"leg_front_r_0", "leg_front_r_5"},
+  {"leg_middle_r_0", "leg_middle_r_5"},
+  {"leg_back_r_0", "leg_back_r_5"},
+  {"leg_front_l_0", "leg_front_l_5"},
+  {"leg_middle_l_0", "leg_middle_l_5"},
+  {"leg_back_l_0", "leg_back_l_5"},
+}
+HIP_LIMIT :: animation.JointLimit{{math.PI / 6, math.PI / 2, math.PI / 6}}
+JOINT_LIMIT :: animation.JointLimit{{math.PI / 2, math.PI / 2, math.PI / 2}}
+BODY_HEIGHT :: 2
 
-lift_frequency_default :: f32(1.5)
-lift_height_a: mu.Real = 0.5
-lift_height_b: mu.Real = 0.5
-lift_duration_a: mu.Real = 0.6
-lift_duration_b: mu.Real = 0.6
-lift_frequency_shared: mu.Real = mu.Real(lift_frequency_default)
-phase_offset_b: mu.Real = mu.Real(lift_frequency_default * 0.5)
-
-body_amplitude: mu.Real = 8.0
-body_speed: mu.Real = 0.05
-body_anim_enabled: bool = true
-body_pos_x: mu.Real = 0.0
-body_pos_z: mu.Real = 0.0
-body_lerp_rate: mu.Real = 2.0
-body_max_speed: mu.Real = 4.0
-body_current_pos: [3]f32 = {0, 2, 0}
-
-GROUP_A := [3]int{0, 2, 4}
-GROUP_B := [3]int{1, 3, 5}
+Tripod :: struct {
+  lift_height:   mu.Real,
+  lift_duration: mu.Real,
+  phase:         mu.Real,
+}
 
 App :: struct {
-  window:   platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  debug:    debugui.Context,
-  input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  window:         platform.Platform,
+  scene:          world.World,
+  renderer:       render.Renderer,
+  debug:          debugui.Context,
+  input:          input.State,
+  orbit:          render.Orbit,
+  spider:         gltf.Scene,
+  spider_root:    world.NodeHandle,
+  spider_mesh:    world.NodeHandle,
+  rig:            ^animation.Rig,
+  animator:       animation.Animator,
+  legs:           [LEG_COUNT]animation.LayerHandle,
+  time:           f32,
+  tripods:        [2]Tripod,
+  lift_period:    mu.Real,
+  animate_body:   bool,
+  body_amplitude: mu.Real,
+  body_speed:     mu.Real,
+  body_target:    [2]mu.Real,
+  body_lerp_rate: f32,
+  body_max_speed: f32,
+  body_position:  [3]f32,
 }
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
+  app.lift_period = 1.5
+  app.tripods = {{0.5, 0.6, 0}, {0.5, 0.6, 0.75}}
+  app.animate_body = true
+  app.body_amplitude = 8
+  app.body_speed = 0.05
+  app.body_lerp_rate = 2
+  app.body_max_speed = 4
+  app.body_position = {0, BODY_HEIGHT, 0}
   w := &app.window
   if !platform.init(w, 900, 700, "Spider Leg") do return
   if !render.init(&app.renderer, "Spider Leg", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
@@ -74,121 +88,99 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
+  animation.destroy(&app.animator)
+  gltf.destroy(&app.spider, &app.scene, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
-  gltf.destroy(&scene)
 }
 
 should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {0, 30, 15}, {0, 0, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  scene = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
-  if len(scene.roots) == 0 || len(scene.skinned) == 0 do return true
-  spider_root_node = scene.roots[0]
-  world.translate(&app.scene, spider_root_node, y = 5)
-  spider_mesh_node = scene.skinned[0].node
-  rig = &scene.rigs[scene.skinned[0].rig]
-  skel := &rig.skeleton
-  animation.animator_init(&animator, rig)
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
-  leg_meta := [6]struct{root_name, tip_name: string, time_offset: f32}{
-    {"leg_front_r_0",  "leg_front_r_5",  0.0},
-    {"leg_middle_r_0", "leg_middle_r_5", lift_frequency_default * 0.5},
-    {"leg_back_r_0",   "leg_back_r_5",   0.0},
-    {"leg_front_l_0",  "leg_front_l_5",  lift_frequency_default * 0.5},
-    {"leg_middle_l_0", "leg_middle_l_5", 0.0},
-    {"leg_back_l_0",   "leg_back_l_5",   lift_frequency_default * 0.5},
-  }
-
-  deg30 := f32(math.PI / 6.0)
-  deg90 := f32(math.PI / 2.0)
-  // one leg layer per leg; the two tripod groups step half a cycle apart
-  limits := animation.bone_limits(&animator)
-  for i in 0 ..< 6 {
-    offset, _ := animation.rest_offset(skel, leg_meta[i].root_name, leg_meta[i].tip_name)
-    bones, _ := animation.bone_chain(skel, leg_meta[i].root_name, leg_meta[i].tip_name, context.temp_allocator)
-    for b, k in bones do limits[b] = {{deg30, deg90, deg30} if k == 0 else {deg90, deg90, deg90}}
-    in_group_a := slice.contains(GROUP_A[:], i)
-    leg := animation.LegParams {
-      offset         = offset,
-      lift_height    = f32(in_group_a ? lift_height_a : lift_height_b),
-      lift_frequency = f32(lift_frequency_shared),
-      lift_duration  = f32(in_group_a ? lift_duration_a : lift_duration_b),
-      time_offset    = leg_meta[i].time_offset,
-    }
-    if idx, ok := animation.layer_create(&animator, rig, leg, bones); ok do leg_layers[i] = idx
-  }
-
-  ground_plane = world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground_plane.index), render.primitive(&app.renderer, .CUBE, .GRAY))
-  world.scale(&app.scene, ground_plane, [3]f32{20, 0.2, 20})
+  ground := world.spawn(&app.scene)
+  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))
+  world.scale(&app.scene, ground, [3]f32{20, 0.2, 20})
   light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light(radius=15)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light(intensity = 400, radius = 15)))
+
+  app.spider = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/spider.glb"))
+  if len(app.spider.roots) == 0 || len(app.spider.skinned) == 0 do return true
+  app.spider_root = app.spider.roots[0]
+  app.spider_mesh = app.spider.skinned[0].node
+  app.rig = &app.spider.rigs[app.spider.skinned[0].rig]
+  skel := &app.rig.skeleton
+  animation.animator_init(&app.animator, app.rig)
+  limits := animation.bone_limits(&app.animator)
+  for chain, i in LEG_CHAINS {
+    offset, _ := animation.rest_offset(skel, chain.root, chain.tip)
+    bones, _ := animation.bone_chain(skel, chain.root, chain.tip, context.temp_allocator)
+    for b, k in bones do limits[b] = HIP_LIMIT if k == 0 else JOINT_LIMIT
+    leg := animation.LegParams{offset = offset}
+    tripod_step(app, &leg, i)
+    app.legs[i] = animation.layer_create(&app.animator, app.rig, leg, bones)
+  }
   return true
 }
 
-apply_group :: proc(app: ^App, group: []int, lift_height, lift_duration, lift_frequency, time_offset: f32) {
-  for i in group {
-    layer := leg_layers[i].? or_continue
-    p := animation.layer_params(&animator, layer, animation.LegParams) or_continue
-    p.lift_height, p.lift_duration, p.lift_frequency, p.time_offset = lift_height, lift_duration, lift_frequency, time_offset
-  }
+tripod_step :: proc(app: ^App, leg: ^animation.LegParams, index: int) {
+  tripod := app.tripods[index % 2]
+  leg.lift_height = f32(tripod.lift_height)
+  leg.lift_duration = f32(tripod.lift_duration)
+  leg.lift_frequency = f32(app.lift_period)
+  leg.time_offset = f32(tripod.phase)
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  if body_anim_enabled {
-    animation_time += dt
-    body_x := f32(body_amplitude) * math.sin(animation_time * f32(body_speed) * 2 * math.PI)
-    body_current_pos = {body_x, 0.2, 0}
-    body_pos_x = mu.Real(body_x)
-    body_pos_z = 0
-  } else {
-    target := [3]f32{f32(body_pos_x), 2, f32(body_pos_z)}
-    t := 1 - math.exp(-f32(body_lerp_rate) * dt)
-    desired := linalg.lerp(body_current_pos, target, t)
-    step := desired - body_current_pos
-    max_step := f32(body_max_speed) * dt
-    step_len := linalg.length(step)
-    if step_len > max_step do step *= max_step / step_len
-    body_current_pos += step
-  }
-  world.translate(&app.scene, spider_root_node, body_current_pos)
-
-  apply_group(app, GROUP_A[:], f32(lift_height_a), f32(lift_duration_a), f32(lift_frequency_shared), 0.0)
-  apply_group(app, GROUP_B[:], f32(lift_height_b), f32(lift_duration_b), f32(lift_frequency_shared), f32(phase_offset_b))
-
-  if rig != nil do animation.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, spider_mesh_node))
-
-  red := [4]f32{1, 0.2, 0.2, 1}
-  for l in leg_layers {
-    foot := animation.leg_foot(&animator, l.? or_continue) or_continue
-    render.debug_sphere(&app.renderer, foot, 0.2, red)
-  }
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  if app.rig != nil do walk(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  if rig != nil do render.stage_bones(&app.renderer, render.SlotHandle(spider_mesh_node.index), animator.palette)
+  if app.rig != nil do render.stage_bones(&app.renderer, render.SlotHandle(app.spider_mesh.index), app.animator.palette)
   render.update(&app.renderer, dt)
+}
+
+walk :: proc(app: ^App, dt: f32) {
+  move_body(app, dt)
+  world.translate(&app.scene, app.spider_root, app.body_position)
+  for layer, i in app.legs {
+    if leg, ok := animation.layer_params(&app.animator, layer, animation.LegParams); ok do tripod_step(app, leg, i)
+  }
+  animation.animator_update(&app.animator, app.rig, dt, world.world_matrix(&app.scene, app.spider_mesh))
+  for layer in app.legs {
+    if foot, ok := animation.leg_foot(&app.animator, layer); ok do render.debug_sphere(&app.renderer, foot, 0.2, {1, 0.2, 0.2, 1})
+  }
+}
+
+move_body :: proc(app: ^App, dt: f32) {
+  if app.animate_body {
+    app.time += dt
+    x := f32(app.body_amplitude) * math.sin(app.time * f32(app.body_speed) * 2 * math.PI)
+    app.body_position = {x, BODY_HEIGHT, 0}
+    app.body_target = {mu.Real(x), 0}
+    return
+  }
+  target := [3]f32{f32(app.body_target.x), BODY_HEIGHT, f32(app.body_target.y)}
+  step := linalg.lerp(app.body_position, target, 1 - math.exp(-app.body_lerp_rate * dt)) - app.body_position
+  max_step := app.body_max_speed * dt
+  if length := linalg.length(step); length > max_step do step *= max_step / length
+  app.body_position += step
 }
 
 frame :: proc(app: ^App) -> bool {
@@ -197,22 +189,22 @@ frame :: proc(app: ^App) -> bool {
   if mu.window(ctx, "Spider Legs", {500, 20, 340, 480}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Body motion")
-    mu.checkbox(ctx, "Animate body", &body_anim_enabled)
-    if body_anim_enabled {
-      mu.label(ctx, "Amplitude"); mu.slider(ctx, &body_amplitude, 0.0, 30.0)
-      mu.label(ctx, "Speed (Hz)"); mu.slider(ctx, &body_speed, 0.0, 1.0)
+    mu.checkbox(ctx, "Animate body", &app.animate_body)
+    if app.animate_body {
+      mu.label(ctx, "Amplitude"); mu.slider(ctx, &app.body_amplitude, 0, 30)
+      mu.label(ctx, "Speed (Hz)"); mu.slider(ctx, &app.body_speed, 0, 1)
     } else {
-      mu.label(ctx, "Body X"); mu.slider(ctx, &body_pos_x, -30.0, 30.0)
-      mu.label(ctx, "Body Z"); mu.slider(ctx, &body_pos_z, -30.0, 30.0)
+      mu.label(ctx, "Body X"); mu.slider(ctx, &app.body_target.x, -30, 30)
+      mu.label(ctx, "Body Z"); mu.slider(ctx, &app.body_target.y, -30, 30)
     }
-    mu.label(ctx, "Shared lift frequency (period s)"); mu.slider(ctx, &lift_frequency_shared, 0.1, 4.0)
-    mu.label(ctx, "Group B phase offset (s)"); mu.slider(ctx, &phase_offset_b, 0.0, 4.0)
+    mu.label(ctx, "Shared lift frequency (period s)"); mu.slider(ctx, &app.lift_period, 0.1, 4)
+    mu.label(ctx, "Group B phase offset (s)"); mu.slider(ctx, &app.tripods[1].phase, 0, 4)
     mu.label(ctx, "Group A (legs 0, 2, 4)")
-    mu.label(ctx, "Lift height"); mu.slider(ctx, &lift_height_a, 0.0, 5.0)
-    mu.label(ctx, "Lift duration (s)"); mu.slider(ctx, &lift_duration_a, 0.05, 2.0)
+    mu.label(ctx, "Lift height"); mu.slider(ctx, &app.tripods[0].lift_height, 0, 5)
+    mu.label(ctx, "Lift duration (s)"); mu.slider(ctx, &app.tripods[0].lift_duration, 0.05, 2)
     mu.label(ctx, "Group B (legs 1, 3, 5)")
-    mu.label(ctx, "Lift height"); mu.slider(ctx, &lift_height_b, 0.0, 5.0)
-    mu.label(ctx, "Lift duration (s)"); mu.slider(ctx, &lift_duration_b, 0.05, 2.0)
+    mu.label(ctx, "Lift height"); mu.slider(ctx, &app.tripods[1].lift_height, 0, 5)
+    mu.label(ctx, "Lift duration (s)"); mu.slider(ctx, &app.tripods[1].lift_duration, 0.05, 2)
   }
   render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))

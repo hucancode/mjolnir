@@ -11,18 +11,16 @@ import "core:math"
 import "core:math/linalg"
 
 App :: struct {
-  window:   platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  input:    input.State,
-  time:     f32,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  window:          platform.Platform,
+  scene:           world.World,
+  renderer:        render.Renderer,
+  input:           input.State,
+  orbit:           render.Orbit,
+  time:            f32,
+  top_down_camera: render.CameraHandle,
+  screen_material: render.MaterialHandle,
+  spinner:         world.NodeHandle,
 }
-
-rtt_camera_handle: render.CameraHandle
-rtt_material_handle: render.MaterialHandle
-spinner_handle: world.NodeHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -61,30 +59,27 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
   return n
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {5, 3, 6}, {0, 1, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
   spawn_primitive(app, .QUAD_XZ, .GRAY, {0, 0, 0}, 6.0, cast_shadow = false)
 
   spawn_primitive(app, .CUBE,   .RED,   {-1.5, 0.5, 0})
   spawn_primitive(app, .SPHERE, .GREEN, {0, 0.6, 1.0}, 0.6)
   spawn_primitive(app, .CONE,   .BLUE,  {1.5, 0.5, -0.5})
-  spinner_handle = spawn_primitive(app, .CUBE, .YELLOW, {0, 1.8, 0}, 0.4)
+  app.spinner = spawn_primitive(app, .CUBE, .YELLOW, {0, 1.8, 0}, 0.4)
 
   light := world.spawn(&app.scene, {0, 3, 1.5})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1.0, 0.6, 0.3, 1.0}, 12.0, false)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1.0, 0.6, 0.3}, 100, 12.0, false)))
 
-  rtt_camera_handle = render.camera_create(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
-  rtt_material_handle = render.material_create(&app.renderer, render.make_material())
-
-  display_mesh := app.renderer.builtin_meshes[.QUAD_XY]
-  display_handle := world.spawn(&app.scene, {0, 2.5, -3.5})
-  render.attach(&app.renderer, render.SlotHandle(display_handle.index), render.MeshAttachment{mesh = display_mesh, material = rtt_material_handle, cast_shadow = false})
-  world.scale(&app.scene, display_handle, 3.0)
+  app.top_down_camera = render.camera_create(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
+  app.screen_material = render.material_create(&app.renderer, render.make_material())
+  screen := world.spawn(&app.scene, {0, 2.5, -3.5})
+  render.attach(&app.renderer, render.SlotHandle(screen.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.QUAD_XY], material = app.screen_material})
+  world.scale(&app.scene, screen, 3.0)
   return true
 }
 
@@ -92,14 +87,11 @@ update :: proc(app: ^App, dt: f32) {
   app.time += dt
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  world.rotate(&app.scene, spinner_handle, app.time, linalg.VECTOR3F32_Y_AXIS)
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  world.rotate(&app.scene, app.spinner, app.time, linalg.VECTOR3F32_Y_AXIS)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
@@ -107,11 +99,7 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  ok := render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
-  if mat, found := render.material(&app.renderer, rtt_material_handle); found {
-    // the image the frame just submitted rendered: the next frame samples it
-    // while it draws into the other one
-    mat.albedo_texture = render.camera_image(&app.renderer, rtt_camera_handle, .FINAL_IMAGE, previous_frame = true)
-  }
-  return ok
+  screen := render.material(&app.renderer, app.screen_material)
+  screen.albedo_texture = render.camera_image(&app.renderer, app.top_down_camera, .FINAL_IMAGE, previous_frame = true)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

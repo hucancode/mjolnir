@@ -222,26 +222,26 @@ fn calculate_shadow(placed: LightPlacement, frag_pos: vec3f, n: vec3f, l: vec3f)
     return mix(SHADOW_FLOOR, 1.0, lit / 9.0);
 }
 
+// Inverse-square falloff windowed to reach zero, with zero slope, at radius.
+fn distance_falloff(dist: f32, radius: f32) -> f32 {
+    let r = dist / max(radius, 0.01);
+    let window = clamp(1.0 - r * r * r * r, 0.0, 1.0);
+    return window * window / (dist * dist + 1.0);
+}
+
 fn attenuation(placed: LightPlacement, frag_pos: vec3f) -> f32 {
     let light = lights[placed.light];
     if (light.light_type == LIGHT_DIRECTIONAL) {
         return 1.0;
     }
+    let to_frag = frag_pos - light_position(placed);
+    let dist = length(to_frag);
+    let falloff = distance_falloff(dist, light.radius);
     if (light.light_type == LIGHT_POINT) {
-        let norm_dist = length(light_position(placed) - frag_pos) / max(0.01, light.radius);
-        return light.radius * (1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0));
+        return falloff;
     }
-    let tip_to_frag = frag_pos - light_position(placed);
-    let axis = light_forward(placed);
-    let along = dot(tip_to_frag, axis);
-    let radial = length(tip_to_frag - along * axis);
-    let cone_radius = along * tan(light.angle_outer);
-    let normalized_radial = radial / max(cone_radius, 0.001);
-    let inner_outer_ratio = tan(light.angle_inner) / tan(light.angle_outer);
-    var spot = smoothstep(1.0, inner_outer_ratio, normalized_radial);
-    let norm_dist = along / max(0.01, light.radius);
-    spot *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
-    return light.radius * spot;
+    let cos_angle = dot(to_frag / max(dist, 0.0001), light_forward(placed));
+    return falloff * smoothstep(cos(light.angle_outer), cos(light.angle_inner), cos_angle);
 }
 
 // The surface a pixel shows, as the lights read it.
@@ -270,7 +270,7 @@ fn direct_light(placed: LightPlacement, s: Surface) -> vec3f {
         return vec3f(0.0);
     }
     let f0 = mix(vec3f(0.04), s.albedo, s.metallic);
-    let light_color = light.color.rgb * light.color.a;
+    let light_color = light.color * light.intensity;
     let h = normalize(s.v + l);
     let n_dot_l = max(dot(s.normal, l), 0.0);
     let n_dot_v = max(dot(s.normal, s.v), 0.01);

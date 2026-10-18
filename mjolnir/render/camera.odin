@@ -135,22 +135,46 @@ camera_look_at :: proc(self: ^Camera, from, to: [3]f32, up: [3]f32 = {0, 0, 0}) 
   self.rotation = linalg.to_quaternion(rotation_matrix)
 }
 
-// camera_orbit places the camera on a sphere around target, looking at it. yaw turns
-// around the Y axis (0 = +X); pitch is elevation above the XZ plane.
-camera_orbit :: proc(self: ^Camera, yaw, pitch, distance: f32, target: [3]f32 = {0, 0, 0}) {
-  cp, sp := math.cos(pitch), math.sin(pitch)
-  cy, sy := math.cos(yaw), math.sin(yaw)
-  position := target + distance * [3]f32{cp * cy, sp, cp * sy}
-  camera_look_at(self, position, target, {-sp * cy, cp, -sp * sy})
+// Orbit is a camera pose on a sphere around target: yaw turns around the Y axis (0 = +X),
+// pitch is elevation above the XZ plane. camera_orbit applies it.
+Orbit :: struct {
+  yaw, pitch, distance: f32,
+  target:               [3]f32,
 }
 
-// camera_orbit_state is the inverse of camera_orbit for the current pose.
-camera_orbit_state :: proc(self: ^Camera, target: [3]f32 = {0, 0, 0}) -> (yaw, pitch, distance: f32) {
+// orbit_from_camera returns the Orbit around target that reproduces the camera's position.
+orbit_from_camera :: proc(self: ^Camera, target: [3]f32 = {0, 0, 0}) -> Orbit {
   offset := self.position - target
-  distance = max(linalg.length(offset), 0.001)
-  yaw = math.atan2(offset.z, offset.x)
-  pitch = math.asin(clamp(offset.y / distance, -1, 1))
-  return
+  distance := max(linalg.length(offset), 0.001)
+  return {
+    yaw = math.atan2(offset.z, offset.x),
+    pitch = math.asin(clamp(offset.y / distance, -1, 1)),
+    distance = distance,
+    target = target,
+  }
+}
+
+// orbit_drag turns the orbit by drag (e.g. mouse delta in pixels) times speed and moves it
+// zoom steps closer (e.g. scroll), keeping pitch short of the poles and distance in range.
+orbit_drag :: proc(
+  self: ^Orbit,
+  drag: [2]f32,
+  zoom: f32,
+  speed: f32 = 0.02,
+  min_distance: f32 = 1,
+  max_distance: f32 = 200,
+) {
+  self.yaw += drag.x * speed
+  self.pitch = clamp(self.pitch + drag.y * speed, -1.5, 1.5)
+  self.distance = clamp(self.distance - zoom * 2, min_distance, max_distance)
+}
+
+// camera_orbit places the camera at orbit, looking at its target.
+camera_orbit :: proc(self: ^Camera, orbit: Orbit) {
+  cp, sp := math.cos(orbit.pitch), math.sin(orbit.pitch)
+  cy, sy := math.cos(orbit.yaw), math.sin(orbit.yaw)
+  position := orbit.target + orbit.distance * [3]f32{cp * cy, sp, cp * sy}
+  camera_look_at(self, position, orbit.target, {-sp * cy, cp, -sp * sy})
 }
 
 // camera_pose returns the camera's world position and rotation.
@@ -295,9 +319,10 @@ camera_destroy :: proc(self: ^Renderer, handle: CameraHandle) {
   if handle == self.main_camera do self.main_camera = 0
 }
 
-// camera_image returns one of a camera's images as the next frame renders it.
-// previous_frame returns the one the last submitted frame rendered instead: sampling it
-// while the next frame draws the other copy does not depend on the order cameras draw in.
+// camera_image returns one of a camera's images as the next frame renders it. The camera
+// renders into a new copy each frame, so the handle changes: fetch it again every frame.
+// previous_frame returns the picture the last frame finished instead, the one to sample
+// (render-to-texture): it never depends on the order cameras draw in.
 camera_image :: proc(
   self: ^Renderer,
   handle: CameraHandle,

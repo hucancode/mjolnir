@@ -38,16 +38,14 @@ Game :: struct {
   alive:       bool,
 }
 
-g: Game
-
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
   font:     font.Font,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  orbit:    render.Orbit,
+  game:     Game,
 }
 
 main :: proc() {
@@ -57,7 +55,6 @@ main :: proc() {
   if !platform.init(w, 1024, 768, "Snake 3D") do return
   if !render.init(&app.renderer, "Snake 3D", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   if !world.init(&app.scene) do return
-  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return
   mjolnir.run(
     mjolnir.Loop(App) {
       app = app,
@@ -71,6 +68,8 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
+  delete(app.game.body)
+  delete(app.game.body_nodes)
   font.destroy(&app.font)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
@@ -84,10 +83,9 @@ should_close :: proc(app: ^App) -> bool {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  // score labels: glyph runs of the font, drawn by render's 2D overlay
   commands := make([dynamic]render.RenderCommand, context.temp_allocator)
-  label(app, &commands, fmt.tprintf("Score: %d", g.score), {20, 20}, 28, {255, 255, 255, 255})
-  label(app, &commands, fmt.tprintf("Best: %d", g.best), {20, 60}, 24, {255, 220, 100, 255})
+  label(app, &commands, fmt.tprintf("Score: %d", app.game.score), {20, 20}, 28, {255, 255, 255, 255})
+  label(app, &commands, fmt.tprintf("Best: %d", app.game.best), {20, 60}, 24, {255, 220, 100, 255})
   pixels, size, changed := font.atlas(&app.font)
   render.stage_overlay(&app.renderer, {commands = commands[:], atlas = pixels if changed else nil, atlas_size = size})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
@@ -99,9 +97,9 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
   return n
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
+  if !font.init(&app.font, #load("../../assets/Outfit-Regular.ttf")) do return true
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   half := f32(GRID) * CELL * 0.5
   wall_t :: 0.2
@@ -116,18 +114,16 @@ setup :: proc(app: ^App) -> bool {
   spawn_wall(app, {-(half + wall_t), wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
 
   render.camera_look_at(render.main_camera(&app.renderer), {0, 18, 13}, {0, 0, 0})
-
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
   spot := world.spawn(&app.scene, {0, 10, 4})
-  render.attach(&app.renderer, render.SlotHandle(spot.index), render.light_create(&app.renderer, render.make_spot_light({0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true)))
+  render.attach(&app.renderer, render.SlotHandle(spot.index), render.light_create(&app.renderer, render.make_spot_light({0.2, 0.95, 0.85}, 500, 16.0, math.PI * 0.35)))
   world.rotate(&app.scene, spot, math.PI * 0.55, linalg.VECTOR3F32_X_AXIS)
 
-
-  g.head_node = spawn_primitive(app, .CUBE, .YELLOW)
-  world.scale(&app.scene, g.head_node, SEGMENT_SCALE)
-  g.food_node = spawn_primitive(app, .SPHERE, .RED)
-  world.scale(&app.scene, g.food_node, FOOD_SCALE)
+  app.game.head_node = spawn_primitive(app, .CUBE, .YELLOW)
+  world.scale(&app.scene, app.game.head_node, SEGMENT_SCALE)
+  app.game.food_node = spawn_primitive(app, .SPHERE, .RED)
+  world.scale(&app.scene, app.game.food_node, FOOD_SCALE)
 
   reset_game(app)
   log.info("Controls: WASD or arrows. Auto-restart on game over.")
@@ -140,20 +136,20 @@ spawn_wall :: proc(app: ^App, pos: [3]f32, sx, sy, sz: f32) {
 }
 
 reset_game :: proc(app: ^App) {
-  for h in g.body_nodes do world.destroy(&app.scene, h)
-  clear(&g.body_nodes); clear(&g.body)
+  for h in app.game.body_nodes do world.destroy(&app.scene, h)
+  clear(&app.game.body_nodes); clear(&app.game.body)
 
   mid: i32 = GRID / 2
-  append(&g.body, Cell{mid, mid})
-  append(&g.body, Cell{mid - 1, mid})
-  append(&g.body, Cell{mid - 2, mid})
-  for i in 1 ..< len(g.body) {
-    append(&g.body_nodes, spawn_body_node(app, g.body[i]))
+  append(&app.game.body, Cell{mid, mid})
+  append(&app.game.body, Cell{mid - 1, mid})
+  append(&app.game.body, Cell{mid - 2, mid})
+  for i in 1 ..< len(app.game.body) {
+    append(&app.game.body_nodes, spawn_body_node(app, app.game.body[i]))
   }
-  place_node(app, g.head_node, g.body[0], SEGMENT_Y)
+  place_node(app, app.game.head_node, app.game.body[0], SEGMENT_Y)
 
-  g.dir = {1, 0}; g.pending_dir = {1, 0}
-  g.timer = 0; g.score = 0; g.alive = true
+  app.game.dir = {1, 0}; app.game.pending_dir = {1, 0}
+  app.game.timer = 0; app.game.score = 0; app.game.alive = true
 
   place_food(app)
 }
@@ -172,10 +168,10 @@ place_food :: proc(app: ^App) {
   for {
     c := Cell{i32(rand.int31_max(GRID)), i32(rand.int31_max(GRID))}
     occupied := false
-    for b in g.body do if b == c { occupied = true; break }
-    if !occupied { g.food = c; break }
+    for b in app.game.body do if b == c { occupied = true; break }
+    if !occupied { app.game.food = c; break }
   }
-  place_node(app, g.food_node, g.food, FOOD_Y)
+  place_node(app, app.game.food_node, app.game.food, FOOD_Y)
 }
 
 cell_to_world :: proc(c: Cell, y: f32) -> [3]f32 {
@@ -185,19 +181,19 @@ cell_to_world :: proc(c: Cell, y: f32) -> [3]f32 {
   return {x, y, z}
 }
 
-on_key :: proc(key: input.Key) {
+on_key :: proc(app: ^App, key: input.Key) {
   #partial switch key {
-  case .W, .UP:    if g.dir.y != 1  do g.pending_dir = {0, -1}
-  case .S, .DOWN:  if g.dir.y != -1 do g.pending_dir = {0, 1}
-  case .A, .LEFT:  if g.dir.x != 1  do g.pending_dir = {-1, 0}
-  case .D, .RIGHT: if g.dir.x != -1 do g.pending_dir = {1, 0}
+  case .W, .UP:    if app.game.dir.y != 1  do app.game.pending_dir = {0, -1}
+  case .S, .DOWN:  if app.game.dir.y != -1 do app.game.pending_dir = {0, 1}
+  case .A, .LEFT:  if app.game.dir.x != 1  do app.game.pending_dir = {-1, 0}
+  case .D, .RIGHT: if app.game.dir.x != -1 do app.game.pending_dir = {1, 0}
   }
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
-  if !app.input.mouse_captured do app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
+  if !app.input.mouse_captured do render.orbit_drag(&app.orbit, 0, app.input.scroll.y)
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   step_game(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
@@ -207,50 +203,51 @@ update :: proc(app: ^App, dt: f32) {
 step_game :: proc(app: ^App, dt: f32) {
   if !app.input.keyboard_captured {
     it := 0
-    for key, pressed in input.next_key_edge(&app.input, &it) do if pressed do on_key(key)
+    for key, pressed in input.next_key_edge(&app.input, &it) do if pressed do on_key(app, key)
   }
-  g.timer += dt
-  if g.timer < TICK do return
-  g.timer = 0
+  app.game.timer += dt
+  if app.game.timer < TICK do return
+  app.game.timer = 0
 
-  if !g.alive {
-    if g.score > g.best do g.best = g.score
+  if !app.game.alive {
+    if app.game.score > app.game.best do app.game.best = app.game.score
     reset_game(app)
     return
   }
 
-  g.dir = g.pending_dir
-  head := g.body[0]
-  next := Cell{head.x + g.dir.x, head.y + g.dir.y}
+  app.game.dir = app.game.pending_dir
+  head := app.game.body[0]
+  next := Cell{head.x + app.game.dir.x, head.y + app.game.dir.y}
 
   if next.x < 0 || next.x >= GRID || next.y < 0 || next.y >= GRID {
-    g.alive = false; return
+    app.game.alive = false; return
   }
-  ate := next == g.food
-  limit := len(g.body) if ate else len(g.body) - 1
-  for i in 0 ..< limit do if g.body[i] == next { g.alive = false; return }
+  ate := next == app.game.food
+  limit := len(app.game.body) if ate else len(app.game.body) - 1
+  for i in 0 ..< limit do if app.game.body[i] == next { app.game.alive = false; return }
 
-  old_head := g.body[0]
+  old_head := app.game.body[0]
   if ate {
     new_node := spawn_body_node(app, old_head)
-    inject_at(&g.body_nodes, 0, new_node)
-    inject_at(&g.body, 0, next)
-    g.score += 1
+    inject_at(&app.game.body_nodes, 0, new_node)
+    inject_at(&app.game.body, 0, next)
+    app.game.score += 1
     place_food(app)
-  } else if len(g.body_nodes) > 0 {
-    tail_node := pop(&g.body_nodes)
+  } else if len(app.game.body_nodes) > 0 {
+    tail_node := pop(&app.game.body_nodes)
     place_node(app, tail_node, old_head, SEGMENT_Y)
-    inject_at(&g.body_nodes, 0, tail_node)
-    pop(&g.body)
-    inject_at(&g.body, 0, next)
+    inject_at(&app.game.body_nodes, 0, tail_node)
+    pop(&app.game.body)
+    inject_at(&app.game.body, 0, next)
   } else {
-    g.body[0] = next
+    app.game.body[0] = next
   }
-  place_node(app, g.head_node, next, SEGMENT_Y)
+  place_node(app, app.game.head_node, next, SEGMENT_Y)
 }
 
 label :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand, text: string, pos: [2]f32, size: f32, color: [4]u8) {
+  dpi := platform.dpi_scale(&app.window)
   glyphs := make([dynamic]font.Glyph, context.temp_allocator)
-  font.glyphs(&app.font, text, pos, size, &glyphs)
+  font.glyphs(&app.font, text, pos * dpi, size * dpi, &glyphs)
   append(commands, render.RenderCommand{shape = render.DrawTextCommand{glyphs = glyphs[:], color = color}})
 }

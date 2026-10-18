@@ -21,14 +21,10 @@ App :: struct {
   renderer: render.Renderer,
   debug:    debugui.Context,
   input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  orbit:    render.Orbit,
+  size:     int,
+  cubes:    [dynamic]world.NodeHandle,
 }
-
-current_size_index: int = -1
-pending_index: int = -1
-despawn_cooldown: int
-grid_root: world.NodeHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -49,22 +45,22 @@ main :: proc() {
   )
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   light := world.spawn(&app.scene, {10, 18, 10})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 3.0}, 60.0, false)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, 3.0, 60.0, false)))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   render.camera_look_at(render.main_camera(&app.renderer), {14, 14, 14}, {0, 0, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
-  pending_index = 0
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  app.size = GRID_SIZES[0]
   return true
 }
 
 shutdown :: proc(app: ^App) {
+  delete(app.cubes)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -76,68 +72,46 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-// Despawned slots stay reserved for a few updates (world RETIRE_GRACE = 3); respawning before
-// they are reusable finds no free slots near the node cap, so wait longer than the grace.
-request_rebuild :: proc(idx: int) {
-  if idx == current_size_index do return
-  pending_index = idx
+select_size :: proc(app: ^App, size: int) {
+  for cube in app.cubes do world.destroy(&app.scene, cube)
+  clear(&app.cubes)
+  app.size = size
+}
+
+fill_grid :: proc(app: ^App) {
+  n := app.size
+  half := f32(n) * 0.5
+  color := render.Color.GREEN if n > 5 else render.Color.YELLOW
+  for len(app.cubes) < n * n {
+    x, z := len(app.cubes) % n, len(app.cubes) / n
+    cube := world.spawn(&app.scene, {(f32(x) - half) * 4, 0, (f32(z) - half) * 4}) or_break
+    render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, color))
+    append(&app.cubes, cube)
+  }
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  if despawn_cooldown > 0 {
-    despawn_cooldown -= 1
-    if despawn_cooldown == 0 do spawn_grid(app, pending_index)
-  } else if pending_index >= 0 && pending_index != current_size_index {
-    if grid_root.index != 0 do world.destroy(&app.scene, grid_root)
-    grid_root = {}
-    despawn_cooldown = 5
-  }
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  fill_grid(app)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
-}
-
-spawn_grid :: proc(app: ^App, idx: int) {
-  current_size_index = idx
-  pending_index = -1
-  sizes := GRID_SIZES
-  n := sizes[idx]
-  color := render.Color.GREEN if n > 5 else render.Color.YELLOW
-  half := f32(n) * 0.5
-  log.infof("spawning %dx%d cubes", n, n)
-  grid_root = world.spawn(&app.scene, {0, 0, 0})
-  for z in 0 ..< n do for x in 0 ..< n {
-    cube, ok := world.spawn(&app.scene, {(f32(x) - half) * 4, 0, (f32(z) - half) * 4}, parent = grid_root)
-    if !ok {
-      log.warnf("out of node slots, grid truncated at row %d, column %d", z, x)
-      return
-    }
-    render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, color))
-  }
 }
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Grid", {540, 20, 240, 200}, {.NO_CLOSE}) {
-    sizes := GRID_SIZES
-    label_text: string = "<loading>"
-    if current_size_index >= 0 do label_text = fmt.tprintf("%dx%d", sizes[current_size_index], sizes[current_size_index])
-    mu.label(ctx, fmt.tprintf("Size: %s", label_text))
-    mu.label(ctx, "")
     mu.layout_row(ctx, {-1}, 0)
-    for n, i in sizes {
-      if .SUBMIT in mu.button(ctx, fmt.tprintf("%dx%d", n, n)) do request_rebuild(i)
+    mu.label(ctx, fmt.tprintf("Cubes: %d / %d", len(app.cubes), app.size * app.size))
+    for n in GRID_SIZES {
+      if .SUBMIT in mu.button(ctx, fmt.tprintf("%dx%d", n, n)) && n != app.size do select_size(app, n)
     }
   }
   render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})

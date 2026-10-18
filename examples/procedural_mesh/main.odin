@@ -9,26 +9,17 @@ import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import mu "vendor:microui"
 
-wave_node: world.NodeHandle
-knot_node: world.NodeHandle
-spiral_node: world.NodeHandle
-
-wave_visible: bool = true
-knot_visible: bool = true
-spiral_visible: bool = true
-
-rotate_speed: mu.Real = 0.4
-spin: f32
+SPIN_SPEED :: 0.4
 
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  orbit:    render.Orbit,
+  shapes:   [3]world.NodeHandle,
+  spin:     f32,
 }
 
 main :: proc() {
@@ -72,14 +63,13 @@ spawn_mesh :: proc(app: ^App, mesh_handle: render.MeshHandle, material: render.M
   return n
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {0, 6, 14}, {0, 1, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
   light := world.spawn(&app.scene, {6, 12, 6})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 0.97, 0.93, 5.0}, shadow_radius = 20.0)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 0.97, 0.93}, intensity = 5.0, shadow_radius = 20.0)))
   ground := world.spawn(&app.scene, {0, -1, 0})
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 12.0)
@@ -88,9 +78,11 @@ setup :: proc(app: ^App) -> bool {
   knot_mat   := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.5,  0.2,  1}, metallic_value = 0.8, roughness_value = 0.3))
   spiral_mat := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.4, 0.85, 0.4,  1}, metallic_value = 0.0, roughness_value = 0.7))
 
-  wave_node   = spawn_mesh(app, render.mesh_create(&app.renderer, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0})
-  knot_node   = spawn_mesh(app, render.mesh_create(&app.renderer, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0})
-  spiral_node = spawn_mesh(app, render.mesh_create(&app.renderer, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0})
+  app.shapes = {
+    spawn_mesh(app, render.mesh_create(&app.renderer, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0}),
+    spawn_mesh(app, render.mesh_create(&app.renderer, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0}),
+    spawn_mesh(app, render.mesh_create(&app.renderer, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0}),
+  }
   return true
 }
 
@@ -191,24 +183,14 @@ build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  spin += dt * f32(rotate_speed)
-  set_spin(app, wave_node,   wave_visible,   spin, {-6, 0, 0})
-  set_spin(app, knot_node,   knot_visible,   spin, {0, 1.5, 0})
-  set_spin(app, spiral_node, spiral_visible, spin, {6, 0, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  app.spin += dt * SPIN_SPEED
+  for shape in app.shapes do world.rotate(&app.scene, shape, app.spin)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
 }
 
-set_spin :: proc(app: ^App, h: world.NodeHandle, visible: bool, angle: f32, pos: [3]f32) {
-  world.set_visible(&app.scene, h, visible)
-  world.translate(&app.scene, h, pos)
-  world.rotate(&app.scene, h, angle)
-}

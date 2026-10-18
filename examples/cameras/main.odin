@@ -16,30 +16,27 @@ import mu "vendor:microui"
 
 CameraMode :: enum {ORBIT, FREE, FOLLOW}
 
-mode: CameraMode = .ORBIT
-follow_target: [3]f32 = {0, 0.6, 0}
-runner_handle: world.NodeHandle
-runner_phase: f32
-
-orbit_distance:    mu.Real = 8.0
-free_speed:        mu.Real = 5.0
-follow_offset_y:   mu.Real = 3.0
-follow_offset_back:mu.Real = 6.0
-follow_lerp:       mu.Real = 5.0
-
-// The whole "controller": orbit state is just yaw/pitch/distance around a target.
-orbit_state :: struct {
-  yaw, pitch, distance: f32,
-}
-
 App :: struct {
-  window:   platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  debug:    debugui.Context,
-  orbit:    orbit_state,
-  input:    input.State,
+  window:     platform.Platform,
+  scene:      world.World,
+  renderer:   render.Renderer,
+  debug:      debugui.Context,
+  input:      input.State,
+  mode:       CameraMode,
+  orbit:      render.Orbit,
+  runner:     world.NodeHandle,
+  runner_pos: [3]f32,
+  time:       f32,
 }
+
+ORBIT_MIN_DISTANCE :: 2
+ORBIT_MAX_DISTANCE :: 40
+
+orbit_distance:     mu.Real = 8.0
+free_speed:         mu.Real = 5.0
+follow_offset_y:    mu.Real = 3.0
+follow_offset_back: mu.Real = 6.0
+follow_lerp:        mu.Real = 5.0
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -60,17 +57,15 @@ main :: proc() {
   )
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {0, 6, 12}, {0, 0, 0})
-  if cam, ok := render.main_camera(&app.renderer); ok {
-    app.orbit.yaw, app.orbit.pitch, app.orbit.distance = render.camera_orbit_state(cam)
-  }
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
+  orbit_distance = mu.Real(app.orbit.distance)
   sun := world.spawn(&app.scene, {6, 12, 6})
-  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 0.97, 0.92, 1}, shadow_radius = 6.0, cast_shadow = true)))
+  render.attach(&app.renderer, render.SlotHandle(sun.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 0.97, 0.92}, shadow_radius = 6.0)))
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
@@ -82,11 +77,9 @@ setup :: proc(app: ^App) -> bool {
 
   cube := world.spawn(&app.scene, {0, 0.5, 0})
   render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .MAGENTA))
-  runner_handle = world.spawn(&app.scene, follow_target)
-  render.attach(&app.renderer, render.SlotHandle(runner_handle.index), render.primitive(&app.renderer, .SPHERE, .CYAN))
-  world.scale(&app.scene, runner_handle, 0.6)
-
-  log.info("Camera controllers — switch live via UI (ORBIT/FREE/FOLLOW)")
+  app.runner = world.spawn(&app.scene, app.runner_pos)
+  render.attach(&app.renderer, render.SlotHandle(app.runner.index), render.primitive(&app.renderer, .SPHERE, .CYAN))
+  world.scale(&app.scene, app.runner, 0.6)
   return true
 }
 
@@ -110,18 +103,16 @@ spawn_landmark :: proc(app: ^App, pos: [3]f32, color: render.Color) {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
-  runner_phase += dt * 0.6
-  follow_target = {7.0 * math.sin(runner_phase), 0.6, 4.0 * math.sin(runner_phase * 2.0)}
-  world.translate(&app.scene, runner_handle, follow_target)
-  if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-    switch mode {
-    case .ORBIT: orbit_camera(app, cam)
-    case .FREE:  free_camera(app, cam, dt)
-    case .FOLLOW:
-      // pose chases a point behind/above the runner; position and rotation both ease
-      t := 1 - math.exp(-f32(follow_lerp) * dt)
-      from := follow_target + {0, f32(follow_offset_y), f32(follow_offset_back)}
-      render.camera_lerp_look_at(cam, from, follow_target, t)
+  app.time += dt
+  phase := app.time * 0.6
+  app.runner_pos = {7.0 * math.sin(phase), 0.6, 4.0 * math.sin(phase * 2.0)}
+  world.translate(&app.scene, app.runner, app.runner_pos)
+  cam := render.main_camera(&app.renderer)
+  if !app.input.mouse_captured {
+    switch app.mode {
+    case .ORBIT:  orbit_camera(app, cam)
+    case .FREE:   free_camera(app, cam, dt)
+    case .FOLLOW: follow_camera(app, cam, dt)
     }
   }
   world.update(&app.scene)
@@ -139,47 +130,43 @@ frame :: proc(app: ^App) -> bool {
     if .SUBMIT in mu.button(ctx, "Free")   do switch_mode(app, .FREE)
     if .SUBMIT in mu.button(ctx, "Follow") do switch_mode(app, .FOLLOW)
     mu.layout_row(ctx, {-1}, 0)
-    mu.label(ctx, fmt.tprintf("Active: %v", mode))
+    mu.label(ctx, fmt.tprintf("Active: %v", app.mode))
     mu.label(ctx, "")
-    mu.label(ctx, "Orbit — distance:")
-    if .CHANGE in mu.slider(ctx, &orbit_distance, 2.0, 20.0) do set_orbit_distance(app)
-    mu.label(ctx, "Free — move speed:"); mu.slider(ctx, &free_speed, 1.0, 30.0)
-    mu.label(ctx, "Follow — height offset:"); mu.slider(ctx, &follow_offset_y, 0.5, 10.0)
-    mu.label(ctx, "Follow — back offset:"); mu.slider(ctx, &follow_offset_back, 1.0, 15.0)
-    mu.label(ctx, "Follow — lerp speed:"); mu.slider(ctx, &follow_lerp, 0.5, 20.0)
+    mu.label(ctx, "Orbit: distance:")
+    if .CHANGE in mu.slider(ctx, &orbit_distance, ORBIT_MIN_DISTANCE, ORBIT_MAX_DISTANCE) do app.orbit.distance = f32(orbit_distance)
+    mu.label(ctx, "Free: move speed:"); mu.slider(ctx, &free_speed, 1.0, 30.0)
+    mu.label(ctx, "Follow: height offset:"); mu.slider(ctx, &follow_offset_y, 0.5, 10.0)
+    mu.label(ctx, "Follow: back offset:"); mu.slider(ctx, &follow_offset_back, 1.0, 15.0)
+    mu.label(ctx, "Follow: lerp speed:"); mu.slider(ctx, &follow_lerp, 0.5, 20.0)
     mu.label(ctx, "")
-    if cam, ok := render.main_camera(&app.renderer); ok {
-      mu.label(ctx, fmt.tprintf("Cam pos: %.1f %.1f %.1f", cam.position.x, cam.position.y, cam.position.z))
-    }
-    mu.label(ctx, fmt.tprintf("Runner: %.1f %.1f %.1f", follow_target.x, follow_target.y, follow_target.z))
+    cam := render.main_camera(&app.renderer)
+    mu.label(ctx, fmt.tprintf("Cam pos: %.1f %.1f %.1f", cam.position.x, cam.position.y, cam.position.z))
+    mu.label(ctx, fmt.tprintf("Runner: %.1f %.1f %.1f", app.runner_pos.x, app.runner_pos.y, app.runner_pos.z))
   }
   render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
-switch_mode :: proc(app: ^App, new_mode: CameraMode) {
-  if mode == new_mode do return
-  mode = new_mode
-  if cam, ok := render.main_camera(&app.renderer); ok && new_mode == .ORBIT {
-    app.orbit.yaw, app.orbit.pitch, app.orbit.distance = render.camera_orbit_state(cam)
+switch_mode :: proc(app: ^App, mode: CameraMode) {
+  if app.mode == mode do return
+  app.mode = mode
+  if mode == .ORBIT {
+    app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
     orbit_distance = mu.Real(app.orbit.distance)
   }
 }
 
-// Orbit distance is the camera's distance to the origin.
-set_orbit_distance :: proc(app: ^App) {
-  app.orbit.distance = f32(orbit_distance)
+orbit_camera :: proc(app: ^App, cam: ^render.Camera) {
+  drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+  render.orbit_drag(&app.orbit, drag, app.input.scroll.y, min_distance = ORBIT_MIN_DISTANCE, max_distance = ORBIT_MAX_DISTANCE)
+  orbit_distance = mu.Real(app.orbit.distance)
+  render.camera_orbit(cam, app.orbit)
 }
 
-orbit_camera :: proc(app: ^App, cam: ^render.Camera) {
-  o := &app.orbit
-  if input.mouse_down(&app.input, .LEFT) {
-    d := app.input.mouse_delta * 0.02
-    o.yaw += d.x
-    o.pitch = clamp(o.pitch + d.y, -1.5, 1.5)
-  }
-  o.distance = clamp(o.distance - app.input.scroll.y * 2, 2, 40)
-  render.camera_orbit(cam, o.yaw, o.pitch, o.distance)
+follow_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
+  ease := 1 - math.exp(-f32(follow_lerp) * dt)
+  from := app.runner_pos + {0, f32(follow_offset_y), f32(follow_offset_back)}
+  render.camera_lerp_look_at(cam, from, app.runner_pos, ease)
 }
 
 free_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {

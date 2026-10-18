@@ -10,15 +10,17 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-elapsed: f32 = 0
+TRAIL_PERIOD :: 0.25
+TRAIL_LIFE :: 3.0
 
 App :: struct {
-  window:   platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  window:     platform.Platform,
+  scene:      world.World,
+  renderer:   render.Renderer,
+  input:      input.State,
+  orbit:      render.Orbit,
+  time:       f32,
+  next_trail: f32,
 }
 
 main :: proc() {
@@ -40,29 +42,23 @@ main :: proc() {
   )
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   light := world.spawn(&app.scene, {10, 18, 10})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 2.0}, 60.0, false)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, 2.0, 60.0, cast_shadow = false)))
   world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
 
-  tiny := world.spawn(&app.scene, {0, -0.5, 0})
-  render.attach(&app.renderer, render.SlotHandle(tiny.index), render.primitive(&app.renderer, .CUBE, .GRAY))
-  world.scale(&app.scene, tiny, 0.01)
   ground := world.spawn(&app.scene, {0, -1, 0})
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY))
   world.scale(&app.scene, ground, 20.0)
 
-  // Real cube provides depth-occlusion contrast for the adjacent debug cube.
   occluder := world.spawn(&app.scene, {-6, 0, 0})
   render.attach(&app.renderer, render.SlotHandle(occluder.index), render.primitive(&app.renderer, .CUBE, .BLUE))
   world.scale(&app.scene, occluder, 0.8)
 
   render.camera_look_at(render.main_camera(&app.renderer), {12, 8, 14}, {0, 0, 0})
-
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   return true
 }
 
@@ -80,15 +76,12 @@ should_close :: proc(app: ^App) -> bool {
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  elapsed += dt
-  t := elapsed
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  app.time += dt
+  t := app.time
   white := render.DEBUG_WHITE
 
   render.debug_axes(&app.renderer, {0, 0, 0}, scale = 2)
@@ -113,18 +106,15 @@ update :: proc(app: ^App, dt: f32) {
   render.debug_arrow(&app.renderer, {0, 3, 0}, target, render.DEBUG_RED)
   render.debug_point(&app.renderer, target, size = 0.3, color = white)
 
-  trail_period :: 0.25
-  trail_count_total := int(t / trail_period)
-  if trail_count_total > 0 {
-    last := f32(trail_count_total) * trail_period
-    if last > elapsed - dt && last <= elapsed {
-      angle := last * 1.5
-      pos := [3]f32{5 * math.cos(angle), 0.5, 5 * math.sin(angle)}
-      render.debug_sphere(&app.renderer, pos, 0.25, render.DEBUG_GREEN, life = 3.0)
-    }
+  if t >= app.next_trail {
+    app.next_trail += TRAIL_PERIOD
+    angle := t * 1.5
+    render.debug_sphere(&app.renderer, {5 * math.cos(angle), 0.5, 5 * math.sin(angle)}, 0.25, render.DEBUG_GREEN, life = TRAIL_LIFE)
   }
 
-  // bypass_depth = renders over the real cube.
+  render.debug_sphere(&app.renderer, {0, 5, 0}, 0.4, render.DEBUG_CYAN)
+  render.debug_sphere(&app.renderer, {0, 6, 0}, 0.4, render.DEBUG_MAGENTA)
+  render.debug_arrow(&app.renderer, {0, 5, 0}, {0, 6, 0}, white)
   render.debug_axes(&app.renderer, {-6, 0, 0}, scale = 1.5, bypass_depth = true)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
@@ -133,10 +123,5 @@ update :: proc(app: ^App, dt: f32) {
 
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.window)
-  render.debug_sphere(&app.renderer, {0, 5, 0}, 0.4, render.DEBUG_CYAN)
-  ok := render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
-  // Drawn after the frame is recorded; these segments appear next frame.
-  render.debug_sphere(&app.renderer, {0, 6, 0}, 0.4, render.DEBUG_MAGENTA)
-  render.debug_arrow(&app.renderer, {0, 5, 0}, {0, 6, 0}, render.DEBUG_WHITE)
-  return ok
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

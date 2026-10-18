@@ -103,8 +103,8 @@ struct Material {
 }
 
 struct Light {
-    // rgb, a = intensity
-    color: vec4f,
+    color: vec3f,
+    intensity: f32,
     radius: f32,
     angle_inner: f32,
     angle_outer: f32,

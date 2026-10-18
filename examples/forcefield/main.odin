@@ -11,31 +11,31 @@ import "core:log"
 import "core:math/linalg"
 import mu "vendor:microui"
 
+EMITTER_SIZE_START :: 100
+EMITTER_SIZE_END :: 30
+
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   debug:    debugui.Context,
   input:    input.State,
+  orbit:    render.Orbit,
   time:     f32,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  repel:    Field,
+  attract:  Field,
 }
 
-FFState :: struct {
-  parent:           world.NodeHandle,
-  ff_node:          world.NodeHandle,
-  color:            [4]f32,
-  enabled:          bool,
-  strength:         mu.Real,
-  tangent_strength: mu.Real,
-  area_of_effect:   mu.Real,
-  spin_speed:       mu.Real,
-  spin_dir:         f32,
+Field :: struct {
+  pivot:      world.NodeHandle,
+  node:       world.NodeHandle,
+  handle:     render.ForceFieldHandle,
+  color:      [4]f32,
+  enabled:    bool,
+  area:       f32,
+  spin_speed: f32,
+  spin_dir:   f32,
 }
-
-repel:   FFState
-attract: FFState
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -70,35 +70,27 @@ should_close :: proc(app: ^App) -> bool {
 
 spawn_field :: proc(
   app: ^App,
-  offset_x: f32,
+  orbit_radius: f32,
   strength, tangent, area: f32,
   color: [4]f32,
   spin_speed, spin_dir: f32,
-) -> FFState {
-  s: FFState
-  s.parent = world.spawn(&app.scene, {0, 2, 0})
-  s.ff_node = world.spawn(&app.scene, {offset_x, 0, 0}, parent = s.parent)
-  render.attach(&app.renderer, render.SlotHandle(s.ff_node.index), render.force_field_create(&app.renderer, render.make_force_field(area_of_effect = area, strength = strength, tangent_strength = tangent)))
-  s.color = color
-  s.enabled = true
-  s.strength = mu.Real(strength)
-  s.tangent_strength = mu.Real(tangent)
-  s.area_of_effect = mu.Real(area)
-  s.spin_speed = mu.Real(spin_speed)
-  s.spin_dir = spin_dir
-  return s
+) -> Field {
+  f := Field{color = color, enabled = true, area = area, spin_speed = spin_speed, spin_dir = spin_dir}
+  f.pivot = world.spawn(&app.scene, {0, 2, 0})
+  f.node = world.spawn(&app.scene, {orbit_radius, 0, 0}, parent = f.pivot)
+  f.handle = render.force_field_create(&app.renderer, render.make_force_field(area_of_effect = area, strength = strength, tangent_strength = tangent))
+  render.attach(&app.renderer, render.SlotHandle(f.node.index), f.handle)
+  return f
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {0, 12, 3}, {0, 2, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   app.renderer.skybox_intensity = 0
 
-  // Particle source at center, large position spread
   if tex, ok := render.texture_create(&app.renderer, #load("../../assets/particles/star_09.png")); ok {
     em := render.make_emitter(
       texture           = tex,
@@ -109,8 +101,8 @@ setup :: proc(app: ^App) -> bool {
       color_end         = {1, 0.2, 0, 0},
       particle_lifetime = 4.0,
       position_spread   = 0.2,
-      size_start        = 100,
-      size_end          = 30,
+      size_start        = EMITTER_SIZE_START,
+      size_end          = EMITTER_SIZE_END,
       weight            = 0.0,
       weight_spread     = 0.0,
     )
@@ -118,34 +110,22 @@ setup :: proc(app: ^App) -> bool {
     render.attach(&app.renderer, render.SlotHandle(n.index), render.emitter_create(&app.renderer, em))
   }
 
-  // Repulsion field — blue marker
-  repel = spawn_field(app, 2.5, -15.0, 8.0, 4.0, {0.1, 0.5, 1.0, 1}, 1.2, 1.0)
-  // Attraction field — green marker, opposite spin, slower, larger orbit radius
-  attract = spawn_field(app, 3.5, 12.0, -5.0, 4.0, {0.2, 1.0, 0.4, 1}, 0.7, -1.0)
+  app.repel = spawn_field(app, 2.5, -15.0, 8.0, 4.0, {0.1, 0.5, 1.0, 1}, 1.2, 1.0)
+  app.attract = spawn_field(app, 3.5, 12.0, -5.0, 4.0, {0.2, 1.0, 0.4, 1}, 0.7, -1.0)
 
   light := world.spawn(&app.scene, {3, 6, 3})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1, 1}, shadow_radius = 10)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light(color = {1, 1, 1}, shadow_radius = 10)))
   return true
 }
 
-apply_ff :: proc(app: ^App, s: ^FFState) {
-  ff, ok := render.force_field(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(s.ff_node.index), render.ForceFieldHandle))
-  if !ok do return
-  ff.strength         = f32(s.strength)
-  ff.tangent_strength = f32(s.tangent_strength)
-  // a zero area pauses the field
-  ff.area_of_effect   = f32(s.area_of_effect) if s.enabled else 0
-}
-
-draw_ff_marker :: proc(app: ^App, s: ^FFState) {
-  if _, ok := world.node(&app.scene, s.ff_node); !ok do return
-  pos := world.world_matrix(&app.scene, s.ff_node)[3].xyz
-  c := s.color
-  if !s.enabled do c = {c.r * 0.3, c.g * 0.3, c.b * 0.3, 1}
-  render.debug_sphere(&app.renderer, pos, 0.4, c)
-  if s.enabled {
-    render.debug_sphere(&app.renderer, pos, f32(s.area_of_effect), {c.r, c.g, c.b, 0.5})
+draw_field_marker :: proc(app: ^App, f: ^Field) {
+  position := world.world_matrix(&app.scene, f.node)[3].xyz
+  if !f.enabled {
+    render.debug_sphere(&app.renderer, position, 0.4, {f.color.r * 0.3, f.color.g * 0.3, f.color.b * 0.3, 1})
+    return
   }
+  render.debug_sphere(&app.renderer, position, 0.4, f.color)
+  render.debug_sphere(&app.renderer, position, f.area, {f.color.r, f.color.g, f.color.b, 0.5})
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -153,20 +133,14 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  t := app.time
-  world.rotate(&app.scene, repel.parent,   t * f32(repel.spin_speed)   * repel.spin_dir,   linalg.VECTOR3F32_Y_AXIS)
-  world.rotate(&app.scene, attract.parent, t * f32(attract.spin_speed) * attract.spin_dir, linalg.VECTOR3F32_Y_AXIS)
-  apply_ff(app, &repel)
-  apply_ff(app, &attract)
-  draw_ff_marker(app, &repel)
-  draw_ff_marker(app, &attract)
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  for f in ([]^Field{&app.repel, &app.attract}) {
+    world.rotate(&app.scene, f.pivot, app.time * f.spin_speed * f.spin_dir, linalg.VECTOR3F32_Y_AXIS)
+    draw_field_marker(app, f)
+  }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
@@ -179,24 +153,27 @@ frame :: proc(app: ^App) -> bool {
   return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 
-ff_panel :: proc(ctx: ^mu.Context, name: string, s: ^FFState) {
+field_panel :: proc(app: ^App, ctx: ^mu.Context, name: string, f: ^Field) {
+  ff := render.force_field(&app.renderer, f.handle)
+  if ff == nil do return
   mu.layout_row(ctx, {-1}, 0)
-  mu.checkbox(ctx, name, &s.enabled)
+  mu.checkbox(ctx, name, &f.enabled)
   mu.label(ctx, "Strength")
-  mu.slider(ctx, &s.strength, -30, 30)
+  mu.slider(ctx, &ff.strength, -30, 30)
   mu.label(ctx, "Tangent")
-  mu.slider(ctx, &s.tangent_strength, -15, 15)
+  mu.slider(ctx, &ff.tangent_strength, -15, 15)
   mu.label(ctx, "Radius")
-  mu.slider(ctx, &s.area_of_effect, 0.5, 10)
+  mu.slider(ctx, &f.area, 0.5, 10)
   mu.label(ctx, "Spin")
-  mu.slider(ctx, &s.spin_speed, 0, 4)
+  mu.slider(ctx, &f.spin_speed, 0, 4)
   mu.label(ctx, "")
+  ff.area_of_effect = f.area if f.enabled else 0
 }
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "Forcefields", {780, 20, 300, 520}, {.NO_CLOSE}) {
-    ff_panel(ctx, "Repel (blue)",   &repel)
-    ff_panel(ctx, "Attract (green)", &attract)
+    field_panel(app, ctx, "Repel (blue)", &app.repel)
+    field_panel(app, ctx, "Attract (green)", &app.attract)
   }
 }

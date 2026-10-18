@@ -20,7 +20,7 @@ See `examples` for common use cases, and [document](https://hucancode.github.io/
 - GLTF
 - Post-processing
 - Billboard, Sprite
-- Tween, Spline
+- Spline
 - Particles Simulation
 - Render to texture
 - Physics

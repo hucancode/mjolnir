@@ -7,24 +7,21 @@ import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
-import "core:strings"
 import "core:fmt"
 import "core:log"
 import mu "vendor:microui"
 
 App :: struct {
-  window:   platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  debug:    debugui.Context,
-  input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
-}
-
-TextureEntry :: struct {
-  name:   string,
-  handle: render.TextureHandle,
+  window:        platform.Platform,
+  scene:         world.World,
+  renderer:      render.Renderer,
+  debug:         debugui.Context,
+  input:         input.State,
+  orbit:         render.Orbit,
+  emitter:       render.EmitterHandle,
+  textures:      [len(TEXTURE_FILES)]render.TextureHandle,
+  emission_rate: f32,
+  enabled:       bool,
 }
 
 TEXTURE_FILES := [?]struct {
@@ -52,29 +49,11 @@ TEXTURE_FILES := [?]struct {
   {"symbol_02", #load("../../assets/particles/symbol_02.png")},
 }
 
-textures:            [dynamic]TextureEntry
-selected_tex_index:  i32 = 0
-emitter_node:        world.NodeHandle
-enabled:            bool = true
-
-emission_rate:    mu.Real = 200
-lifetime:         mu.Real = 2.0
-size_start:       mu.Real = 350
-size_end:         mu.Real = 80
-weight:           mu.Real = 0.2
-weight_spread:    mu.Real = 0.1
-position_spread:  mu.Real = 0.3
-velocity_x:       mu.Real = 0
-velocity_y:       mu.Real = 3.0
-velocity_z:       mu.Real = 0
-velocity_spread:  mu.Real = 1.5
-
-color_start: [4]f32 = {1.0, 0.9, 0.4, 1.0}
-color_end:   [4]f32 = {1.0, 0.2, 0.0, 0.0}
-
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
+  app.emission_rate = 200
+  app.enabled = true
   w := &app.window
   if !platform.init(w, 1280, 800, "Particles") do return
   if !render.init(&app.renderer, "Particles", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
@@ -91,26 +70,32 @@ main :: proc() {
   )
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
-
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 5, 10}, {0, 2, 0})
-
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
   app.renderer.skybox_intensity = 0
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 5, 10}, {0, 2, 0})
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
-  for file in TEXTURE_FILES {
-    handle, ok := render.texture_create(&app.renderer, file.data)
-    if !ok do continue
-    append(&textures, TextureEntry{name = strings.clone(file.name), handle = handle})
-  }
-  if len(textures) > 0 && int(selected_tex_index) >= len(textures) do selected_tex_index = 0
+  for file, i in TEXTURE_FILES do app.textures[i] = render.texture_create(&app.renderer, file.data)
 
-  emitter_node = world.spawn(&app.scene, {0, 2, 0})
-  render.attach(&app.renderer, render.SlotHandle(emitter_node.index), render.emitter_create(&app.renderer, render.make_emitter()))
+  app.emitter = render.emitter_create(&app.renderer, render.make_emitter(
+    texture           = app.textures[0],
+    emission_rate     = app.emission_rate,
+    initial_velocity  = {0, 3, 0},
+    velocity_spread   = 1.5,
+    color_start       = {1.0, 0.9, 0.4, 1.0},
+    color_end         = {1.0, 0.2, 0.0, 0.0},
+    particle_lifetime = 2.0,
+    position_spread   = 0.3,
+    size_start        = 350,
+    size_end          = 80,
+    weight            = 0.2,
+    weight_spread     = 0.1,
+  ))
+  emitter_node := world.spawn(&app.scene, {0, 2, 0})
+  render.attach(&app.renderer, render.SlotHandle(emitter_node.index), app.emitter)
   return true
 }
 
@@ -130,32 +115,10 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  tex: render.TextureHandle
-  if len(textures) > 0 && int(selected_tex_index) < len(textures) {
-    tex = textures[selected_tex_index].handle
-  }
-  if em, ok := render.emitter(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(emitter_node.index), render.EmitterHandle)); ok {
-    em.texture           = tex
-    // a zero rate pauses the emitter
-    em.emission_rate     = f32(emission_rate) if enabled else 0
-    em.particle_lifetime = f32(lifetime)
-    em.size_start        = f32(size_start)
-    em.size_end          = f32(size_end)
-    em.weight            = f32(weight)
-    em.weight_spread     = f32(weight_spread)
-    em.position_spread   = f32(position_spread)
-    em.initial_velocity  = {f32(velocity_x), f32(velocity_y), f32(velocity_z)}
-    em.velocity_spread   = f32(velocity_spread)
-    em.color_start       = color_start
-    em.color_end         = color_end
-  }
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
@@ -170,50 +133,42 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
+  em := render.emitter(&app.renderer, app.emitter)
+  if em == nil do return
 
   if mu.window(ctx, "Texture", {20, 20, 220, 760}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
-    mu.checkbox(ctx, "Enabled", &enabled)
-    current_name := "(none)"
-    if len(textures) > 0 && int(selected_tex_index) < len(textures) {
-      current_name = textures[selected_tex_index].name
-    }
-    mu.layout_row(ctx, {-1}, 0)
-    for tex, idx in textures {
-      prefix := "  "
-      if i32(idx) == selected_tex_index do prefix = "> "
-      if .SUBMIT in mu.button(ctx, fmt.tprintf("%s%s", prefix, tex.name)) {
-        selected_tex_index = i32(idx)
-      }
+    mu.checkbox(ctx, "Enabled", &app.enabled)
+    for file, i in TEXTURE_FILES {
+      prefix := "> " if em.texture == app.textures[i] else "  "
+      if .SUBMIT in mu.button(ctx, fmt.tprintf("%s%s", prefix, file.name)) do em.texture = app.textures[i]
     }
   }
 
   if mu.window(ctx, "Emission & Lifetime", {900, 20, 320, 600}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Emission rate")
-    mu.slider(ctx, &emission_rate, 1, 300)
+    mu.slider(ctx, &app.emission_rate, 1, 300)
     mu.label(ctx, "Lifetime")
-    mu.slider(ctx, &lifetime, 0.1, 10)
-    mu.layout_row(ctx, {-1}, 0)
-    mu.label(ctx, "Size start")
-    mu.slider(ctx, &size_start, 1, 1000)
-    mu.label(ctx, "Size end")
-    mu.slider(ctx, &size_end, 1, 1000)
+    mu.slider(ctx, &em.particle_lifetime, 0.1, 10)
+    mu.label(ctx, "Size start (px at 1 unit)")
+    mu.slider(ctx, &em.size_start, 1, 1000)
+    mu.label(ctx, "Size end (px at 1 unit)")
+    mu.slider(ctx, &em.size_end, 1, 1000)
     mu.label(ctx, "Weight")
-    mu.slider(ctx, &weight, -2, 5)
+    mu.slider(ctx, &em.weight, -2, 5)
     mu.label(ctx, "Weight spread")
-    mu.slider(ctx, &weight_spread, 0, 2)
-    mu.layout_row(ctx, {-1}, 0)
+    mu.slider(ctx, &em.weight_spread, 0, 2)
     mu.label(ctx, "Velocity X")
-    mu.slider(ctx, &velocity_x, -8, 8)
+    mu.slider(ctx, &em.initial_velocity.x, -8, 8)
     mu.label(ctx, "Velocity Y")
-    mu.slider(ctx, &velocity_y, -8, 12)
+    mu.slider(ctx, &em.initial_velocity.y, -8, 12)
     mu.label(ctx, "Velocity Z")
-    mu.slider(ctx, &velocity_z, -8, 8)
+    mu.slider(ctx, &em.initial_velocity.z, -8, 8)
     mu.label(ctx, "Velocity spread")
-    mu.slider(ctx, &velocity_spread, 0, 8)
+    mu.slider(ctx, &em.velocity_spread, 0, 8)
     mu.label(ctx, "Position spread")
-    mu.slider(ctx, &position_spread, 0, 4)
+    mu.slider(ctx, &em.position_spread, 0, 4)
   }
-
+  em.emission_rate = app.emission_rate if app.enabled else 0
 }

@@ -6,10 +6,11 @@ import "rhi"
 // .CUSTOM materials whose Material.shader it is; 0 is none.
 MaterialShader :: distinct u32
 
-// material_shader_create makes a material shader from a user fragment shader. Its materials
-// draw in the forward pass, after the built-in forward types, over the lit image: depth-tested
-// without writing depth, blended by `blend`. They cast no shadow and are not occlusion-culled.
-// There is room for MAX_MATERIAL_SHADERS at once. A backend uses only its own source:
+// material_shader_create makes a material shader from a user fragment shader; the vertex stage
+// is render's mesh stage. Its materials draw in the forward pass, after the built-in forward
+// types, over the lit image: depth-tested without writing depth, blended by `blend`. They cast
+// no shadow, are not occlusion-culled and see no lights (shade them from the material and the
+// view). There is room for MAX_MATERIAL_SHADERS at once. A backend uses only its own source:
 // `frag_spirv` on Vulkan, `frag_wgsl` on WebGPU.
 //
 // Vulkan: compile against shader/vulkan/include/material.glsl (glslc -I), which declares the

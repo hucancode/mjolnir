@@ -13,45 +13,47 @@ import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 
-App :: struct {
-  window:   platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  debug:    debugui.Context,
-  input:    input.State,
-  time:     f32,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
-}
-
-fox_scene: gltf.Scene
-fox_handle: world.NodeHandle
-rig: ^anim.Rig
-animator: anim.Animator
-target_cube: world.NodeHandle
-
-walk_layer:   Maybe(anim.LayerHandle)
-run_layer:    Maybe(anim.LayerHandle)
-survey_layer: Maybe(anim.LayerHandle)
-ik_layer:     Maybe(anim.LayerHandle)
-
-walk_run_blend: mu.Real = 0.0
-auto_blend:     bool    = true
-blend_dir:      f32     = 1.0
-survey_weight:  mu.Real = 0.0
-ik_weight:      mu.Real = 0.0
-animate_target: bool    = true
-target_x:       mu.Real = 0.0
-target_y:       mu.Real = 4.0
-target_z:       mu.Real = 5.0
-target_radius:  mu.Real = 4.0
-target_speed:   mu.Real = 1.0
 TRANSITION_DURATION :: f32(1.5)
-on_run: bool = false
+IK_POLE :: [3]f32{0, 5, 0}
+
+App :: struct {
+  window:         platform.Platform,
+  scene:          world.World,
+  renderer:       render.Renderer,
+  debug:          debugui.Context,
+  input:          input.State,
+  orbit:          render.Orbit,
+  time:           f32,
+  fox:            gltf.Scene,
+  fox_node:       world.NodeHandle,
+  rig:            ^anim.Rig,
+  animator:       anim.Animator,
+  target_cube:    world.NodeHandle,
+  walk_layer:     anim.LayerHandle,
+  run_layer:      anim.LayerHandle,
+  survey_layer:   anim.LayerHandle,
+  ik_layer:       anim.LayerHandle,
+  walk_run_blend: mu.Real,
+  auto_blend:     bool,
+  blend_dir:      f32,
+  on_run:         bool,
+  survey_weight:  mu.Real,
+  ik_weight:      mu.Real,
+  animate_target: bool,
+  target:         [3]mu.Real,
+  target_radius:  mu.Real,
+  target_speed:   mu.Real,
+}
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
+  app.auto_blend = true
+  app.blend_dir = 1
+  app.animate_target = true
+  app.target = {0, 4, 5}
+  app.target_radius = 4
+  app.target_speed = 1
   w := &app.window
   if !platform.init(w, 800, 600, "Animation Layering") do return
   if !render.init(&app.renderer, "Animation Layering", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
@@ -69,57 +71,58 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
+  anim.destroy(&app.animator)
+  gltf.destroy(&app.fox, &app.scene, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
   free(app)
-  gltf.destroy(&fox_scene)
 }
 
 should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 1, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
 
-  fox_scene = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/Fox2.glb"))
-  if len(fox_scene.skinned) == 0 {
+  light := world.spawn(&app.scene)
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light()))
+  app.target_cube = world.spawn(&app.scene, target_position(app))
+  render.attach(&app.renderer, render.SlotHandle(app.target_cube.index), render.primitive(&app.renderer, .CUBE, .RED, cast_shadow = false))
+  world.scale(&app.scene, app.target_cube, 0.25)
+
+  app.fox = gltf.scene_create(&app.scene, &app.renderer, #load("../../assets/Fox2.glb"))
+  if len(app.fox.skinned) == 0 {
     log.error("Fox2.glb has no skinned mesh")
     return true
   }
-  fox_handle = fox_scene.skinned[0].node
-  rig = &fox_scene.rigs[fox_scene.skinned[0].rig]
-  anim.animator_init(&animator, rig)
-  if clip, ok := anim.clip_find(rig, "Walk"); ok {
-    if l, ok := anim.layer_create(&animator, rig, anim.ClipParams{clip = clip, speed = 1}); ok do walk_layer = l
+  app.fox_node = app.fox.skinned[0].node
+  app.rig = &app.fox.rigs[app.fox.skinned[0].rig]
+  anim.animator_init(&app.animator, app.rig)
+  app.walk_layer = clip_layer(app, "Walk", 1, weight = 1)
+  app.run_layer = clip_layer(app, "Run", 1)
+  app.survey_layer = clip_layer(app, "Survey", 0.5, anim.bone_subtree(&app.rig.skeleton, "b_Spine01_02", context.temp_allocator))
+  if neck, ok := anim.bones_find(&app.rig.skeleton, {"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}, context.temp_allocator); ok {
+    ik := anim.IKParams{target = target_position(app), pole = IK_POLE, pole_weight = 1, space = .WORLD}
+    app.ik_layer = anim.layer_create(&app.animator, app.rig, ik, neck, weight = 0)
   }
-  if clip, ok := anim.clip_find(rig, "Run"); ok {
-    if l, ok := anim.layer_create(&animator, rig, anim.ClipParams{clip = clip, speed = 1}, weight = 0); ok do run_layer = l
-  }
-  // Survey drives only the spine and everything above it; legs keep walking.
-  if clip, ok := anim.clip_find(rig, "Survey"); ok {
-    upper := anim.bone_subtree(&rig.skeleton, "b_Spine01_02", context.temp_allocator)
-    if l, ok := anim.layer_create(&animator, rig, anim.ClipParams{clip = clip, speed = 0.5}, upper, weight = 0); ok do survey_layer = l
-  }
-  if bones, ok := anim.bones_find(&rig.skeleton, {"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}, context.temp_allocator); ok {
-    ik := anim.IKParams{target = {f32(target_x), f32(target_y), f32(target_z)}, pole = {0, 5, 2.5}, pole_weight = 1, space = .WORLD}
-    if l, ok := anim.layer_create(&animator, rig, ik, bones, weight = 0); ok do ik_layer = l
-  }
-  log.infof("Layers: walk=%v run=%v survey=%v ik=%v", walk_layer, run_layer, survey_layer, ik_layer)
-
-  target_cube = world.spawn(&app.scene, {f32(target_x), f32(target_y), f32(target_z)})
-  render.attach(&app.renderer, render.SlotHandle(target_cube.index), render.primitive(&app.renderer, .CUBE, .RED, cast_shadow = false))
-  world.scale(&app.scene, target_cube, 0.25)
-  light := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 1, 1, 1}, 10.0, true)))
   return true
+}
+
+clip_layer :: proc(app: ^App, name: string, speed: f32, bones: []u32 = nil, weight: f32 = 0) -> anim.LayerHandle {
+  clip, found := anim.clip_find(app.rig, name)
+  if !found do return {}
+  return anim.layer_create(&app.animator, app.rig, anim.ClipParams{clip = clip, speed = speed}, bones, weight)
+}
+
+target_position :: proc(app: ^App) -> [3]f32 {
+  return {f32(app.target.x), f32(app.target.y), f32(app.target.z)}
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -127,17 +130,20 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  if rig != nil do animate(app, dt)
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  if app.animate_target {
+    t := app.time * f32(app.target_speed)
+    r := f32(app.target_radius)
+    app.target = {mu.Real(math.cos(t) * r), mu.Real(4 + math.sin(t * 2)), mu.Real(math.sin(t) * r)}
+  }
+  world.translate(&app.scene, app.target_cube, target_position(app))
+  if app.rig != nil do animate(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  if rig != nil do render.stage_bones(&app.renderer, render.SlotHandle(fox_handle.index), animator.palette)
+  if app.rig != nil do render.stage_bones(&app.renderer, render.SlotHandle(app.fox_node.index), app.animator.palette)
   render.update(&app.renderer, dt)
 }
 
@@ -149,35 +155,31 @@ frame :: proc(app: ^App) -> bool {
 }
 
 animate :: proc(app: ^App, dt: f32) {
-
-  if auto_blend {
-    walk_run_blend += mu.Real(blend_dir * dt * 0.5)
-    if walk_run_blend >= 1.0 { walk_run_blend = 1.0; blend_dir = -1.0 }
-    if walk_run_blend <= 0.0 { walk_run_blend = 0.0; blend_dir =  1.0 }
-    set_walk_run(0)
+  if app.auto_blend {
+    app.walk_run_blend = clamp(app.walk_run_blend + mu.Real(app.blend_dir * dt * 0.5), 0, 1)
+    if app.walk_run_blend == 1 do app.blend_dir = -1
+    if app.walk_run_blend == 0 do app.blend_dir = 1
+    set_walk_run(app, 0)
   }
-  if l, ok := survey_layer.?; ok do anim.layer_fade(&animator, l, f32(survey_weight))
-
-  if ik, ok := ik_layer.?; ok {
-    anim.layer_fade(&animator, ik, f32(ik_weight))
-    if animate_target {
-      t := app.time * f32(target_speed)
-      r := f32(target_radius)
-      target_x = mu.Real(math.cos(t) * r)
-      target_z = mu.Real(math.sin(t) * r)
-      target_y = mu.Real(4.0 + math.sin(t * 2.0))
-    }
-    pos := [3]f32{f32(target_x), f32(target_y), f32(target_z)}
-    if p, ok := anim.layer_params(&animator, ik, anim.IKParams); ok do p.target, p.pole = pos, {0, 5, 0}
-    if _, ok := world.node(&app.scene, target_cube); ok do world.translate(&app.scene, target_cube, pos)
+  anim.layer_fade(&app.animator, app.survey_layer, f32(app.survey_weight))
+  anim.layer_fade(&app.animator, app.ik_layer, f32(app.ik_weight))
+  if ik, ok := anim.layer_params(&app.animator, app.ik_layer, anim.IKParams); ok {
+    ik.target, ik.pole = target_position(app), IK_POLE
   }
-  anim.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, fox_handle))
+  anim.animator_update(&app.animator, app.rig, dt, world.world_matrix(&app.scene, app.fox_node))
 }
 
-// Weigh walk against run by walk_run_blend, fading over `duration` seconds.
-set_walk_run :: proc(duration: f32) {
-  if l, ok := walk_layer.?; ok do anim.layer_fade(&animator, l, 1.0 - f32(walk_run_blend), duration)
-  if l, ok := run_layer.?; ok do anim.layer_fade(&animator, l, f32(walk_run_blend), duration)
+set_walk_run :: proc(app: ^App, duration: f32) {
+  anim.layer_fade(&app.animator, app.walk_layer, 1 - f32(app.walk_run_blend), duration)
+  anim.layer_fade(&app.animator, app.run_layer, f32(app.walk_run_blend), duration)
+}
+
+cross_fade_walk_run :: proc(app: ^App) {
+  app.on_run = !app.on_run
+  app.auto_blend = false
+  app.walk_run_blend = 1 if app.on_run else 0
+  anim.clip_seek(&app.animator, app.run_layer if app.on_run else app.walk_layer, 0)
+  set_walk_run(app, TRANSITION_DURATION)
 }
 
 debug_ui :: proc(app: ^App) {
@@ -185,34 +187,27 @@ debug_ui :: proc(app: ^App) {
   if mu.window(ctx, "Animation Layering", {480, 20, 320, 490}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Base layer (Walk <-> Run)")
-    mu.checkbox(ctx, "Auto blend", &auto_blend)
+    mu.checkbox(ctx, "Auto blend", &app.auto_blend)
     mu.label(ctx, "Blend")
-    if .CHANGE in mu.slider(ctx, &walk_run_blend, 0.0, 1.0) {
-      auto_blend = false
-      set_walk_run(0)
+    if .CHANGE in mu.slider(ctx, &app.walk_run_blend, 0, 1) {
+      app.auto_blend = false
+      set_walk_run(app, 0)
     }
-    if .SUBMIT in mu.button(ctx, "Trigger transition") {
-      // cross-fade: one layer fades out while the other fades in from its start
-      on_run = !on_run
-      auto_blend = false
-      walk_run_blend = on_run ? 1.0 : 0.0
-      if l, ok := (run_layer if on_run else walk_layer).?; ok do anim.clip_seek(&animator, l, 0)
-      set_walk_run(TRANSITION_DURATION)
-    }
+    if .SUBMIT in mu.button(ctx, "Trigger transition") do cross_fade_walk_run(app)
     mu.label(ctx, "")
     mu.label(ctx, "Upper body (Survey)")
-    mu.label(ctx, "Weight"); mu.slider(ctx, &survey_weight, 0.0, 1.0)
+    mu.label(ctx, "Weight"); mu.slider(ctx, &app.survey_weight, 0, 1)
     mu.label(ctx, "")
     mu.label(ctx, "IK head tracking")
-    mu.label(ctx, "Weight"); mu.slider(ctx, &ik_weight, 0.0, 1.0)
-    mu.checkbox(ctx, "Animate target", &animate_target)
-    if animate_target {
-      mu.label(ctx, "Radius"); mu.slider(ctx, &target_radius, 1.0, 8.0)
-      mu.label(ctx, "Speed"); mu.slider(ctx, &target_speed, 0.0, 4.0)
+    mu.label(ctx, "Weight"); mu.slider(ctx, &app.ik_weight, 0, 1)
+    mu.checkbox(ctx, "Animate target", &app.animate_target)
+    if app.animate_target {
+      mu.label(ctx, "Radius"); mu.slider(ctx, &app.target_radius, 1, 8)
+      mu.label(ctx, "Speed"); mu.slider(ctx, &app.target_speed, 0, 4)
     } else {
-      mu.label(ctx, "X"); mu.slider(ctx, &target_x, -8.0, 8.0)
-      mu.label(ctx, "Y"); mu.slider(ctx, &target_y, 0.0, 8.0)
-      mu.label(ctx, "Z"); mu.slider(ctx, &target_z, -8.0, 8.0)
+      mu.label(ctx, "X"); mu.slider(ctx, &app.target.x, -8, 8)
+      mu.label(ctx, "Y"); mu.slider(ctx, &app.target.y, 0, 8)
+      mu.label(ctx, "Z"); mu.slider(ctx, &app.target.z, -8, 8)
     }
   }
 }

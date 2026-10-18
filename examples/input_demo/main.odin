@@ -11,31 +11,33 @@ import "core:fmt"
 import "core:log"
 import mu "vendor:microui"
 
+Seen :: struct {
+  key:            Maybe(input.Key),
+  key_pressed:    bool,
+  button:         input.MouseButton,
+  button_pressed: bool,
+  scroll:         [2]f32,
+  cursor:         [2]f32,
+  drag:           [2]f32,
+  dragging:       bool,
+  text:           [64]u8,
+  text_len:       int,
+}
+
 App :: struct {
   window:   platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   debug:    debugui.Context,
   input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  orbit:    render.Orbit,
+  cube:     world.NodeHandle,
+  cube_pos: [3]f32,
+  cube_yaw: f32,
+  light:    render.LightHandle,
+  seen:     Seen,
 }
 
-cube_handle: world.NodeHandle
-light_handle: world.NodeHandle
-cube_pos: [3]f32 = {0, 0.5, 0}
-cube_yaw: f32
-
-last_key: input.Key
-last_key_pressed: bool
-last_button: input.MouseButton
-last_button_pressed: bool
-last_scroll: [2]f32
-last_mouse: [2]f32
-last_drag: [2]f32
-lmb_down: bool
-last_text: [64]u8
-last_text_len: int
 move_speed: mu.Real = 4.0
 light_intensity: mu.Real = 4.0
 
@@ -62,24 +64,25 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {0, 8, 12}, {0, 0.5, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0.5, 0})
 
-  light_handle = world.spawn(&app.scene, {4, 8, 4})
-  render.attach(&app.renderer, render.SlotHandle(light_handle.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, f32(light_intensity)}, 15.0, true)))
+  app.light = render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, f32(light_intensity), 15.0))
+  sun := world.spawn(&app.scene, {4, 8, 4})
+  render.attach(&app.renderer, render.SlotHandle(sun.index), app.light)
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 8.0)
 
-  cube_handle = world.spawn(&app.scene, cube_pos)
-  render.attach(&app.renderer, render.SlotHandle(cube_handle.index), render.primitive(&app.renderer, .CUBE, .CYAN))
-  world.scale(&app.scene, cube_handle, 0.5)
+  app.cube_pos = {0, 0.5, 0}
+  app.cube = world.spawn(&app.scene, app.cube_pos)
+  render.attach(&app.renderer, render.SlotHandle(app.cube.index), render.primitive(&app.renderer, .CUBE, .CYAN))
+  world.scale(&app.scene, app.cube, 0.5)
   log.info("Input demo  WASD: move cube  Q/E: yaw  LMB drag, RMB, scroll, typing read from the input snapshot")
   return true
 }
@@ -92,67 +95,52 @@ shutdown :: proc(app: ^App) {
   free(app)
 }
 
-// Track the latest edges from this tick's input snapshot, skipping devices
-// the debug UI owns.
-read_input :: proc(app: ^App) {
+record_input :: proc(app: ^App) {
   inp := &app.input
-  if !app.input.keyboard_captured {
+  seen := &app.seen
+  if !inp.keyboard_captured {
     it := 0
     for key, pressed in input.next_key_edge(inp, &it) {
-      last_key = key; last_key_pressed = pressed
+      seen.key, seen.key_pressed = key, pressed
     }
-    if t := input.text(inp); len(t) > 0 {
-      last_text_len = copy(last_text[:], t)
-    }
+    if t := input.text(inp); len(t) > 0 do seen.text_len = copy(seen.text[:], t)
   }
-  last_mouse = inp.cursor
-  if !app.input.mouse_captured {
+  seen.cursor = inp.cursor
+  if !inp.mouse_captured {
     for b in input.MouseButton {
       if input.mouse_pressed(inp, b) {
-        last_button = b; last_button_pressed = true
-        if b == .LEFT do lmb_down = true
+        seen.button, seen.button_pressed = b, true
+        if b == .LEFT do seen.dragging = true
       }
-      if input.mouse_released(inp, b) {
-        last_button = b; last_button_pressed = false
-      }
+      if input.mouse_released(inp, b) do seen.button, seen.button_pressed = b, false
     }
-    if s := inp.scroll; s != {} {
-      last_scroll = s
-      light_intensity = clamp(light_intensity + mu.Real(s.y) * 0.5, 0.0, 20.0)
+    if inp.scroll != {} {
+      seen.scroll = inp.scroll
+      light_intensity = clamp(light_intensity + mu.Real(inp.scroll.y) * 0.5, 0.0, 20.0)
     }
   }
-  if !input.mouse_down(inp, .LEFT) do lmb_down = false
-  last_drag = inp.mouse_delta if lmb_down else {}
+  if !input.mouse_down(inp, .LEFT) do seen.dragging = false
+  seen.drag = inp.mouse_delta if seen.dragging else {}
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, 0)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  read_input(app)
-  move := [3]f32{0, 0, 0}
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  record_input(app)
   if !app.input.keyboard_captured {
-    move.x = input.axis(&app.input, .A, .D)
-    move.z = input.axis(&app.input, .W, .S)
-    cube_yaw += input.axis(&app.input, .E, .Q) * dt * 2.0
+    step := f32(move_speed) * dt
+    app.cube_pos.x = clamp(app.cube_pos.x + input.axis(&app.input, .A, .D) * step, -7.5, 7.5)
+    app.cube_pos.z = clamp(app.cube_pos.z + input.axis(&app.input, .W, .S) * step, -7.5, 7.5)
+    app.cube_yaw += input.axis(&app.input, .E, .Q) * dt * 2.0
   }
-  if move.x != 0 || move.z != 0 {
-    speed := f32(move_speed) * dt
-    cube_pos.x = clamp(cube_pos.x + move.x * speed, -7.5, 7.5)
-    cube_pos.z = clamp(cube_pos.z + move.z * speed, -7.5, 7.5)
-  }
-  world.translate(&app.scene, cube_handle, cube_pos)
-  world.rotate(&app.scene, cube_handle, cube_yaw)
-  if l, ok := render.light(&app.renderer, render.attachment(&app.renderer, render.SlotHandle(light_handle.index), render.LightHandle)); ok {
-    l.color[3] = f32(light_intensity)
-  }
+  world.translate(&app.scene, app.cube, app.cube_pos)
+  world.rotate(&app.scene, app.cube, app.cube_yaw)
+  render.light(&app.renderer, app.light).intensity = f32(light_intensity)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
@@ -166,17 +154,19 @@ frame :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
+  seen := &app.seen
   ctx := debugui.begin(&app.debug)
-  if mu.window(ctx, "Input", {700, 20, 200, 300}, {.NO_CLOSE}) {
+  if mu.window(ctx, "Input", {700, 20, 280, 400}, {.NO_CLOSE}) {
+    mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "WASD move, Q/E yaw")
-    mu.label(ctx, fmt.tprintf("Last key: %v %v", last_key, "PRESS" if last_key_pressed else "RELEASE"))
-    mu.label(ctx, fmt.tprintf("Typed: %s", string(last_text[:last_text_len])))
+    mu.label(ctx, fmt.tprintf("Last key: %v %v", seen.key, "PRESS" if seen.key_pressed else "RELEASE"))
+    mu.label(ctx, fmt.tprintf("Typed: %s", string(seen.text[:seen.text_len])))
     mu.label(ctx, "Move speed")
     mu.slider(ctx, &move_speed, 0.5, 20.0)
-    mu.label(ctx, fmt.tprintf("Mouse: %.0f %.0f", last_mouse.x, last_mouse.y))
-    mu.label(ctx, fmt.tprintf("Drag delta: %.1f %.1f", last_drag.x, last_drag.y))
-    mu.label(ctx, fmt.tprintf("Last mouse button: %v %v", last_button, "PRESS" if last_button_pressed else "RELEASE"))
-    mu.label(ctx, fmt.tprintf("Scroll: %.1f %.1f", last_scroll.x, last_scroll.y))
+    mu.label(ctx, fmt.tprintf("Mouse: %.0f %.0f", seen.cursor.x, seen.cursor.y))
+    mu.label(ctx, fmt.tprintf("Drag delta: %.1f %.1f", seen.drag.x, seen.drag.y))
+    mu.label(ctx, fmt.tprintf("Last mouse button: %v %v", seen.button, "PRESS" if seen.button_pressed else "RELEASE"))
+    mu.label(ctx, fmt.tprintf("Scroll: %.1f %.1f", seen.scroll.x, seen.scroll.y))
     mu.label(ctx, "Light (Scroll to adjust):")
     mu.slider(ctx, &light_intensity, 0.0, 20.0)
   }

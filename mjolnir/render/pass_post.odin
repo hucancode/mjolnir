@@ -84,7 +84,7 @@ post_pipelines_create :: proc(self: ^Renderer, frag_spirv: []u8, frag_wgsl: stri
 }
 
 // post_shader_create makes a post-process shader from a user fragment shader, for
-// CustomEffect. A backend uses only its own source: `frag_spirv` on Vulkan, `frag_wgsl` on
+// CustomEffect in effect_stack, which the main camera runs. A backend uses only its own source: `frag_spirv` on Vulkan, `frag_wgsl` on
 // WebGPU.
 //
 // Vulkan: compile against shader/vulkan/include/post.glsl (glslc -I), which declares the

@@ -3,12 +3,14 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/debugui"
+import "../../mjolnir/geometry"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
+import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
 
@@ -16,11 +18,10 @@ obj_files := [3][]u8{#load("../../assets/nav_test.obj"), #load("../../assets/flo
 OBJ_SCALES :: [3]f32{1.0, 1.0, 0.05}
 OBJ_LABELS :: [3]string{"nav_test", "5 obstacles", "dungeon"}
 
-display_node: world.NodeHandle
-display_material: render.MaterialHandle
-loaded_meshes: [3]render.MeshHandle
-loaded_aabb: [3]struct{min, max: [3]f32}
-current_index: int = -1
+Model :: struct {
+  mesh:   render.MeshHandle,
+  bounds: geometry.Aabb,
+}
 
 App :: struct {
   window:   platform.Platform,
@@ -28,8 +29,11 @@ App :: struct {
   renderer: render.Renderer,
   debug:    debugui.Context,
   input:    input.State,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  orbit:    render.Orbit,
+  models:   [3]Model,
+  material: render.MaterialHandle,
+  display:  world.NodeHandle,
+  current:  int,
 }
 
 main :: proc() {
@@ -51,17 +55,16 @@ main :: proc() {
   )
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   if !debugui.init(&app.debug, &app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
 
   light := world.spawn(&app.scene, {10, 18, 10})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92, 3.0}, 10.0, false)))
-  world.rotate(&app.scene, light, 1.5707963, [3]f32{1, 0, 0})
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, 3.0, 10.0, false)))
+  world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
 
-  display_material = render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1}))
+  app.material = render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1}))
 
   scales := OBJ_SCALES
   labels := OBJ_LABELS
@@ -73,15 +76,13 @@ setup :: proc(app: ^App) -> bool {
     }
     geom := render.make_geometry_from_triangles(obj.positions, obj.indices)
     obj_mesh_destroy(&obj)
-    aabb := render.aabb_from_vertices(geom.vertices)
-    log.infof("%s: %d verts, %d tris, aabb %v..%v", labels[i], len(geom.vertices), len(geom.indices) / 3, aabb.min, aabb.max)
-    loaded_aabb[i] = {aabb.min, aabb.max}
-    loaded_meshes[i] = render.mesh_create(&app.renderer, geom)
+    bounds := render.aabb_from_vertices(geom.vertices)
+    log.infof("%s: %d verts, %d tris, aabb %v..%v", labels[i], len(geom.vertices), len(geom.indices) / 3, bounds.min, bounds.max)
+    app.models[i] = {mesh = render.mesh_create(&app.renderer, geom), bounds = bounds}
   }
 
-  display_node = world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(display_node.index), render.MeshAttachment{mesh = loaded_meshes[0], material = display_material, cast_shadow = true})
-  swap_model(app, 0)
+  app.display = world.spawn(&app.scene)
+  show_model(app, 0)
   return true
 }
 
@@ -101,39 +102,29 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   debugui.feed(&app.debug, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
 }
 
-swap_model :: proc(app: ^App, index: int) {
-  if index == current_index do return
-  current_index = index
+show_model :: proc(app: ^App, index: int) {
+  app.current = index
+  model := app.models[index]
+  center := (model.bounds.min + model.bounds.max) * 0.5
+  radius := max(linalg.length(model.bounds.max - model.bounds.min) * 0.5, 1)
 
-  aabb := loaded_aabb[index]
-  center := (aabb.min + aabb.max) * 0.5
-  extents := aabb.max - aabb.min
-  radius := linalg.length(extents) * 0.5
-  if radius < 0.001 do radius = 1
-
-  if a, ok := render.attachment(&app.renderer, render.SlotHandle(display_node.index), render.MeshAttachment); ok {
-    a.mesh = loaded_meshes[index]
-    render.attach(&app.renderer, render.SlotHandle(display_node.index), a)
-  }
-  world.translate(&app.scene, display_node, -center)
+  render.attach(&app.renderer, render.SlotHandle(app.display.index), render.MeshAttachment{mesh = model.mesh, material = app.material, cast_shadow = true})
+  world.translate(&app.scene, app.display, -center)
 
   cam_dist := radius * 1.8
   cam := render.main_camera(&app.renderer)
   render.camera_set_perspective(cam, 1.2, max(0.1, cam_dist * 0.01), cam_dist * 5.0)
   render.camera_look_at(cam, {cam_dist, cam_dist * 0.7, cam_dist}, {0, 0, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(cam)
+  app.orbit = render.orbit_from_camera(cam)
 }
 
 frame :: proc(app: ^App) -> bool {
@@ -141,11 +132,11 @@ frame :: proc(app: ^App) -> bool {
   ctx := debugui.begin(&app.debug)
   if mu.window(ctx, "OBJ Loader", {720, 20, 260, 200}, {.NO_CLOSE}) {
     labels := OBJ_LABELS
-    mu.label(ctx, fmt.tprintf("Current: %s", labels[current_index] if current_index >= 0 else "<none>"))
+    mu.label(ctx, fmt.tprintf("Current: %s", labels[app.current]))
     mu.label(ctx, "")
     mu.layout_row(ctx, {-1}, 0)
     for label, i in labels {
-      if .SUBMIT in mu.button(ctx, label) do swap_model(app, i)
+      if .SUBMIT in mu.button(ctx, label) && i != app.current do show_model(app, i)
     }
   }
   render.stage_overlay(&app.renderer, {commands = debugui.end(&app.debug, platform.dpi_scale(&app.window))})

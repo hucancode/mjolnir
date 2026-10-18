@@ -19,13 +19,11 @@ App :: struct {
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
+  orbit:    render.Orbit,
   time:     f32,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  cubes:    [CUBE_COUNT]world.NodeHandle,
+  spline:   animation.Spline([3]f32),
 }
-
-cubes: [CUBE_COUNT]world.NodeHandle
-spline: animation.Spline([3]f32)
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -47,7 +45,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  animation.destroy(&spline)
+  animation.destroy(&app.spline)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.window)
@@ -58,12 +56,11 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {0, 10, 0}, {0, 0, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
   CONTROL_POINTS :: 10
   points: [CONTROL_POINTS][3]f32
@@ -74,26 +71,19 @@ setup :: proc(app: ^App) -> bool {
     points[i] = {scale * math.sin(t), 0, scale * math.sin(2.0 * t) * 0.5}
     times[i] = f32(i) * ANIMATION_DURATION / f32(CONTROL_POINTS - 1)
   }
-  if !animation.spline_init(&spline, points[:], times[:]) do log.error("Spline validation failed!")
+  if !animation.spline_init(&app.spline, points[:], times[:]) do log.error("Spline validation failed!")
 
-  mats := [?]render.MaterialHandle{
-    app.renderer.builtin_materials[.RED], app.renderer.builtin_materials[.GREEN],
-    app.renderer.builtin_materials[.BLUE], app.renderer.builtin_materials[.YELLOW],
-    app.renderer.builtin_materials[.CYAN], app.renderer.builtin_materials[.MAGENTA],
-    app.renderer.builtin_materials[.WHITE], app.renderer.builtin_materials[.GRAY],
-    app.renderer.builtin_materials[.BLACK],
-  }
-  cube := app.renderer.builtin_meshes[.CUBE]
-  for i in 0 ..< CUBE_COUNT {
-    cubes[i] = world.spawn(&app.scene, {0, 0, 0})
-    render.attach(&app.renderer, render.SlotHandle(cubes[i].index), render.MeshAttachment{mesh = cube, material = mats[i % len(mats)]})
-    world.scale(&app.scene, cubes[i], 0.3)
+  colors := [?]render.Color{.RED, .GREEN, .BLUE, .YELLOW, .CYAN, .MAGENTA, .WHITE, .GRAY, .BLACK}
+  for &cube, i in app.cubes {
+    cube = world.spawn(&app.scene)
+    render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, colors[i % len(colors)]))
+    world.scale(&app.scene, cube, 0.3)
   }
   ground := world.spawn(&app.scene, {0, -2, 0})
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
   light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1, 1, 1, 1}, 20.0, true)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light({1, 1, 1}, 600, 20.0, true)))
   return true
 }
 
@@ -101,21 +91,16 @@ update :: proc(app: ^App, dt: f32) {
   app.time += dt
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  total_length := animation.spline_arc_length(spline)
-  for i in 0 ..< CUBE_COUNT {
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  total_length := animation.spline_arc_length(app.spline)
+  for cube, i in app.cubes {
     offset := f32(i) / f32(CUBE_COUNT) * total_length
-    elapsed := app.time
-    current_s := math.mod_f32(elapsed * (total_length / ANIMATION_DURATION) + offset, total_length)
-    normalized := current_s / total_length
-    tweened := ease.ease(.Quadratic_In_Out, normalized) * total_length
-    world.translate(&app.scene, cubes[i], animation.spline_sample_uniform(spline, tweened))
+    distance := math.mod_f32(app.time * (total_length / ANIMATION_DURATION) + offset, total_length)
+    eased := ease.ease(.Quadratic_In_Out, distance / total_length) * total_length
+    world.translate(&app.scene, cube, animation.spline_sample_uniform(app.spline, eased))
   }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

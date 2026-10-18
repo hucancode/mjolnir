@@ -43,7 +43,7 @@ Renderer :: struct {
   ibl_intensity:          f32,
   builtin_materials:      [Color]MaterialHandle,
   builtin_meshes:         [Primitive]MeshHandle,
-  // every camera runs the stack in order
+  // the main camera runs the stack in order; without a ToneMapEffect it presents HDR as is
   effect_stack:           [dynamic]PostprocessEffect,
   using _:               Renderer_State,
 }
@@ -416,8 +416,10 @@ post_process_release_images :: proc(self: ^Renderer) {
   }
 }
 
-// lock holds off frame while another thread edits through the pointers material, light,
-// emitter and force_field return; stage_*, *_create and *_destroy lock themselves.
+// lock holds off frame while another thread (USE_PARALLEL_UPDATE) edits renderer state: the
+// pointers material, light, emitter, force_field and camera return, effect_stack and the
+// settings. stage_*, and *_create / *_destroy of meshes, materials, textures, lights,
+// emitters and force fields lock themselves.
 lock :: proc(self: ^Renderer) {
   sync.recursive_mutex_lock(&self.mutex)
 }
@@ -758,10 +760,13 @@ attachment :: proc(
 // SPOT_LIGHT_INNER_RATIO is the default ratio of a spot light's full-intensity cone to its falloff cone.
 SPOT_LIGHT_INNER_RATIO :: f32(0.75)
 
-// Light shines from every slot it is attached to, along the slot's forward axis
+// Light shines from every slot it is attached to, along the slot's +Z axis
 // (make_*_light fill one; light_create stores it). Point lights ignore the angles.
 Light :: struct #align(16) {
-  color:              [4]f32, // RGB + intensity
+  color:              [3]f32,
+  // a directional light's strength; a point or spot light's at 1 unit away, falling off by
+  // inverse square and fading smoothly to zero at radius
+  intensity:          f32,
   // range of a point or spot light; shadow distance of a directional light from the main camera
   radius:             f32,
   angle_inner:        f32, // spot cone angles
@@ -810,25 +815,28 @@ light_pose :: proc(world_matrix: matrix[4, 4]f32) -> (position, direction: [3]f3
 
 // make_point_light returns an omnidirectional Light for light_create.
 make_point_light :: proc(
-  color: [4]f32 = {1, 1, 1, 1},
+  color: [3]f32 = {1, 1, 1},
+  intensity: f32 = 1.0,
   radius: f32 = 10.0,
   cast_shadow: bool = true,
 ) -> Light {
-  return {type = .POINT, color = color, radius = radius, cast_shadow = b32(cast_shadow)}
+  return {type = .POINT, color = color, intensity = intensity, radius = radius, cast_shadow = b32(cast_shadow)}
 }
 
 // make_directional_light returns a sun-like Light for light_create; shadow_radius is its shadow distance.
 make_directional_light :: proc(
-  color: [4]f32 = {1, 1, 1, 1},
+  color: [3]f32 = {1, 1, 1},
+  intensity: f32 = 1.0,
   shadow_radius: f32 = 10.0,
-  cast_shadow: bool = false,
+  cast_shadow: bool = true,
 ) -> Light {
-  return {type = .DIRECTIONAL, color = color, radius = shadow_radius, cast_shadow = b32(cast_shadow)}
+  return {type = .DIRECTIONAL, color = color, intensity = intensity, radius = shadow_radius, cast_shadow = b32(cast_shadow)}
 }
 
 // make_spot_light returns a cone Light of the given half angle for light_create.
 make_spot_light :: proc(
-  color: [4]f32 = {1, 1, 1, 1},
+  color: [3]f32 = {1, 1, 1},
+  intensity: f32 = 1.0,
   radius: f32 = 10.0,
   angle: f32 = math.PI * 0.2,
   cast_shadow: bool = true,
@@ -836,6 +844,7 @@ make_spot_light :: proc(
   return {
     type        = .SPOT,
     color       = color,
+    intensity   = intensity,
     radius      = radius,
     angle_inner = angle * SPOT_LIGHT_INNER_RATIO,
     angle_outer = angle,
@@ -1019,7 +1028,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
     for &v in cameras {
       if v.type_mask == 0 do continue
       if !geometry.frustum_test_sphere({v.planes}, bounds.xyz, bounds.w) do continue
-      score = max(score, shadow_score(bounds, light.color.a, v.position.xyz))
+      score = max(score, shadow_score(bounds, light.intensity, v.position.xyz))
     }
     if score < 0 do continue
     casters[caster_count] = {light = i, owner = u32(i) + 1, score = score}

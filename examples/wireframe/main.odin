@@ -14,9 +14,9 @@ App :: struct {
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
+  orbit:    render.Orbit,
   time:     f32,
-  // orbit controller state, owned by the app
-  yaw, pitch, dist: f32,
+  cubes:    [9]world.NodeHandle,
 }
 
 main :: proc() {
@@ -49,28 +49,19 @@ should_close :: proc(app: ^App) -> bool {
   return platform.should_close(&app.window)
 }
 
-handles: [9]world.NodeHandle
-
-// On the web the renderer's device arrives after main returns: build the scene once it is up.
 setup :: proc(app: ^App) -> bool {
   if !render.ready(&app.renderer) do return false
   render.environment_map_load(&app.renderer, #load("../../assets/Cannon_Exterior.hdr"))
   render.camera_look_at(render.main_camera(&app.renderer), {0, 4, 9}, {0, 0, 0})
-  app.yaw, app.pitch, app.dist = render.camera_orbit_state(render.main_camera(&app.renderer))
+  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
   app.renderer.skybox_intensity = 0
 
-  cube := app.renderer.builtin_meshes[.CUBE]
-  mat := render.material_create(&app.renderer, render.make_material(.WIREFRAME))
-
-  for i in 0 ..< 9 {
-    row := i / 3
-    col := i % 3
-    x := f32(col - 1) * 2.5
-    z := f32(row - 1) * 2.5
-    h := world.spawn(&app.scene, {x, 0, z})
-    render.attach(&app.renderer, render.SlotHandle(h.index), render.MeshAttachment{mesh = cube, material = mat, cast_shadow = false})
-    world.scale(&app.scene, h, 0.7)
-    handles[i] = h
+  wireframe := render.material_create(&app.renderer, render.make_material(.WIREFRAME))
+  for &cube, i in app.cubes {
+    row, col := i / 3, i % 3
+    cube = world.spawn(&app.scene, {f32(col - 1) * 2.5, 0, f32(row - 1) * 2.5})
+    render.attach(&app.renderer, render.SlotHandle(cube.index), render.MeshAttachment{mesh = app.renderer.builtin_meshes[.CUBE], material = wireframe})
+    world.scale(&app.scene, cube, 0.7)
   }
   return true
 }
@@ -79,17 +70,13 @@ update :: proc(app: ^App, dt: f32) {
   app.time += dt
   platform.read_input(&app.window, &app.input)
   if !app.input.mouse_captured {
-    if input.mouse_down(&app.input, .LEFT) {
-      app.yaw += app.input.mouse_delta.x * 0.02
-      app.pitch = clamp(app.pitch + app.input.mouse_delta.y * 0.02, -1.5, 1.5)
-    }
-    app.dist = clamp(app.dist - app.input.scroll.y * 2, 1, 200)
+    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
+    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.yaw, app.pitch, app.dist)
-  t := app.time
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   axis := linalg.normalize([3]f32{1, 1, 0.4})
-  for h, i in handles {
-    world.rotate(&app.scene, h, linalg.quaternion_angle_axis(t * (0.4 + f32(i) * 0.15), axis))
+  for cube, i in app.cubes {
+    world.rotate(&app.scene, cube, linalg.quaternion_angle_axis(app.time * (0.4 + f32(i) * 0.15), axis))
   }
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

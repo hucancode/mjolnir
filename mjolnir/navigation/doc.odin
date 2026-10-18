@@ -1,5 +1,5 @@
-// Pathfinding on a navigation mesh: load one baked by navigation/bake, then find paths and
-// nearest points.
+// Pathfinding on a navigation mesh: init one from bytes baked by navigation/bake, then find paths
+// and nearest points.
 package navigation
 
 // The runtime navigation mesh: load a NavMesh from bytes (baked by navigation/bake, now or
