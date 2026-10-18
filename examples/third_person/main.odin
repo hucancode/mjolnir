@@ -5,6 +5,7 @@ package main
 
 import "../../mjolnir"
 import anim "../../mjolnir/animation"
+import bt "../../mjolnir/behavior_tree"
 import "../../mjolnir/font"
 import "../../mjolnir/geometry"
 import "../../mjolnir/gltf"
@@ -263,20 +264,15 @@ Enemy :: struct {
   strike:      f32,
   repath:      f32,
   dying:       f32,
-  trace:       [8]Trace,
-  traced:      int,
+  trace:       [dynamic]bt.Step,
 }
 
-TRACE_COLORS := [Status][4]u8 {
+TRACE_COLORS := [bt.Status][4]u8 {
   .FAILURE = {170, 170, 180, 255},
   .SUCCESS = {120, 230, 120, 255},
   .RUNNING = {250, 210, 80, 255},
 }
 
-Trace :: struct {
-  name:   string,
-  status: Status,
-}
 
 Pickup :: struct {
   node:     world.NodeHandle,
@@ -344,45 +340,37 @@ App :: struct {
   crowd:        crowd.Crowd,
 }
 
-Status :: enum {
-  FAILURE,
-  SUCCESS,
-  RUNNING,
+Mob :: struct {
+  app:   ^App,
+  enemy: ^Enemy,
 }
 
-Leaf :: struct {
-  name: string,
-  run:  proc(app: ^App, e: ^Enemy) -> Status,
-}
-Sequence :: distinct []Behavior
-Selector :: distinct []Behavior
-Behavior :: union {
-  Leaf,
-  Sequence,
-  Selector,
-}
+Action :: bt.Action(Mob)
+Sequence :: bt.Sequence(Mob)
+Selector :: bt.Selector(Mob)
+Behavior :: bt.Behavior(Mob)
 
-MELEE := Behavior(Selector{
-  Sequence{Leaf{"is_dead", is_dead}, Leaf{"die", die}},
-  Sequence{Leaf{"in_range", in_range}, Leaf{"attack", attack}},
-  Sequence{Leaf{"sees_player", sees_player}, Leaf{"chase", chase}},
-  Leaf{"patrol", patrol},
-})
+MELEE := Behavior(Selector{{
+  Sequence{{Action{"is_dead", is_dead}, Action{"die", die}}},
+  Sequence{{Action{"in_range", in_range}, Action{"attack", attack}}},
+  Sequence{{Action{"sees_player", sees_player}, Action{"chase", chase}}},
+  Action{"patrol", patrol},
+}})
 
-RANGED := Behavior(Selector{
-  Sequence{Leaf{"is_dead", is_dead}, Leaf{"die", die}},
-  Sequence{Leaf{"too_close", too_close}, Leaf{"retreat", retreat}},
-  Sequence{Leaf{"in_range", in_range}, Leaf{"attack", attack}},
-  Sequence{Leaf{"sees_player", sees_player}, Leaf{"chase", chase}},
-  Leaf{"patrol", patrol},
-})
+RANGED := Behavior(Selector{{
+  Sequence{{Action{"is_dead", is_dead}, Action{"die", die}}},
+  Sequence{{Action{"too_close", too_close}, Action{"retreat", retreat}}},
+  Sequence{{Action{"in_range", in_range}, Action{"attack", attack}}},
+  Sequence{{Action{"sees_player", sees_player}, Action{"chase", chase}}},
+  Action{"patrol", patrol},
+}})
 
-BOSS := Behavior(Selector{
-  Sequence{Leaf{"is_dead", is_dead}, Leaf{"die", die}},
-  Sequence{Leaf{"in_range", in_range}, Leaf{"attack", attack}},
-  Sequence{Leaf{"enraged", enraged}, Leaf{"charge", charge}},
-  Leaf{"chase", chase},
-})
+BOSS := Behavior(Selector{{
+  Sequence{{Action{"is_dead", is_dead}, Action{"die", die}}},
+  Sequence{{Action{"in_range", in_range}, Action{"attack", attack}}},
+  Sequence{{Action{"enraged", enraged}, Action{"charge", charge}}},
+  Action{"chase", chase},
+}})
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -460,7 +448,10 @@ should_close :: proc(app: ^App) -> bool {
 clear_scene :: proc(app: ^App) {
   for &a in app.lineup do actor_destroy(app, &a)
   actor_destroy(app, &app.player)
-  for &e in app.enemies do actor_destroy(app, &e)
+  for &e in app.enemies {
+    actor_destroy(app, &e)
+    delete(e.trace)
+  }
   for &i in app.props do gltf.destroy(&i, &app.scene)
   for &p in app.pickups do gltf.destroy(&p.instance, &app.scene)
   for &p in app.projectiles do gltf.destroy(&p.instance, &app.scene)
@@ -848,8 +839,8 @@ update_enemies :: proc(app: ^App, dt: f32) {
     e.cooldown -= dt
     e.repath -= dt
     if e.health <= 0 do e.dying += dt
-    e.traced = 0
-    if app.player.health > 0 || e.health <= 0 do tick(brain(e.kind), app, e)
+    clear(&e.trace)
+    if app.player.health > 0 || e.health <= 0 do bt.tick(brain(e.kind), &Mob{app, e}, &e.trace)
     agent := crowd.agent(&app.crowd, e.agent)
     world.translate(&app.scene, e.model, agent.position)
     if e.health > 0 {
@@ -865,6 +856,7 @@ update_enemies :: proc(app: ^App, dt: f32) {
     if e.dying > DESPAWN_TIME {
       crowd.agent_destroy(&app.crowd, e.agent)
       actor_destroy(app, e)
+      delete(e.trace)
       unordered_remove(&app.enemies, i)
     }
   }
@@ -906,30 +898,14 @@ brain :: proc(kind: EnemyKind) -> Behavior {
   return MELEE
 }
 
-tick :: proc(b: Behavior, app: ^App, e: ^Enemy) -> Status {
-  switch node in b {
-  case Leaf:
-    status := node.run(app, e)
-    if e.traced < len(e.trace) {
-      e.trace[e.traced] = {node.name, status}
-      e.traced += 1
-    }
-    return status
-  case Sequence:
-    for child in node do if status := tick(child, app, e); status != .SUCCESS do return status
-    return .SUCCESS
-  case Selector:
-    for child in node do if status := tick(child, app, e); status != .FAILURE do return status
-    return .FAILURE
-  }
-  return .FAILURE
-}
 
-is_dead :: proc(app: ^App, e: ^Enemy) -> Status {
+is_dead :: proc(m: ^Mob) -> bt.Status {
+  e := m.enemy
   return .SUCCESS if e.health <= 0 else .FAILURE
 }
 
-die :: proc(app: ^App, e: ^Enemy) -> Status {
+die :: proc(m: ^Mob) -> bt.Status {
+  app, e := m.app, m.enemy
   if e.clip != .DEATH {
     actor_play(e, .DEATH)
     halt(app, e)
@@ -937,11 +913,13 @@ die :: proc(app: ^App, e: ^Enemy) -> Status {
   return .RUNNING
 }
 
-in_range :: proc(app: ^App, e: ^Enemy) -> Status {
+in_range :: proc(m: ^Mob) -> bt.Status {
+  app, e := m.app, m.enemy
   return .SUCCESS if enemy_distance(app, e) <= FOES[e.kind].range else .FAILURE
 }
 
-attack :: proc(app: ^App, e: ^Enemy) -> Status {
+attack :: proc(m: ^Mob) -> bt.Status {
+  app, e := m.app, m.enemy
   halt(app, e)
   if e.cooldown > 0 do return .RUNNING
   actor_play(e, .ATTACK)
@@ -950,11 +928,13 @@ attack :: proc(app: ^App, e: ^Enemy) -> Status {
   return .SUCCESS
 }
 
-sees_player :: proc(app: ^App, e: ^Enemy) -> Status {
+sees_player :: proc(m: ^Mob) -> bt.Status {
+  app, e := m.app, m.enemy
   return .SUCCESS if enemy_distance(app, e) <= SIGHT else .FAILURE
 }
 
-chase :: proc(app: ^App, e: ^Enemy) -> Status {
+chase :: proc(m: ^Mob) -> bt.Status {
+  app, e := m.app, m.enemy
   if e.repath <= 0 {
     e.repath = 0.5
     crowd.move_to(&app.crowd, e.agent, app.feet)
@@ -962,11 +942,13 @@ chase :: proc(app: ^App, e: ^Enemy) -> Status {
   return .RUNNING
 }
 
-too_close :: proc(app: ^App, e: ^Enemy) -> Status {
+too_close :: proc(m: ^Mob) -> bt.Status {
+  app, e := m.app, m.enemy
   return .SUCCESS if enemy_distance(app, e) < FOES[e.kind].range * 0.4 else .FAILURE
 }
 
-retreat :: proc(app: ^App, e: ^Enemy) -> Status {
+retreat :: proc(m: ^Mob) -> bt.Status {
+  app, e := m.app, m.enemy
   if e.repath <= 0 {
     e.repath = 0.5
     position := enemy_position(app, e)
@@ -975,7 +957,8 @@ retreat :: proc(app: ^App, e: ^Enemy) -> Status {
   return .RUNNING
 }
 
-patrol :: proc(app: ^App, e: ^Enemy) -> Status {
+patrol :: proc(m: ^Mob) -> bt.Status {
+  app, e := m.app, m.enemy
   if e.repath <= 0 {
     e.repath = 3
     crowd.move_to(&app.crowd, e.agent, {rand.float32_range(-ARENA, ARENA), 0, rand.float32_range(-ARENA, ARENA)} * 0.7)
@@ -983,13 +966,15 @@ patrol :: proc(app: ^App, e: ^Enemy) -> Status {
   return .RUNNING
 }
 
-enraged :: proc(app: ^App, e: ^Enemy) -> Status {
+enraged :: proc(m: ^Mob) -> bt.Status {
+  e := m.enemy
   return .SUCCESS if e.health < FOES[e.kind].health * 0.5 else .FAILURE
 }
 
-charge :: proc(app: ^App, e: ^Enemy) -> Status {
+charge :: proc(m: ^Mob) -> bt.Status {
+  app, e := m.app, m.enemy
   crowd.agent_params(&app.crowd, e.agent).max_speed = FOES[e.kind].speed * 1.8
-  return chase(app, e)
+  return chase(m)
 }
 
 halt :: proc(app: ^App, e: ^Enemy) {
@@ -1167,9 +1152,9 @@ hud :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand) {
     point := render.world_to_screen(&app.renderer, head) or_continue
     bar(commands, point - {30, 0}, {60, 7}, e.health / FOES[e.kind].health, {230, 200, 60, 255})
     if !app.debug do continue
-    for t, i in e.trace[:e.traced] {
-      color := TRACE_COLORS[t.status]
-      text(commands, fmt.tprintf("%s %v", t.name, t.status), point + {-30, -16 * f32(e.traced - i) - 4}, 13, color)
+    for step, i in e.trace {
+      color := TRACE_COLORS[step.status]
+      text(commands, fmt.tprintf("%s %v", step.name, step.status), point + {-30, -16 * f32(len(e.trace) - i) - 4}, 13, color)
     }
   }
 }
