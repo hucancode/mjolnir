@@ -44,32 +44,10 @@ jobs:
           # build.sh also builds wasm, which may fail on the runner; only the native lib is needed
           bash /home/runner/odin/vendor/box3d/src/build.sh || test -f /home/runner/odin/vendor/box3d/lib/linux-amd64/libbox3d.a
 
-      # libc-shim's strncpy (still in Odin master) is wrong for cgltf on the web: it measures
-      # len(src), the whole rest of the unterminated JSON buffer, per token (quadratic: minutes
-      # to load an animated glb), and does not zero-pad (strings stay unterminated, every glTF
-      # fails as legacy_gltf). Replace its body with a bounded scan plus C zero-padding.
+      # libc-shim's strncpy (still in Odin master) is quadratic on cgltf's unterminated JSON and
+      # does not zero-pad, so glTF loading hangs or fails on the web; see the patch for details
       - name: Patch libc-shim strncpy
-        run: |
-          python3 - <<'PY'
-          import re
-          p = "/home/runner/odin/vendor/libc-shim/string.odin"
-          s = open(p).read()
-          body = (
-              "strncpy :: proc \"c\" (dst: [^]byte, src: cstring, count: uint) -> cstring {\n"
-              "\ticount := int(count)\n"
-              "\tassert_contextless(icount >= 0)\n"
-              "\tcnt := 0\n"
-              "\tfor cnt < icount && ([^]byte)(src)[cnt] != 0 do cnt += 1\n"
-              "\tintrinsics.mem_copy_non_overlapping(dst, rawptr(src), cnt)\n"
-              "\tfor i in cnt..<icount do dst[i] = 0\n"
-              "\treturn cstring(dst)\n"
-              "}\n"
-          )
-          s, n = re.subn(r"strncpy :: proc \"c\".*?\n}\n", lambda m: body, s, count=1, flags=re.S)
-          assert n == 1
-          open(p, "w").write(s)
-          PY
-          grep -q 'cnt < icount' /home/runner/odin/vendor/libc-shim/string.odin
+        run: patch -p1 -d /home/runner/odin/vendor/libc-shim < "$GITHUB_WORKSPACE/.github/workflows/libc-shim-strncpy.patch"
 
       # render imports both backends, so vendor:wgpu is compiled even for the vulkan build
       - name: Get wgpu-native

@@ -1,0 +1,15 @@
+--- a/string.odin
++++ b/string.odin
+@@ -59,9 +59,10 @@
+ strncpy :: proc "c" (dst: [^]byte, src: cstring, count: uint) -> cstring {
+ 	icount := int(count)
+ 	assert_contextless(icount >= 0)
+-	cnt := min(len(src), icount)
++	cnt := 0
++	for cnt < icount && ([^]byte)(src)[cnt] != 0 do cnt += 1
+ 	intrinsics.mem_copy_non_overlapping(dst, rawptr(src), cnt)
+-	dst[icount-cnt] = 0
++	for i in cnt..<icount do dst[i] = 0
+ 	return cstring(dst)
+ }
+ 
