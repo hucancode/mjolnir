@@ -1,4 +1,4 @@
-// Recast build + Detour pathfinding.
+// Navmesh baking and pathfinding: right-click to set the goal.
 package main
 
 import "../../mjolnir"

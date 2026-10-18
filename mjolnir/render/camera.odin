@@ -249,17 +249,18 @@ camera_set_orthographic :: proc(
   self.far = far
 }
 
-// cursor_ray returns the world-space ray from the main camera through cursor, given in
-// window coordinates as input.State reports them (the DPI scale is applied here).
+// cursor_ray returns the world-space ray from the main camera's near plane through cursor,
+// given in window coordinates as input.State reports them (the DPI scale is applied here).
 cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (ray: geometry.Ray, ok: bool) {
   cam := main_camera(self) or_return
   extent := self.camera_targets[self.main_camera].extent
   p := cursor * self.dpi_scale
   ndc := 2 * p / [2]f32{f32(extent[0]), f32(extent[1])} - 1
-  ray_eye := linalg.matrix4_inverse(camera_projection_matrix(cam, extent)) * [4]f32{ndc.x, ndc.y, -1, 1}
-  ray_eye = {ray_eye.x, ray_eye.y, -1, 0}
-  dir := linalg.normalize((linalg.matrix4_inverse(camera_view_matrix(cam)) * ray_eye).xyz)
-  return {origin = cam.position, direction = dir}, true
+  inv := linalg.matrix4_inverse(camera_projection_matrix(cam, extent) * camera_view_matrix(cam))
+  near := inv * [4]f32{ndc.x, ndc.y, 0, 1}
+  far := inv * [4]f32{ndc.x, ndc.y, 1, 1}
+  origin := near.xyz / near.w
+  return {origin = origin, direction = linalg.normalize(far.xyz / far.w - origin)}, true
 }
 
 // world_to_screen returns where position appears on screen through the main camera, in window

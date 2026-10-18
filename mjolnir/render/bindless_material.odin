@@ -52,9 +52,10 @@ material :: proc(self: ^Renderer, handle: MaterialHandle) -> (^Material, bool) #
 }
 
 // make_material returns a Material for material_create. type picks how it draws: .SPRITE
-// shows a frame_columns x frame_rows sheet cell of albedo_texture on a camera-facing QUAD_XY;
-// .CUSTOM is drawn by shader (material_shader_create), which reads params (its own values)
-// and any other field.
+// shows cell frame_index (row-major) of a frame_columns x frame_rows sheet in albedo_texture
+// on a camera-facing QUAD_XY (a negative node scale mirrors it; the nearer sprite covers the
+// farther); .CUSTOM is drawn by shader (material_shader_create), which reads params (its own
+// values) and any other field.
 make_material :: proc(
   type: MaterialType = .PBR,
   albedo_texture: TextureHandle = NO_TEXTURE,
@@ -67,6 +68,7 @@ make_material :: proc(
   base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
+  frame_index: u32 = 0,
   shader: MaterialShader = 0,
   params: [2][4]f32 = {},
 ) -> Material {
@@ -82,6 +84,7 @@ make_material :: proc(
     base_color_factor          = base_color_factor,
     frame_columns              = frame_columns,
     frame_rows                 = frame_rows,
+    frame_index                = frame_index,
     shader                     = shader,
     params                     = params,
   }

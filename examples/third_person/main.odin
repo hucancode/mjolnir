@@ -1025,7 +1025,7 @@ update_pickups :: proc(app: ^App, dt: f32) {
   for i := len(app.pickups) - 1; i >= 0; i -= 1 {
     pickup := &app.pickups[i]
     world.rotate_by(&app.scene, pickup.node, dt * 2)
-    world.translate(&app.scene, pickup.node, pickup.base + {0, 0.2 * math.sin(f32(app.renderer.time) * 3), 0})
+    world.translate(&app.scene, pickup.node, pickup.base + {0, 0.2 * math.sin(app.screen.time * 3), 0})
     if app.player.health <= 0 || linalg.length(pickup.base.xz - app.feet.xz) > 1.2 do continue
     if pickup.power == .HEAL {
       app.player.health = min(app.player.health + 50, HEROES[app.hero].health)

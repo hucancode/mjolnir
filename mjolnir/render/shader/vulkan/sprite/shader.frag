@@ -18,4 +18,6 @@ layout(location = 0) out vec4 outColor;
 void main() {
     vec4 tex_color = texture(sampler2D(textures[nonuniformEXT(inTextureIndex)], samplers[SAMPLER_NEAREST_CLAMP]), inUV);
     outColor = tex_color * inColor;
+    // reconsider this if we want to support semi-transparent sprite
+    if (outColor.a < 0.5) discard;
 }

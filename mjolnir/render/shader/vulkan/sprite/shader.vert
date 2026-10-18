@@ -85,11 +85,11 @@ void main() {
     Material sprite = materials[node.material_id];
     vec3 camera_right = vec3(camera.view[0][0], camera.view[1][0], camera.view[2][0]);
     vec3 camera_up = vec3(camera.view[0][1], camera.view[1][1], camera.view[2][1]);
-    // Extract position from world matrix
-    vec3 world_pos = (world * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-    // Extract scale from world matrix (length of basis vectors)
-    float scale_x = length(vec3(world[0][0], world[1][0], world[2][0]));
-    float scale_y = length(vec3(world[0][1], world[1][1], world[2][1]));
+    vec3 world_pos = world[3].xyz;
+    // the scale is the length of each basis column; a mirrored basis mirrors the sprite
+    float mirror = sign(determinant(mat3(world)));
+    float scale_x = length(world[0].xyz) * mirror;
+    float scale_y = length(world[1].xyz);
     // Apply scale to billboard vertices
     vec3 vertex_pos = world_pos + camera_right * (inPosition.x * scale_x) + camera_up * (inPosition.y * scale_y);
     vec4 worldPosition = vec4(vertex_pos, 1.0);

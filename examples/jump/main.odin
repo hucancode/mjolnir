@@ -38,7 +38,7 @@ main :: proc() {
   app := new(App)
   app.jump_force, app.move_force, app.jump_interval, app.mass = 20.0, 20.0, 5.0, 2.0
   app.auto_jump = true
-  physics.init(&app.phys, gravity = {0, -10, 0})
+  if !physics.init(&app.phys, gravity = {0, -10, 0}) do return
   w := &app.window
   if !platform.init(w, 1000, 700, "Character Controller") do return
   if !render.init(&app.renderer, "Character Controller", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return

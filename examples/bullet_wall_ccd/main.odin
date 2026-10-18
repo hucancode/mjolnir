@@ -48,7 +48,7 @@ main :: proc() {
   app := new(App)
   app.target_wall = 1
   app.bullet_speed = 60.0
-  physics.init(&app.phys, gravity = {0, 0, 0})
+  if !physics.init(&app.phys, gravity = {0, 0, 0}) do return
   w := &app.window
   if !platform.init(w, 1000, 700, "Bullet vs Thin Wall (CCD)") do return
   if !render.init(&app.renderer, "Bullet vs Thin Wall (CCD)", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return

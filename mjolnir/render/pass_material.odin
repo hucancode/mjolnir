@@ -8,7 +8,7 @@ import "rhi"
 MaterialPass :: enum {
   // writes the G-buffer and depth, lit by the lighting pass
   GBUFFER,
-  // alpha-blends into the lit image, depth-tested; only opaque custom shaders write depth
+  // alpha-blends into the lit image, depth-tested; only sprites and opaque custom shaders write depth
   FORWARD,
 }
 
@@ -40,7 +40,8 @@ material_pass_formats :: proc(pass: MaterialPass) -> []TextureFormat {
 }
 
 // The depth the pipelines of a pass test: the G-buffer writes it, the forward pass reads, unless
-// the pipeline is opaque (a custom shader without blending), which writes it too.
+// the pipeline is opaque (a sprite, whose cut-out pixels are, or a custom shader without
+// blending), which writes it too.
 @(private)
 material_pass_depth :: proc(pass: MaterialPass, opaque := false) -> rhi.DepthState {
   return {write = pass == .GBUFFER || opaque, compare = .LESS_EQUAL}
@@ -104,7 +105,7 @@ material_init :: proc(self: ^Renderer) -> bool {
         cull          = cull[type],
         color_formats = material_pass_formats(pass),
         blend         = .ALPHA if pass == .FORWARD else .NONE,
-        depth         = material_pass_depth(pass),
+        depth         = material_pass_depth(pass, opaque = type == .SPRITE),
         wireframe     = type == .WIREFRAME,
       }
       self.material_pipelines[pass][int(type)] = dev.graphics_pipeline_create(&self.gpu, desc) or_return

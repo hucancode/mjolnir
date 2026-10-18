@@ -91,7 +91,8 @@ MaterialType :: enum u32 {
   TRANSPARENT,
   WIREFRAME,
   RANDOM_COLOR,
-  // camera-facing billboard showing one cell of the albedo sprite sheet
+  // camera-facing billboard showing one cell of the albedo sprite sheet, unlit; a negative scale
+  // mirrors it, pixels under half alpha are cut out and depth orders overlapping sprites
   SPRITE,
   // a user fragment shader (Material.shader, material_shader_create); one draw list per shader
   CUSTOM,

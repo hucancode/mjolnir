@@ -36,7 +36,7 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  physics.init(&app.phys)
+  if !physics.init(&app.phys) do return
   w := &app.window
   if !platform.init(w, 800, 600, "AOE Query") do return
   if !render.init(&app.renderer, "AOE Query", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
