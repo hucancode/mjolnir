@@ -57,19 +57,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   half := f32(GRID - 1) * 0.5 * SPACING
-  render.camera_look_at(render.main_camera(&app.renderer), {half + 2, half + 4, half * 2.4}, {0, half - 1, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 0, half * 2.4}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer))
 
   sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
-  plane_mesh := app.renderer.builtin_meshes[.QUAD_XZ]
-  ground_albedo, _ := render.texture_create(&app.renderer, #load("statue-1275469_1280.jpg"), generate_mips = true)
-  plane_material := render.material_create(&app.renderer, render.make_material(.PBR,
-    albedo_texture = ground_albedo, roughness_value = 0.7, metallic_value = 0.0,
-  ))
-
-  plane := world.spawn(&app.scene, {0, -1, 0})
-  render.attach(&app.renderer, render.SlotHandle(plane.index), render.MeshAttachment{mesh = plane_mesh, material = plane_material, cast_shadow = false})
-  world.scale(&app.scene, plane, f32(GRID) * SPACING * 1.5)
 
   base_color: [4]f32 = {0.85, 0.85, 0.9, 1}
   for row in 0 ..< GRID do for col in 0 ..< GRID {
@@ -79,13 +70,13 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     ))
     app.sphere_materials[row][col] = mat
     x := f32(col) * SPACING - half
-    y := f32(row) * SPACING
+    y := f32(row) * SPACING - half
     sphere := world.spawn(&app.scene, {x, y, 0})
     render.attach(&app.renderer, render.SlotHandle(sphere.index), render.MeshAttachment{mesh = sphere_mesh, material = mat, cast_shadow = true})
   }
 
   sun_heading := linalg.quaternion_angle_axis(math.PI * 0.65, linalg.VECTOR3F32_Y_AXIS)
-  sun_elevation := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
+  sun_elevation := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_Y_AXIS)
   app.renderer.sun = {enabled = true, cast_shadow = true, color = {1, 0.97, 0.92}, intensity = f32(sun_intensity), direction = linalg.quaternion_mul_vector3(sun_elevation * sun_heading, [3]f32{0, 0, -1}), shadow_distance = 12}
   return .READY
 }
