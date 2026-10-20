@@ -1,7 +1,7 @@
 // Paints the snake: rows of overlapping scales, each lying over the front of the ones behind it
-// and shading them, a zigzag down the back and speckles picked scale by scale, plated belly and
-// the mouth, in toon bands of the sun with glossy glints and a rim light. Reads
-// (up, along, around, mouth) from the vertex shader, around a fraction of a turn from the top.
+// and shading them, a zigzag down the back and speckles picked scale by scale, plated belly, in toon
+// bands of the sun with glossy glints and a rim light. Reads
+// (up, along, around) from the vertex shader, around a fraction of a turn from the top.
 // Shared by snake_body.slang and snake_head.slang.
 #pragma once
 #include "material.slang"
@@ -63,6 +63,5 @@ float4 fs_main(VertexOut v) : SV_Target0
     float gloss = step(0.97, dot(n, normalize(sun + eye))) * (1.0 - d) * (1.0 - d);
     color += 0.4 * gloss * view.sun_radiance.rgb;
     color += 0.2 * step(0.7, 1.0 - max(dot(n, eye), 0.0));
-    color = lerp(color, float3(0.55, 0.1, 0.15), step(0.5, v.color.w));
     return float4(color, 1.0);
 }

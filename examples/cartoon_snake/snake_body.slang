@@ -23,6 +23,17 @@ float2 spine_point(float2 p[POINTS], int i)
     return p[i];
 }
 
+// How hard the body bends toward its right at spine point k, in body widths, from the points
+// around it. Cheaper than the spline's own second derivative, which jumps at every point.
+float spine_bend(float2 p[POINTS], int k)
+{
+    float2 a = spine_point(p, k - 1);
+    float2 b = spine_point(p, k + 1);
+    float2 d1 = 0.5 * (b - a);
+    float2 d2 = a + b - 2.0 * p[k];
+    return clamp(-RADIUS * (d1.x * d2.y - d1.y * d2.x) / pow(max(length(d1), 1e-4), 3.0), -0.8, 0.8);
+}
+
 [shader("vertex")]
 VertexOut vs_main(VertexIn v)
 {
@@ -50,11 +61,10 @@ VertexOut vs_main(VertexIn v)
     float2 c3 = -a + 3.0 * b - 3.0 * c + d;
     float2 center = b + 0.5 * (c1 * f + c2 * f * f + c3 * f * f * f);
     float2 d1 = 0.5 * (c1 + 2.0 * c2 * f + 3.0 * c3 * f * f);
-    float2 d2 = 0.5 * (2.0 * c2 + 6.0 * c3 * f);
     float2 along = normalize(d1);
     float3 side = float3(along.y, 0.0, -along.x);
-    // how hard the body bends toward `side`, in body widths
-    float bend = clamp(-RADIUS * (d1.x * d2.y - d1.y * d2.x) / pow(length(d1), 3.0), -0.8, 0.8);
+    // how hard the body bends toward `side`, blended smoothly from one spine point to the next
+    float bend = lerp(spine_bend(p, i), spine_bend(p, i + 1), smoothstep(0.0, 1.0, f));
 
     float2 around = normalize(v.position.xz + float2(1e-5, 0.0));
     float inner = bend * around.x;
