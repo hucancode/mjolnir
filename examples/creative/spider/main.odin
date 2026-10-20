@@ -1,4 +1,4 @@
-// Procedural spider legs — IK + parabolic foot lift.
+// Procedural spider legs — IK + parabolic foot lift. Drive the spider with WASD.
 package main
 
 import "core:log"
@@ -28,12 +28,7 @@ LEG_CHAINS := [LEG_COUNT]struct {
 HIP_LIMIT :: animation.JointLimit{{math.PI / 6, math.PI / 2, math.PI / 6}}
 JOINT_LIMIT :: animation.JointLimit{{math.PI / 2, math.PI / 2, math.PI / 2}}
 GROUND_TOP :: 0.1
-
-Tripod :: struct {
-  lift_height:   mu.Real,
-  lift_duration: mu.Real,
-  phase:         mu.Real,
-}
+BODY_RANGE :: 9
 
 App :: struct {
   window:         platform.Platform,
@@ -50,14 +45,14 @@ App :: struct {
   animator:       animation.Animator,
   legs:           [LEG_COUNT]animation.LayerHandle,
   time:           f32,
-  tripods:        [2]Tripod,
+  lift_height:    mu.Real,
+  lift_duration:  mu.Real,
+  group_b_phase:  mu.Real,
   lift_period:    mu.Real,
-  animate_body:   bool,
+  autopilot:      bool,
   body_amplitude: mu.Real,
   body_speed:     mu.Real,
-  body_target:    [2]mu.Real,
-  body_lerp_rate: f32,
-  body_max_speed: f32,
+  body_speed_max: f32,
   body_position:  [3]f32,
   body_height:    f32,
   grounded:       bool,
@@ -67,17 +62,17 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   app.lift_period = 1.5
-  app.tripods = {{0.5, 0.6, 0}, {0.5, 0.6, 0.75}}
-  app.animate_body = true
+  app.lift_height = 0.5
+  app.lift_duration = 0.6
+  app.group_b_phase = 0.75
   app.body_amplitude = 8
   app.body_speed = 0.05
-  app.body_lerp_rate = 2
-  app.body_max_speed = 4
+  app.body_speed_max = 3
   app.body_height = 2
   app.body_position = {0, app.body_height, 0}
   w := &app.window
-  if !platform.init(w, 900, 700, "Spider Leg") do return
-  if !render.init(&app.renderer, "Spider Leg", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(w, 900, 700, "Spider") do return
+  if !render.init(&app.renderer, "Spider", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -109,14 +104,14 @@ should_close :: proc(app: ^App) -> bool {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {900, 700}) do return .FAIL
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 30, 15}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 20, 20}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))
   world.scale(&app.scene, ground, [3]f32{20, 0.2, 20})
-  light := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light(intensity = 400, radius = 15)))
+  light := world.spawn(&app.scene, {0, 8, 0})
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light(intensity = 400, radius = 35)))
 
   app.spider_model = gltf.model_create(&app.renderer, #load("assets/spider.glb"))
   app.spider = gltf.instance_create(&app.spider_model, &app.scene, &app.renderer)
@@ -139,11 +134,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 tripod_step :: proc(app: ^App, leg: ^animation.LegParams, index: int) {
-  tripod := app.tripods[index % 2]
-  leg.lift_height = f32(tripod.lift_height)
-  leg.lift_duration = f32(tripod.lift_duration)
+  leg.lift_height = f32(app.lift_height)
+  leg.lift_duration = f32(app.lift_duration)
   leg.lift_frequency = f32(app.lift_period)
-  leg.time_offset = f32(tripod.phase)
+  leg.time_offset = f32(app.group_b_phase) if index % 2 == 1 else 0
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -199,18 +193,19 @@ pose_legs :: proc(app: ^App, dt: f32) {
 }
 
 move_body :: proc(app: ^App, dt: f32) {
-  if app.animate_body {
+  if app.autopilot {
     app.time += dt
     x := f32(app.body_amplitude) * math.sin(app.time * f32(app.body_speed) * 2 * math.PI)
     app.body_position = {x, app.body_height, 0}
-    app.body_target = {mu.Real(x), 0}
     return
   }
-  target := [3]f32{f32(app.body_target.x), app.body_height, f32(app.body_target.y)}
-  step := linalg.lerp(app.body_position, target, 1 - math.exp(-app.body_lerp_rate * dt)) - app.body_position
-  max_step := app.body_max_speed * dt
-  if length := linalg.length(step); length > max_step do step *= max_step / length
-  app.body_position += step
+  forward := linalg.normalize0([3]f32{-math.cos(app.orbit.yaw), 0, -math.sin(app.orbit.yaw)})
+  right := [3]f32{-forward.z, 0, forward.x}
+  dir := forward * input.axis(&app.input, .S, .W) + right * input.axis(&app.input, .A, .D)
+  app.body_position += linalg.normalize0(dir) * app.body_speed_max * dt
+  app.body_position.y = app.body_height
+  app.body_position.x = clamp(app.body_position.x, -BODY_RANGE, BODY_RANGE)
+  app.body_position.z = clamp(app.body_position.z, -BODY_RANGE, BODY_RANGE)
 }
 
 frame :: proc(app: ^App) -> bool {
@@ -220,24 +215,19 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Spider Legs", {500, 20, 340, 480}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Spider Legs", {580, 20, 300, 350}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
-    mu.label(ctx, "Body motion")
-    mu.checkbox(ctx, "Animate body", &app.animate_body)
-    if app.animate_body {
+    mu.label(ctx, "Move: WASD")
+    mu.checkbox(ctx, "Autopilot", &app.autopilot)
+    if app.autopilot {
       mu.label(ctx, "Amplitude"); mu.slider(ctx, &app.body_amplitude, 0, 30)
       mu.label(ctx, "Speed (Hz)"); mu.slider(ctx, &app.body_speed, 0, 1)
     } else {
-      mu.label(ctx, "Body X"); mu.slider(ctx, &app.body_target.x, -30, 30)
-      mu.label(ctx, "Body Z"); mu.slider(ctx, &app.body_target.y, -30, 30)
+      mu.label(ctx, "Walk speed"); mu.slider(ctx, &app.body_speed_max, 1, 5)
     }
     mu.label(ctx, "Shared lift frequency (period s)"); mu.slider(ctx, &app.lift_period, 0.1, 4)
-    mu.label(ctx, "Group B phase offset (s)"); mu.slider(ctx, &app.tripods[1].phase, 0, 4)
-    mu.label(ctx, "Group A (legs 0, 2, 4)")
-    mu.label(ctx, "Lift height"); mu.slider(ctx, &app.tripods[0].lift_height, 0, 5)
-    mu.label(ctx, "Lift duration (s)"); mu.slider(ctx, &app.tripods[0].lift_duration, 0.05, 2)
-    mu.label(ctx, "Group B (legs 1, 3, 5)")
-    mu.label(ctx, "Lift height"); mu.slider(ctx, &app.tripods[1].lift_height, 0, 5)
-    mu.label(ctx, "Lift duration (s)"); mu.slider(ctx, &app.tripods[1].lift_duration, 0.05, 2)
+    mu.label(ctx, "Group B phase offset (s)"); mu.slider(ctx, &app.group_b_phase, 0, 4)
+    mu.label(ctx, "Lift height"); mu.slider(ctx, &app.lift_height, 0, 5)
+    mu.label(ctx, "Lift duration (s)"); mu.slider(ctx, &app.lift_duration, 0.05, 2)
   }
 }
