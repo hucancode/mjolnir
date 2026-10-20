@@ -15,8 +15,8 @@ IKTargetSpace :: enum {
 // first, each bone the parent of the next (bone_chain); joint limits come from bone_limits.
 IKParams :: struct {
   target:      [3]f32,
-  pole:        [3]f32, // point the chain's non-root bones twist their X axis toward; the bend plane comes from the incoming pose
-  pole_weight: f32, // pole twist strength, 0-1
+  pole:        [3]f32, // point the chain's bend (its middle joints) turns toward, about the root-to-target axis
+  pole_weight: f32, // how far the bend turns toward the pole, 0-1
   space:       IKTargetSpace, // space target and pole live in
   iterations:  int, // 0 = 10
   tolerance:   f32, // stop when the end is this close to target; 0 = 0.001
@@ -159,6 +159,8 @@ ik_solve :: proc(
   total_length: f32 = 0
   for length in bone_lengths do total_length += length
   dist_to_target := linalg.distance(root_position, target_pos)
+  // Start from the pole's bend plane so the constrained solve below keeps the limits.
+  aim_bend_at_pole(joints, target_pos, pole, clamp(pole_weight, 0, 1))
   if dist_to_target > total_length * 0.999 {
     // Unreachable: re-aim every segment from its own joint so a constrained
     // chain still curls toward the target.
@@ -200,13 +202,38 @@ ik_solve :: proc(
     rotations,
     bones,
     joints,
-    fk_positions,
     fk_dirs,
     fk_rotations,
-    pole,
-    clamp(pole_weight, 0, 1),
     constraints if has_constraints else nil,
   )
+}
+
+// Rotate the middle joints about the root-to-`end` axis so the chain's bend points toward `pole`.
+// Bone lengths stay put. A chain with no bend, or a pole on the axis, is left alone.
+@(private = "file")
+aim_bend_at_pole :: proc(joints: [][3]f32, end, pole: [3]f32, weight: f32) {
+  n := len(joints)
+  if n < 3 || weight <= 0 || linalg.length2(pole) <= math.F32_EPSILON do return
+  root := joints[0]
+  axis_v := end - root
+  if linalg.length2(axis_v) < 1e-12 do return
+  axis := linalg.normalize(axis_v)
+  perp :: proc(v, axis: [3]f32) -> [3]f32 {
+    return v - axis * linalg.dot(v, axis)
+  }
+  bend: [3]f32
+  for i in 1 ..< n - 1 do bend += perp(joints[i] - root, axis)
+  want := perp(pole - root, axis)
+  if linalg.length2(bend) < 1e-10 || linalg.length2(want) < 1e-10 do return
+  bend, want = linalg.normalize(bend), linalg.normalize(want)
+  q: quaternion128
+  if linalg.dot(bend, want) < -0.9999 {
+    q = linalg.quaternion_angle_axis(f32(math.PI), axis)
+  } else {
+    q = linalg.quaternion_between_two_vector3(bend, want)
+  }
+  q = linalg.quaternion_slerp(linalg.QUATERNIONF32_IDENTITY, q, weight)
+  for i in 1 ..< n - 1 do joints[i] = root + geometry.qmv(q, joints[i] - root)
 }
 
 // Backward FABRIK pass: walk from the root placing each joint one bone length
@@ -241,24 +268,19 @@ place_from_root :: proc(
 }
 
 // Write the chain's solved joint positions and the matching rotations back
-// into the pose. Uses swing-twist decomposition for pole-controlled twist.
-// When `constraints` is non-nil, applies twist limit (max_angle.y) per bone,
-// measured against the FK orientation carried by the parent's swing.
+// into the pose. When `constraints` is non-nil, applies twist limit (max_angle.y)
+// per bone, measured against the FK orientation carried by the parent's swing.
 @(private = "file")
 update_transforms_from_positions :: proc(
   positions: [][3]f32,
   rotations: []quaternion128,
   bone_indices: []u32,
   joints: [][3]f32,
-  fk_positions: [][3]f32,
   fk_dirs: [][3]f32,
   fk_rotations: []quaternion128,
-  pole_vector: [3]f32,
-  pole_weight: f32,
   constraints: []JointLimit,
 ) {
   chain_length := len(bone_indices)
-  has_pole := linalg.length2(pole_vector) > math.F32_EPSILON && pole_weight > 0
   last_swing := linalg.QUATERNIONF32_IDENTITY
   // Bones 0..chain_length-2: swing from segment (i, i+1). Last bone inherits last_swing.
   for i in 0 ..< chain_length - 1 {
@@ -268,24 +290,6 @@ update_transforms_from_positions :: proc(
     parent_swing := last_swing
     last_swing = swing
     new_rot := swing * fk_rotations[i]
-    if has_pole && i > 0 {
-      fk_perp := geometry.qx(fk_rotations[i])
-      current_perp := geometry.qmv(swing, fk_perp)
-      to_pole := pole_vector - joints[i]
-      desired_perp := to_pole - ik_dir * linalg.dot(to_pole, ik_dir)
-      perp_len := linalg.length(desired_perp)
-      if perp_len > math.F32_EPSILON {
-        desired_perp /= perp_len
-        twist := linalg.quaternion_between_two_vector3(current_perp, desired_perp)
-        // Twist after swing: twist rotates around ik_dir (new bone direction).
-        interpolated_twist := linalg.quaternion_slerp(
-          linalg.QUATERNIONF32_IDENTITY,
-          twist,
-          pole_weight,
-        )
-        new_rot = interpolated_twist * new_rot
-      }
-    }
     if constraints != nil {
       new_rot = apply_twist_constraint(new_rot, parent_swing * fk_rotations[i], constraints[i].max_angle.y)
     }
