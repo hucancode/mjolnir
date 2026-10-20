@@ -3,6 +3,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/animation"
 import "../../mjolnir/debugui"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
@@ -38,20 +39,20 @@ App :: struct {
   head:     world.NodeHandle,
   skin:     render.MaterialHandle,
   head_skin: render.MaterialHandle,
-  neck:     [2]f32, // on the ground, (x, z)
   focus:    [2]f32, // what the camera looks at, follows the neck loosely so the weave doesn't shake it
   heading:  f32,
   look:     f32,
   lean:     f32,
   speed:    f32,
   phase:    f32,
-  distance: f32,
-  recorded: f32,
-  history:  [int(SNAKE_LENGTH / TRAIL_STEP) + 2][2]f32, // the neck's path, newest first
+  goal:     [2]f32, // where auto move is heading
+  goals:    int,
+  trail:    animation.Trail([2]f32), // the neck's path on the ground, (x, z)
 }
 
 cruise_speed: mu.Real = 5.0
 color: [3]mu.Real = {0.3, 0.75, 0.25}
+auto_move := true
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -98,7 +99,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     render.attach(r, render.SlotHandle(pupil.index), render.primitive(r, .SPHERE, .BLACK))
     world.scale(&app.scene, pupil, 0.5)
   }
-  for &p, i in app.history do p = {0, f32(i) * TRAIL_STEP}
+  animation.trail_init(&app.trail, {0, 0}, {0, 1}, SNAKE_LENGTH, TRAIL_STEP)
 
   grass := render.material_create(r, render.make_material(base_color_factor = {0.45, 0.7, 0.35, 1}, roughness_value = 0.9))
   ground := world.spawn(&app.scene)
@@ -114,6 +115,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 shutdown :: proc(app: ^App) {
+  animation.trail_destroy(&app.trail)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -156,7 +158,16 @@ steer :: proc(app: ^App, dt: f32) {
   want := ahead * move.y + [2]f32{-ahead.y, ahead.x} * move.x
   aim, target := f32(0), f32(0)
   if want != 0 {
+    auto_move = false
     aim = wrap(math.atan2(-want.x, -want.y) - app.heading)
+    target = f32(cruise_speed)
+  } else if auto_move {
+    if linalg.distance(app.trail.head, app.goal) < 2 {
+      app.goals += 1
+      app.goal = [2]f32{math.cos(f32(app.goals) * 2.4), math.sin(f32(app.goals) * 2.4)} * ARENA * (0.5 + 0.4 * math.mod(f32(app.goals) * 0.618, 1))
+    }
+    to := app.goal - app.trail.head
+    aim = wrap(math.atan2(-to.x, -to.y) - app.heading)
     target = f32(cruise_speed)
   }
   app.speed += (target - app.speed) * min(dt * 4, 1)
@@ -168,25 +179,16 @@ steer :: proc(app: ^App, dt: f32) {
 
   app.phase = math.mod(app.phase + ds * math.TAU / WAVELENGTH, math.TAU)
   course := app.heading + WEAVE * math.sin(app.phase)
-  before := app.neck
-  app.neck += [2]f32{-math.sin(course), -math.cos(course)} * ds
-  if linalg.length(app.neck) > ARENA do app.neck = linalg.normalize(app.neck) * ARENA
-  app.focus += (app.neck - app.focus) * min(dt * 5, 1)
-  moved := linalg.length(app.neck - before)
-  start := app.distance
-  app.distance += moved
-  for app.recorded + TRAIL_STEP <= app.distance {
-    app.recorded += TRAIL_STEP
-    copy(app.history[1:], app.history[:])
-    app.history[0] = linalg.lerp(before, app.neck, (app.recorded - start) / moved)
-  }
-
+  neck := app.trail.head + [2]f32{-math.sin(course), -math.cos(course)} * ds
+  if linalg.length(neck) > ARENA do neck = linalg.normalize(neck) * ARENA
+  animation.trail_move(&app.trail, neck)
+  app.focus += (neck - app.focus) * min(dt * 5, 1)
 }
 
 // Places the head and hangs the body behind the head along the neck's path.
 pose :: proc(app: ^App) {
   yaw := app.heading + app.look + 0.5 * WEAVE * math.sin(app.phase)
-  neck := app.neck
+  neck := app.trail.head
   world.translate(&app.scene, app.head, {neck.x, 0, neck.y})
   world.rotate(
     &app.scene,
@@ -203,20 +205,11 @@ pose :: proc(app: ^App) {
   skin := render.material(&app.renderer, app.skin)
   skin.base_color_factor = head_skin.base_color_factor
   for i in 0 ..< SPINE_POINTS {
-    p := point_behind(app, f32(i + 1) * SNAKE_LENGTH / SPINE_POINTS) - neck
+    p := animation.trail_sample(app.trail, f32(i + 1) * SNAKE_LENGTH / SPINE_POINTS) - neck
     // the z half is the float's top; off zero it never makes a denormal
     p.y = math.copy_sign(max(abs(p.y), 1e-3), p.y)
     skin.params[i / 4][i % 4] = transmute(f32)[2]f16{f16(p.x), f16(p.y)}
   }
-}
-
-// Where the neck was `back` of travel ago, blending between recorded steps.
-point_behind :: proc(app: ^App, back: f32) -> [2]f32 {
-  lag := app.distance - app.recorded
-  if back <= lag do return linalg.lerp(app.neck, app.history[0], back / max(lag, 1e-6))
-  at := (back - lag) / TRAIL_STEP
-  i := min(int(at), len(app.history) - 2)
-  return linalg.lerp(app.history[i], app.history[i + 1], at - f32(i))
 }
 
 wrap :: proc(angle: f32) -> f32 {
@@ -230,9 +223,10 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Cartoon Snake", {20, 20, 260, 220}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Cartoon Snake", {20, 20, 260, 250}, {}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "WASD / arrows slither")
+    mu.checkbox(ctx, "Auto move", &auto_move)
     mu.label(ctx, "Speed"); mu.slider(ctx, &cruise_speed, 2.0, 10.0)
     mu.label(ctx, "Skin")
     mu.layout_row(ctx, {74, 74, 74}, 0)
