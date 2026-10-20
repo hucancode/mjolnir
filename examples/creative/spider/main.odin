@@ -27,8 +27,12 @@ LEG_CHAINS := [LEG_COUNT]struct {
 }
 HIP_LIMIT :: animation.JointLimit{{math.PI / 6, math.PI / 2, math.PI / 6}}
 JOINT_LIMIT :: animation.JointLimit{{math.PI / 2, math.PI / 2, math.PI / 2}}
+STRIDE :: 4.5 // distance the body covers per step cycle
+MIN_PERIOD :: 0.3
+MAX_PERIOD :: 3.0
 GROUND_TOP :: 0.1
-BODY_RANGE :: 9
+GROUND_SIZE :: 60
+BODY_RANGE :: GROUND_SIZE / 2 - 1
 
 App :: struct {
   window:         platform.Platform,
@@ -46,12 +50,9 @@ App :: struct {
   legs:           [LEG_COUNT]animation.LayerHandle,
   time:           f32,
   lift_height:    mu.Real,
-  lift_duration:  mu.Real,
-  group_b_phase:  mu.Real,
-  lift_period:    mu.Real,
+  lift_period:    f32,
   autopilot:      bool,
-  body_amplitude: mu.Real,
-  body_speed:     mu.Real,
+  lap_time:       mu.Real,
   body_speed_max: f32,
   body_position:  [3]f32,
   body_height:    f32,
@@ -61,13 +62,11 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
+  app.autopilot = true
   app.lift_period = 1.5
   app.lift_height = 0.5
-  app.lift_duration = 0.6
-  app.group_b_phase = 0.75
-  app.body_amplitude = 8
-  app.body_speed = 0.05
-  app.body_speed_max = 3
+  app.lap_time = 2
+  app.body_speed_max = 5
   app.body_height = 2
   app.body_position = {0, app.body_height, 0}
   w := &app.window
@@ -109,9 +108,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))
-  world.scale(&app.scene, ground, [3]f32{20, 0.2, 20})
+  world.scale(&app.scene, ground, [3]f32{GROUND_SIZE, 0.2, GROUND_SIZE})
   light := world.spawn(&app.scene, {0, 8, 0})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light(intensity = 400, radius = 35)))
+  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light(intensity = 1200, radius = 80)))
 
   app.spider_model = gltf.model_create(&app.renderer, #load("assets/spider.glb"))
   app.spider = gltf.instance_create(&app.spider_model, &app.scene, &app.renderer)
@@ -135,9 +134,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
 tripod_step :: proc(app: ^App, leg: ^animation.LegParams, index: int) {
   leg.lift_height = f32(app.lift_height)
-  leg.lift_duration = f32(app.lift_duration)
-  leg.lift_frequency = f32(app.lift_period)
-  leg.time_offset = f32(app.group_b_phase) if index % 2 == 1 else 0
+  leg.lift_frequency = app.lift_period
+  leg.lift_duration = leg.lift_frequency / 2
+  leg.time_offset = leg.lift_frequency / 2 if index % 2 == 1 else 0
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -179,6 +178,8 @@ ground_body :: proc(app: ^App) {
 
 walk :: proc(app: ^App, dt: f32) {
   move_body(app, dt)
+  // constant while walking: the leg phase is time mod period, so a changing period scrambles it
+  app.lift_period = clamp(STRIDE / app.body_speed_max, MIN_PERIOD, MAX_PERIOD)
   world.translate(&app.scene, app.spider_root, app.body_position)
   for layer, i in app.legs {
     if leg, ok := animation.layer_params(&app.animator, layer, animation.LegParams); ok do tripod_step(app, leg, i)
@@ -193,10 +194,18 @@ pose_legs :: proc(app: ^App, dt: f32) {
 }
 
 move_body :: proc(app: ^App, dt: f32) {
+  for key in ([?]input.Key{.W, .A, .S, .D}) {
+    if input.key_down(&app.input, key) {
+      app.autopilot = false
+      app.time = 0
+    }
+  }
   if app.autopilot {
-    app.time += dt
-    x := f32(app.body_amplitude) * math.sin(app.time * f32(app.body_speed) * 2 * math.PI)
-    app.body_position = {x, app.body_height, 0}
+    lap := f32(app.lap_time)
+    app.time = math.mod(app.time + dt, 2 * lap)
+    direction: f32 = 1 if app.time < lap else -1
+    app.body_position.x = clamp(app.body_position.x + direction * app.body_speed_max * dt, -BODY_RANGE, BODY_RANGE)
+    app.body_position.y = app.body_height
     return
   }
   forward := linalg.normalize0([3]f32{-math.cos(app.orbit.yaw), 0, -math.sin(app.orbit.yaw)})
@@ -219,15 +228,10 @@ debug_ui :: proc(app: ^App) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Move: WASD")
     mu.checkbox(ctx, "Autopilot", &app.autopilot)
+    mu.label(ctx, "Walk speed"); mu.slider(ctx, &app.body_speed_max, 3, 15)
+    mu.label(ctx, "Lift height"); mu.slider(ctx, &app.lift_height, 0.2, 1.5)
     if app.autopilot {
-      mu.label(ctx, "Amplitude"); mu.slider(ctx, &app.body_amplitude, 0, 30)
-      mu.label(ctx, "Speed (Hz)"); mu.slider(ctx, &app.body_speed, 0, 1)
-    } else {
-      mu.label(ctx, "Walk speed"); mu.slider(ctx, &app.body_speed_max, 1, 5)
+      mu.label(ctx, "Lap time (s)"); mu.slider(ctx, &app.lap_time, 0.5, 10)
     }
-    mu.label(ctx, "Shared lift frequency (period s)"); mu.slider(ctx, &app.lift_period, 0.1, 4)
-    mu.label(ctx, "Group B phase offset (s)"); mu.slider(ctx, &app.group_b_phase, 0, 4)
-    mu.label(ctx, "Lift height"); mu.slider(ctx, &app.lift_height, 0, 5)
-    mu.label(ctx, "Lift duration (s)"); mu.slider(ctx, &app.lift_duration, 0.05, 2)
   }
 }
