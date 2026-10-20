@@ -48,26 +48,26 @@ function renderExamples(root) {
   const list = window.EXAMPLES;
   const hasGpu = !!navigator.gpu;
   const nav = el('nav');
-  const thumbBtn = el('button', { type: 'button', className: 'thumb-toggle' });
+  const thumbBtn = el('button', { type: 'button' });
   const stage = el('div', { className: 'stage' });
   const loader = el('div', { className: 'loader', hidden: true }, el('span', { className: 'spinner' }), el('span', { textContent: 'Loading…' }));
   const modeBtn = el('button', { type: 'button' });
-  const desc = el('p', { className: 'desc' });
+  const desc = el('p');
   const codeBtn = el('button', { type: 'button', textContent: 'Code' });
   const logBtn = el('button', { type: 'button', textContent: 'Log' });
-  const panel = el('div', { className: 'help-panel', hidden: true }, desc, el('p', { className: 'toolbar' }, modeBtn, codeBtn, logBtn));
-  const helpBtn = el('button', { type: 'button', className: 'overlay help', textContent: '?', title: 'About this example' });
-  const frame = el('div', { className: 'frame' }, stage, loader, panel, helpBtn);
+  const panel = el('div', { className: 'help-panel', hidden: true }, desc, el('p', {}, modeBtn, codeBtn, logBtn));
+  const helpBtn = el('button', { type: 'button', textContent: '?', title: 'About this example' });
+  const frame = el('div', {}, stage, loader, panel, helpBtn);
   const code = el('code');
   const pre = el('pre', {}, code);
   const closeBtn = el('button', { type: 'button', textContent: 'Close' });
   const dialogTitle = el('strong');
-  const dialog = el('dialog', { className: 'code-dialog' }, el('header', {}, dialogTitle, closeBtn), pre);
+  const dialog = el('dialog', {}, el('header', {}, dialogTitle, closeBtn), pre);
   const logPre = el('pre');
   const logCloseBtn = el('button', { type: 'button', textContent: 'Close' });
-  const logDialog = el('dialog', { className: 'code-dialog' }, el('header', {}, el('strong', { textContent: 'Log' }), logCloseBtn), logPre);
+  const logDialog = el('dialog', {}, el('header', {}, el('strong', { textContent: 'Log' }), logCloseBtn), logPre);
   const view = el('section', {}, frame, dialog, logDialog);
-  root.append(el('div', { className: 'examples' }, el('search', {}, thumbBtn, nav), view));
+  root.append(el('div', {}, el('search', {}, thumbBtn, nav), view));
 
   // picker: section headers, optional video-frame thumbnails
   let thumbs = localStorage.getItem('examples-thumbs') !== '0';
@@ -168,7 +168,6 @@ function renderExamples(root) {
   show();
 }
 
-const page = document.body.dataset.page;
 const root = document.querySelector('main');
-if (page === 'api') renderApi(root);
-else if (page === 'examples') renderExamples(root);
+if (window.API) renderApi(root);
+else if (window.EXAMPLES) renderExamples(root);

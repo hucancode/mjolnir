@@ -1,405 +1,554 @@
-// Procedural Mjolnir hammer floating over a grid, plain WebGL, no dependencies.
+// Call the lightning: bolts out of the night onto a glowing grid, plain WebGL2, no dependencies.
+// Click to strike, drag to look around. Mjolnir draws strikes in.
 (() => {
-  const canvas = document.getElementById("hero-canvas");
+  const canvas = document.getElementById("storm");
   if (!canvas) return;
-  const gl = canvas.getContext("webgl", { antialias: true, alpha: true, premultipliedAlpha: true });
-  if (!gl) { canvas.hidden = true; return; }
+  const figure = canvas.parentElement;
+  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false });
+  if (!gl) { figure.hidden = true; return; }
+  const floatRT = !!gl.getExtension("EXT_color_buffer_float");
 
-  // ---------- vector helpers ----------
+  // ---------- helpers ----------
+  let seed = Date.now() | 0;
+  const rng = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const gauss = () => rng() + rng() + rng() - 1.5;
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
   const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const scale = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-  const norm = (v) => { const l = Math.hypot(...v) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
-  const shade = (c, k) => c.map((x) => x * k);
+  const len = (v) => Math.hypot(v[0], v[1], v[2]);
+  const norm = (v) => scale(v, 1 / (len(v) || 1));
+  const randDir = () => norm([gauss(), gauss(), gauss()]);
 
-  // ---------- geometry: interleaved pos / normal / color, flat shaded ----------
-  const metal = [], matte = [], lines = [];
-  // `out` = point the triangle should face away from (undefined: trust winding)
-  const tri = (dst, a, b, c, col, away) => {
-    let n = norm(cross(sub(b, a), sub(c, a)));
-    if (away) {
-      const m = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3];
-      if (dot(n, sub(m, away)) < 0) { [b, c] = [c, b]; n = [-n[0], -n[1], -n[2]]; }
-    }
-    for (const p of [a, b, c]) dst.push(p[0], p[1], p[2], n[0], n[1], n[2], col[0], col[1], col[2]);
-  };
-
-  // cross-sections: points in the (u,v) plane
-  const circle = (n) => (rx, ry) => Array.from({ length: n }, (_, i) => {
-    const a = (i / n) * Math.PI * 2; return [Math.cos(a) * rx, Math.sin(a) * ry];
-  });
-  // rectangle with chamfered corners (octagon)
-  const chamfer = (c) => (rx, ry) => {
-    c = Math.min(c, rx * 0.9, ry * 0.9);
-    return [[rx, -ry + c], [rx, ry - c], [rx - c, ry], [-rx + c, ry],
-            [-rx, ry - c], [-rx, -ry + c], [-rx + c, -ry], [rx - c, -ry]];
-  };
-  const place = { x: (t, u, v) => [t, u, v], y: (t, u, v) => [u, t, v] };
-
-  // loft along an axis through sections {t, rx, ry}, capped at both ends
-  const loft = (dst, axis, secs, ring, col, shadeFn) => {
-    const P = place[axis];
-    const rings = secs.map((s) => ring(s.rx, s.ry).map(([u, v]) => P(s.t, u, v)));
-    const centers = secs.map((s) => P(s.t, 0, 0));
-    for (let i = 0; i + 1 < secs.length; i++) {
-      const A = rings[i], B = rings[i + 1], n = A.length;
-      const k = shadeFn ? shadeFn(i) : 1;
-      for (let j = 0; j < n; j++) {
-        const j2 = (j + 1) % n, mid = P((secs[i].t + secs[i + 1].t) / 2, 0, 0);
-        tri(dst, A[j], B[j], B[j2], shade(col, k), mid);
-        tri(dst, A[j], B[j2], A[j2], shade(col, k), mid);
-      }
-    }
-    const cap = (ringPts, c, away) => {
-      for (let j = 0; j < ringPts.length; j++) tri(dst, c, ringPts[j], ringPts[(j + 1) % ringPts.length], shade(col, 0.9), away);
-    };
-    const last = secs.length - 1;
-    cap(rings[0], centers[0], centers[last]);
-    cap(rings[last], centers[last], centers[0]);
-  };
-
-  // torus in the XY plane
-  const torus = (dst, cx, cy, R, r, col, seg = 28, sides = 8) => {
-    const pt = (i, j) => {
-      const a = (i / seg) * Math.PI * 2, b = (j / sides) * Math.PI * 2;
-      const d = R + Math.cos(b) * r;
-      return [cx + Math.cos(a) * d, cy + Math.sin(a) * d, Math.sin(b) * r];
-    };
-    for (let i = 0; i < seg; i++) for (let j = 0; j < sides; j++) {
-      const a = pt(i, j), b = pt(i + 1, j), c = pt(i + 1, j + 1), d = pt(i, j + 1);
-      const away = [cx + Math.cos(((i + 0.5) / seg) * Math.PI * 2) * R, cy + Math.sin(((i + 0.5) / seg) * Math.PI * 2) * R, 0];
-      tri(dst, a, b, c, col, away); tri(dst, a, c, d, col, away);
-    }
-  };
-
-  // axis-aligned box
-  const box = (dst, x0, y0, z0, x1, y1, z1, col) => {
-    const c = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
-    const v = (x, y, z) => [x, y, z];
-    const f = [[v(x0, y0, z0), v(x1, y0, z0), v(x1, y1, z0), v(x0, y1, z0)], [v(x0, y0, z1), v(x1, y0, z1), v(x1, y1, z1), v(x0, y1, z1)],
-               [v(x0, y0, z0), v(x0, y0, z1), v(x0, y1, z1), v(x0, y1, z0)], [v(x1, y0, z0), v(x1, y0, z1), v(x1, y1, z1), v(x1, y1, z0)],
-               [v(x0, y0, z0), v(x1, y0, z0), v(x1, y0, z1), v(x0, y0, z1)], [v(x0, y1, z0), v(x1, y1, z0), v(x1, y1, z1), v(x0, y1, z1)]];
-    for (const q of f) { tri(dst, q[0], q[1], q[2], col, c); tri(dst, q[0], q[2], q[3], col, c); }
+  // column-major perspective * lookAt
+  const viewProjection = (fov, asp, eye, at) => {
+    const t = 1 / Math.tan(fov / 2), n = 0.3, f = 600;
+    const z = norm(sub(eye, at)), x = norm(cross([0, 1, 0], z)), y = cross(z, x);
+    const ex = -dot(x, eye), ey = -dot(y, eye), ez = -dot(z, eye);
+    const A = (f + n) / (n - f), B = (2 * f * n) / (n - f);
+    return [t / asp * x[0], t * y[0], A * z[0], -z[0],
+            t / asp * x[1], t * y[1], A * z[1], -z[1],
+            t / asp * x[2], t * y[2], A * z[2], -z[2],
+            t / asp * ex, t * ey, A * ez + B, -ez];
   };
 
   // ---------- parameters (driven by the control panel) ----------
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const S = {
-    slant: 45, spin: false, finish: "steel", headLength: 1.5, handleLength: 3, loop: true,
-    orbit: !reduce, orbitSpeed: 0.12, distance: 14, height: 4.5,
-    sunAzimuth: 35, sunElevation: 50, theme: "auto",
-    grid: true, gridSpacing: 1, gridOpacity: 0.8, gridFade: 40, shadow: true,
+    auto: !reduce, rate: 0.35, branching: 0.5, jag: 0.5, thickness: 1, restrikes: 2,
+    bloom: 1, flash: reduce ? 0 : 0.6, orbit: !reduce,
   };
 
-  // ---------- Mjolnir, built along +Y: head at the origin, handle hanging down ----------
-  const FINISH = { steel: [0.55, 0.6, 0.68], bronze: [0.72, 0.46, 0.28], obsidian: [0.15, 0.16, 0.22] };
-  const GOLD = [0.85, 0.66, 0.25], LEATHER = [0.30, 0.17, 0.09], STRAP = [0.5, 0.33, 0.18];
-  const buildHammer = () => {
-  metal.length = 0; matte.length = 0;
-  const STEEL = FINISH[S.finish];
-  const HL = S.headLength, HH = 0.75, HD = 0.62; // head half-length (x), half-height (y), half-depth (z)
-
-  // head: a chamfered block whose striking faces have a raised rim around a recessed centre
-  const headSecs = [
-    { t: -HL, rx: HH * 0.8, ry: HD * 0.8 },       // recessed face
-    { t: -HL + 0.09, rx: HH * 0.8, ry: HD * 0.8 },
-    { t: -HL + 0.09, rx: HH * 0.96, ry: HD * 0.96 }, // rim
-    { t: -HL + 0.2, rx: HH, ry: HD },
-    { t: -HL * 0.55, rx: HH, ry: HD },
-    { t: -HL * 0.55, rx: HH * 1.04, ry: HD * 1.06 }, // gold band
-    { t: -HL * 0.45, rx: HH * 1.04, ry: HD * 1.06 },
-    { t: -HL * 0.45, rx: HH, ry: HD },
-    { t: HL * 0.45, rx: HH, ry: HD },
-    { t: HL * 0.45, rx: HH * 1.04, ry: HD * 1.06 },
-    { t: HL * 0.55, rx: HH * 1.04, ry: HD * 1.06 },
-    { t: HL * 0.55, rx: HH, ry: HD },
-    { t: HL - 0.2, rx: HH, ry: HD },
-    { t: HL - 0.09, rx: HH * 0.96, ry: HD * 0.96 },
-    { t: HL - 0.09, rx: HH * 0.8, ry: HD * 0.8 },
-    { t: HL, rx: HH * 0.8, ry: HD * 0.8 },
-  ];
-  // the head is lofted along x with cross-section (y,z): swap via place.x → [t,u,v]
-  loft(metal, "x", headSecs.map((s) => ({ t: s.t, rx: s.rx, ry: s.ry })), chamfer(0.2), STEEL,
-       (i) => ([1, 4, 5, 6, 9, 10].includes(i) ? 1.3 : 1));
-  // gold bands are the sections 5-6 and 9-10: recolour by overlaying slim gold rings
-  for (const x of [-HL * 0.5, HL * 0.5]) {
-    loft(metal, "x", [{ t: x - 0.05, rx: HH * 1.045, ry: HD * 1.07 }, { t: x + 0.05, rx: HH * 1.045, ry: HD * 1.07 }], chamfer(0.2), GOLD);
-  }
-  // engraved-looking knotwork: small gold studs along the top and bottom of the head
-  for (let i = -Math.round(HL * 2.2); i <= Math.round(HL * 2.2); i++) for (const s of [-1, 1]) {
-    const x = i * 0.28, y = s * (HH + 0.005);
-    box(metal, x - 0.06, Math.min(y, y + s * 0.03), -0.2, x + 0.06, Math.max(y, y + s * 0.03), 0.2, shade(GOLD, 0.85));
-  }
-
-  // collar where the handle meets the head
-  loft(metal, "y", [{ t: -HH - 0.02, rx: 0.25, ry: 0.25 }, { t: -HH - 0.22, rx: 0.22, ry: 0.22 },
-                    { t: -HH - 0.25, rx: 0.17, ry: 0.17 }], circle(14), GOLD);
-
-  // handle: wrapped leather, built as many thin sections
-  const HANDLE_TOP = -HH - 0.25, HANDLE_END = -(HH + 0.25 + S.handleLength);
-  const hs = [];
-  for (let y = HANDLE_TOP; y >= HANDLE_END; y -= 0.07) {
-    const wrap = y < -1.9 && y > HANDLE_END + 0.9 ? (Math.floor((HANDLE_TOP - y) / 0.07) % 2 ? 0.012 : -0.006) : 0;
-    hs.push({ t: y, rx: 0.14 + wrap, ry: 0.14 + wrap });
-  }
-  hs.reverse();
-  loft(matte, "y", hs, circle(10), LEATHER, (i) => (i % 2 ? 1.08 : 0.92));
-
-  // the belt: a strap wound around the end of the handle with a buckle, then a loop
-  const BELT_Y = HANDLE_END + 0.55;
-  loft(matte, "y", [{ t: BELT_Y - 0.28, rx: 0.19, ry: 0.19 }, { t: BELT_Y + 0.28, rx: 0.19, ry: 0.19 }], circle(14), STRAP);
-  for (const dy of [-0.3, 0.3]) loft(metal, "y", [{ t: BELT_Y + dy - 0.025, rx: 0.2, ry: 0.2 }, { t: BELT_Y + dy + 0.025, rx: 0.2, ry: 0.2 }], circle(14), GOLD);
-  box(metal, 0.17, BELT_Y - 0.14, -0.1, 0.25, BELT_Y + 0.14, 0.1, GOLD); // buckle
-  box(metal, 0.2, BELT_Y - 0.07, -0.06, 0.28, BELT_Y + 0.07, 0.06, shade(GOLD, 0.7)); // tongue
-  // pommel cap
-  loft(metal, "y", [{ t: HANDLE_END + 0.02, rx: 0.2, ry: 0.2 }, { t: HANDLE_END - 0.05, rx: 0.26, ry: 0.26 },
-                    { t: HANDLE_END - 0.2, rx: 0.26, ry: 0.26 }, { t: HANDLE_END - 0.28, rx: 0.15, ry: 0.15 }], circle(14), GOLD);
-  // hanging wrist loop
-  if (S.loop) torus(matte, 0, HANDLE_END - 0.28 - 0.38, 0.38, 0.05, STRAP);
+  // ---------- Mjolnir: lofted head + wrapped handle, interleaved pos / normal / color ----------
+  // built head-down in hammer units (head centred on y = 0), emitted lifted onto the floor and scaled
+  const HL = 1.5, HH = 0.75, HD = 0.62, HAMMER_S = 0.5, HAMMER_TIP = [0, (2 * HH + 3.53) * HAMMER_S, 0];
+  const verts = [];
+  const tri = (a, b, c, col, away) => {
+    let n = norm(cross(sub(b, a), sub(c, a)));
+    if (dot(n, sub(scale(add(add(a, b), c), 1 / 3), away)) < 0) { [b, c] = [c, b]; n = scale(n, -1); }
+    for (const p of [a, b, c]) verts.push(p[0] * HAMMER_S, (p[1] + HH) * HAMMER_S, p[2] * HAMMER_S, ...n, ...col);
   };
-
-
-
-  // ground: grid lines (pos, normal, intensity)
-  const EXT = 100;
-  for (let i = -EXT; i <= EXT; i++) {
-    const k = i % 5 === 0 ? 1.0 : 0.45;
-    lines.push(i, 0, -EXT, 0, 1, 0, k, k, k, i, 0, EXT, 0, 1, 0, k, k, k,
-               -EXT, 0, i, 0, 1, 0, k, k, k, EXT, 0, i, 0, 1, 0, k, k, k);
-  }
-  const lineCount = lines.length / 9;
-  // soft contact shadow under the hammer
-  const shadowSrc = [];
-  tri(shadowSrc, [-14, 0.01, -14], [-14, 0.01, 14], [14, 0.01, 14], [0, 0, 0]);
-  tri(shadowSrc, [-14, 0.01, -14], [14, 0.01, 14], [14, 0.01, -14], [0, 0, 0]);
-
-  const lineStart = 0, shadowStart = lineCount, metalStart = lineCount + 6;
-  let metalCount = 0, matteCount = 0, matteStart = 0, all = null;
-
-  // ---------- shaders ----------
-  const compile = (type, src) => {
-    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
-    return s;
+  // cross-sections in the unit square, scaled per section
+  const circle = (n) => Array.from({ length: n }, (_, i) => [Math.cos((i / n) * Math.PI * 2), Math.sin((i / n) * Math.PI * 2)]);
+  const chamfer = (c) => [[1, -1 + c], [1, 1 - c], [1 - c, 1], [-1 + c, 1], [-1, 1 - c], [-1, -1 + c], [-1 + c, -1], [1 - c, -1]];
+  // loft `shape` through sections [t, r1, r2] along x or y, capped at both ends
+  const loft = (axis, secs, shape, col) => {
+    const at = (t, u, v) => (axis === "x" ? [t, u, v] : [u, t, v]), sides = shape.length;
+    const rings = secs.map(([t, r1, r2 = r1]) => shape.map(([u, v]) => at(t, u * r1, v * r2))), axisAt = (i) => at(secs[i][0], 0, 0);
+    for (let i = 0; i + 1 < secs.length; i++) for (let j = 0; j < sides; j++) {
+      const A = rings[i], B = rings[i + 1], j2 = (j + 1) % sides, mid = scale(add(axisAt(i), axisAt(i + 1)), 0.5);
+      tri(A[j], B[j], B[j2], col, mid); tri(A[j], B[j2], A[j2], col, mid);
+    }
+    for (const [r, o] of [[0, secs.length - 1], [secs.length - 1, 0]]) {
+      for (let j = 0; j < sides; j++) tri(axisAt(r), rings[r][j], rings[r][(j + 1) % sides], col, axisAt(o));
+    }
   };
-  const program = (vs, fs) => {
+  const STEEL = [0.55, 0.6, 0.68], GOLD = [0.85, 0.66, 0.25], LEATHER = [0.3, 0.17, 0.09];
+  const head = (secs, col) => loft("x", secs.map(([t, k]) => [t, HH * k, HD * k]), chamfer(0.2), col);
+  head([[-HL, 0.8], [-HL + 0.1, 0.8], [-HL + 0.1, 1], [HL - 0.1, 1], [HL - 0.1, 0.8], [HL, 0.8]], STEEL);
+  for (const x of [-HL * 0.5, HL * 0.5]) head([[x - 0.05, 1.05], [x + 0.05, 1.05]], GOLD);
+  loft("y", [[HH, 0.25], [HH + 0.25, 0.17]], circle(14), GOLD);                                       // collar
+  loft("y", [[HH + 0.25, 0.14], [HH + 3.25, 0.14]], circle(10), LEATHER);                             // grip
+  loft("y", [[HH + 3.2, 0.2], [HH + 3.3, 0.26], [HH + 3.45, 0.26], [HH + 3.53, 0.15]], circle(14), GOLD); // pommel
+  const hammerData = new Float32Array(verts);
+
+  // ---------- gl wrapper ----------
+  const compile = (vs, fs) => {
     const p = gl.createProgram();
-    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs)); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, "#version 300 es\nprecision highp float;\n" + src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      gl.attachShader(p, s);
+    }
     gl.linkProgram(p);
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
-    return p;
+    const cache = {};
+    return { p, u: (n) => (n in cache ? cache[n] : (cache[n] = gl.getUniformLocation(p, n))) };
   };
-  let sceneP;
-  try {
-    sceneP = program(`
-      attribute vec3 aPos, aNrm, aCol;
-      uniform mat4 uVP, uModel;
-      varying vec3 vPos, vNrm, vCol;
-      void main() {
-        vec4 p = uModel * vec4(aPos, 1.0);
-        vPos = p.xyz; vNrm = mat3(uModel) * aNrm; vCol = aCol;
-        gl_Position = uVP * p;
-      }`, `
-      precision mediump float;
-      varying vec3 vPos, vNrm, vCol;
-      uniform vec3 uSun, uEye, uSkyAmb, uGround, uGrid;
-      uniform float uMode, uGridAlpha; uniform vec3 uShadow; uniform vec2 uFade;
-      void main() {
-        vec3 col; float a = 1.0;
-        vec3 v = normalize(uEye - vPos);
-        if (uMode > 2.5) {            // contact shadow
-          vec2 p = vPos.xz; float c = cos(uShadow.z), s = sin(uShadow.z);
-          vec2 q = vec2(p.x * c - p.y * s, p.x * s + p.y * c) / uShadow.xy;
-          col = vec3(0.0); a = 0.45 * smoothstep(1.0, 0.0, length(q));
-        } else if (uMode > 1.5) {     // grid
-          col = uGrid;
-          a = vCol.r * uGridAlpha * (1.0 - smoothstep(uFade.x, uFade.y, length(vPos.xz)));
-        } else {
-          vec3 n = normalize(vNrm);
-          if (dot(n, v) < 0.0) n = -n;
-          float d = max(dot(n, uSun), 0.0);
-          vec3 amb = mix(uGround, uSkyAmb, n.y * 0.5 + 0.5);
-          if (uMode > 0.5) {          // metal: fake environment + specular
-            vec3 r = reflect(-v, n);
-            vec3 env = mix(uGround, uSkyAmb * 1.3, smoothstep(-0.4, 0.6, r.y));
-            vec3 h = normalize(uSun + v);
-            float sp = pow(max(dot(n, h), 0.0), 48.0);
-            col = vCol * (0.35 * amb + d * 0.55) + env * vCol * 0.55 + sp * vec3(1.0, 0.95, 0.85);
-          } else {
-            col = vCol * (amb * 0.9 + d * vec3(1.0, 0.92, 0.8) * 0.8);
-          }
-        }
-        gl_FragColor = vec4(col, a);
-      }`);
-  } catch (e) { console.warn(e); canvas.hidden = true; return; }
-
-  const buf = gl.createBuffer();
-  const upload = () => {
-    buildHammer();
-    metalCount = metal.length / 9; matteCount = matte.length / 9; matteStart = metalStart + metalCount;
-    all = new Float32Array([...lines, ...shadowSrc, ...metal, ...matte]);
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.bufferData(gl.ARRAY_BUFFER, all, gl.DYNAMIC_DRAW);
-  };
-
-  // ---------- matrices (column-major) ----------
-  const perspective = (fov, asp, n, f) => {
-    const t = 1 / Math.tan(fov / 2);
-    return [t / asp, 0, 0, 0, 0, t, 0, 0, 0, 0, (f + n) / (n - f), -1, 0, 0, 2 * f * n / (n - f), 0];
-  };
-  const lookAt = (e, c, up) => {
-    const z = norm(sub(e, c)), x = norm(cross(up, z)), y = cross(z, x);
-    return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, e), -dot(y, e), -dot(z, e), 1];
-  };
-  const mul = (a, b) => {
-    const o = new Array(16);
-    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++)
-      o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
-    return o;
-  };
-  const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-  const T = (x, y, z) => { const m = I.slice(); m[12] = x; m[13] = y; m[14] = z; return m; };
-    const Rz = (a) => { const c = Math.cos(a), s = Math.sin(a); return [c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]; };
-
-  const Ry = (a) => { const c = Math.cos(a), s = Math.sin(a); return [c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1]; };
-  const rad = (d) => (d * Math.PI) / 180;
-
-  // ---------- palette (follows OS color scheme unless overridden) ----------
-  const dark = matchMedia("(prefers-color-scheme: dark)");
-  const palette = () => {
-    const sun = [Math.cos(rad(S.sunElevation)) * Math.cos(rad(S.sunAzimuth)), Math.sin(rad(S.sunElevation)), Math.cos(rad(S.sunElevation)) * Math.sin(rad(S.sunAzimuth))];
-    return (S.theme === "auto" ? dark.matches : S.theme === "dark")
-      ? { amb: [0.45, 0.5, 0.7], gnd: [0.1, 0.1, 0.16], grid: [0.35, 0.6, 0.85], sun }
-      : { amb: [0.65, 0.7, 0.8], gnd: [0.4, 0.38, 0.36], grid: [0.3, 0.4, 0.6], sun };
-  };
-
-  // resting pose: head touching the ground, handle raised S.slant degrees
-  let basePose = I, half = [1, 1];
-  const updatePose = () => {
-    const rest = Rz(Math.PI / 2 + rad(S.slant));
-    let minY = Infinity, minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (let i = metalStart; i < metalStart + metalCount + matteCount; i++) {
-      const x = all[i * 9], y = all[i * 9 + 1], z = all[i * 9 + 2];
-      const wx = rest[0] * x + rest[4] * y, wy = rest[1] * x + rest[5] * y;
-      minY = Math.min(minY, wy); minX = Math.min(minX, wx); maxX = Math.max(maxX, wx);
-      minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+  // set uniforms by value shape: number, vec2, vec3, mat4
+  const use = (prog, values) => {
+    gl.useProgram(prog.p);
+    for (const [k, v] of Object.entries(values)) {
+      if (typeof v === "number") gl.uniform1f(prog.u(k), v);
+      else if (v.length === 2) gl.uniform2fv(prog.u(k), v);
+      else if (v.length === 3) gl.uniform3fv(prog.u(k), v);
+      else gl.uniformMatrix4fv(prog.u(k), false, v);
     }
-    basePose = mul(T(-(minX + maxX) / 2, -minY, 0), rest);
-    half = [Math.max((maxX - minX) / 2 * 0.9, 0.8), Math.max((maxZ - minZ) * 0.9, 1.4)];
   };
-  upload(); updatePose();
+  const sample = (prog, name, unit, tex) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(prog.u(name), unit); };
+  const target = (w, h, depth) => {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, floatRT ? gl.RGBA16F : gl.RGBA8, w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    if (depth) gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+    return { tex, fbo, w, h };
+  };
+  const bind = (t) => { gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fbo : null); gl.viewport(0, 0, t ? t.w : canvas.width, t ? t.h : canvas.height); };
+  const emptyVao = gl.createVertexArray();
+  const fullscreen = () => { gl.bindVertexArray(emptyVao); gl.drawArrays(gl.TRIANGLES, 0, 3); };
+  // float attributes at locations 0.. with the given component counts
+  const vertexArray = (data, sizes, usage = gl.STATIC_DRAW) => {
+    const vao = gl.createVertexArray(), buf = gl.createBuffer(), stride = sizes.reduce((a, b) => a + b) * 4;
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, data, usage);
+    let off = 0;
+    sizes.forEach((n, i) => { gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, n, gl.FLOAT, false, stride, off); off += n * 4; });
+    gl.bindVertexArray(null);
+    return { vao, buf };
+  };
 
-  // ---------- render ----------
-  let w = 0, h = 0, visible = true, camAng = 0.5, yaw = 0, tAcc = 0, last = performance.now();
+  // ---------- shaders ----------
+  const GLOW = "vec3(0.65, 0.7, 1.0)", HORIZON = "vec3(0.1, 0.09, 0.16)";
 
-  const resize = () => {
+  const FULL_VS = `
+out vec2 vUv;
+void main() {
+  vUv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  gl_Position = vec4(vUv * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+  // plain night gradient behind the grid
+  const SKY_FS = `
+in vec2 vUv;
+uniform vec3 uFwd, uUp;
+uniform vec2 uView; // tan(fov / 2) * aspect, tan(fov / 2)
+uniform float uFlash;
+out vec4 o;
+void main() {
+  float y = dot(normalize(uFwd + (vUv.y * 2.0 - 1.0) * uView.y * uUp), vec3(0.0, 1.0, 0.0));
+  o = vec4(mix(${HORIZON}, vec3(0.01, 0.012, 0.03), smoothstep(-0.05, 0.35, y)) + ${GLOW} * uFlash * 0.25, 1.0);
+}`;
+
+  const MESH_VS = `
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNrm;
+layout(location = 2) in vec3 aCol;
+uniform mat4 uVP;
+out vec3 vPos, vNrm, vCol;
+void main() {
+  vPos = aPos; vNrm = aNrm; vCol = aCol;
+  gl_Position = uVP * vec4(aPos, 1.0);
+}`;
+  // grid floor (vCol = 0) or hammer (vCol = albedo), lit by bolt point lights
+  const MESH_FS = `
+in vec3 vPos, vNrm, vCol;
+uniform vec3 uEye;
+uniform float uFlash, uHammerGlow;
+uniform vec4 uL[16];
+uniform int uN;
+out vec4 o;
+void main() {
+  vec3 n = normalize(vNrm);
+  float L = 0.0;
+  for (int i = 0; i < 16; i++) {
+    if (i >= uN) break;
+    vec3 d = uL[i].xyz - vPos;
+    L += uL[i].w * (max(dot(n, normalize(d)), 0.0) * 0.8 + 0.2) / (1.0 + dot(d, d) / 49.0);
+  }
+  vec3 col;
+  if (vCol == vec3(0.0)) {
+    vec2 g = vPos.xz, w = fwidth(g);
+    vec2 a = abs(fract(g - 0.5) - 0.5) / w, b = abs(fract(g / 5.0 - 0.5) - 0.5) / w * 5.0;
+    float lines = (1.0 - min(min(a.x, a.y), 1.0)) * 0.3 * (1.0 - smoothstep(0.1, 0.4, max(w.x, w.y)))
+                + (1.0 - min(min(b.x, b.y) / 1.5, 1.0)) * 0.8 * (1.0 - smoothstep(0.5, 2.0, max(w.x, w.y)));
+    col = vec3(0.015, 0.015, 0.025) * mix(0.5, 1.0, smoothstep(0.4, 2.5, length(g)));
+    col = mix(col, vec3(0.45, 0.55, 0.85), clamp(lines * (0.5 + L * 2.0 + uFlash * 2.0), 0.0, 1.0));
+    col += ${GLOW} * (L * 0.35 + uFlash * 0.15);
+  } else {
+    float key = max(dot(n, normalize(vec3(-0.4, 0.8, -0.3))), 0.0);
+    float rim = pow(1.0 - abs(dot(n, normalize(uEye - vPos))), 2.0);
+    col = vCol * (0.35 + key * 0.55 + ${GLOW} * (L * 0.9 + uFlash * 0.4));
+    col += ${GLOW} * (rim * (0.25 + uHammerGlow * 1.5) + uHammerGlow * 0.15);
+  }
+  float fog = 1.0 - exp(-pow(length(vPos - uEye) * 0.019, 2.0));
+  o = vec4(mix(col, ${HORIZON}, fog), 1.0);
+}`;
+
+  // bolt segments as screen-space ribbons, depth tested against the scene
+  const SEG_VS = `
+layout(location = 0) in vec3 aA;
+layout(location = 1) in vec3 aB;
+layout(location = 2) in vec4 aMeta; // along, side, world radius, intensity
+uniform mat4 uVP;
+uniform vec2 uRes;
+uniform float uFocal;
+out vec2 vP, vA, vB; out float vR, vI;
+void main() {
+  vec4 ca = uVP * vec4(aA, 1.0), cb = uVP * vec4(aB, 1.0);
+  if (ca.w < 0.3 || cb.w < 0.3) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }
+  vec2 sa = (ca.xy / ca.w * 0.5 + 0.5) * uRes, sb = (cb.xy / cb.w * 0.5 + 0.5) * uRes;
+  vec2 t = length(sb - sa) > 1e-4 ? normalize(sb - sa) : vec2(0.0, 1.0), n = vec2(-t.y, t.x);
+  float rc = max(aMeta.z * uFocal / mix(ca.w, cb.w, aMeta.x), 0.7), R = rc * 5.0 + 2.0;
+  vP = mix(sa, sb, aMeta.x) + t * (aMeta.x * 2.0 - 1.0) * R + n * aMeta.y * R;
+  vA = sa; vB = sb; vR = rc; vI = aMeta.w;
+  gl_Position = vec4(vP / uRes * 2.0 - 1.0, mix(ca.z / ca.w, cb.z / cb.w, aMeta.x), 1.0);
+}`;
+  const SEG_FS = `
+in vec2 vP, vA, vB; in float vR, vI;
+out vec4 o;
+void main() {
+  vec2 pa = vP - vA, ba = vB - vA;
+  float k = length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0)) / vR;
+  o = vec4(vI * (exp(-k * k) + 0.15 * exp(-k * 0.8)), 0.0, 0.0, 1.0);
+}`;
+
+  // bloom: each level is a 5-tap blur of the one above; the composite sums them all
+  const DOWN_FS = `
+in vec2 vUv; uniform sampler2D uSrc; uniform vec2 uTexel; out vec4 o;
+void main() {
+  vec2 t = uTexel, u = vec2(t.x, -t.y);
+  o = (texture(uSrc, vUv) * 4.0 + texture(uSrc, vUv - t) + texture(uSrc, vUv + t) + texture(uSrc, vUv + u) + texture(uSrc, vUv - u)) / 8.0;
+}`;
+
+  const COMP_FS = `
+in vec2 vUv;
+uniform float uBloom;
+uniform sampler2D uScene, uEmis, uB1, uB2, uB3, uB4, uB5;
+out vec4 o;
+void main() {
+  float bloom = texture(uB1, vUv).r + texture(uB2, vUv).r + texture(uB3, vUv).r + texture(uB4, vUv).r + texture(uB5, vUv).r;
+  vec3 col = texture(uScene, vUv).rgb + ${GLOW} * bloom * uBloom * 0.6 + texture(uEmis, vUv).r;
+  o = vec4(mix(col, 1.0 - 0.2 * exp(-(col - 0.8) / 0.2), step(0.8, col)), 1.0); // soft shoulder above 0.8
+}`;
+
+  const skyProg = compile(FULL_VS, SKY_FS);
+  const meshProg = compile(MESH_VS, MESH_FS);
+  const segProg = compile(SEG_VS, SEG_FS);
+  const downProg = compile(FULL_VS, DOWN_FS);
+  const compProg = compile(FULL_VS, COMP_FS);
+
+  // ---------- meshes ----------
+  const G = 400;
+  const floor = vertexArray(new Float32Array([[-G, -G], [-G, G], [G, G], [-G, -G], [G, G], [G, -G]].flatMap(([x, z]) => [x, 0, z, 0, 1, 0, 0, 0, 0])), [3, 3, 3]);
+  const hammer = vertexArray(hammerData, [3, 3, 3]);
+  const MAX_SEGS = 8000, SEG_STRIDE = 10, CORNERS = [[0, -1], [1, -1], [1, 1], [0, -1], [1, 1], [0, 1]];
+  const segData = new Float32Array(MAX_SEGS * 6 * SEG_STRIDE);
+  const segs = vertexArray(segData.byteLength, [3, 3, 4], gl.DYNAMIC_DRAW);
+
+  // ---------- sizing ----------
+  let scene = null, emis = null, depth = null, down = [], aspect = 1;
+  const syncSize = () => {
     const dpr = Math.min(devicePixelRatio || 1, 2);
-    w = Math.round(canvas.clientWidth * dpr); h = Math.round(canvas.clientHeight * dpr);
-    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    const w = Math.max(1, Math.floor(canvas.clientWidth * dpr)), h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+    aspect = w / h;
+    if (scene && canvas.width === w && canvas.height === h) return;
+    canvas.width = w; canvas.height = h;
+    if (scene) {
+      for (const t of [scene, emis, ...down]) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fbo); }
+      gl.deleteRenderbuffer(depth);
+    }
+    depth = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
+    scene = target(w, h, depth);
+    emis = target(w, h, depth);
+    down = [1, 2, 3, 4, 5].map((i) => target(Math.max(1, w >> i), Math.max(1, h >> i)));
   };
 
-  const attrs = (p) => {
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    for (const [name, off] of [["aPos", 0], ["aNrm", 12], ["aCol", 24]]) {
-      const l = gl.getAttribLocation(p, name);
-      gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l, 3, gl.FLOAT, false, 36, off);
+  // ---------- camera ----------
+  const FOV = (50 * Math.PI) / 180, TAN = Math.tan(FOV / 2), LOOK = [0, 1.8, 0];
+  const cam = { yaw: 0.9, pitch: 0.12, dist: 9 };
+  let eye, fwd, right, camUp, viewProj;
+  const updateCamera = () => {
+    const cp = Math.cos(cam.pitch);
+    eye = add(LOOK, [cam.dist * cp * Math.sin(cam.yaw), cam.dist * Math.sin(cam.pitch), cam.dist * cp * Math.cos(cam.yaw)]);
+    eye[1] = Math.max(eye[1], 0.4);
+    fwd = norm(sub(LOOK, eye)); right = norm(cross(fwd, [0, 1, 0])); camUp = cross(right, fwd);
+    viewProj = viewProjection(FOV, aspect, eye, LOOK);
+  };
+  // where a screen point's ray meets the floor (or a far floor point under it), and whether it passes the hammer
+  const pick = (u, v) => {
+    const dir = norm(add(fwd, add(scale(right, (u * 2 - 1) * TAN * aspect), scale(camUp, (v * 2 - 1) * TAN))));
+    const t = dir[1] < -1e-3 ? Math.min(-eye[1] / dir[1], 60) : 60;
+    const hit = add(eye, scale(dir, t));
+    hit[1] = 0;
+    let toHammer = Math.hypot(hit[0], hit[2]) < 1.6;
+    for (let s = 0; s < t && !toHammer; s += 0.2) {
+      const p = add(eye, scale(dir, s));
+      toHammer = Math.hypot(p[0], p[2]) < 1.2 && p[1] < HAMMER_TIP[1] + 0.8;
+    }
+    return { hit, toHammer };
+  };
+
+  // ---------- bolts ----------
+  // a bolt's segments are {a, b, t, w, lvl}: endpoints, time the leader reaches it, radius, branch depth
+  const SKY_Y = 18;
+  const bolts = [];
+  let time = 0;
+
+  // random walk from a toward b; the last point is exactly b
+  const walk = (a, b, step, jag) => {
+    const pts = [a];
+    let p = a, drift = [0, 0, 0];
+    for (let n = 0; n < 600; n++) {
+      const d = sub(b, p), rem = len(d);
+      if (rem < step * 1.2) break;
+      drift = scale(add(drift, scale(randDir(), 0.25)), 0.88);
+      const wander = scale(add(drift, scale(randDir(), jag * 1.4)), Math.min(1, rem / 3));
+      p = add(p, scale(norm(add(scale(d, 1 / rem), wander)), step * (0.6 + rng() * 0.8)));
+      pts.push(p);
+    }
+    pts.push(b);
+    return pts;
+  };
+
+  const branch = (out, p, dir, t0, dt, w, lvl, steps, prob) => {
+    for (let j = 0; j < steps; j++) {
+      const d = norm(add(dir, scale(randDir(), S.jag * 1.2)));
+      const q = add(p, scale(d, 0.3 * (0.6 + rng() * 0.8)));
+      const tw = w * (1 - (j / steps) * 0.6);
+      out.push({ a: p, b: q, t: t0 + j * dt, w: tw, lvl });
+      if (lvl < 3 && rng() < prob * 0.5) {
+        branch(out, q, norm(add(d, scale(randDir(), 0.9))), t0 + j * dt, dt, tw * 0.55, lvl + 1, Math.floor((steps - j) * (0.3 + rng() * 0.5)), prob * 0.5);
+      }
+      dir = norm(add(scale(dir, 0.92), [0, -0.08, 0])); // sag toward the ground
+      p = q;
     }
   };
 
-  const frame = (now) => {
-    requestAnimationFrame(frame);
-    if (!visible) { last = now; return; }
-    const dt = Math.min((now - last) / 1000, 0.1);
-    last = now;
-    if (S.orbit) camAng += dt * S.orbitSpeed;
-    if (S.spin) yaw += dt * 0.6;
-    resize();
-    const pal = palette();
-    gl.viewport(0, 0, w, h);
-    gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
-    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  const grow = (pts, power, leaderDur, prob) => {
+    const out = [], dt = leaderDur / (pts.length - 1), w = 0.035 * S.thickness * (0.7 + power * 0.3);
+    for (let i = 0; i + 1 < pts.length; i++) {
+      out.push({ a: pts[i], b: pts[i + 1], t: i * dt, w, lvl: 0 });
+      if (i > 1 && i < pts.length - 4 && rng() < prob) {
+        const steps = Math.floor((4 + rng() * (8 + 24 * S.branching)) * (1 - (i / pts.length) * 0.6));
+        branch(out, pts[i], norm(add(norm(sub(pts[i + 1], pts[i])), scale(randDir(), 0.9))), i * dt, dt * 1.1, w * 0.5, 1, steps, prob);
+      }
+    }
+    return out;
+  };
 
-    const eye = [Math.cos(camAng) * S.distance, S.height, Math.sin(camAng) * S.distance];
-    const vp = mul(perspective(0.7, w / h, 0.5, 400), lookAt(eye, [0, 1.8, 0], [0, 1, 0]));
+  // sky to floor strike: stepped leader, then a return stroke and re-strikes along the same channel
+  const strike = (to, power, toHammer) => {
+    const end = toHammer ? HAMMER_TIP : to;
+    const pts = walk([end[0] + gauss() * 6, SKY_Y - rng() * 1.5, end[2] + gauss() * 6], end, 0.35, S.jag);
+    const leaderDur = 0.12 + rng() * 0.1, strokes = [{ t: leaderDur, amp: 1 }];
+    for (let i = 0; i < S.restrikes; i++) strokes.push({ t: strokes[i].t + 0.05 + rng() * 0.09, amp: 0.75 - i * 0.12 });
+    const segs = grow(pts, power, leaderDur, S.branching * 0.2 * (0.6 + power * 0.4));
+    bolts.push({ born: time, segs, pts, leaderDur, strokes, power, toHammer, end: strokes.at(-1).t + 1.2 });
+  };
 
-    gl.useProgram(sceneP);
-    attrs(sceneP);
-    const U = (n) => gl.getUniformLocation(sceneP, n);
-    gl.uniformMatrix4fv(U("uVP"), false, vp);
-    gl.uniform3fv(U("uSun"), pal.sun); gl.uniform3fv(U("uEye"), eye);
-    gl.uniform3fv(U("uSkyAmb"), pal.amb);
-    gl.uniform3fv(U("uGround"), pal.gnd); gl.uniform3fv(U("uGrid"), pal.grid);
-    gl.uniform3f(U("uShadow"), half[0], half[1], yaw);
-    gl.uniform1f(U("uGridAlpha"), S.gridOpacity);
-    gl.uniform2f(U("uFade"), S.gridFade * 0.2, S.gridFade);
+  const envelope = (b, a, tau) => b.strokes.reduce((e, s) => e + (a >= s.t ? s.amp * Math.exp(-(a - s.t) / tau) : 0), 0)
+    + (a >= b.leaderDur ? 0.12 * Math.exp(-(a - b.leaderDur) / 0.4) : 0);
+  const intensity = (b, s, a) => {
+    if (a < s.t) return 0;
+    const fresh = Math.exp(-(a - s.t) / 0.015), k = [1, 0.55, 0.4, 0.3][s.lvl];
+    if (a < b.leaderDur) return (0.22 + fresh * 0.7) * k;
+    if (s.lvl === 0) return envelope(b, a, 0.045) * 1.6 * b.power;
+    return k * (0.8 * Math.exp(-(a - b.leaderDur) / 0.035) + 0.15 * Math.max(0, envelope(b, a, 0.03) - 1));
+  };
+
+  // ---------- input: tap to strike, drag to look around ----------
+  let pointer = null;
+  canvas.addEventListener("pointerdown", (e) => {
+    try { canvas.setPointerCapture(e.pointerId); } catch {}
+    const r = canvas.getBoundingClientRect();
+    pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, drag: false, ...pick((e.clientX - r.left) / r.width, 1 - (e.clientY - r.top) / r.height) };
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!pointer || e.pointerId !== pointer.id) return;
+    const dx = e.clientX - pointer.x, dy = e.clientY - pointer.y;
+    if (!pointer.drag && Math.hypot(dx, dy) < 6) return;
+    pointer.drag = true;
+    cam.yaw -= dx * 0.005;
+    cam.pitch = clamp(cam.pitch + dy * 0.004, -0.05, 0.7);
+    pointer.x = e.clientX; pointer.y = e.clientY;
+  });
+  const release = (e) => {
+    if (!pointer || e.pointerId !== pointer.id) return;
+    if (e.type === "pointerup" && !pointer.drag) strike(pointer.hit, 1 + rng() * 0.5, pointer.toHammer);
+    pointer = null;
+  };
+  canvas.addEventListener("pointerup", release);
+  canvas.addEventListener("pointercancel", release);
+
+  // ---------- frame ----------
+  let flash = 0, lastFlash = -1, hammerGlow = 0, nextAuto = 0.8;
+  const lights = new Float32Array(16 * 4);
+  const update = (dt) => {
+    time += dt;
+    if (S.orbit && !pointer) cam.yaw += dt * 0.04;
+    updateCamera();
+    if (S.auto && time >= nextAuto) {
+      const a = rng() * Math.PI * 2, d = 4 + rng() * 40;
+      strike([Math.sin(a) * d, 0, Math.cos(a) * d], 0.7 + rng() * 0.7, rng() < 0.25);
+      nextAuto = time + (0.4 + rng() * 1.6) / Math.max(S.rate, 0.05);
+    }
+
+    let n = 0;
+    const light = (p, i) => { if (n < 16 && i > 0.01) lights.set([...p, i], 4 * n++); };
+    for (let i = bolts.length - 1; i >= 0; i--) {
+      const b = bolts[i], a = time - b.born, pts = b.pts, mid = pts[pts.length >> 1], last = pts.at(-1);
+      if (a > b.end) { bolts.splice(i, 1); continue; }
+      if (a < b.leaderDur) { light(pts[Math.floor((a / b.leaderDur) * (pts.length - 1))], 0.2); continue; }
+      if (!b.struck) {
+        b.struck = true;
+        const dist = len(sub(last, eye));
+        // full-view flashes are rate limited and only follow the first stroke
+        if (time - lastFlash > 0.45) { flash = Math.max(flash, b.power * clamp(1.4 - dist / 60, 0.3, 1)); lastFlash = time; }
+        if (b.toHammer) hammerGlow = 1;
+      }
+      const e = envelope(b, a, 0.06) * b.power;
+      light(last, e * 1.2); light(mid, e * 0.8); light(pts[0], e * 0.8);
+    }
+    hammerGlow *= Math.exp(-dt / 1.5);
+    if (hammerGlow > 0.02) light(add(HAMMER_TIP, [0, -1, 0]), hammerGlow * 0.4);
+    flash *= Math.exp(-dt / 0.25);
+    return n;
+  };
+
+  const draw = (nLights) => {
+    const flashU = reduce ? 0 : Math.min(flash, 1) * S.flash * 0.35;
+
+    // 1. scene: sky, grid floor, hammer
+    bind(scene);
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+    use(skyProg, { uFwd: fwd, uUp: camUp, uView: [TAN * aspect, TAN], uFlash: flashU });
+    fullscreen();
     gl.enable(gl.DEPTH_TEST);
-    gl.enable(gl.BLEND);
-    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    use(meshProg, { uVP: viewProj, uEye: eye, uFlash: flashU, uHammerGlow: hammerGlow });
+    gl.uniform4fv(meshProg.u("uL"), lights);
+    gl.uniform1i(meshProg.u("uN"), nLights);
+    gl.bindVertexArray(floor.vao);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindVertexArray(hammer.vao);
+    gl.drawArrays(gl.TRIANGLES, 0, hammerData.length / 9);
 
-    if (S.grid) {
-      gl.uniformMatrix4fv(U("uModel"), false, [S.gridSpacing, 0, 0, 0, 0, 1, 0, 0, 0, 0, S.gridSpacing, 0, 0, 0, 0, 1]);
-      gl.uniform1f(U("uMode"), 2);
-      gl.drawArrays(gl.LINES, lineStart, lineCount);
+    // 2. bolts into the emissive target, depth tested against the scene
+    let v = 0;
+    for (const b of bolts) for (const s of b.segs) {
+      const I = intensity(b, s, time - b.born);
+      if (I < 0.003 || v >= MAX_SEGS * 6) continue;
+      for (const [cx, cy] of CORNERS) segData.set([...s.a, ...s.b, cx, cy, s.w, I], SEG_STRIDE * v++);
     }
-    if (S.shadow) {
-      gl.uniformMatrix4fv(U("uModel"), false, I);
+    bind(emis);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (v) {
       gl.depthMask(false);
-      gl.uniform1f(U("uMode"), 3);
-      gl.drawArrays(gl.TRIANGLES, shadowStart, 6);
+      gl.enable(gl.BLEND);
+      gl.blendEquation(gl.MAX);
+      use(segProg, { uVP: viewProj, uRes: [canvas.width, canvas.height], uFocal: canvas.height * 0.5 / TAN });
+      gl.bindVertexArray(segs.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, segs.buf);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, segData, 0, v * SEG_STRIDE);
+      gl.drawArrays(gl.TRIANGLES, 0, v);
+      gl.disable(gl.BLEND);
       gl.depthMask(true);
     }
+    gl.disable(gl.DEPTH_TEST);
 
-    gl.uniformMatrix4fv(U("uModel"), false, mul(Ry(yaw), basePose));
-    gl.uniform1f(U("uMode"), 1);
-    gl.drawArrays(gl.TRIANGLES, metalStart, metalCount);
-    gl.uniform1f(U("uMode"), 0);
-    gl.drawArrays(gl.TRIANGLES, matteStart, matteCount);
+    // 3. bloom
+    let src = emis;
+    for (const d of down) {
+      bind(d);
+      use(downProg, { uTexel: [1 / src.w, 1 / src.h] });
+      sample(downProg, "uSrc", 0, src.tex);
+      fullscreen();
+      src = d;
+    }
+
+    // 4. composite
+    bind(null);
+    use(compProg, { uBloom: S.bloom });
+    sample(compProg, "uScene", 0, scene.tex);
+    sample(compProg, "uEmis", 1, emis.tex);
+    down.forEach((d, i) => sample(compProg, "uB" + (i + 1), i + 2, d.tex));
+    fullscreen();
   };
 
+  let visible = true, running = false, last = 0;
+  const frame = (now) => {
+    if (!visible || document.hidden) { running = false; return; }
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    syncSize();
+    draw(update(dt));
+    requestAnimationFrame(frame);
+  };
+  const start = () => {
+    if (running || !visible || document.hidden) return;
+    running = true;
+    requestAnimationFrame((now) => { last = now; frame(now); });
+  };
 
   // ---------- control panel ----------
-  const stage = canvas.parentElement;
   const toggle = document.createElement("button");
-  toggle.type = "button"; toggle.textContent = "\u00ab";
+  toggle.type = "button"; toggle.textContent = "«";
   toggle.setAttribute("aria-label", "Toggle controls"); toggle.setAttribute("aria-expanded", "false");
   const panel = document.createElement("aside");
   panel.hidden = true;
   toggle.onclick = () => {
     panel.hidden = !panel.hidden;
-    toggle.textContent = panel.hidden ? "\u00ab" : "\u00bb";
+    toggle.textContent = panel.hidden ? "«" : "»";
     toggle.setAttribute("aria-expanded", String(!panel.hidden));
   };
   let uid = 0;
-  const row = (label, input) => {
-    const r = document.createElement("div");
-    const l = document.createElement("label"); l.textContent = label;
-    if (input.id) l.htmlFor = input.id;
-    r.append(l, input); panel.append(r); return r;
+  const control = (label, key, attrs, onChange) => {
+    const row = document.createElement("div"), l = document.createElement("label"), i = document.createElement("input");
+    const box = attrs.type === "checkbox";
+    Object.assign(i, attrs, { id: "storm" + uid++ });
+    if (box) { row.className = "check"; i.checked = S[key]; } else i.value = S[key];
+    i.oninput = () => { S[key] = box ? i.checked : +i.value; onChange && onChange(); };
+    l.textContent = label; l.htmlFor = i.id;
+    row.append(l, i); panel.append(row);
   };
-  const heading = (text) => { const h = document.createElement("h3"); h.textContent = text; panel.append(h); };
-  const slider = (label, key, min, max, step, onChange) => {
-    const i = document.createElement("input");
-    i.type = "range"; i.id = "hc" + uid++; i.min = min; i.max = max; i.step = step; i.value = S[key];
-    i.oninput = () => { S[key] = +i.value; onChange && onChange(); };
-    row(label, i);
-  };
-  const rebuild = () => { upload(); updatePose(); };
+  const heading = (text) => panel.append(Object.assign(document.createElement("h3"), { textContent: text }));
+  const slider = (label, key, min, max, step) => control(label, key, { type: "range", min, max, step });
+  const check = (label, key, onChange) => control(label, key, { type: "checkbox" }, onChange);
 
-  heading("Hammer");
-  slider("Head length", "headLength", 0.8, 2.2, 0.05, rebuild);
-  slider("Handle length", "handleLength", 2, 7, 0.1, rebuild);
+  heading("Storm");
+  check("Auto strikes", "auto", () => { nextAuto = time + 0.3; });
+  slider("Strike rate", "rate", 0.05, 1.5, 0.05);
+  heading("Bolt");
+  slider("Branching", "branching", 0, 1, 0.01);
+  slider("Jaggedness", "jag", 0.1, 1, 0.01);
+  slider("Thickness", "thickness", 0.4, 3, 0.05);
+  slider("Re-strikes", "restrikes", 0, 4, 1);
+  heading("Glow");
+  slider("Bloom", "bloom", 0, 3, 0.05);
+  if (!reduce) slider("Flash", "flash", 0, 1, 0.01);
   heading("Camera");
-  slider("Orbit speed", "orbitSpeed", -0.6, 0.6, 0.01);
-  slider("Distance", "distance", 7, 28, 0.5);
-  slider("Height", "height", 0.5, 14, 0.1);
-  heading("Light");
-  slider("Sun direction", "sunAzimuth", 0, 360, 1);
-  heading("Ground");
-  slider("Spacing", "gridSpacing", 0.5, 2.5, 0.05);
-  slider("Opacity", "gridOpacity", 0.1, 1, 0.01);
-  slider("Fade distance", "gridFade", 10, 50, 1);
-  stage.append(panel, toggle);
+  check("Orbit", "orbit");
+  figure.append(panel, toggle);
 
-  new IntersectionObserver((e) => { visible = e[0].isIntersecting; }).observe(canvas);
-  requestAnimationFrame(frame);
+  new IntersectionObserver((e) => { visible = e[0].isIntersecting; start(); }).observe(canvas);
+  document.addEventListener("visibilitychange", start);
+  start();
 })();

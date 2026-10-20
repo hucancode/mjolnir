@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mjolnir Engine</title>
 <link rel="icon" href="data:,">
-<meta name="description" content="Mjolnir is a minimalistic, bindless, GPU-driven game engine in Odin, on Vulkan and WebGPU.">
+<meta name="description" content="Mjolnir is a minimalistic, GPU-driven game engine in Odin.">
 <link rel="stylesheet" href="style.css">
 </head>
-<body data-page="home">
+<body>
 <nav>
   <a href="index.html">Home</a>
   <a href="examples.html">Examples</a>
@@ -17,91 +17,56 @@
 </nav>
 <main>
 <header>
-  <figure><canvas id="hero-canvas" aria-label="Procedurally generated Mjolnir hammer" role="img"></canvas></figure>
+  <figure>
+    <canvas id="storm" aria-label="Interactive lightning storm: click to strike, drag to look around" role="img"></canvas>
+  </figure>
   <div>
     <h1>Mjolnir Engine</h1>
     <p>
-      <a href="https://github.com/hucancode/mjolnir">Mjolnir</a> is a minimalistic, bindless,
-      GPU-driven game engine in Odin, on Vulkan and WebGPU (native and web).
+      <a href="https://github.com/hucancode/mjolnir">Mjolnir</a> is a minimalistic,
+      GPU-driven game engine in <a href="https://github.com/odin-lang/Odin">Odin</a>.
     </p>
   </div>
 </header>
 
-<h2>Get started</h2>
-<p>
-  Run <code>make shader</code> to compile shaders to SPIR-V and copy the <code>mjolnir/</code>
-  directory into your project. The <a href="examples.html">examples</a> are the guide: start
-  with <a href="examples.html#cube">cube</a> (<code>odin run examples/cube</code>), then look up
-  calls in the <a href="api.html">API reference</a>.
-</p>
-
-<section>
-  <article>
-    <div>
-      <h2>Physically-based rendering</h2>
-      <p>Metallic-roughness materials with image-based lighting, driven entirely from bindless GPU buffers.</p>
-      <a href="examples.html#pbr">See PBR example</a>
-    </div>
-    <figure><video autoplay src="videos/pbr.mp4" muted loop playsinline preload="metadata" aria-label="Physically-based rendering"></video></figure>
-  </article>
-  <article>
-    <div>
-      <h2>Lights and shadows</h2>
-      <p>Point and spot lights and a sun, with shadows from one shared shadow atlas.</p>
-      <a href="examples.html#lights">See lights example</a>
-    </div>
-    <figure><video autoplay src="videos/lights.mp4" muted loop playsinline preload="metadata" aria-label="Lights and shadows"></video></figure>
-  </article>
-  <article>
-    <div>
-      <h2>Skeletal animation</h2>
-      <p>Forward kinematics, FABRIK inverse kinematics, and layering with bone masks, blend modes and transitions.</p>
-      <a href="examples.html#animation_layering">See animation example</a>
-    </div>
-    <figure><video autoplay src="videos/animation_layering.mp4" muted loop playsinline preload="metadata" aria-label="Skeletal animation"></video></figure>
-  </article>
-  <article>
-    <div>
-      <h2>Procedural animation</h2>
-      <p>Tail follow-through, spider legs and path-on-spline modifiers on top of any rig.</p>
-      <a href="examples.html#spider">See spider example</a>
-    </div>
-    <figure><video autoplay src="videos/spider.mp4" muted loop playsinline preload="metadata" aria-label="Procedural animation"></video></figure>
-  </article>
-  <article>
-    <div>
-      <h2>Rigid-body physics</h2>
-      <p>Physics primitives - boxes, spheres and cylinders with sleeping, sensors, area queries and ray casts.</p>
-      <a href="examples.html#physics">See physics example</a>
-    </div>
-    <figure><video autoplay src="videos/physics.mp4" muted loop playsinline preload="metadata" aria-label="Rigid-body physics"></video></figure>
-  </article>
-  <article>
-    <div>
-      <h2>Navigation</h2>
-      <p>Recast, Detour path queries and crowd steering with local avoidance.</p>
-      <a href="examples.html#crowd_nav">See navigation example</a>
-    </div>
-    <figure><video autoplay src="videos/crowd_nav.mp4" muted loop playsinline preload="metadata" aria-label="Navigation"></video></figure>
-  </article>
-  <article>
-    <div>
-      <h2>Particles and force fields</h2>
-      <p>GPU particle simulation, shaped by force fields placed in the scene.</p>
-      <a href="examples.html#particles">See particles example</a>
-    </div>
-    <figure><video autoplay src="videos/particles.mp4" muted loop playsinline preload="metadata" aria-label="Particles and force fields"></video></figure>
-  </article>
-  <article>
-    <div>
-      <h2>Post-processing</h2>
-      <p>Tonemap, bloom, blur, fog, outline, depth of field and crosshatch, stacked in any order, plus your own post shaders.</p>
-      <a href="examples.html#post_process">See post processing example</a>
-    </div>
-    <figure><video autoplay src="videos/post_process.mp4" muted loop playsinline preload="metadata" aria-label="Post-processing"></video></figure>
-  </article>
-</section>
+<ul>
+  <li><a href="examples.html#pbr"><figure><video src="videos/pbr.mp4" muted playsinline preload="metadata" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>PBR</a></li>
+  <li><a href="examples.html#lights"><figure><video src="videos/lights.mp4" muted playsinline preload="metadata" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Lights and shadows</a></li>
+  <li><a href="examples.html#animation_layering"><figure><video src="videos/animation_layering.mp4" muted playsinline preload="metadata" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Skeletal animation</a></li>
+  <li><a href="examples.html#spider"><figure><video src="videos/spider.mp4" muted playsinline preload="metadata" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Procedural animation</a></li>
+  <li><a href="examples.html#physics"><figure><video src="videos/physics.mp4" muted playsinline preload="metadata" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Rigid-body physics</a></li>
+  <li><a href="examples.html#crowd_nav"><figure><video src="videos/crowd_nav.mp4" muted playsinline preload="metadata" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Navigation</a></li>
+  <li><a href="examples.html#particles"><figure><video src="videos/particles.mp4" muted playsinline preload="metadata" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>GPU particles</a></li>
+  <li><a href="examples.html#post_process"><figure><video src="videos/post_process.mp4" muted playsinline preload="metadata" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Post-processing</a></li>
+</ul>
 </main>
 <script src="hero.js" defer></script>
+<script>
+  const vids = [...document.querySelectorAll("main > ul video")];
+  const bars = vids.map((v) => v.nextElementSibling);
+  vids.forEach((v, i) => v.addEventListener("timeupdate", () => { bars[i].value = v.currentTime / (v.duration || 1); }));
+  const rest = (v) => { if (v.duration && Math.abs(v.currentTime - v.duration * 0.4) > 0.05) v.currentTime = v.duration * 0.4; };
+  vids.forEach((v) => { v.addEventListener("loadedmetadata", () => rest(v)); rest(v); });
+  let cur = 0, hover = null, visible = false, started = false;
+  const active = () => hover ?? cur;
+  function sync() {
+    vids.forEach((v, i) => {
+      const on = visible && i === active();
+      v.loop = i === hover;
+      bars[i].hidden = !on;
+      if (on && i === cur && !started) { started = true; v.currentTime = 0; }
+      if (on) v.play().catch(() => {});
+      else { v.pause(); if (i !== cur && i !== hover) rest(v); }
+    });
+  }
+  vids.forEach((v, i) => {
+    v.addEventListener("ended", () => { cur = (i + 1) % vids.length; vids[cur].currentTime = 0; sync(); });
+    const li = v.closest("li");
+    li.addEventListener("mouseenter", () => { hover = i; sync(); });
+    li.addEventListener("mouseleave", () => { hover = null; sync(); });
+  });
+  new IntersectionObserver((es) => { visible = es.some((e) => e.isIntersecting); sync(); })
+    .observe(document.querySelector("main > ul"));
+</script>
 </body>
 </html>
