@@ -3,7 +3,7 @@
 # VK_LAYER_LUNARG_screenshot layer (one PPM per frame) and stitching the
 # frames into docs/site/videos/<example>.mp4 with ffmpeg.
 #
-# Per-example overrides live in examples/<name>/record.cfg as key=value lines.
+# Per-example overrides live in examples/<category>/<name>/record.cfg as key=value lines.
 # Recognized keys:
 #   frame_limit   total frames to render        (default 300)
 #   fps           render cadence + mp4 framerate (default 30)
@@ -63,7 +63,8 @@ read_cfg() {
 
 record_one() {
     local example="$1"
-    local example_dir="examples/$example"
+    local example_dir
+    example_dir=$(ls -d examples/*/"$example" 2>/dev/null | head -1)
     [[ -f "$example_dir/main.odin" ]] || { echo "skip $example (no main.odin)"; return 0; }
 
     local cfg="$example_dir/record.cfg"
@@ -166,7 +167,7 @@ declare -a targets
 if [[ $# -gt 0 ]]; then
     targets=("$@")
 else
-    for d in examples/*/; do
+    for d in examples/*/*/; do
         targets+=("$(basename "$d")")
     done
 fi

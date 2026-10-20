@@ -1,12 +1,12 @@
 SHADER_DIR := mjolnir/render/shader
 
-# One Slang source per shader (engine: $(SHADER_DIR)/*.slang, users: examples/*/*.slang), compiled
+# One Slang source per shader (engine: $(SHADER_DIR)/*.slang, users: examples/*/*/*.slang), compiled
 # for the backend: name.spv (Vulkan) or name.wgsl (wgpu). Shaders branch on BACKEND_VULKAN and
 # BACKEND_WGPU where the backends differ. The headers are only included.
 SHADER_HEADERS := common mesh mesh_vertex mesh_pulled material post gpu ibl_common
-SLANG_SOURCES := $(filter-out $(addprefix $(SHADER_DIR)/,$(addsuffix .slang,$(SHADER_HEADERS))) examples/cartoon_snake/snake_skin.slang,$(wildcard $(SHADER_DIR)/*.slang) $(wildcard examples/*/*.slang))
+SLANG_SOURCES := $(filter-out $(addprefix $(SHADER_DIR)/,$(addsuffix .slang,$(SHADER_HEADERS))) examples/creative/cartoon_snake/snake_skin.slang,$(wildcard $(SHADER_DIR)/*.slang) $(wildcard examples/*/*/*.slang))
 SLANG_ENTRIES := $(shell grep -l '\[shader' $(SLANG_SOURCES) 2>/dev/null)
-SLANG_HEADERS := $(wildcard $(SHADER_DIR)/*.slang examples/*/*.slang)
+SLANG_HEADERS := $(wildcard $(SHADER_DIR)/*.slang examples/*/*/*.slang)
 SLANG_FLAGS := -I $(SHADER_DIR) -matrix-layout-column-major -warnings-disable 39001
 SPV_SHADERS := $(SLANG_ENTRIES:.slang=.spv)
 WGSL_SHADERS := $(SLANG_ENTRIES:.slang=.wgsl)
@@ -45,11 +45,13 @@ EXAMPLE ?= cube
 
 web: shader-wgpu
 	mkdir -p web
-	odin build examples/$(EXAMPLE) -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
+	odin build $(call example_dir,$(EXAMPLE)) -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
 		-target-features:"atomics,bulk-memory" -no-thread-local -extra-linker-flags:"--export-table" -out:web/$(EXAMPLE).wasm
 	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js mjolnir/platform/web/index.html web/
 
-EXAMPLES := $(patsubst examples/%/main.odin,%,$(wildcard examples/*/main.odin))
+# Examples live in examples/<category>/<name>; everything else addresses them by bare name.
+example_dir = $(firstword $(wildcard examples/*/$(1)))
+EXAMPLES := $(notdir $(patsubst %/main.odin,%,$(wildcard examples/*/*/main.odin)))
 
 examples:
 	@echo "Running all samples..."
@@ -134,7 +136,7 @@ doc-live: shader-wgpu
 	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js mjolnir/platform/web/index.html docs/build/live/
 	@for name in $(EXAMPLES); do \
 		echo "wasm: $$name"; \
-		odin build examples/$$name -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
+		odin build $$(ls -d examples/*/$$name) -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
 			-target-features:"atomics,bulk-memory" -no-thread-local -extra-linker-flags:"--export-table" \
 			-out:docs/build/live/$$name.wasm >/dev/null 2>&1 || echo "  skipped $$name (no web build)"; \
 	done
@@ -148,9 +150,9 @@ doc: shader
 
 compare-physics:
 	git stash -u
-	odin build examples/physics -out:bin/physics_before -disable-assert -no-bounds-check -o:speed -define:NX=30 -define:NY=30 -define:NZ=30
+	odin build examples/basic/physics -out:bin/physics_before -disable-assert -no-bounds-check -o:speed -define:NX=30 -define:NY=30 -define:NZ=30
 	git stash pop
-	odin build examples/physics -out:bin/physics_after -disable-assert -no-bounds-check -o:speed -define:NX=30 -define:NY=30 -define:NZ=30
+	odin build examples/basic/physics -out:bin/physics_after -disable-assert -no-bounds-check -o:speed -define:NX=30 -define:NY=30 -define:NZ=30
 	timeout 10s perf record -F 999 -g --call-graph dwarf ./bin/physics_before || true
 	timeout 10s perf record -F 999 -g --call-graph dwarf ./bin/physics_after || true
 	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt

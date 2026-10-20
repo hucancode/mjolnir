@@ -18,7 +18,7 @@ function renderApi(root) {
     const path = decodeURIComponent(location.hash.slice(1)) || pkgs[0].path;
     const pkg = pkgs.find((p) => p.path === path) ?? pkgs[0];
     document.title = pkg.path + ' - Mjolnir';
-    for (const a of nav.children) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + pkg.path);
+    for (const a of nav.querySelectorAll('a')) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + pkg.path);
     content.replaceChildren(el('h1', { textContent: pkg.path }));
     if (pkg.doc) content.append(el('p', { textContent: pkg.doc }));
     for (const s of pkg.sections) {
@@ -48,12 +48,16 @@ function renderExamples(root) {
   const list = window.EXAMPLES;
   const hasGpu = !!navigator.gpu;
   const nav = el('nav');
+  const thumbBtn = el('button', { type: 'button', className: 'thumb-toggle' });
   const stage = el('div', { className: 'stage' });
-  const title = el('h1');
+  const loader = el('div', { className: 'loader', hidden: true }, el('span', { className: 'spinner' }), el('span', { textContent: 'Loading…' }));
+  const modeBtn = el('button', { type: 'button', className: 'overlay mode' });
   const desc = el('p', { className: 'desc' });
-  const modeBtn = el('button', { type: 'button' });
   const codeBtn = el('button', { type: 'button', textContent: 'Code' });
   const logBtn = el('button', { type: 'button', textContent: 'Log' });
+  const panel = el('div', { className: 'help-panel', hidden: true }, desc, el('p', { className: 'toolbar' }, codeBtn, logBtn));
+  const helpBtn = el('button', { type: 'button', className: 'overlay help', textContent: '?', title: 'About this example' });
+  const frame = el('div', { className: 'frame' }, stage, loader, modeBtn, panel, helpBtn);
   const code = el('code');
   const pre = el('pre', {}, code);
   const closeBtn = el('button', { type: 'button', textContent: 'Close' });
@@ -62,10 +66,43 @@ function renderExamples(root) {
   const logPre = el('pre');
   const logCloseBtn = el('button', { type: 'button', textContent: 'Close' });
   const logDialog = el('dialog', { className: 'code-dialog' }, el('header', {}, el('strong', { textContent: 'Log' }), logCloseBtn), logPre);
-  const view = el('section', {}, el('div', { className: 'title-row' }, title, el('p', { className: 'toolbar' }, modeBtn, codeBtn, logBtn)), desc, stage, dialog, logDialog);
-  root.append(el('div', { className: 'examples' }, el('search', {}, nav), view));
+  const view = el('section', {}, frame, dialog, logDialog);
+  root.append(el('div', { className: 'examples' }, el('search', {}, thumbBtn, nav), view));
 
-  for (const e of list) nav.append(el('a', { href: '#' + e.name, textContent: e.name }));
+  // picker: section headers, optional video-frame thumbnails
+  let thumbs = localStorage.getItem('examples-thumbs') !== '0';
+  const setThumbs = () => {
+    nav.classList.toggle('thumbs', thumbs);
+    thumbBtn.textContent = thumbs ? 'Hide thumbnails' : 'Show thumbnails';
+    localStorage.setItem('examples-thumbs', thumbs ? '1' : '0');
+    for (const v of nav.querySelectorAll('video')) {
+      if (thumbs && !v.src) v.src = v.dataset.src;
+    }
+  };
+  thumbBtn.addEventListener('click', () => { thumbs = !thumbs; setThumbs(); });
+  let category;
+  for (const e of list) {
+    if (e.category !== category) {
+      category = e.category;
+      nav.append(el('h2', { textContent: category }));
+    }
+    const link = el('a', { href: '#' + e.name }, el('span', { textContent: e.name }));
+    if (e.video) {
+      // a still frame of the clip; the source is attached lazily, only while thumbnails are shown
+      const v = el('video', { muted: true, preload: 'metadata', playsInline: true, tabIndex: -1 });
+      v.muted = true;
+      v.dataset.src = `videos/${e.name}.mp4#t=1`;
+      link.prepend(v);
+    } else {
+      link.prepend(el('div', { className: 'no-thumb' }));
+    }
+    nav.append(link);
+  }
+  setThumbs();
+
+  helpBtn.addEventListener('click', () => { panel.hidden = !panel.hidden; });
+  codeBtn.addEventListener('click', () => { panel.hidden = true; dialog.showModal(); });
+  logBtn.addEventListener('click', () => { panel.hidden = true; });
 
   let current, live; // live: whether the current example runs as a WebGPU build rather than a video
 
@@ -73,15 +110,21 @@ function renderExamples(root) {
     const e = current;
     modeBtn.hidden = !(e.wasm && e.video && hasGpu);
     logBtn.hidden = !live;
+    loader.hidden = false;
+    const ready = () => { if (current === e) loader.hidden = true; };
     modeBtn.textContent = live ? 'Video' : 'Run live';
     if (live) {
-      stage.replaceChildren(el('iframe', { src: `live/index.html?example=${encodeURIComponent(e.name)}`, title: e.name, allow: 'fullscreen; gamepad' }));
+      const f = el('iframe', { src: `live/index.html?example=${encodeURIComponent(e.name)}`, title: e.name, allow: 'fullscreen; gamepad' });
+      f.addEventListener('load', ready);
+      stage.replaceChildren(f);
     } else if (e.video) {
       const v = el('video', { src: `videos/${e.name}.mp4`, autoplay: true, muted: true, loop: true, playsInline: true, controls: true });
+      v.addEventListener('loadeddata', ready);
       v.muted = true; // the muted attribute must be set for autoplay to be allowed
       stage.replaceChildren(v);
     } else {
       stage.replaceChildren(el('p', { textContent: 'No live build or video for this example yet.' }));
+      ready();
     }
   }
 
@@ -92,8 +135,9 @@ function renderExamples(root) {
     current = e;
     live = hasGpu && e.wasm; // fall back to the video without WebGPU or a wasm build
     document.title = e.name + ' - Examples - Mjolnir';
-    for (const a of nav.children) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + e.name);
-    title.textContent = e.name;
+    for (const a of nav.querySelectorAll('a')) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + e.name);
+    nav.querySelector('a[aria-current]')?.scrollIntoView({ block: 'nearest' });
+    panel.hidden = true;
     desc.textContent = e.desc;
     code.textContent = e.source;
     dialogTitle.textContent = e.name + ' source';

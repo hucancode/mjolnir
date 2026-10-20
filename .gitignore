@@ -1,6 +1,6 @@
 **/*.spv
 mjolnir/render/shader/*.wgsl
-examples/*/*.wgsl
+examples/*/*/*.wgsl
 /bin
 test.bin
 screenshot.png

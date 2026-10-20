@@ -7,6 +7,8 @@ artifact_root="${2:-artifacts}"
 # Find test directory
 if [[ -d "examples/$test_id" ]]; then
     test_dir="examples/$test_id"
+elif compgen -G "examples/*/$test_id" >/dev/null; then
+    test_dir=$(ls -d examples/*/"$test_id" | head -1)
 else
     test_dir="$test_id"
 fi

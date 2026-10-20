@@ -28,7 +28,8 @@ Pkg :: struct {
 }
 
 Example :: struct {
-	name:   string,
+	name:     string,
+	category: string, // the examples/<category> folder it lives in
 	desc:   string,
 	source: string,
 	video:  bool,
@@ -225,11 +226,15 @@ expand_reexport :: proc(sig: string) -> string {
 }
 
 load_examples :: proc() -> []Example {
-	infos, err := os.read_all_directory_by_path("examples", context.allocator)
+	categories, err := os.read_all_directory_by_path("examples", context.allocator)
 	if err != nil {die("cannot list examples: %v", err)}
 	out: [dynamic]Example
+	for category in categories {
+	if category.type != .Directory {continue}
+	infos, err := os.read_all_directory_by_path(category.fullpath, context.allocator)
+	if err != nil {die("cannot list %s: %v", category.name, err)}
 	for fi in infos {
-		main_path, _ := filepath.join({"examples", fi.name, "main.odin"})
+		main_path, _ := filepath.join({"examples", category.name, fi.name, "main.odin"})
 		if fi.type != .Directory || !os.exists(main_path) {continue}
 		source := read(main_path)
 		// description = the leading block of `//` comment lines
@@ -243,14 +248,24 @@ load_examples :: proc() -> []Example {
 		wasm_path, _ := filepath.join({"docs", "build", "live", fmt.tprintf("%s.wasm", fi.name)})
 		append(&out, Example{
 			name = fi.name,
+			category = category.name,
 			desc = strings.join(desc[:], " "),
 			source = source,
 			video = os.exists(video_path),
 			wasm = os.exists(wasm_path),
 		})
 	}
-	// cube first, as the hello world; the rest alphabetical
+	}
+	// basic, creative, interactive; cube first as the hello world, the rest alphabetical
+	rank :: proc(category: string) -> int {
+		switch category {
+		case "basic": return 0
+		case "creative": return 1
+		}
+		return 2
+	}
 	slice.sort_by(out[:], proc(a, b: Example) -> bool {
+		if a.category != b.category {return rank(a.category) < rank(b.category)}
 		if (a.name == "cube") != (b.name == "cube") {return a.name == "cube"}
 		return a.name < b.name
 	})
