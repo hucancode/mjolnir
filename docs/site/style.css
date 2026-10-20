@@ -137,7 +137,6 @@ main > div.examples { grid-template-columns: 16rem minmax(0, 1fr); }
 .overlay { position: absolute; opacity: 0.85; }
 .overlay:hover { opacity: 1; }
 .overlay.help { right: 0.75rem; bottom: 0.75rem; width: 2rem; height: 2rem; padding: 0; border-radius: 50%; font-weight: 700; }
-.overlay.mode { right: 0.75rem; top: 0.75rem; }
 .help-panel {
   position: absolute; right: 0.75rem; bottom: 3.5rem; width: min(26rem, calc(100% - 1.5rem)); padding: 0.75rem;
   background: var(--color-base-200); border: var(--border) solid var(--color-neutral);

@@ -51,13 +51,13 @@ function renderExamples(root) {
   const thumbBtn = el('button', { type: 'button', className: 'thumb-toggle' });
   const stage = el('div', { className: 'stage' });
   const loader = el('div', { className: 'loader', hidden: true }, el('span', { className: 'spinner' }), el('span', { textContent: 'Loading…' }));
-  const modeBtn = el('button', { type: 'button', className: 'overlay mode' });
+  const modeBtn = el('button', { type: 'button' });
   const desc = el('p', { className: 'desc' });
   const codeBtn = el('button', { type: 'button', textContent: 'Code' });
   const logBtn = el('button', { type: 'button', textContent: 'Log' });
-  const panel = el('div', { className: 'help-panel', hidden: true }, desc, el('p', { className: 'toolbar' }, codeBtn, logBtn));
+  const panel = el('div', { className: 'help-panel', hidden: true }, desc, el('p', { className: 'toolbar' }, modeBtn, codeBtn, logBtn));
   const helpBtn = el('button', { type: 'button', className: 'overlay help', textContent: '?', title: 'About this example' });
-  const frame = el('div', { className: 'frame' }, stage, loader, modeBtn, panel, helpBtn);
+  const frame = el('div', { className: 'frame' }, stage, loader, panel, helpBtn);
   const code = el('code');
   const pre = el('pre', {}, code);
   const closeBtn = el('button', { type: 'button', textContent: 'Close' });
