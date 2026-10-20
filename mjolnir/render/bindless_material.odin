@@ -39,9 +39,9 @@ Material :: struct {
   frame_index:              u32,
   type:                     MaterialType,
   // .CUSTOM: the shader's own values, read as m.params[i] (built-in types ignore them)
-  params:                   [2][4]f32,
+  params:                   [4][4]f32,
 }
-#assert(size_of(Material) == 96)
+#assert(size_of(Material) == 128)
 
 // material returns the material of `handle`, to edit in place; the pointer is valid for
 // this tick: getting it marks the data for upload, so get it again next tick.
@@ -70,7 +70,7 @@ make_material :: proc(
   frame_rows: u32 = 1,
   frame_index: u32 = 0,
   shader: MaterialShader = 0,
-  params: [2][4]f32 = {},
+  params: [4][4]f32 = {},
 ) -> Material {
   return {
     type                       = type,

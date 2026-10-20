@@ -17,7 +17,7 @@ struct Material {
     uint frame_rows;
     uint frame_index;
     uint type; // MaterialType
-    vec4 params[2]; // a .CUSTOM shader's own values
+    vec4 params[4]; // a .CUSTOM shader's own values
 };
 
 layout(set = 0, binding = 3) readonly buffer MaterialBuffer {

@@ -9,8 +9,9 @@ MaterialShader :: distinct u32
 // material_shader_create makes a material shader from a user fragment shader and, optionally, a
 // user vertex shader that moves the mesh's vertices (procedural animation); without one the
 // vertex stage is render's. Its materials draw in the forward pass, after the built-in forward
-// types, over the lit image: depth-tested, blended by `blend`, and writing depth when `blend` is
-// .NONE (so opaque meshes hide each other, not only the scene behind them). They cast no
+// types, over the lit image: depth-tested, blended by `blend`, and writing depth unless
+// `depth_write` is false (so nearer meshes hide farther ones drawn after them; a blended
+// shader that discards nothing may want it off). They cast no
 // shadow, are not occlusion-culled, are culled by the mesh's bounds (keep moved vertices near
 // them) and see only the sun (View.sun_direction, sun_radiance). There is room for
 // MAX_MATERIAL_SHADERS at once. A backend uses only its own sources: `*_spirv` on Vulkan,
@@ -21,7 +22,8 @@ MaterialShader :: distinct u32
 // shader defines MATERIAL_VERTEX before including it.
 // WebGPU: the sources follow common.wgsl, mesh.wgsl and material_custom.wgsl, so they read
 // what they declare; they declare `fs_main(in: VertexOut) -> @location(0) vec4f` and
-// `vs_main(in: VertexIn) -> VertexOut`.
+// `vs_main(in: VertexIn) -> VertexOut`. The vertex and fragment sources join into one module:
+// the fragment source reads what the vertex source declares, and must not declare it again.
 // Both read the material's params (Material.params), render's time and the image size there.
 // Vulkan samples any texture by handle (sample_texture); WebGPU the material's own four
 // (albedo_texture, metallic_roughness_texture, normal_texture, emissive_texture).
@@ -33,6 +35,7 @@ material_shader_create :: proc(
   cull: CullMode = .BACK,
   vert_spirv: []u8 = nil,
   vert_wgsl: string = "",
+  depth_write := true,
 ) -> (
   shader: MaterialShader,
   ok: bool,
@@ -55,7 +58,7 @@ material_shader_create :: proc(
     cull          = cull,
     color_formats = material_pass_formats(.FORWARD),
     blend         = blend,
-    depth         = material_pass_depth(.FORWARD, opaque = blend == .NONE),
+    depth         = material_pass_depth(.FORWARD, opaque = depth_write),
   }
   pipeline := dev.graphics_pipeline_create(&self.gpu, desc) or_return
   self.custom_material_pipelines[slot] = pipeline

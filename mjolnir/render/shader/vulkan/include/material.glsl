@@ -1,10 +1,10 @@
 // The interface of a user material shader (render.material_shader_create): the scene buffers
 // it reads, the bindless textures and, for a fragment shader, the mesh vertex stage's outputs
 // and the color output. A custom material is drawn in the forward pass over the lit image,
-// depth-tested, writing depth when its shader does not blend. Read your own values from
-// node_material().params (render.Material.params), the time from camera_view().time, the sun
-// from camera_view().sun_direction and .sun_radiance and the image size from
-// camera_view().extent.
+// depth-tested and writing depth unless its shader was made with depth_write = false. Read
+// your own values from node_material().params (render.Material.params), the time from
+// camera_view().time, the sun from camera_view().sun_direction and .sun_radiance and the image
+// size from camera_view().extent.
 //
 //     #version 450
 //     #include "material.glsl"
@@ -71,7 +71,7 @@ struct Material {
     uint frame_rows;
     uint frame_index;
     uint type; // MaterialType
-    vec4 params[2]; // a .CUSTOM shader's own values
+    vec4 params[4]; // a .CUSTOM shader's own values
 };
 
 struct Node {

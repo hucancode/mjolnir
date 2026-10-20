@@ -100,7 +100,7 @@ struct Material {
     frame_index: u32,
     material_type: u32,
     // a .CUSTOM shader's own values
-    params: array<vec4f, 2>,
+    params: array<vec4f, 4>,
 }
 
 struct Light {

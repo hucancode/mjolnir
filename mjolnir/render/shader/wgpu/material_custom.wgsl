@@ -3,8 +3,8 @@
 // (u.camera_index), VertexIn and VertexOut; the user sources follow this and declare
 // `fs_main(in: VertexOut) -> @location(0) vec4f` and, to move the vertices,
 // `vs_main(in: VertexIn) -> VertexOut`, which ends with material_vertex. A custom material is
-// drawn in the forward pass over the lit image, depth-tested, writing depth when its shader
-// does not blend. Read your own values from node_material(in).params (render.Material.params),
+// drawn in the forward pass over the lit image, depth-tested and writing depth unless its
+// shader was made with depth_write = false. Read your own values from node_material(in).params (render.Material.params),
 // the time from views[u.camera_index].time, the sun from views[u.camera_index].sun_direction and
 // .sun_radiance, and the image size from views[u.camera_index].extent.
 

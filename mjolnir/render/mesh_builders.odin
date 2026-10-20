@@ -72,29 +72,55 @@ make_billboard_quad :: proc(
   return make_geometry(vertices, indices)
 }
 
-// make_sphere builds a UV sphere of the given radius centered at the origin.
+// make_sphere builds a UV sphere of the given radius centered at the origin. A faceted sphere
+// gives each quad its own four vertices, all with the normal through the quad's center, so the
+// quads shade flat and can move apart.
 make_sphere :: proc(
   segments: u32 = 16,
   rings: u32 = 16,
   radius: f32 = 1.0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  faceted := false,
 ) -> Geometry {
+  point :: proc(seg, ring: f32, segments, rings: u32) -> [3]f32 {
+    phi := math.PI * ring / f32(rings)
+    theta := 2.0 * math.PI * seg / f32(segments)
+    return {math.sin(phi) * math.cos(theta), math.cos(phi), math.sin(phi) * math.sin(theta)}
+  }
+  if faceted {
+    vertices := make([]Vertex, rings * segments * 4)
+    indices := make([]u32, rings * segments * 6)
+    for ring in 0 ..< rings {
+      for seg in 0 ..< segments {
+        quad := ring * segments + seg
+        normal := point(f32(seg) + 0.5, f32(ring) + 0.5, segments, rings)
+        for corner in u32(0) ..< 4 {
+          s, r := seg + corner % 2, ring + corner / 2
+          vertices[quad * 4 + corner] = Vertex {
+            position = radius * point(f32(s), f32(r), segments, rings),
+            normal   = normal,
+            color    = color,
+            uv       = {f32(s) / f32(segments), f32(r) / f32(rings)},
+          }
+        }
+        a := quad * 4
+        p := indices[quad * 6:]
+        p[0], p[1], p[2], p[3], p[4], p[5] = a, a + 1, a + 2, a + 2, a + 1, a + 3
+      }
+    }
+    return make_geometry(vertices, indices)
+  }
   vert_count := (rings + 1) * (segments + 1)
   idx_count := rings * segments * 6
   vertices := make([]Vertex, vert_count)
   indices := make([]u32, idx_count)
   for ring in 0 ..= rings {
-    phi := math.PI * f32(ring) / f32(rings)
-    y := math.cos(phi)
-    r := math.sin(phi)
     for seg in 0 ..= segments {
-      theta := 2.0 * math.PI * f32(seg) / f32(segments)
-      x := r * math.cos(theta)
-      z := r * math.sin(theta)
+      n := point(f32(seg), f32(ring), segments, rings)
       idx := ring * (segments + 1) + seg
       vertices[idx] = Vertex {
-        position = {radius * x, radius * y, radius * z},
-        normal   = {x, y, z},
+        position = radius * n,
+        normal   = n,
         color    = color,
         uv       = {f32(seg) / f32(segments), f32(ring) / f32(rings)},
       }
@@ -285,41 +311,74 @@ make_torus :: proc(
   return make_geometry(vertices, indices)
 }
 
-// make_cylinder builds a capped cylinder along Y centered at the origin.
+// make_cylinder builds a cylinder along Y centered at the origin, its side cut into `rings`
+// bands from top to bottom, capped at both ends when `caps`.
 make_cylinder :: proc(
   segments: u32 = 32,
+  rings: u32 = 1,
   height: f32 = 2.0,
   radius: f32 = 1.0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  caps := true,
 ) -> Geometry {
-  // body rings interleaved, then each cap's center and rim; rings repeat their first vertex for the UV seam
+  // side columns top to bottom, then each cap's center and rim; columns repeat the first for the UV seam
   ring := segments + 1
-  top_center := 2 * ring
+  column := rings + 1
+  side := ring * column
+  top_center := side
   bottom_center := top_center + 1 + ring
-  vertices := make([]Vertex, 2 * ring + 2 * (ring + 1))
-  indices := make([]u32, segments * 12)
+  vertices := make([]Vertex, side + (2 * (ring + 1) if caps else 0))
+  indices := make([]u32, segments * rings * 6 + (segments * 6 if caps else 0))
   half_h := height * 0.5
+  for i in 0 ..< ring {
+    theta := 2.0 * math.PI * f32(i) / f32(segments)
+    x, z := math.cos(theta), math.sin(theta)
+    u := f32(i) / f32(segments)
+    for r in 0 ..< column {
+      v := f32(r) / f32(rings)
+      vertices[i * column + r] = {position = {radius * x, half_h - height * v, radius * z}, normal = {x, 0, z}, color = color, uv = {u, v}}
+    }
+  }
+  for seg in 0 ..< segments {
+    for r in 0 ..< rings {
+      a, c := seg * column + r, (seg + 1) * column + r
+      p := indices[(seg * rings + r) * 6:]
+      p[0], p[1], p[2], p[3], p[4], p[5] = a, c, a + 1, a + 1, c, c + 1
+    }
+  }
+  if !caps do return make_geometry(vertices, indices)
   vertices[top_center] = {position = {0, half_h, 0}, normal = {0, 1, 0}, color = color, uv = {0.5, 0.5}}
   vertices[bottom_center] = {position = {0, -half_h, 0}, normal = {0, -1, 0}, color = color, uv = {0.5, 0.5}}
   for i in 0 ..< ring {
     theta := 2.0 * math.PI * f32(i) / f32(segments)
     x, z := math.cos(theta), math.sin(theta)
-    top, bottom := [3]f32{radius * x, half_h, radius * z}, [3]f32{radius * x, -half_h, radius * z}
-    u := f32(i) / f32(segments)
     cap_uv := [2]f32{0.5 + 0.5 * x, 0.5 + 0.5 * z}
-    vertices[2 * i] = {position = top, normal = {x, 0, z}, color = color, uv = {u, 0}}
-    vertices[2 * i + 1] = {position = bottom, normal = {x, 0, z}, color = color, uv = {u, 1}}
-    vertices[top_center + 1 + i] = {position = top, normal = {0, 1, 0}, color = color, uv = cap_uv}
-    vertices[bottom_center + 1 + i] = {position = bottom, normal = {0, -1, 0}, color = color, uv = cap_uv}
+    vertices[top_center + 1 + i] = {position = {radius * x, half_h, radius * z}, normal = {0, 1, 0}, color = color, uv = cap_uv}
+    vertices[bottom_center + 1 + i] = {position = {radius * x, -half_h, radius * z}, normal = {0, -1, 0}, color = color, uv = cap_uv}
   }
-  // per segment: a body quad, then a triangle of each cap
   for seg in 0 ..< segments {
-    a, c := seg * 2, (seg + 1) * 2
     top_rim, bottom_rim := top_center + 1 + seg, bottom_center + 1 + seg
-    p := indices[seg * 12:]
-    p[0], p[1], p[2], p[3], p[4], p[5] = a, c, a + 1, a + 1, c, c + 1
-    p[6], p[7], p[8] = top_center, top_rim + 1, top_rim
-    p[9], p[10], p[11] = bottom_center, bottom_rim, bottom_rim + 1
+    p := indices[segments * rings * 6 + seg * 6:]
+    p[0], p[1], p[2] = top_center, top_rim + 1, top_rim
+    p[3], p[4], p[5] = bottom_center, bottom_rim, bottom_rim + 1
+  }
+  return make_geometry(vertices, indices)
+}
+
+// make_circle builds a disc in XZ facing +Y centered at the origin: a fan of `segments`
+// triangles, uv mapping the disc's square to [0, 1].
+make_circle :: proc(segments: u32 = 32, radius: f32 = 1.0, color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> Geometry {
+  vertices := make([]Vertex, segments + 2)
+  indices := make([]u32, segments * 3)
+  vertices[0] = {normal = {0, 1, 0}, color = color, uv = {0.5, 0.5}}
+  for i in 0 ..= segments {
+    theta := 2.0 * math.PI * f32(i) / f32(segments)
+    x, z := math.cos(theta), math.sin(theta)
+    vertices[1 + i] = {position = {radius * x, 0, radius * z}, normal = {0, 1, 0}, color = color, uv = {0.5 + 0.5 * x, 0.5 + 0.5 * z}}
+  }
+  for seg in 0 ..< segments {
+    p := indices[seg * 3:]
+    p[0], p[1], p[2] = 0, seg + 2, seg + 1
   }
   return make_geometry(vertices, indices)
 }

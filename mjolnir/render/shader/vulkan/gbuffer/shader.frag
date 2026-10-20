@@ -23,7 +23,7 @@ struct Material {
     uint frame_rows;
     uint frame_index;
     uint type; // MaterialType
-    vec4 params[2]; // a .CUSTOM shader's own values
+    vec4 params[4]; // a .CUSTOM shader's own values
 };
 
 // textures and samplers set = 1
