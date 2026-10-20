@@ -40,6 +40,7 @@ follow_lerp:        mu.Real = 5.0
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
+  app.mode = .FOLLOW
   w := &app.window
   if !platform.init(w, 1000, 700, "Camera Controllers") do return
   if !render.init(&app.renderer, "Camera Controllers", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
@@ -127,25 +128,25 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Cameras", {700, 20, 280, 360}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Cameras", {680, 20, 300, 260}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.label(ctx, "Controller:")
     mu.layout_row(ctx, {90, 90, 90}, 0)
-    if .SUBMIT in mu.button(ctx, "Orbit")  do switch_mode(app, .ORBIT)
-    if .SUBMIT in mu.button(ctx, "Free")   do switch_mode(app, .FREE)
-    if .SUBMIT in mu.button(ctx, "Follow") do switch_mode(app, .FOLLOW)
+    names := [CameraMode]string{.ORBIT = "Orbit", .FREE = "Free", .FOLLOW = "Follow"}
+    for name, mode in names {
+      if .SUBMIT in mu.button(ctx, fmt.tprintf("%s%s", "> " if app.mode == mode else "", name)) do switch_mode(app, mode)
+    }
     mu.layout_row(ctx, {-1}, 0)
-    mu.label(ctx, fmt.tprintf("Active: %v", app.mode))
-    mu.label(ctx, "")
-    mu.label(ctx, "Orbit: distance:")
-    if .CHANGE in mu.slider(ctx, &orbit_distance, ORBIT_MIN_DISTANCE, ORBIT_MAX_DISTANCE) do app.orbit.distance = f32(orbit_distance)
-    mu.label(ctx, "Free: move speed:"); mu.slider(ctx, &free_speed, 1.0, 30.0)
-    mu.label(ctx, "Follow: height offset:"); mu.slider(ctx, &follow_offset_y, 0.5, 10.0)
-    mu.label(ctx, "Follow: back offset:"); mu.slider(ctx, &follow_offset_back, 1.0, 15.0)
-    mu.label(ctx, "Follow: lerp speed:"); mu.slider(ctx, &follow_lerp, 0.5, 20.0)
-    mu.label(ctx, "")
-    cam := render.main_camera(&app.renderer)
-    mu.label(ctx, fmt.tprintf("Cam pos: %.1f %.1f %.1f", cam.position.x, cam.position.y, cam.position.z))
-    mu.label(ctx, fmt.tprintf("Runner: %.1f %.1f %.1f", app.runner_pos.x, app.runner_pos.y, app.runner_pos.z))
+    switch app.mode {
+    case .ORBIT:
+      mu.label(ctx, "Distance:")
+      if .CHANGE in mu.slider(ctx, &orbit_distance, ORBIT_MIN_DISTANCE, ORBIT_MAX_DISTANCE) do app.orbit.distance = f32(orbit_distance)
+    case .FREE:
+      mu.label(ctx, "Move speed:"); mu.slider(ctx, &free_speed, 1.0, 30.0)
+    case .FOLLOW:
+      mu.label(ctx, "Height offset:"); mu.slider(ctx, &follow_offset_y, 0.5, 10.0)
+      mu.label(ctx, "Back offset:"); mu.slider(ctx, &follow_offset_back, 1.0, 15.0)
+      mu.label(ctx, "Lerp speed:"); mu.slider(ctx, &follow_lerp, 0.5, 20.0)
+    }
   }
 }
 

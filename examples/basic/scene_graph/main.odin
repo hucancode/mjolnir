@@ -49,9 +49,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
 
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 14, 18}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 10, 4}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
-
 
   ground := world.spawn(&app.scene, {0, -2, 0})
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
@@ -118,12 +117,9 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Scene Graph", {720, 20, 260, 240}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Scene Graph", {720, 20, 260, 180}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Hierarchy: sun > planets > moon")
-    mu.label(ctx, "Each planet inherits sun rotation.")
-    mu.label(ctx, "Moon inherits outer planet too.")
-    mu.label(ctx, "")
     mu.label(ctx, "Orbit speed")
     mu.slider(ctx, &orbit_speed, 0.0, 4.0)
     mu.label(ctx, "Spin speed")

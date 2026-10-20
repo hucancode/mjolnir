@@ -1,4 +1,4 @@
-// Navmesh baking and pathfinding: right-click to set the goal.
+// Navmesh baking and pathfinding: the agent keeps walking to random goals; right-click to pick one.
 package main
 
 import "mjolnir"
@@ -10,12 +10,12 @@ import nav "mjolnir/navigation"
 import "mjolnir/navigation/bake"
 import "core:log"
 import "core:math/linalg"
+import "core:math/rand"
 
 GROUND_HALF_SIZE :: 50
 AGENT_SPEED :: 5
 AGENT_HALF_HEIGHT :: 1
 WAYPOINT_REACHED :: 0.5
-PATH_SHOW_SECONDS :: 5
 MAX_PATH_POINTS :: 256
 
 Box :: struct {
@@ -42,7 +42,6 @@ App :: struct {
   goal_marker:    world.NodeHandle,
   path:           [][3]f32,
   next_waypoint:  int,
-  path_age:       f32,
 }
 
 main :: proc() {
@@ -133,7 +132,6 @@ go_to :: proc(app: ^App, goal: [3]f32) {
   delete(app.path)
   app.path = path
   app.next_waypoint = 0
-  app.path_age = 0
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -150,11 +148,19 @@ update :: proc(app: ^App, dt: f32) {
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   follow_path(app, dt)
-  app.path_age += dt
-  if app.path_age < PATH_SHOW_SECONDS do draw_path(app)
+  if app.next_waypoint >= len(app.path) do go_to(app, random_goal(app))
+  draw_path(app)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
+}
+
+random_goal :: proc(app: ^App) -> [3]f32 {
+  for _ in 0 ..< 32 {
+    p := [3]f32{rand.float32_range(-GROUND_HALF_SIZE, GROUND_HALF_SIZE), 0, rand.float32_range(-GROUND_HALF_SIZE, GROUND_HALF_SIZE)}
+    if goal, ok := nav.nearest_point(&app.navmesh, p, {4, 6, 4}); ok do return goal
+  }
+  return app.agent_position
 }
 
 follow_path :: proc(app: ^App, dt: f32) {
@@ -171,7 +177,7 @@ follow_path :: proc(app: ^App, dt: f32) {
 
 draw_path :: proc(app: ^App) {
   lift := [3]f32{0, 0.15, 0}
-  for i in 1 ..< len(app.path) {
+  for i in max(app.next_waypoint, 1) ..< len(app.path) {
     render.debug_segment(&app.renderer, app.path[i - 1] + lift, app.path[i] + lift, {1.0, 0.8, 0.0, 1.0})
   }
 }

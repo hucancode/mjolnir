@@ -13,8 +13,8 @@ import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
 
-TRANSITION_DURATION :: f32(1.5)
 IK_POLE :: [3]f32{0, 5, 0}
+TARGET_RADIUS :: f32(4)
 
 App :: struct {
   window:         platform.Platform,
@@ -35,26 +35,20 @@ App :: struct {
   survey_layer:   anim.LayerHandle,
   ik_layer:       anim.LayerHandle,
   walk_run_blend: mu.Real,
-  auto_blend:     bool,
+  auto_mix:       bool,
   blend_dir:      f32,
-  on_run:         bool,
   survey_weight:  mu.Real,
   ik_weight:      mu.Real,
-  animate_target: bool,
-  target:         [3]mu.Real,
-  target_radius:  mu.Real,
-  target_speed:   mu.Real,
+  target:         [3]f32,
 }
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  app.auto_blend = true
+  app.walk_run_blend = 0.5
+  app.auto_mix = true
   app.blend_dir = 1
-  app.animate_target = true
   app.target = {0, 4, 5}
-  app.target_radius = 4
-  app.target_speed = 1
   w := &app.window
   if !platform.init(w, 800, 600, "Animation Layering") do return
   if !render.init(&app.renderer, "Animation Layering", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
@@ -122,7 +116,7 @@ clip_layer :: proc(app: ^App, name: string, speed: f32, bones: []u32 = nil, weig
 }
 
 target_position :: proc(app: ^App) -> [3]f32 {
-  return {f32(app.target.x), f32(app.target.y), f32(app.target.z)}
+  return app.target
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -138,11 +132,8 @@ update :: proc(app: ^App, dt: f32) {
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  if app.animate_target {
-    t := app.time * f32(app.target_speed)
-    r := f32(app.target_radius)
-    app.target = {mu.Real(math.cos(t) * r), mu.Real(4 + math.sin(t * 2)), mu.Real(math.sin(t) * r)}
-  }
+  t := app.time
+  app.target = {math.cos(t) * TARGET_RADIUS, 4 + math.sin(t * 2), math.sin(t) * TARGET_RADIUS}
   world.translate(&app.scene, app.target_cube, target_position(app))
   if app.rig != nil do animate(app, dt)
   world.update(&app.scene)
@@ -158,11 +149,9 @@ frame :: proc(app: ^App) -> bool {
 }
 
 animate :: proc(app: ^App, dt: f32) {
-  if app.auto_blend {
-    app.walk_run_blend = clamp(app.walk_run_blend + mu.Real(app.blend_dir * dt * 0.5), 0, 1)
-    if app.walk_run_blend == 1 do app.blend_dir = -1
-    if app.walk_run_blend == 0 do app.blend_dir = 1
-    set_walk_run(app, 0)
+  if app.auto_mix {
+    app.survey_weight = mu.Real(0.5 + 0.5 * math.sin(app.time * 0.7))
+    app.ik_weight = mu.Real(0.5 + 0.5 * math.sin(app.time * 0.45 + 2))
   }
   anim.layer_fade(&app.animator, app.survey_layer, f32(app.survey_weight))
   anim.layer_fade(&app.animator, app.ik_layer, f32(app.ik_weight))
@@ -171,45 +160,25 @@ animate :: proc(app: ^App, dt: f32) {
   }
 }
 
-set_walk_run :: proc(app: ^App, duration: f32) {
-  anim.layer_fade(&app.animator, app.walk_layer, 1 - f32(app.walk_run_blend), duration)
-  anim.layer_fade(&app.animator, app.run_layer, f32(app.walk_run_blend), duration)
-}
-
-cross_fade_walk_run :: proc(app: ^App) {
-  app.on_run = !app.on_run
-  app.auto_blend = false
-  app.walk_run_blend = 1 if app.on_run else 0
-  anim.clip_seek(&app.animator, app.run_layer if app.on_run else app.walk_layer, 0)
-  set_walk_run(app, TRANSITION_DURATION)
+set_walk_run :: proc(app: ^App) {
+  anim.layer_fade(&app.animator, app.walk_layer, 1 - f32(app.walk_run_blend))
+  anim.layer_fade(&app.animator, app.run_layer, f32(app.walk_run_blend))
 }
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Animation Layering", {480, 20, 320, 490}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Animation", {20, 20, 260, 220}, {}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
-    mu.label(ctx, "Base layer (Walk <-> Run)")
-    mu.checkbox(ctx, "Auto blend", &app.auto_blend)
-    mu.label(ctx, "Blend")
+    mu.label(ctx, "Walk <-> Run")
     if .CHANGE in mu.slider(ctx, &app.walk_run_blend, 0, 1) {
-      app.auto_blend = false
-      set_walk_run(app, 0)
+      set_walk_run(app)
     }
-    if .SUBMIT in mu.button(ctx, "Trigger transition") do cross_fade_walk_run(app)
-    mu.label(ctx, "")
-    mu.label(ctx, "Upper body (Survey)")
-    mu.label(ctx, "Weight"); mu.slider(ctx, &app.survey_weight, 0, 1)
-    mu.label(ctx, "")
-    mu.label(ctx, "IK head tracking")
-    mu.label(ctx, "Weight"); mu.slider(ctx, &app.ik_weight, 0, 1)
-    mu.checkbox(ctx, "Animate target", &app.animate_target)
-    if app.animate_target {
-      mu.label(ctx, "Radius"); mu.slider(ctx, &app.target_radius, 1, 8)
-      mu.label(ctx, "Speed"); mu.slider(ctx, &app.target_speed, 0, 4)
-    } else {
-      mu.label(ctx, "X"); mu.slider(ctx, &app.target.x, -8, 8)
-      mu.label(ctx, "Y"); mu.slider(ctx, &app.target.y, 0, 8)
-      mu.label(ctx, "Z"); mu.slider(ctx, &app.target.z, -8, 8)
-    }
+    mu.layout_row(ctx, {-1}, 0)
+    mu.checkbox(ctx, "Auto mix", &app.auto_mix)
+    mu.label(ctx, "Survey")
+    if .CHANGE in mu.slider(ctx, &app.survey_weight, 0, 1) do app.auto_mix = false
+    mu.layout_row(ctx, {-1}, 0)
+    mu.label(ctx, "Head tracking")
+    if .CHANGE in mu.slider(ctx, &app.ik_weight, 0, 1) do app.auto_mix = false
   }
 }

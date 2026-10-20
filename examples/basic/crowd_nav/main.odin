@@ -1,4 +1,4 @@
-// Crowd agents steering along navmesh paths around each other.
+// Crowd agents steering along navmesh paths around each other, each picking a new goal on arrival.
 package main
 
 import "mjolnir"
@@ -24,6 +24,7 @@ AGENT_SPEED :: f32(3.2)
 WORLD_HALF :: f32(50)
 SPAWN_RADIUS :: f32(38)
 GOAL_MIN_DIST :: f32(20)
+GOAL_REACHED :: f32(1.5)
 NAVMESH_OVERLAY_LIFT :: f32(0.2)
 
 Box :: struct {
@@ -55,11 +56,13 @@ App :: struct {
   navmesh:  nav.NavMesh,
   crowd:    crowd.Crowd,
   agents:   [AGENT_COUNT]Agent,
+  wander:   bool,
 }
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
+  app.wander = true
   w := &app.window
   if !platform.init(w, 1000, 700, "Crowd Navigation") do return
   if !render.init(&app.renderer, "Crowd Navigation", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
@@ -175,6 +178,14 @@ send_to_random_goals :: proc(app: ^App) {
   }
 }
 
+reassign_arrived :: proc(app: ^App) {
+  for a in app.agents {
+    if !a.placed do continue
+    ag := crowd.agent(&app.crowd, a.handle)
+    if linalg.length(ag.target - ag.position) < GOAL_REACHED do crowd.move_to(&app.crowd, a.handle, random_goal(app, ag.position))
+  }
+}
+
 send_all_to :: proc(app: ^App, goal: [3]f32) {
   for a in app.agents {
     if a.placed do crowd.move_to(&app.crowd, a.handle, goal)
@@ -197,6 +208,7 @@ update :: proc(app: ^App, dt: f32) {
     }
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  if app.wander do reassign_arrived(app)
   crowd.update(&app.crowd, dt)
   world.set_world_poses(&app.scene, crowd.agent_poses(&app.crowd))
   for a in app.agents do if a.placed do draw_corners(app, crowd.agent(&app.crowd, a.handle), a.color)
@@ -222,10 +234,11 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Crowd", {720, 20, 260, 200}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Crowd", {720, 20, 260, 230}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.label(ctx, fmt.tprintf("Agents: %d", AGENT_COUNT))
     mu.label(ctx, "Right-click: set all goals")
     mu.layout_row(ctx, {-1}, 0)
+    mu.checkbox(ctx, "Pick new goal on arrival", &app.wander)
     if .SUBMIT in mu.button(ctx, "Reassign targets") do send_to_random_goals(app)
   }
 }

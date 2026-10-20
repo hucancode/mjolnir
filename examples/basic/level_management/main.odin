@@ -6,6 +6,7 @@ package main
 
 import "core:fmt"
 import "core:log"
+import "core:math"
 import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
@@ -16,6 +17,7 @@ import "mjolnir/render"
 import "mjolnir/world"
 
 AUTOMATED_TEST :: #config(AUTOMATED_TEST, false)
+LEVEL_SECONDS :: f32(10)
 
 Level :: struct {
   name:     string,
@@ -45,12 +47,15 @@ App :: struct {
   current:         int,
   requested:       int,
   loads:           int,
+  countdown:       f32,
+  auto_switch:     bool,
   test_frame:      int,
 }
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
+  app.auto_switch = true
   w := &app.window
   if !platform.init(w, 1100, 760, "Level Management") do return
   if !render.init(&app.renderer, "Level Management", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
@@ -105,6 +110,7 @@ build_level :: proc(app: ^App, index: int) -> bool {
   }
   app.current = index
   app.loads += 1
+  app.countdown = LEVEL_SECONDS
   log.infof("level %s built: %d nodes, %d meshes, %d materials, %d textures (load #%d)", l.name, len(app.model.nodes), len(app.model.meshes), len(app.model.materials), len(app.model.textures), app.loads)
   return true
 }
@@ -137,10 +143,13 @@ update :: proc(app: ^App, dt: f32) {
     drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
     render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
   }
+  app.countdown -= dt
+  if app.auto_switch && app.countdown <= 0 && app.requested < 0 do app.requested = (app.current + 1) % len(LEVELS)
   if app.requested >= 0 {
     index := app.requested
     app.requested = -1
     destroy_level(app)
+    app.countdown = LEVEL_SECONDS
     if index < len(LEVELS) do build_level(app, index)
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
@@ -168,7 +177,7 @@ run_test_step :: proc(app: ^App) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Level Management", {20, 20, 320, 340}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Level Management", {20, 20, 320, 380}, {}, {.NO_CLOSE}) {
     levels := LEVELS
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, fmt.tprintf("Level:     %s", levels[app.current].name if app.current >= 0 else "none"))
@@ -177,6 +186,11 @@ debug_ui :: proc(app: ^App) {
     mu.label(ctx, fmt.tprintf("Materials: %d", len(app.model.materials)))
     mu.label(ctx, fmt.tprintf("Textures:  %d", len(app.model.textures)))
     mu.label(ctx, fmt.tprintf("Loads:     %d", app.loads))
+    mu.checkbox(ctx, "Auto switch level", &app.auto_switch)
+    if app.auto_switch {
+      next := levels[(app.current + 1) % len(levels)].name
+      mu.label(ctx, fmt.tprintf("Next level (%s) in %.0fs", next, math.ceil(max(app.countdown, 0))))
+    }
     for l, i in levels do if .SUBMIT in mu.button(ctx, fmt.tprintf("Load %s", l.name)) do app.requested = i
     if .SUBMIT in mu.button(ctx, "Reload Level") do app.requested = app.current
     if .SUBMIT in mu.button(ctx, "Unload Level") do app.requested = len(LEVELS)
