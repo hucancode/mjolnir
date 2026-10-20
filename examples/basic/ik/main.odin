@@ -87,7 +87,7 @@ should_close :: proc(app: ^App) -> bool {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {800, 600}) do return .FAIL
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 20, 20}, {0, 0, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {0, 10, 10}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
 
   ground := world.spawn(&app.scene)
