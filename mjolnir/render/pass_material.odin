@@ -67,31 +67,13 @@ mesh_vertex_streams :: proc(self: ^Renderer, position_only := false) -> []rhi.Ve
 
 @(private)
 material_init :: proc(self: ^Renderer) -> bool {
-  common := wgsl("shader/wgpu/common.wgsl")
-  mesh := wgsl_join(common, wgsl("shader/wgpu/mesh.wgsl"), wgsl("shader/wgpu/mesh_vertex.wgsl"))
-  pulled := wgsl_join(common, wgsl("shader/wgpu/mesh_pulled.wgsl"))
   sources := #partial [MaterialType]rhi.ShaderSource {
-    .PBR = {
-      spirv = {vert = spirv("shader/vulkan/gbuffer/vert.spv"), frag = spirv("shader/vulkan/gbuffer/frag.spv")},
-      wgsl = wgsl_join(mesh, wgsl("shader/wgpu/gbuffer.wgsl")),
-    },
-    .TRANSPARENT = {
-      spirv = {vert = spirv("shader/vulkan/gbuffer/vert.spv"), frag = spirv("shader/vulkan/transparent/frag.spv")},
-      wgsl = wgsl_join(mesh, wgsl("shader/wgpu/transparent.wgsl")),
-    },
+    .PBR          = shader_source("gbuffer"),
+    .TRANSPARENT  = shader_source("transparent"),
     // no line polygon mode and no primitive index in core WebGPU: the shader pulls vertices
-    .WIREFRAME = {
-      spirv = {vert = spirv("shader/vulkan/gbuffer/vert.spv"), frag = spirv("shader/vulkan/wireframe/frag.spv")},
-      wgsl = wgsl_join(pulled, wgsl("shader/wgpu/wireframe.wgsl")),
-    },
-    .RANDOM_COLOR = {
-      spirv = {vert = spirv("shader/vulkan/gbuffer/vert.spv"), frag = spirv("shader/vulkan/random_color/frag.spv")},
-      wgsl = wgsl_join(pulled, wgsl("shader/wgpu/random_color.wgsl")),
-    },
-    .SPRITE = {
-      spirv = {vert = spirv("shader/vulkan/sprite/vert.spv"), frag = spirv("shader/vulkan/sprite/frag.spv")},
-      wgsl = wgsl_join(common, wgsl("shader/wgpu/sprite.wgsl")),
-    },
+    .WIREFRAME    = shader_source("wireframe"),
+    .RANDOM_COLOR = shader_source("random_color"),
+    .SPRITE       = shader_source("sprite"),
   }
   cull := #partial [MaterialType]rhi.CullMode{.PBR = .BACK, .TRANSPARENT = .BACK, .WIREFRAME = .NONE, .RANDOM_COLOR = .BACK, .SPRITE = .NONE}
   for pass in MaterialPass {

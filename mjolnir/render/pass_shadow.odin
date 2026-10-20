@@ -67,11 +67,10 @@ shadow_init :: proc(self: ^Renderer) -> bool {
   position := [?]rhi.VertexAttribute{{location = 0, format = .F32X3, offset = u32(offset_of(Vertex, position))}}
   node := [?]rhi.VertexAttribute{{location = 5, format = .U32, offset = 0}}
   streams := [?]rhi.VertexBuffer{{stride = size_of(Vertex), attributes = position[:]}, {stride = size_of(u32), step = .INSTANCE, attributes = node[:]}}
-  common := wgsl("shader/wgpu/common.wgsl")
   self.shadow_pipeline = dev.graphics_pipeline_create(
     &self.gpu,
     {
-      shader = {spirv = {vert = spirv("shader/vulkan/shadow/vert.spv")}, wgsl = wgsl_join(common, wgsl("shader/wgpu/shadow.wgsl"))},
+      shader = shader_source("shadow"),
       layout = pipeline_layout(self, .SHADOW),
       // WebGPU draws take their node from an instance stream
       vertex = streams[:1 if BINDLESS else 2],

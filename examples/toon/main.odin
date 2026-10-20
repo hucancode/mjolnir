@@ -50,13 +50,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.camera_look_at(render.main_camera(&app.renderer), {0, 4, 10}, {0, 1, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
 
-  when render.RENDER_BACKEND == "vulkan" {
-    toon_spirv, toon_wgsl := #load("toon.frag.spv"), ""
-  } else {
-    toon_spirv, toon_wgsl := ([]u8)(nil), #load("toon.wgsl", string)
-  }
   ok: bool
-  app.toon, ok = render.material_shader_create(&app.renderer, toon_spirv, toon_wgsl, blend = .NONE)
+  app.toon, ok = render.material_shader_create(&app.renderer, #load("toon." + render.SHADER_EXT), blend = .NONE)
   if !ok {
     log.error("Failed to create the toon shader")
     return .FAIL

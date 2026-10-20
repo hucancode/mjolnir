@@ -36,45 +36,32 @@ PostPush :: struct {
 @(private)
 post_init :: proc(self: ^Renderer) -> bool {
   // every tag but CustomEffect's, whose pipelines post_shader_create makes
-  frag_spirv := [POST_EFFECT_COUNT - 1][]u8 {
-    spirv("shader/vulkan/postprocess/frag.spv"),
-    spirv("shader/vulkan/grayscale/frag.spv"),
-    spirv("shader/vulkan/tonemap/frag.spv"),
-    spirv("shader/vulkan/blur/frag.spv"),
-    spirv("shader/vulkan/bloom/frag.spv"),
-    spirv("shader/vulkan/outline/frag.spv"),
-    spirv("shader/vulkan/fog/frag.spv"),
-    spirv("shader/vulkan/crosshatch/frag.spv"),
-    spirv("shader/vulkan/dof/frag.spv"),
-  }
-  frag_wgsl := [POST_EFFECT_COUNT - 1]string {
-    wgsl("shader/wgpu/post_copy.wgsl"),
-    wgsl("shader/wgpu/post_grayscale.wgsl"),
-    wgsl("shader/wgpu/post_tonemap.wgsl"),
-    wgsl("shader/wgpu/post_blur.wgsl"),
-    wgsl("shader/wgpu/post_bloom.wgsl"),
-    wgsl("shader/wgpu/post_outline.wgsl"),
-    wgsl("shader/wgpu/post_fog.wgsl"),
-    wgsl("shader/wgpu/post_crosshatch.wgsl"),
-    wgsl("shader/wgpu/post_dof.wgsl"),
+  sources := [POST_EFFECT_COUNT - 1]rhi.ShaderSource {
+    shader_source("post_copy"),
+    shader_source("post_grayscale"),
+    shader_source("post_tonemap"),
+    shader_source("post_blur"),
+    shader_source("post_bloom"),
+    shader_source("post_outline"),
+    shader_source("post_fog"),
+    shader_source("post_crosshatch"),
+    shader_source("post_dof"),
   }
   for tag in 0 ..< POST_EFFECT_COUNT - 1 {
-    pipelines := post_pipelines_create(self, frag_spirv[tag], frag_wgsl[tag]) or_return
+    pipelines := post_pipelines_create(self, sources[tag]) or_return
     for p, is_last in pipelines do self.post_pipelines[is_last][tag] = p
   }
   return true
 }
 
 // An effect's pipelines, [is_last]: every pass writes an HDR ring image but the last, which
-// writes the backbuffer. The fragment shader follows the shared vertex stage: on WebGPU its
-// source is appended to common.wgsl and postprocess.wgsl.
+// writes the backbuffer.
 @(private = "file")
-post_pipelines_create :: proc(self: ^Renderer, frag_spirv: []u8, frag_wgsl: string) -> (pipelines: [2]rhi.Pipeline, ok: bool) {
-  vertex := wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/postprocess.wgsl"))
+post_pipelines_create :: proc(self: ^Renderer, source: rhi.ShaderSource) -> (pipelines: [2]rhi.Pipeline, ok: bool) {
   formats := [2]TextureFormat{HDR_COLOR_FORMAT, .BACKBUFFER}
   for &p, is_last in pipelines {
     desc := rhi.GraphicsPipelineDesc {
-      shader = {spirv = {vert = spirv("shader/vulkan/postprocess/vert.spv"), frag = frag_spirv}, wgsl = wgsl_join(vertex, frag_wgsl)},
+      shader = source,
       layout = pipeline_layout(self, .NONE, .POST),
       color_formats = formats[is_last:][:1],
     }
@@ -83,19 +70,13 @@ post_pipelines_create :: proc(self: ^Renderer, frag_spirv: []u8, frag_wgsl: stri
   return pipelines, true
 }
 
-// post_shader_create makes a post-process shader from a user fragment shader, for
-// CustomEffect in effect_stack, which the main camera runs. A backend uses only its own source: `frag_spirv` on Vulkan, `frag_wgsl` on
-// WebGPU.
-//
-// Vulkan: compile against shader/vulkan/include/post.glsl (glslc -I), which declares the
-// fullscreen uv input, the color output, the textures and the push block, its params the
-// user's (POST_PARAMS).
-// WebGPU: the source follows common.wgsl and postprocess.wgsl, so it reads the bindings, the
-// uniforms `u` and helpers they declare; it declares `struct Effect` (its params) and
-// `fs_main(in: VertexOut) -> @location(0) vec4f`.
-// Both read render's time and the image size (post_resolution) there.
-post_shader_create :: proc(self: ^Renderer, frag_spirv: []u8, frag_wgsl: string) -> (PostShader, bool) {
-  pipelines, ok := post_pipelines_create(self, frag_spirv, frag_wgsl)
+// post_shader_create makes a post-process shader from a compiled user shader (the entry points
+// of post.slang: its vs_main and a fs_main), for CustomEffect in effect_stack, which the main
+// camera runs. Compile it from a .slang that declares `struct Effect` (its params) and includes
+// shader/post.slang; load it with #load("name." + SHADER_EXT). It reads render's time and the
+// image size (post_resolution).
+post_shader_create :: proc(self: ^Renderer, source: []u8) -> (PostShader, bool) {
+  pipelines, ok := post_pipelines_create(self, source)
   if !ok do return 0, false
   for &slot, i in self.custom_post_pipelines {
     if slot[0] != 0 do continue

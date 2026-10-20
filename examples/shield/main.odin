@@ -66,15 +66,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.orbit_from_camera(render.main_camera(r), {0, 1.4, 0})
   // r.skybox_intensity = 0
 
-  when render.RENDER_BACKEND == "vulkan" {
-    field_vert, field_frag, ring_frag := #load("field.vert.spv"), #load("field.frag.spv"), #load("ring.frag.spv")
-    field_vert_wgsl, field_frag_wgsl, ring_frag_wgsl := "", "", ""
-  } else {
-    field_vert, field_frag, ring_frag := ([]u8)(nil), ([]u8)(nil), ([]u8)(nil)
-    field_vert_wgsl, field_frag_wgsl, ring_frag_wgsl := #load("field_vert.wgsl", string), #load("field_frag.wgsl", string), #load("ring.wgsl", string)
-  }
-  ring_shader, ring_ok := render.material_shader_create(r, ring_frag, ring_frag_wgsl)
-  field_shader, field_ok := render.material_shader_create(r, field_frag, field_frag_wgsl, blend = .NONE, cull = .NONE, vert_spirv = field_vert, vert_wgsl = field_vert_wgsl)
+  ring_shader, ring_ok := render.material_shader_create(r, #load("ring." + render.SHADER_EXT))
+  field_shader, field_ok := render.material_shader_create(r, #load("field." + render.SHADER_EXT), blend = .NONE, cull = .NONE)
   if !field_ok || !ring_ok do return .FAIL
   app.field = render.material_create(r, render.make_material(.CUSTOM, shader = field_shader))
   app.ring = render.material_create(r, render.make_material(.CUSTOM, shader = ring_shader))

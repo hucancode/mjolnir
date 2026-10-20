@@ -1,18 +1,15 @@
-SHADER_DIR := mjolnir/render/shader/vulkan
+SHADER_DIR := mjolnir/render/shader
 
-# Find all shader files
-VERT_SHADERS := $(shell find $(SHADER_DIR) -name "shader.vert")
-FRAG_SHADERS := $(shell find $(SHADER_DIR) -name "shader.frag")
-SPV_SHADERS := $(patsubst $(SHADER_DIR)/%/shader.vert,$(SHADER_DIR)/%/vert.spv,$(VERT_SHADERS)) \
-               $(patsubst $(SHADER_DIR)/%/shader.frag,$(SHADER_DIR)/%/frag.spv,$(FRAG_SHADERS))
-COMP_SHADERS := $(shell find $(SHADER_DIR) -name "*.comp")
-SPV_COMPUTE_SHADERS := $(patsubst %.comp,%.spv,$(COMP_SHADERS))
-# User shaders of the examples (render.post_shader_create, render.material_shader_create,
-# render.compute_shader_create, render.draw_shader_create): name.frag compiles to
-# name.frag.spv against the engine's includes.
-SHADER_INCLUDE := $(SHADER_DIR)/include
-EXAMPLE_SHADERS := $(wildcard examples/*/*.vert examples/*/*.frag examples/*/*.comp)
-SPV_EXAMPLE_SHADERS := $(addsuffix .spv,$(EXAMPLE_SHADERS))
+# One Slang source per shader (engine: $(SHADER_DIR)/*.slang, users: examples/*/*.slang), compiled
+# for the backend: name.spv (Vulkan) or name.wgsl (wgpu). Shaders branch on BACKEND_VULKAN and
+# BACKEND_WGPU where the backends differ. The headers are only included.
+SHADER_HEADERS := common mesh mesh_vertex mesh_pulled material post gpu ibl_common
+SLANG_SOURCES := $(filter-out $(addprefix $(SHADER_DIR)/,$(addsuffix .slang,$(SHADER_HEADERS))) examples/cartoon_snake/snake_skin.slang,$(wildcard $(SHADER_DIR)/*.slang) $(wildcard examples/*/*.slang))
+SLANG_ENTRIES := $(shell grep -l '\[shader' $(SLANG_SOURCES) 2>/dev/null)
+SLANG_HEADERS := $(wildcard $(SHADER_DIR)/*.slang examples/*/*.slang)
+SLANG_FLAGS := -I $(SHADER_DIR) -matrix-layout-column-major -warnings-disable 39001
+SPV_SHADERS := $(SLANG_ENTRIES:.slang=.spv)
+WGSL_SHADERS := $(SLANG_ENTRIES:.slang=.wgsl)
 
 run: shader
 	odin run . -out:bin/main
@@ -26,15 +23,18 @@ build: shader
 build-debug: shader
 	odin build . -out:bin/main-debug -debug
 
-shader: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS) $(SPV_EXAMPLE_SHADERS)
+shader: $(SPV_SHADERS)
 	@echo "Shader compilation complete."
 
-# The WebGPU backend: WGSL shaders are embedded, nothing to compile ahead. Natively it needs
-# wgpu-native in Odin's vendor/wgpu/lib (see vendor/wgpu/doc.odin).
-run-wgpu:
+shader-wgpu: $(WGSL_SHADERS)
+	@echo "Shader compilation complete."
+
+# The WebGPU backend. Natively it needs wgpu-native in Odin's vendor/wgpu/lib (see
+# vendor/wgpu/doc.odin).
+run-wgpu: shader-wgpu
 	odin run . -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
 
-build-wgpu:
+build-wgpu: shader-wgpu
 	odin build . -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
 
 # An example on the web: web/$(EXAMPLE).wasm beside Odin's JS runtime, WebGPU glue and the
@@ -43,7 +43,7 @@ build-wgpu:
 ODIN_ROOT := $(shell odin root)
 EXAMPLE ?= cube
 
-web:
+web: shader-wgpu
 	mkdir -p web
 	odin build examples/$(EXAMPLE) -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
 		-target-features:"atomics,bulk-memory" -no-thread-local -extra-linker-flags:"--export-table" -out:web/$(EXAMPLE).wasm
@@ -106,21 +106,13 @@ record: shader
 clean:
 	rm -rf bin/*
 
-%.spv: %.comp
-	@echo "Compiling compute shader $<..."
-	@glslc --target-env=vulkan1.3 "$<" -o "$@"
+%.spv: %.slang $(SLANG_HEADERS)
+	@echo "Compiling shader $< for Vulkan..."
+	@slangc "$<" $(SLANG_FLAGS) -target spirv -fvk-use-entrypoint-name -D BACKEND_VULKAN=1 -D BACKEND_WGPU=0 -o "$@"
 
-$(SHADER_DIR)/%/vert.spv: $(SHADER_DIR)/%/shader.vert
-	@echo "Compiling vertex shader $<..."
-	@glslc --target-env=vulkan1.3 "$<" -o "$@"
-
-$(SHADER_DIR)/%/frag.spv: $(SHADER_DIR)/%/shader.frag
-	@echo "Compiling fragment shader $<..."
-	@glslc --target-env=vulkan1.3 "$<" -o "$@"
-
-examples/%.spv: examples/% $(wildcard $(SHADER_INCLUDE)/*.glsl)
-	@echo "Compiling example shader $<..."
-	@glslc --target-env=vulkan1.3 -I $(SHADER_INCLUDE) "$<" -o "$@"
+%.wgsl: %.slang $(SLANG_HEADERS)
+	@echo "Compiling shader $< for wgpu..."
+	@slangc "$<" $(SLANG_FLAGS) -target wgsl -D BACKEND_VULKAN=0 -D BACKEND_WGPU=1 -o "$@"
 
 long-proc:
 	grep -rhE "^\s*[a-zA-Z0-9_]+\s*::\s*proc" mjolnir --include \*.odin | \
@@ -137,7 +129,7 @@ long-example:
 
 # Live builds for the examples page: docs/build/live/<example>.wasm plus the host page.
 # Best effort: examples that do not build for the web are skipped and fall back to their video.
-doc-live:
+doc-live: shader-wgpu
 	mkdir -p docs/build/live
 	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js mjolnir/platform/web/index.html docs/build/live/
 	@for name in $(EXAMPLES); do \
@@ -164,4 +156,4 @@ compare-physics:
 	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt
 	perf report -i perf.data --stdio --no-children -n --percent-limit 1 >perf_report_after.txt
 
-.PHONY: doc-live build build-debug build-wgpu run-wgpu web run run-max debug shader check clean vtest examples golden capture long-proc long-file long-example doc doc-dev record compare-physics
+.PHONY: doc-live build build-debug build-wgpu run-wgpu web run run-max debug shader shader-wgpu check clean vtest examples golden capture long-proc long-file long-example doc doc-dev record compare-physics

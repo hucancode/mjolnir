@@ -55,16 +55,10 @@ precompute_ibl :: proc(self: ^Renderer, equirect, env_cube, irradiance_cube, pre
     roughness := f32(mip) / f32(PREFILTER_MIPS - 1)
     dispatches[2 + mip] = {.PREFILTER, env_cube, prefilter_cube, PREFILTER_SIZE, mip, roughness, PREFILTER_SAMPLES}
   }
-  common := wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/ibl_common.wgsl"))
-  spirvs := [PrecomputeShader][]u8 {
-    .EQUIRECT   = spirv("shader/vulkan/ibl/equirect_to_cube.spv"),
-    .IRRADIANCE = spirv("shader/vulkan/ibl/irradiance.spv"),
-    .PREFILTER  = spirv("shader/vulkan/ibl/prefilter.spv"),
-  }
-  wgsls := [PrecomputeShader]string {
-    .EQUIRECT   = wgsl_join(common, wgsl("shader/wgpu/ibl_equirect.wgsl")),
-    .IRRADIANCE = wgsl_join(common, wgsl("shader/wgpu/ibl_irradiance.wgsl")),
-    .PREFILTER  = wgsl_join(common, wgsl("shader/wgpu/ibl_prefilter.wgsl")),
+  sources := [PrecomputeShader]rhi.ShaderSource {
+    .EQUIRECT   = shader_source("ibl_equirect"),
+    .IRRADIANCE = shader_source("ibl_irradiance"),
+    .PREFILTER  = shader_source("ibl_prefilter"),
   }
   when !BINDLESS do layouts: [PrecomputeShader]rhi.BindLayout
   pipelines: [PrecomputeShader]rhi.Pipeline
@@ -81,7 +75,7 @@ precompute_ibl :: proc(self: ^Renderer, equirect, env_cube, irradiance_cube, pre
       layouts[shader] = dev.bind_layout_create(&self.gpu, {entries = entries[:]}) or_return
       layout = pipeline_layout(self, .NONE, .NONE, layouts[shader])
     }
-    pipelines[shader] = dev.compute_pipeline_create(&self.gpu, {{spirv = {comp = spirvs[shader]}, wgsl = wgsls[shader]}, layout}) or_return
+    pipelines[shader] = dev.compute_pipeline_create(&self.gpu, {sources[shader], layout}) or_return
   }
   when BINDLESS {
     for d, i in dispatches do dev.bindless_write(&self.gpu, .STORAGE_IMAGES, PRECOMPUTE_STORAGE_BASE + u32(i), rhi.TextureView{d.dst, i32(d.mip)})

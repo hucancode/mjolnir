@@ -14,7 +14,7 @@ SKIN_GROUP_SIZE :: 64
 skin_init :: proc(self: ^Renderer) -> bool {
   self.skin_pipeline = dev.compute_pipeline_create(
     &self.gpu,
-    {{spirv = {comp = spirv("shader/vulkan/skinning/skin.spv")}, wgsl = wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/skin.wgsl"))}, pipeline_layout(self, .SKIN)},
+    {shader_source("skin"), pipeline_layout(self, .SKIN)},
   ) or_return
   return true
 }

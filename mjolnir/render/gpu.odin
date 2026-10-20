@@ -4,7 +4,7 @@ import "core:log"
 import "rhi"
 
 // Your own GPU programs: buffers, compute shaders and draw shaders, written against
-// shader/vulkan/include/gpu.glsl (SPIR-V) and shader/wgpu/gpu.wgsl (WGSL). A shader names what
+// shader/gpu.slang. A shader names what
 // it binds once, at creation: binding i of set 1 is bindings[i]. Each tick, stage_clear and
 // stage_dispatch queue work that the next frame runs once, in order, before it draws the scene;
 // stage_draw sets what every camera's forward pass draws, until the next tick's draws replace
@@ -184,22 +184,20 @@ buffer_destroy :: proc(self: ^Renderer, handle: BufferHandle) {
   b^ = {}
 }
 
-// compute_shader_create makes a compute shader (entry point main) binding `bindings`; a backend
-// uses only its own source: `spirv` on Vulkan, `wgsl` on WebGPU.
-compute_shader_create :: proc(self: ^Renderer, spirv: []u8, wgsl_source: string, bindings: ..Binding) -> (shader: ComputeShader, ok: bool) {
+// compute_shader_create makes a compute shader (entry point main) binding `bindings`, from a
+// compiled shader: #load("name." + SHADER_EXT).
+compute_shader_create :: proc(self: ^Renderer, source: []u8, bindings: ..Binding) -> (shader: ComputeShader, ok: bool) {
   guard(self)
   layout, group := gpu_bindings(self, bindings, compute = true) or_return
-  source := rhi.ShaderSource{spirv = {comp = spirv}, wgsl = wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/gpu.wgsl"), wgsl_source)}
   pipeline := dev.compute_pipeline_create(&self.gpu, {source, gpu_pipeline_layout(self, layout)}) or_return
   return ComputeShader(gpu_shader_add(self, {pipeline = pipeline, group = group})), true
 }
 
-// draw_shader_create makes a draw shader (entry points main, or vs_main and fs_main in one WGSL
-// source) binding `bindings`, drawn by `state`.
+// draw_shader_create makes a draw shader (entry points vs_main and fs_main of one compiled
+// shader) binding `bindings`, drawn by `state`.
 draw_shader_create :: proc(
   self: ^Renderer,
-  vert_spirv, frag_spirv: []u8,
-  wgsl_source: string,
+  source: []u8,
   state := DEFAULT_DRAW_STATE,
   bindings: ..Binding,
 ) -> (
@@ -209,7 +207,7 @@ draw_shader_create :: proc(
   guard(self)
   layout, group := gpu_bindings(self, bindings, compute = false) or_return
   desc := rhi.GraphicsPipelineDesc {
-    shader        = {spirv = {vert = vert_spirv, frag = frag_spirv}, wgsl = wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/gpu.wgsl"), wgsl_source)},
+    shader        = source,
     layout        = gpu_pipeline_layout(self, layout),
     topology      = state.topology,
     cull          = state.cull,

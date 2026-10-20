@@ -16,8 +16,8 @@ package render
 // lights, post-process passes) and frame.odin records it through rhi: the table copies per frame
 // in flight (resources.odin), then one file per pass (pass_skin, pass_cull, pass_shadow, pass_material,
 // pass_lighting, pass_post, pass_particles, pass_debug_line, pass_overlay; pass_ibl is one-shot),
-// with the barriers between them. Shaders are the passes' too: shader/vulkan (GLSL and its
-// SPIR-V, built by make shader) and shader/wgpu (WGSL), loaded by the pass that uses them.
+// with the barriers between them. Shaders are the passes' too: shader/*.slang, one source each for both backends (built
+// by make shader, or make shader-wgpu), loaded by the pass that uses them.
 // Where the backends differ a pass branches on rhi.Caps (resources.odin: bindless or bind
 // groups; pass_cull.odin: compacted multi-draw or per-batch draws, batches.odin; pass_shadow.odin:
 // one layered draw or one pass of per-view viewports into a tiled atlas) and shaders keep one

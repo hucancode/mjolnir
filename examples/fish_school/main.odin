@@ -103,13 +103,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.camera_look_at(render.main_camera(r), {0, 9, 22}, {0, 3, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(r), {0, 3, 0})
 
-  when render.RENDER_BACKEND == "vulkan" {
-    school_spirv, school_wgsl := #load("school.comp.spv"), ""
-    fish_vert, fish_frag, fish_wgsl := #load("fish.vert.spv"), #load("fish.frag.spv"), ""
-  } else {
-    school_spirv, school_wgsl := ([]u8)(nil), #load("school.wgsl", string)
-    fish_vert, fish_frag, fish_wgsl := ([]u8)(nil), ([]u8)(nil), #load("fish.wgsl", string)
-  }
   fish := make([]Fish, 2 * MAX_FISH, context.temp_allocator)
   for &f in fish[:MAX_FISH] {
     f.position = {rand.float32_range(TANK_MIN.x, TANK_MAX.x), rand.float32_range(TANK_MIN.y, TANK_MAX.y), rand.float32_range(TANK_MIN.z, TANK_MAX.z)}
@@ -121,9 +114,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.fish = render.buffer_create(r, fish)
   app.counters = render.buffer_create(r, []Counters{{}}, {.INDIRECT, .READBACK})
   ok: bool
-  app.school, ok = render.compute_shader_create(r, school_spirv, school_wgsl, app.fish, app.counters)
+  app.school, ok = render.compute_shader_create(r, #load("school." + render.SHADER_EXT), app.fish, app.counters)
   if !ok do return .FAIL
-  app.draw, ok = render.draw_shader_create(r, fish_vert, fish_frag, fish_wgsl, render.DEFAULT_DRAW_STATE, app.fish)
+  app.draw, ok = render.draw_shader_create(r, #load("fish." + render.SHADER_EXT), render.DEFAULT_DRAW_STATE, app.fish)
   if !ok do return .FAIL
 
   sand := render.material_create(r, render.make_material(base_color_factor = {0.76, 0.66, 0.45, 1}, roughness_value = 0.9))

@@ -4,7 +4,7 @@ import wgpu "vendor:wgpu"
 
 // WebGPU has no push constants: cmd_push writes into a ring of uniform entries and binds them,
 // at a dynamic offset, as the push group of the pipeline: the entry's uniforms and the
-// samplers every shader declares at @group(2) (common.wgsl).
+// samplers every shader declares at @group(2) (shader/common.slang).
 @(private)
 UNIFORM_ALIGNMENT :: 256
 @(private)
@@ -36,7 +36,7 @@ shader_module :: proc(b: ^Backend, source: string) -> wgpu.ShaderModule {
 }
 
 // Front faces wind counter-clockwise on screen, as in Vulkan: the vertex shaders flip y on
-// output (clip_output in common.wgsl), so primitives land on the same pixels in the same order.
+// output (clip_output in shader/common.slang), so primitives land on the same pixels in the same order.
 @(private)
 FRONT_FACE :: wgpu.FrontFace.CCW
 

@@ -14,10 +14,7 @@ DebugLinePush :: struct {
 
 @(private)
 debug_line_init :: proc(self: ^Renderer) -> bool {
-  shader := rhi.ShaderSource {
-    spirv = {vert = spirv("shader/vulkan/debug_line/vert.spv"), frag = spirv("shader/vulkan/debug_line/frag.spv")},
-    wgsl = wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/debug_line.wgsl")),
-  }
+  shader := shader_source("debug_line")
   formats := [?]TextureFormat{.BACKBUFFER}
   for &pipeline, ring in self.debug_line_pipelines {
     desc := rhi.GraphicsPipelineDesc {

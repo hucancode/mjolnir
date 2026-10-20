@@ -350,7 +350,7 @@ pipeline_store :: proc(b: ^Backend, p: Pipeline) -> rhi.Pipeline {
 }
 
 rhi_compute_pipeline_create :: proc(b: ^Backend, desc: rhi.ComputePipelineDesc) -> (rhi.Pipeline, bool) {
-  module := shader_module(b, desc.shader.wgsl)
+  module := shader_module(b, string(desc.shader))
   defer wgpu.ShaderModuleRelease(module)
   layout, push_set := pipeline_layout_make(b, desc.layout)
   defer wgpu.PipelineLayoutRelease(layout)
@@ -394,7 +394,7 @@ COMPARE_FUNCTIONS := [rhi.CompareOp]wgpu.CompareFunction {
 }
 
 rhi_graphics_pipeline_create :: proc(b: ^Backend, desc: rhi.GraphicsPipelineDesc) -> (rhi.Pipeline, bool) {
-  module := shader_module(b, desc.shader.wgsl)
+  module := shader_module(b, string(desc.shader))
   defer wgpu.ShaderModuleRelease(module)
   layout, push_set := pipeline_layout_make(b, desc.layout)
   defer wgpu.PipelineLayoutRelease(layout)

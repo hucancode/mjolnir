@@ -40,6 +40,14 @@ jobs:
           version: 1.4.321.1
           cache: true
 
+      - name: Setup Slang
+        run: |
+          curl -fsSL -o slang.tar.gz https://github.com/shader-slang/slang/releases/download/v2026.18.3/slang-2026.18.3-linux-x86_64-glibc-2.27.tar.gz
+          mkdir -p "$HOME/slang"
+          tar -xzf slang.tar.gz -C "$HOME/slang"
+          rm slang.tar.gz
+          echo "$HOME/slang/bin" >> "$GITHUB_PATH"
+
       - name: Install runtime dependencies
         run: |
           # lavapipe needs Mesa >= 25.3 for VK_KHR_unified_image_layouts

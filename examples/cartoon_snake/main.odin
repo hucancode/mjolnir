@@ -84,15 +84,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.camera_look_at(render.main_camera(r), {3, 6, 9}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(r), {0, 0, 0})
 
-  when render.RENDER_BACKEND == "vulkan" {
-    body_spirv, head_spirv, skin_spirv := #load("snake.vert.spv"), #load("snake_head.vert.spv"), #load("snake.frag.spv")
-    body_wgsl, head_wgsl, skin_wgsl := "", "", ""
-  } else {
-    body_spirv, head_spirv, skin_spirv := ([]u8)(nil), ([]u8)(nil), ([]u8)(nil)
-    body_wgsl, head_wgsl, skin_wgsl := #load("snake_vert.wgsl", string), #load("snake_head_vert.wgsl", string), #load("snake_frag.wgsl", string)
-  }
-  body_shader, body_ok := render.material_shader_create(r, skin_spirv, skin_wgsl, blend = .NONE, vert_spirv = body_spirv, vert_wgsl = body_wgsl)
-  head_shader, head_ok := render.material_shader_create(r, skin_spirv, skin_wgsl, blend = .NONE, vert_spirv = head_spirv, vert_wgsl = head_wgsl)
+  body_shader, body_ok := render.material_shader_create(r, #load("snake_body." + render.SHADER_EXT), blend = .NONE)
+  head_shader, head_ok := render.material_shader_create(r, #load("snake_head." + render.SHADER_EXT), blend = .NONE)
   if !body_ok || !head_ok do return .FAIL
   app.skin = render.material_create(r, render.make_material(.CUSTOM, shader = body_shader))
   app.head_skin = render.material_create(r, render.make_material(.CUSTOM, shader = head_shader))

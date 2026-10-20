@@ -1,23 +1,13 @@
 package render
 
-import "core:strings"
+import "./rhi"
 
-// Shaders ship per backend: SPIR-V (shader/vulkan) or WGSL (shader/wgpu). A pass names both and
-// each build embeds only its own backend's.
-@(private)
-spirv :: proc($path: string) -> []u8 {
-  when RENDER_BACKEND == "vulkan" do return #load(path)
-  else do return nil
-}
+// Shaders are compiled from one Slang source per shader (shader/*.slang) to the backend's form:
+// shader/<name>.spv (Vulkan) or shader/<name>.wgsl (wgpu); a build embeds only its own.
+SHADER_EXT :: "spv" when RENDER_BACKEND == "vulkan" else "wgsl"
 
+// The compiled shader of an engine pass, by its source's name under shader/.
 @(private)
-wgsl :: proc($path: string) -> string {
-  when RENDER_BACKEND == "wgpu" do return #load(path, string)
-  else do return ""
-}
-
-// Concatenates WGSL files into one module.
-@(private)
-wgsl_join :: proc(parts: ..string) -> string {
-  return strings.concatenate(parts, context.temp_allocator)
+shader_source :: proc($name: string) -> rhi.ShaderSource {
+  return #load("shader/" + name + "." + SHADER_EXT)
 }

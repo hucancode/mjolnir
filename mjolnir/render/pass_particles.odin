@@ -44,22 +44,18 @@ ParticleDrawPush :: struct {
 
 @(private)
 particles_init :: proc(self: ^Renderer) -> bool {
-  common := wgsl("shader/wgpu/common.wgsl")
   self.particle_emit_pipeline = dev.compute_pipeline_create(
     &self.gpu,
-    {{spirv = {comp = spirv("shader/vulkan/particle/emitter.spv")}, wgsl = wgsl_join(common, wgsl("shader/wgpu/particle_emit.wgsl"))}, pipeline_layout(self, .PARTICLE_EMIT)},
+    {shader_source("particle_emit"), pipeline_layout(self, .PARTICLE_EMIT)},
   ) or_return
   self.particle_sim_pipeline = dev.compute_pipeline_create(
     &self.gpu,
-    {{spirv = {comp = spirv("shader/vulkan/particle/compute.spv")}, wgsl = wgsl_join(common, wgsl("shader/wgpu/particle_simulate.wgsl"))}, pipeline_layout(self, .PARTICLE_SIMULATE)},
+    {shader_source("particle_simulate"), pipeline_layout(self, .PARTICLE_SIMULATE)},
   ) or_return
   self.particle_draw_pipeline = dev.graphics_pipeline_create(
     &self.gpu,
     {
-      shader = {
-        spirv = {vert = spirv("shader/vulkan/particle/vert.spv"), frag = spirv("shader/vulkan/particle/frag.spv")},
-        wgsl = wgsl_join(common, wgsl("shader/wgpu/particle.wgsl")),
-      },
+      shader = shader_source("particle"),
       layout = pipeline_layout(self, .PARTICLE_DRAW, .PARTICLES),
       topology = .POINT_LIST if BINDLESS else .TRIANGLE_LIST,
       // drawn in the forward pass

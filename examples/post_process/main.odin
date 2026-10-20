@@ -89,13 +89,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
   render.camera_look_at(render.main_camera(&app.renderer), {6, 5, 10}, {0, 1.0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1.0, 0})
-  when render.RENDER_BACKEND == "vulkan" {
-    vignette_spirv, vignette_wgsl := #load("vignette.frag.spv"), ""
-  } else {
-    vignette_spirv, vignette_wgsl := ([]u8)(nil), #load("vignette.wgsl", string)
-  }
   ok: bool
-  app.vignette, ok = render.post_shader_create(&app.renderer, vignette_spirv, vignette_wgsl)
+  app.vignette, ok = render.post_shader_create(&app.renderer, #load("vignette." + render.SHADER_EXT))
   if !ok do log.error("Failed to create the vignette shader")
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))

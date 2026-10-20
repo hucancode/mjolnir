@@ -6,7 +6,7 @@ import "rhi"
 // camera's lit image (FINAL_IMAGE) whole, a group per LIGHTING_TILE square tile. Each group
 // walks the light placements once and lists the visible lights reaching its tile (the point
 // and spot ones whose sphere meets it), so a pixel reads the G-buffer once however many lights
-// cover it. The sun is not listed: every pixel adds it from the push (shader/vulkan/lighting/lighting.comp, shader/wgpu/lighting.wgsl).
+// cover it. The sun is not listed: every pixel adds it from the push (shader/lighting.slang).
 // The image is a storage image: bindless at LIT_STORAGE_BASE + the camera's pyramid slot
 // (pyramids_bind), or a group-3 bind group per image (WebGPU).
 
@@ -48,7 +48,7 @@ lighting_init :: proc(self: ^Renderer) -> bool {
   self.lighting_pipeline = dev.compute_pipeline_create(
     &self.gpu,
     {
-      {spirv = {comp = spirv("shader/vulkan/lighting/lighting.spv")}, wgsl = wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/lighting.wgsl"))},
+      shader_source("lighting"),
       pipeline_layout(self, .LIGHTING, .LIGHTING, self.lighting_output_layout),
     },
   ) or_return

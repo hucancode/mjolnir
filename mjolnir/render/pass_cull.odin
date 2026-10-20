@@ -82,7 +82,7 @@ DepthReducePush :: struct {
   slot:        u32,
 }
 
-// Batched cull and draw writing (cull.wgsl, cull_draws.wgsl).
+// Batched cull and draw writing (cull.slang, cull_draws.slang).
 @(private = "file")
 BatchPush :: struct {
   node_count:      u32,
@@ -100,8 +100,8 @@ cull_init :: proc(self: ^Renderer) -> bool {
   for &b in self.draw_count_readback do b = dev.buffer_create(&self.gpu, {size = size_of(u32), usage = {.COPY_DST}, memory = .READBACK}) or_return
   when BINDLESS {
     layout := pipeline_layout(self, .CULL)
-    self.cull_pipeline = dev.compute_pipeline_create(&self.gpu, {{spirv = {comp = spirv("shader/vulkan/occlusion_culling/cull.spv")}}, layout}) or_return
-    self.reduce_pipeline = dev.compute_pipeline_create(&self.gpu, {{spirv = {comp = spirv("shader/vulkan/occlusion_culling/depth_reduce.spv")}}, layout}) or_return
+    self.cull_pipeline = dev.compute_pipeline_create(&self.gpu, {shader_source("cull"), layout}) or_return
+    self.reduce_pipeline = dev.compute_pipeline_create(&self.gpu, {shader_source("depth_reduce"), layout}) or_return
     self.pyramid_counters = dev.buffer_create(&self.gpu, {size = MAX_PYRAMID_SLOTS * size_of(u32), usage = {.STORAGE}}) or_return
     dev.buffer_write(&self.gpu, self.pyramid_counters, 0, make([]u8, MAX_PYRAMID_SLOTS * size_of(u32), context.temp_allocator))
     dev.bindless_write(&self.gpu, .PYRAMID_COUNTERS, 0, rhi.BufferRange{buffer = self.pyramid_counters})
@@ -109,15 +109,14 @@ cull_init :: proc(self: ^Renderer) -> bool {
     stages := bit_set[rhi.ShaderStage]{.COMPUTE}
     cull_entries := [?]rhi.BindEntry{{kind = .STORAGE_BUFFER, stages = stages}, {kind = .TEXTURE_UNFILTERABLE, stages = stages}}
     self.cull_layout = dev.bind_layout_create(&self.gpu, {entries = cull_entries[:]}) or_return
-    common := wgsl("shader/wgpu/common.wgsl")
     cull_layout := pipeline_layout(self, .CULL, .NONE, self.cull_layout)
-    self.cull_pipeline = dev.compute_pipeline_create(&self.gpu, {{wgsl = wgsl_join(common, wgsl("shader/wgpu/cull.wgsl"))}, cull_layout}) or_return
-    self.cull_draws_pipeline = dev.compute_pipeline_create(&self.gpu, {{wgsl = wgsl_join(common, wgsl("shader/wgpu/cull_draws.wgsl"))}, cull_layout}) or_return
+    self.cull_pipeline = dev.compute_pipeline_create(&self.gpu, {shader_source("cull"), cull_layout}) or_return
+    self.cull_draws_pipeline = dev.compute_pipeline_create(&self.gpu, {shader_source("cull_draws"), cull_layout}) or_return
     // the depth image reads as unfilterable float, like the mips
     reduce_entries := [?]rhi.BindEntry{{kind = .TEXTURE_UNFILTERABLE, stages = stages}, {kind = .STORAGE_TEXTURE, stages = stages, format = .R32F}}
     self.reduce_layout = dev.bind_layout_create(&self.gpu, {entries = reduce_entries[:]}) or_return
     reduce_layout := pipeline_layout(self, .NONE, .NONE, self.reduce_layout)
-    self.reduce_pipeline = dev.compute_pipeline_create(&self.gpu, {{wgsl = wgsl_join(common, wgsl("shader/wgpu/depth_reduce.wgsl"))}, reduce_layout}) or_return
+    self.reduce_pipeline = dev.compute_pipeline_create(&self.gpu, {shader_source("depth_reduce"), reduce_layout}) or_return
   }
   return true
 }

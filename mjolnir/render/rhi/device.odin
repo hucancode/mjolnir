@@ -179,14 +179,10 @@ BindGroupDesc :: struct {
   resources: []BindResource,
 }
 
-// A shader in the form each backend takes: SPIR-V per stage (entry point "main") or one WGSL
-// module (entry points vs_main, fs_main, main). A pass loads only its backend's form.
-ShaderSource :: struct {
-  spirv: struct {
-    vert, frag, comp: []u8,
-  },
-  wgsl:  string,
-}
+// A compiled shader of the backend: one SPIR-V module or one WGSL module holding all of its
+// entry points (vs_main, fs_main, main). A graphics pipeline with color targets has a fragment
+// stage.
+ShaderSource :: []u8
 
 VertexStep :: enum {
   VERTEX,

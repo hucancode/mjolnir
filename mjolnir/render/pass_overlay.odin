@@ -22,10 +22,7 @@ overlay_init_pass :: proc(self: ^Renderer) -> bool {
   streams := [?]rhi.VertexBuffer{{stride = size_of(Vertex2D), attributes = attributes[:]}}
   formats := [?]TextureFormat{.BACKBUFFER}
   desc := rhi.GraphicsPipelineDesc {
-    shader = {
-      spirv = {vert = spirv("shader/vulkan/ui/vert.spv"), frag = spirv("shader/vulkan/ui/frag.spv")},
-      wgsl = wgsl_join(wgsl("shader/wgpu/common.wgsl"), wgsl("shader/wgpu/ui.wgsl")),
-    },
+    shader = shader_source("ui"),
     layout = pipeline_layout(self, .NONE, .SINGLE),
     vertex = streams[:],
     color_formats = formats[:],

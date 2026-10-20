@@ -453,7 +453,7 @@ pipeline_store :: proc(b: ^Backend, p: Pipeline) -> rhi.Pipeline {
 }
 
 rhi_compute_pipeline_create :: proc(b: ^Backend, desc: rhi.ComputePipelineDesc) -> (rhi.Pipeline, bool) {
-  code := desc.shader.spirv.comp
+  code := desc.shader
   if len(code) == 0 {
     log.errorf("Compute pipeline without SPIR-V")
     return 0, false
@@ -505,9 +505,8 @@ COMPARE_OPS := [rhi.CompareOp]vk.CompareOp {
 }
 
 rhi_graphics_pipeline_create :: proc(b: ^Backend, desc: rhi.GraphicsPipelineDesc) -> (rhi.Pipeline, bool) {
-  shader := desc.shader.spirv
-  if len(shader.vert) == 0 {
-    log.errorf("Graphics pipeline without a SPIR-V vertex stage")
+  if len(desc.shader) == 0 {
+    log.errorf("Graphics pipeline without SPIR-V")
     return 0, false
   }
   layout, bindless_set, layout_ok := pipeline_layout_get(b, desc.layout)
@@ -539,21 +538,20 @@ rhi_graphics_pipeline_create :: proc(b: ^Backend, desc: rhi.GraphicsPipelineDesc
       pData         = raw_data(desc.constants),
     }
   }
-  // shaders are SPIR-V with entry point "main"; the fragment stage may be absent
+  // one SPIR-V module with entry points vs_main and fs_main; the fragment stage may be absent
   stages: [2]vk.PipelineShaderStageCreateInfo
   stage_count: u32
-  defer for s in stages[:stage_count] do vk.DestroyShaderModule(b.gctx.device, s.module, nil)
-  codes := [2][]u8{shader.vert, shader.frag}
+  module, module_res := create_shader_module(b.gctx.device, desc.shader)
+  if !check(module_res, "rhi shader module") do return 0, false
+  defer vk.DestroyShaderModule(b.gctx.device, module, nil)
   stage_flags := [2]vk.ShaderStageFlags{{.VERTEX}, {.FRAGMENT}}
-  for code, i in codes {
-    if len(code) == 0 do continue
-    module, res := create_shader_module(b.gctx.device, code)
-    if !check(res, "rhi shader module") do return 0, false
+  entry_points := [2]cstring{"vs_main", "fs_main"}
+  for i in 0 ..< (2 if len(desc.color_formats) > 0 else 1) {
     stages[stage_count] = {
       sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage               = stage_flags[i],
       module              = module,
-      pName               = "main",
+      pName               = entry_points[i],
       pSpecializationInfo = &specialization if len(desc.constants) > 0 else nil,
     }
     stage_count += 1

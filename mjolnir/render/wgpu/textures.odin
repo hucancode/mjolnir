@@ -46,7 +46,7 @@ USAGES := [rhi.TextureUsage]wgpu.TextureUsageFlags {
   .STORAGE      = {.StorageBinding},
 }
 
-// Shaders name the samplers by these (shader/common.wgsl binds them in group 2).
+// Shaders name the samplers by these (shader/common.slang binds them in group 2).
 @(private)
 SamplerType :: enum u32 {
   NEAREST_CLAMP,
