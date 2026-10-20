@@ -41,7 +41,7 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  render.camera_look_at(render.main_camera(&app.renderer), {6, 4, 6}, {0, 1, 0})
+  render.camera_look_at(render.main_camera(&app.renderer), {1.5, 1, 1.5}, {0, 0, 0})
   app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
   app.duck = gltf.model_create(&app.renderer, #load("assets/Duck.glb"))
   app.gltf = gltf.instance_create(&app.duck, &app.scene, &app.renderer)
