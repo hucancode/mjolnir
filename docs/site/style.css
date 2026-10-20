@@ -85,7 +85,7 @@ body > nav {
   background: var(--color-base-200);
   border-bottom: var(--border) solid var(--color-base-300);
 }
-main { max-width: 72rem; margin: 0 auto; padding: 1rem 1.5rem 3rem; }
+main { max-width: 100rem; margin: 0 auto; padding: 1rem 1.5rem 3rem; }
 main > h2 { margin-top: 4rem; }
 
 /* home: hero */
