@@ -17,8 +17,8 @@ import mu "vendor:microui"
 SNAKE_LENGTH :: f32(6)
 // the body hangs on this many points behind the neck, two halves to a param float
 SPINE_POINTS :: 8
-// the neck's path is remembered every TRAIL_STEP of travel
-TRAIL_STEP :: f32(0.05)
+// the neck's path is remembered every CHAIN_STEP of travel
+CHAIN_STEP :: f32(0.05)
 // the tightest the snake can turn, as 1 / radius
 MAX_CURVATURE :: f32(1.2)
 // how far the head turns off its course toward where it is told to go
@@ -47,7 +47,7 @@ App :: struct {
   phase:    f32,
   goal:     [2]f32, // where auto move is heading
   goals:    int,
-  trail:    animation.Trail([2]f32), // the neck's path on the ground, (x, z)
+  chain:    animation.Chain([2]f32), // the neck's path on the ground, (x, z)
 }
 
 cruise_speed: mu.Real = 5.0
@@ -99,7 +99,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     render.attach(r, render.SlotHandle(pupil.index), render.primitive(r, .SPHERE, .BLACK))
     world.scale(&app.scene, pupil, 0.5)
   }
-  animation.trail_init(&app.trail, {0, 0}, {0, 1}, SNAKE_LENGTH, TRAIL_STEP)
+  animation.chain_init(&app.chain, {0, 0}, {0, 1}, SNAKE_LENGTH, CHAIN_STEP)
 
   grass := render.material_create(r, render.make_material(base_color_factor = {0.45, 0.7, 0.35, 1}, roughness_value = 0.9))
   ground := world.spawn(&app.scene)
@@ -115,7 +115,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 shutdown :: proc(app: ^App) {
-  animation.trail_destroy(&app.trail)
+  animation.chain_destroy(&app.chain)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -162,11 +162,11 @@ steer :: proc(app: ^App, dt: f32) {
     aim = wrap(math.atan2(-want.x, -want.y) - app.heading)
     target = f32(cruise_speed)
   } else if auto_move {
-    if linalg.distance(app.trail.head, app.goal) < 2 {
+    if linalg.distance(app.chain.head, app.goal) < 2 {
       app.goals += 1
       app.goal = [2]f32{math.cos(f32(app.goals) * 2.4), math.sin(f32(app.goals) * 2.4)} * ARENA * (0.5 + 0.4 * math.mod(f32(app.goals) * 0.618, 1))
     }
-    to := app.goal - app.trail.head
+    to := app.goal - app.chain.head
     aim = wrap(math.atan2(-to.x, -to.y) - app.heading)
     target = f32(cruise_speed)
   }
@@ -179,16 +179,16 @@ steer :: proc(app: ^App, dt: f32) {
 
   app.phase = math.mod(app.phase + ds * math.TAU / WAVELENGTH, math.TAU)
   course := app.heading + WEAVE * math.sin(app.phase)
-  neck := app.trail.head + [2]f32{-math.sin(course), -math.cos(course)} * ds
+  neck := app.chain.head + [2]f32{-math.sin(course), -math.cos(course)} * ds
   if linalg.length(neck) > ARENA do neck = linalg.normalize(neck) * ARENA
-  animation.trail_move(&app.trail, neck)
+  animation.chain_move(&app.chain, neck)
   app.focus += (neck - app.focus) * min(dt * 5, 1)
 }
 
 // Places the head and hangs the body behind the head along the neck's path.
 pose :: proc(app: ^App) {
   yaw := app.heading + app.look + 0.5 * WEAVE * math.sin(app.phase)
-  neck := app.trail.head
+  neck := app.chain.head
   world.translate(&app.scene, app.head, {neck.x, 0, neck.y})
   world.rotate(
     &app.scene,
@@ -205,7 +205,7 @@ pose :: proc(app: ^App) {
   skin := render.material(&app.renderer, app.skin)
   skin.base_color_factor = head_skin.base_color_factor
   for i in 0 ..< SPINE_POINTS {
-    p := animation.trail_sample(app.trail, f32(i + 1) * SNAKE_LENGTH / SPINE_POINTS) - neck
+    p := animation.chain_sample(app.chain, f32(i + 1) * SNAKE_LENGTH / SPINE_POINTS) - neck
     // the z half is the float's top; off zero it never makes a denormal
     p.y = math.copy_sign(max(abs(p.y), 1e-3), p.y)
     skin.params[i / 4][i % 4] = transmute(f32)[2]f16{f16(p.x), f16(p.y)}
