@@ -173,3 +173,9 @@ dd { margin: 0.25rem 0 0 1rem; color: var(--color-neutral); white-space: pre-lin
   main > div, main > div:has(> section) { grid-template-columns: 1fr; }
   search nav { position: static; max-height: 12rem; }
 }
+
+footer {
+  text-align: center;
+  padding: 3em 1em;
+  opacity: .4;
+}
