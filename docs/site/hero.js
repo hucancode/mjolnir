@@ -42,7 +42,7 @@
   // ---------- parameters (driven by the control panel) ----------
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const S = {
-    auto: !reduce, rate: 0.35, branching: 0.5, jag: 0.5, thickness: 1, restrikes: 2,
+    rate: reduce ? 0 : 0.35, branching: 0.5, jag: 0.5, thickness: 1, restrikes: 2,
     bloom: 1, flash: reduce ? 0 : 0.6, orbit: !reduce,
   };
 
@@ -405,7 +405,7 @@ void main() {
     time += dt;
     if (S.orbit && !pointer) cam.yaw += dt * 0.04;
     updateCamera();
-    if (S.auto && time >= nextAuto) {
+    if (S.rate > 0 && time >= nextAuto) {
       const a = rng() * Math.PI * 2, d = 4 + rng() * 40;
       strike([Math.sin(a) * d, 0, Math.cos(a) * d], 0.7 + rng() * 0.7, rng() < 0.25);
       nextAuto = time + (0.4 + rng() * 1.6) / Math.max(S.rate, 0.05);
@@ -530,12 +530,11 @@ void main() {
     row.append(l, i); panel.append(row);
   };
   const heading = (text) => panel.append(Object.assign(document.createElement("h3"), { textContent: text }));
-  const slider = (label, key, min, max, step) => control(label, key, { type: "range", min, max, step });
+  const slider = (label, key, min, max, step, onChange) => control(label, key, { type: "range", min, max, step }, onChange);
   const check = (label, key, onChange) => control(label, key, { type: "checkbox" }, onChange);
 
   heading("Storm");
-  check("Auto strikes", "auto", () => { nextAuto = time + 0.3; });
-  slider("Strike rate", "rate", 0.05, 1.5, 0.05);
+  slider("Strike rate", "rate", 0, 1.5, 0.05, () => { nextAuto = time + 0.3; });
   heading("Bolt");
   slider("Branching", "branching", 0, 1, 0.01);
   slider("Jaggedness", "jag", 0.1, 1, 0.01);
