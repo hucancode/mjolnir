@@ -1,5 +1,5 @@
 // Docs data generator. Run from the repo root: `odin run docs/gen -- docs/build/data`
-// Writes api.js (from `odin doc`) and examples.js (from examples/), each assigning a global for the static pages.
+// Writes api.json (from `odin doc`) and examples.json (from examples/); the pages import them as JSON modules.
 package main
 
 import "core:encoding/json"
@@ -272,23 +272,24 @@ load_examples :: proc() -> []Example {
 	return out[:]
 }
 
-emit :: proc(path, global: string, value: any) {
+emit :: proc(path: string, value: any) {
 	data, err := json.marshal(value, {}, context.allocator)
-	if err != nil {die("cannot encode %s: %v", global, err)}
-	write(path, fmt.aprintf("window.%s = %s;\n", global, string(data)))
+	if err != nil {die("cannot encode %s: %v", path, err)}
+	write(path, string(data))
 }
 
 main :: proc() {
 	if len(os.args) != 2 {die("usage: gen <output dir>")}
 	out := os.args[1]
+
 	if err := os.make_directory_all(out); err != nil && err != os.General_Error.Exist {
 		die("cannot create %s: %v", out, err)
 	}
 
 	pkgs: [dynamic]Pkg
 	for d in package_dirs() {append(&pkgs, load_pkg(d))}
-	emit(strings.concatenate({out, "/api.js"}), "API", pkgs[:])
+	emit(strings.concatenate({out, "/api.json"}), pkgs[:])
 	examples := load_examples()
-	emit(strings.concatenate({out, "/examples.js"}), "EXAMPLES", examples)
+	emit(strings.concatenate({out, "/examples.json"}), examples)
 	fmt.printfln("wrote %d packages, %d examples to %s", len(pkgs), len(examples), out)
 }

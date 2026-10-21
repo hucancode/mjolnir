@@ -72,7 +72,7 @@ header canvas {
   mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
 }
 
-/* hero controls: button + aside, wired up by hero.js */
+/* hero controls: button + aside, wired up by the script in index.html */
 figure > button {
   position: absolute; top: 0; right: 0; width: 2em; height: 100%; padding: 2em 0;
   cursor: pointer;

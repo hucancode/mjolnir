@@ -15,8 +15,56 @@
   <a href="https://github.com/hucancode/mjolnir">GitHub</a>
 </nav>
 <main>
+<div>
+  <search>
+    <input type="search" placeholder="Filter symbols…">
+    <nav></nav>
+  </search>
+  <article></article>
+</div>
 </main>
-<script defer src="data/api.js"></script>
-<script defer src="app.js"></script>
+<script type="module">
+const el = (tag, props = {}, ...kids) => {
+  const e = Object.assign(document.createElement(tag), props);
+  e.append(...kids);
+  return e;
+};
+
+const pkgs = await (await fetch("data/api.json")).json();
+const nav = document.querySelector('search nav');
+const search = document.querySelector('search input');
+const content = document.querySelector('article');
+
+for (const p of pkgs) nav.append(el('a', { href: '#' + p.path, textContent: p.path.replace(/^mjolnir\/?/, '') || 'mjolnir' }));
+
+function show() {
+  const path = decodeURIComponent(location.hash.slice(1)) || pkgs[0].path;
+  const pkg = pkgs.find((p) => p.path === path) ?? pkgs[0];
+  document.title = pkg.path + ' - Mjolnir';
+  for (const a of nav.querySelectorAll('a')) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + pkg.path);
+  content.replaceChildren(el('h1', { textContent: pkg.path }));
+  if (pkg.doc) content.append(el('p', { textContent: pkg.doc }));
+  for (const s of pkg.sections) {
+    content.append(el('h2', { textContent: s.name }));
+    const dl = el('dl');
+    for (const sym of s.syms) {
+      const d = el('div', {}, el('dt', {}, el('code', { textContent: sym.sig })));
+      if (sym.doc) d.append(el('dd', { textContent: sym.doc }));
+      dl.append(d);
+    }
+    content.append(dl);
+  }
+  filter();
+}
+
+function filter() {
+  const q = search.value.trim().toLowerCase();
+  for (const d of content.querySelectorAll('dl > div')) d.hidden = !!q && !d.textContent.toLowerCase().includes(q);
+}
+
+search.addEventListener('input', filter);
+addEventListener('hashchange', show);
+show();
+</script>
 </body>
 </html>

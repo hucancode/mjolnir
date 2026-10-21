@@ -15,8 +15,148 @@
   <a href="https://github.com/hucancode/mjolnir">GitHub</a>
 </nav>
 <main>
+<div>
+  <search>
+    <button type="button"></button>
+    <nav></nav>
+  </search>
+  <section>
+    <div>
+      <div class="stage"></div>
+      <div class="loader" hidden><span class="spinner"></span><span>Loading…</span></div>
+      <div class="help-panel" hidden>
+        <p></p>
+        <p><button type="button"></button><button type="button">Code</button><button type="button">Log</button></p>
+      </div>
+      <button type="button" id="help" title="About this example">?</button>
+    </div>
+    <dialog>
+      <header><strong></strong><button type="button">Close</button></header>
+      <pre><code></code></pre>
+    </dialog>
+    <dialog>
+      <header><strong>Log</strong><button type="button">Close</button></header>
+      <pre></pre>
+    </dialog>
+  </section>
+</div>
 </main>
-<script defer src="data/examples.js"></script>
-<script defer src="app.js"></script>
+<script type="module">
+const el = (tag, props = {}, ...kids) => {
+  const e = Object.assign(document.createElement(tag), props);
+  e.append(...kids);
+  return e;
+};
+
+const list = await (await fetch("data/examples.json")).json();
+const hasGpu = !!navigator.gpu;
+const $ = (s) => document.querySelector(s);
+const nav = $('search nav'), thumbBtn = $('search button');
+const stage = $('.stage'), loader = $('.loader'), panel = $('.help-panel');
+const desc = $('.help-panel p'), [modeBtn, codeBtn, logBtn] = panel.querySelectorAll('button');
+const helpBtn = $('#help');
+const [dialog, logDialog] = document.querySelectorAll('dialog');
+const code = dialog.querySelector('code'), pre = dialog.querySelector('pre'), dialogTitle = dialog.querySelector('strong');
+const closeBtn = dialog.querySelector('button');
+const logPre = logDialog.querySelector('pre'), logCloseBtn = logDialog.querySelector('button');
+
+// picker: section headers, optional video-frame thumbnails
+let thumbs = localStorage.getItem('examples-thumbs') !== '0';
+const setThumbs = () => {
+  nav.classList.toggle('thumbs', thumbs);
+  thumbBtn.textContent = thumbs ? 'Hide thumbnails' : 'Show thumbnails';
+  localStorage.setItem('examples-thumbs', thumbs ? '1' : '0');
+  for (const v of nav.querySelectorAll('video')) {
+    if (thumbs && !v.src) v.src = v.dataset.src;
+  }
+};
+thumbBtn.addEventListener('click', () => { thumbs = !thumbs; setThumbs(); });
+let category;
+for (const e of list) {
+  if (e.category !== category) {
+    category = e.category;
+    nav.append(el('h2', { textContent: category }));
+  }
+  const link = el('a', { href: '#' + e.name }, el('span', { textContent: e.name }));
+  if (e.video) {
+    // a still frame of the clip; the source is attached lazily, only while thumbnails are shown
+    const v = el('video', { muted: true, preload: 'metadata', playsInline: true, tabIndex: -1 });
+    v.muted = true;
+    v.dataset.src = `videos/${e.name}.mp4#t=1`;
+    link.prepend(v);
+  } else {
+    link.prepend(el('div', { className: 'no-thumb' }));
+  }
+  nav.append(link);
+}
+setThumbs();
+
+helpBtn.addEventListener('click', () => { panel.hidden = !panel.hidden; });
+codeBtn.addEventListener('click', () => { panel.hidden = true; dialog.showModal(); });
+logBtn.addEventListener('click', () => { panel.hidden = true; });
+
+let current, live; // live: whether the current example runs as a WebGPU build rather than a video
+
+function mount() {
+  const e = current;
+  modeBtn.hidden = !(e.wasm && e.video && hasGpu);
+  logBtn.hidden = !live;
+  loader.hidden = false;
+  const ready = () => { if (current === e) loader.hidden = true; };
+  modeBtn.textContent = live ? 'Video' : 'Run live';
+  if (live) {
+    const f = el('iframe', { src: `live/index.html?example=${encodeURIComponent(e.name)}`, title: e.name, allow: 'fullscreen; gamepad' });
+    f.addEventListener('load', ready);
+    stage.replaceChildren(f);
+  } else if (e.video) {
+    const v = el('video', { src: `videos/${e.name}.mp4`, autoplay: true, muted: true, loop: true, playsInline: true, controls: true });
+    v.addEventListener('loadeddata', ready);
+    v.muted = true; // the muted attribute must be set for autoplay to be allowed
+    stage.replaceChildren(v);
+  } else {
+    stage.replaceChildren(el('p', { textContent: 'No live build or video for this example yet.' }));
+    ready();
+  }
+}
+
+function show() {
+  const name = decodeURIComponent(location.hash.slice(1));
+  const e = list.find((x) => x.name === name) ?? list[0];
+  if (e === current) return;
+  current = e;
+  live = hasGpu && e.wasm; // fall back to the video without WebGPU or a wasm build
+  document.title = e.name + ' - Examples - Mjolnir';
+  for (const a of nav.querySelectorAll('a')) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + e.name);
+  nav.querySelector('a[aria-current]')?.scrollIntoView({ block: 'nearest' });
+  panel.hidden = true;
+  desc.textContent = e.desc;
+  code.textContent = e.source;
+  dialogTitle.textContent = e.name + ' source';
+  pre.scrollTop = 0;
+  mount();
+}
+
+modeBtn.addEventListener('click', () => { live = !live; mount(); });
+codeBtn.addEventListener('click', () => dialog.showModal());
+closeBtn.addEventListener('click', () => dialog.close());
+dialog.addEventListener('click', (ev) => { if (ev.target === dialog) dialog.close(); }); // backdrop click
+// logs live in the (same-origin) iframe's #console; mirror them while the dialog is open
+let logObserver;
+logBtn.addEventListener('click', () => {
+  const src = stage.querySelector('iframe')?.contentDocument?.getElementById('console');
+  const sync = () => { logPre.textContent = src ? src.textContent : 'No logs available.'; logPre.scrollTop = logPre.scrollHeight; };
+  sync();
+  if (src) {
+    logObserver = new MutationObserver(sync);
+    logObserver.observe(src, { childList: true, characterData: true, subtree: true });
+  }
+  logDialog.showModal();
+});
+logDialog.addEventListener('close', () => logObserver?.disconnect());
+logCloseBtn.addEventListener('click', () => logDialog.close());
+logDialog.addEventListener('click', (ev) => { if (ev.target === logDialog) logDialog.close(); });
+addEventListener('hashchange', show);
+show();
+</script>
 </body>
 </html>
