@@ -26,8 +26,8 @@
       <h3>Bolt</h3>
       <div><label for="storm-branching">Branching</label><input id="storm-branching" data-key="branching" type="range" min="0" max="1" step="0.01"></div>
       <div><label for="storm-jag">Jaggedness</label><input id="storm-jag" data-key="jag" type="range" min="0.1" max="1" step="0.01"></div>
-      <div><label for="storm-thickness">Thickness</label><input id="storm-thickness" data-key="thickness" type="range" min="0.4" max="3" step="0.05"></div>
-      <div><label for="storm-restrikes">Re-strikes</label><input id="storm-restrikes" data-key="restrikes" type="range" min="0" max="4" step="1"></div>
+      <div><label for="storm-thickness">Thickness</label><input id="storm-thickness" data-key="thickness" type="range" min="0.4" max="5" step="0.05"></div>
+      <div><label for="storm-restrikes">Re-strikes</label><input id="storm-restrikes" data-key="restrikes" type="range" min="0" max="10" step="1"></div>
       <h3>Glow</h3>
       <div><label for="storm-bloom">Bloom</label><input id="storm-bloom" data-key="bloom" type="range" min="0" max="5" step="0.05"></div>
       <div><label for="storm-flash">Flash</label><input id="storm-flash" data-key="flash" type="range" min="0" max="5" step="0.05"></div>
@@ -395,10 +395,12 @@ void main() {
   };
 
   const branch = (out, p, dir, t0, dt, w, lvl, steps, prob) => {
+    let girth = 1; // width wanders ±50% rather than jittering per segment, so the channel swells
     for (let j = 0; j < steps; j++) {
       const d = norm(add(dir, scale(randDir(), S.jag * 1.2)));
       const q = add(p, scale(d, 0.3 * (0.6 + rng() * 0.8)));
-      const tw = w * (1 - (j / steps) * 0.6);
+      girth = clamp(girth + gauss() * 0.4, 0.5, 1.5);
+      const tw = w * (1 - (j / steps) * 0.6) * girth; // branches thin out unevenly as they fade
       out.push({ a: p, b: q, t: t0 + j * dt, w: tw, lvl });
       if (lvl < 3 && rng() < prob * 0.5) {
         branch(out, q, norm(add(d, scale(randDir(), 0.9))), t0 + j * dt, dt, tw * 0.55, lvl + 1, Math.floor((steps - j) * (0.3 + rng() * 0.5)), prob * 0.5);
@@ -410,11 +412,18 @@ void main() {
 
   const grow = (pts, power, leaderDur, prob) => {
     const out = [], dt = leaderDur / (pts.length - 1), w = 0.035 * S.thickness * (0.7 + power * 0.3);
+    const spans = Math.max(1, pts.length - 2), swell = 0.6 + rng() * 0.9, phase = rng() * Math.PI * 2;
+    let girth = 1; // width wanders ±50% along the run instead of jittering per segment
     for (let i = 0; i + 1 < pts.length; i++) {
-      out.push({ a: pts[i], b: pts[i + 1], t: i * dt, w, lvl: 0 });
+      // the channel swells toward the ground and drifts in girth as it runs, so the
+      // trunk never reads as one uniform pipe
+      const f = i / spans, taper = 0.5 + 0.6 * f + 0.35 * swell * Math.sin(f * 7 + phase) + 0.12 * Math.sin(f * 23 + phase * 2);
+      girth = clamp(girth + gauss() * 0.4, 0.5, 1.5);
+      const ww = w * clamp(taper, 0.3, 1.5) * girth;
+      out.push({ a: pts[i], b: pts[i + 1], t: i * dt, w: ww, lvl: 0 });
       if (i > 1 && i < pts.length - 4 && rng() < prob) {
         const steps = Math.floor((4 + rng() * (8 + 24 * S.branching)) * (1 - (i / pts.length) * 0.6));
-        branch(out, pts[i], norm(add(norm(sub(pts[i + 1], pts[i])), scale(randDir(), 0.9))), i * dt, dt * 1.1, w * 0.5, 1, steps, prob);
+        branch(out, pts[i], norm(add(norm(sub(pts[i + 1], pts[i])), scale(randDir(), 0.9))), i * dt, dt * 1.1, ww * 0.5, 1, steps, prob);
       }
     }
     return out;
