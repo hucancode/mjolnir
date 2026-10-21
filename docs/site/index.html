@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mjolnir Engine</title>
 <link rel="icon" href="data:,">
-<meta name="description" content="Mjolnir is a minimalistic, GPU-driven game engine in Odin.">
+<meta name="description" content="Mjolnir is a minimalistic, GPU-driven game engine in written Odin.">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -39,7 +39,7 @@
     <h1>Mjolnir Engine</h1>
     <p>
       <a href="https://github.com/hucancode/mjolnir">Mjolnir</a> is a minimalistic,
-      GPU-driven game engine in <a href="https://github.com/odin-lang/Odin">Odin</a>.
+      GPU-driven game engine written in <a href="https://github.com/odin-lang/Odin">Odin</a>.
     </p>
   </div>
 </header>
@@ -163,7 +163,7 @@ void main() {
   o = vec4(mix(col, 1.0 - 0.2 * exp(-(col - 0.8) / 0.2), step(0.8, col)), 1.0); // soft shoulder above 0.8
 }</script>
 <script type="module">
-// Call the lightning: bolts out of the night onto a glowing grid, plain WebGL2, no dependencies.
+// Call the lightning: bolts out of the night onto a glowing grid.
 // Click to strike, drag to look around. Mjolnir draws strikes in.
 (() => {
   const canvas = document.getElementById("storm");

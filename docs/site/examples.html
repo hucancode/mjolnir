@@ -61,11 +61,10 @@ const closeBtn = dialog.querySelector('button');
 const logPre = logDialog.querySelector('pre'), logCloseBtn = logDialog.querySelector('button');
 
 // picker: section headers, optional video-frame thumbnails
-let thumbs = localStorage.getItem('examples-thumbs') !== '0';
+let thumbs = true;
 const setThumbs = () => {
   nav.classList.toggle('thumbs', thumbs);
   thumbBtn.textContent = thumbs ? 'Hide thumbnails' : 'Show thumbnails';
-  localStorage.setItem('examples-thumbs', thumbs ? '1' : '0');
   for (const v of nav.querySelectorAll('video')) {
     if (thumbs && !v.src) v.src = v.dataset.src;
   }
