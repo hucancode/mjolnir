@@ -329,7 +329,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   build(app)
   stand(app)
 
-  app.orbit = {yaw = 0.7, pitch = 0.25, distance = 12, target = {0, 2.6, 0}}
+  app.orbit = {yaw = 0.7, pitch = 0.25, distance = 8, target = {0, 2.6, 0}}
   render.camera_orbit(render.main_camera(r), app.orbit)
   return .READY
 }
