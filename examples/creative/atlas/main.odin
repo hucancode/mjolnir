@@ -114,22 +114,22 @@ CURL_RANGES := [3]struct {
 }
 
 PALETTE := [?][3]f32 {
-  {0.75, 0.22, 0.17},
-  {0.9, 0.49, 0.13},
-  {0.95, 0.77, 0.06},
-  {0.49, 0.8, 0.18},
-  {0.15, 0.68, 0.38},
-  {0.1, 0.74, 0.61},
-  {0.2, 0.6, 0.86},
-  {0.17, 0.35, 0.63},
-  {0.56, 0.27, 0.68},
-  {0.83, 0.33, 0.64},
-  {0.78, 0.63, 0.4},
-  {0.55, 0.43, 0.39},
-  {0.58, 0.65, 0.65},
-  {0.36, 0.43, 0.49},
-  {0.91, 0.89, 0.85},
-  {0.22, 0.28, 0.31},
+  {0.65, 0.12, 0.14},
+  {0.95, 0.45, 0.15},
+  {0.98, 0.82, 0.25},
+  {0.75, 0.88, 0.35},
+  {0.2, 0.55, 0.25},
+  {0.1, 0.35, 0.3},
+  {0.3, 0.8, 0.75},
+  {0.55, 0.82, 0.95},
+  {0.15, 0.35, 0.7},
+  {0.12, 0.15, 0.4},
+  {0.45, 0.25, 0.65},
+  {0.85, 0.55, 0.9},
+  {0.92, 0.3, 0.55},
+  {0.96, 0.94, 0.88},
+  {0.5, 0.55, 0.6},
+  {0.12, 0.14, 0.17},
 }
 
 HEAD_R :: 0.28
@@ -260,7 +260,18 @@ Leg :: struct {
   hip, knee, ankle: int,
 }
 
+Orb :: struct {
+  node:                 world.NodeHandle,
+  radius, height, tilt: f32,
+  speed, phase:         f32,
+}
+
+ORB_COLORS := [?][3]f32{{1, 0.35, 0.4}, {1, 0.65, 0.3}, {0.45, 1, 0.55}, {0.35, 0.75, 1}, {0.75, 0.45, 1}}
+ORB_SIZE :: 0.1
+
 App :: struct {
+  orbs:      [len(ORB_COLORS)]Orb,
+  elapsed:   f32,
   platform:  platform.Platform,
   scene:     world.World,
   renderer:  render.Renderer,
@@ -361,8 +372,27 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   build(app)
   stand(app)
+  for color, i in ORB_COLORS {
+    light, ok := render.light_create(r, render.make_point_light(color, 30, 12))
+    if !ok do continue
+    f := f32(i)
+    orb := &app.orbs[i]
+    orb^ = {
+      radius = 2.4 + 0.3 * f,
+      height = 1 + 0.9 * f,
+      tilt   = 0.5 * math.sin(f * 2.1),
+      speed  = (0.6 + 0.2 * f) * (1 if i % 2 == 0 else -1),
+      phase  = f * math.TAU / len(ORB_COLORS),
+    }
+    orb.node = world.spawn(&app.scene, orb_position(orb^, 0))
+    render.attach(r, render.SlotHandle(orb.node.index), light)
+    marker := world.spawn(&app.scene, parent = orb.node)
+    material := render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, emissive_value = 5))
+    render.attach(r, render.SlotHandle(marker.index), render.MeshAttachment{mesh = app.meshes[.SPHERE], material = material})
+    world.scale(&app.scene, marker, ORB_SIZE)
+  }
 
-  app.orbit = {yaw = 0.7, pitch = 0.25, distance = 8, target = {0, 2.6, 0}}
+  app.orbit = {yaw = 0.7, pitch = 0.25, distance = 7, target = {0, 2.6, 0}}
   render.camera_orbit(render.main_camera(r), app.orbit)
   return .READY
 }
@@ -391,9 +421,16 @@ update :: proc(app: ^App, dt: f32) {
 
   if app.dancing do choreo_step(&app.choreo, dt * app.tempo * PERIOD / 60, &app.pose)
   pose(app)
+  app.elapsed += dt
+  for orb in app.orbs do world.translate(&app.scene, orb.node, orb_position(orb, app.elapsed))
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
+}
+
+orb_position :: proc(o: Orb, t: f32) -> [3]f32 {
+  a := o.phase + o.speed * t
+  return {o.radius * math.cos(a), o.height + o.radius * o.tilt * math.sin(a), o.radius * math.sin(a)}
 }
 
 pose :: proc(app: ^App) {
