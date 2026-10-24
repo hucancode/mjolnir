@@ -45,6 +45,7 @@ Body_State :: struct {
   force:                [3]f32,
   torque:               [3]f32,
   sleep_timer:          f32,
+  jointed:              bool, // has had a joint; the narrowphase then checks the pair for one
   // Position at frame start (after CCD, before substeps) — the solver
   // recovers per-substep contact separation from position - position0.
   position0:            [3]f32,

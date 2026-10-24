@@ -11,6 +11,9 @@ import "core:time"
 
 // KILL_Y is the height below which `step` destroys dynamic bodies (see World.killed).
 KILL_Y :: #config(PHYSICS_KILL_Y, -50.0)
+// MAX_STEP_DT is the longest time one `step` simulates; a longer dt (a stalled frame) is cut to it,
+// so the simulation slows down instead of breaking.
+MAX_STEP_DT :: #config(PHYSICS_MAX_STEP_DT, 1.0 / 30.0)
 @(private = "file")
 NUM_SUBSTEPS :: 4
 @(private = "file")
@@ -156,6 +159,8 @@ World_State :: struct {
   bodies:               []Body,
   body_slots:           containers.Slots,
   prev_warmstart:       map[u64]ContactWarmstart,
+  joints:               []JointData, // indexed by JointHandle.index; joint_slots says which are live
+  joint_slots:          containers.Slots,
   // Moving bodies (dynamic + kinematic) and static bodies
   dynamic_bvh:          geometry.BVH(BodyHandle),
   static_bvh:           geometry.BVH(BodyHandle),
@@ -183,6 +188,8 @@ init :: proc(self: ^World, gravity := [3]f32{0, -9.81, 0}, thread_count := 0) ->
   self^ = {}
   containers.slots_init(&self.body_slots, MAX_BODIES)
   self.bodies = make([]Body, MAX_BODIES)
+  containers.slots_init(&self.joint_slots, MAX_JOINTS)
+  self.joints = make([]JointData, MAX_JOINTS)
   self.gravity = gravity
   self.thread_count = thread_count > 0 ? thread_count : default_thread_count()
   if self.thread_count > 1 {
@@ -207,6 +214,8 @@ shutdown :: proc(self: ^World) {
   }
   containers.slots_destroy(&self.body_slots)
   delete(self.bodies)
+  containers.slots_destroy(&self.joint_slots)
+  delete(self.joints)
   delete(self.contacts)
   delete(self.sensor_overlaps)
   delete(self.killed)
@@ -225,6 +234,7 @@ shutdown :: proc(self: ^World) {
 // teardown drops every body at once; the world stays ready for the next map.
 teardown :: proc(self: ^World) {
   containers.slots_rewind(&self.body_slots)
+  containers.slots_rewind(&self.joint_slots)
   self.dynamic_bvh_stale = 0
   clear(&self.contacts)
   clear(&self.sensor_overlaps)
@@ -264,6 +274,7 @@ body_destroy :: proc(self: ^World, handle: BodyHandle) {
     self.dynamic_bvh_stale += 1
     if self.dynamic_bvh_stale >= BVH_REBUILD_THRESHOLD do self.dynamic_bvh_dirty = true
   }
+  joints_destroy_of(self, handle)
   containers.slots_free(&self.body_slots, handle.index)
 }
 
@@ -393,6 +404,16 @@ apply_impulse :: proc(self: ^World, handle: BodyHandle, impulse: [3]f32) {
   wake_up(body)
 }
 
+// apply_impulse_at is apply_impulse for an impulse applied at a world-space point, so it also
+// spins the body.
+apply_impulse_at :: proc(self: ^World, handle: BodyHandle, impulse, point: [3]f32) {
+  body, ok := lookup(self, handle)
+  if !ok do return
+  if !is_dynamic(body) do return
+  apply_impulse_at_point(body, impulse, point)
+  wake_up(body)
+}
+
 // BodyPose is a body's position and rotation together with its user link.
 BodyPose :: struct {
   user:     Handle,
@@ -487,7 +508,7 @@ step_warmstart_prep :: proc(self: ^World) {
 }
 
 // Island-based sleeping (end of frame, post-solve velocities): bodies linked
-// by dynamic-dynamic contacts sleep only when EVERY island member has been
+// by dynamic-dynamic contacts or joints sleep only when EVERY island member has been
 // quiet for SLEEP_TIME_THRESHOLD. Per-body sleep leaves boxes floating when
 // their support dozes off first; per-island can't. Kinematic bodies are
 // their own island.
@@ -512,6 +533,16 @@ step_island_sleep :: proc(self: ^World, dt: f32) -> (awake_count, sleeping_count
     if !c.b_dynamic do continue
     ra := find(parent, i32(c.body_a.index))
     rb := find(parent, i32(c.body_b.index))
+    if ra != rb do parent[rb] = ra
+  }
+  jc: u32
+  for ji in containers.slots_next(&self.joint_slots, &jc) {
+    j := &self.joints[ji]
+    if j.body_b == {} do continue
+    b := lookup(self, j.body_b) or_continue
+    if !is_dynamic(b) do continue
+    ra := find(parent, i32(j.body_a.index))
+    rb := find(parent, i32(j.body_b.index))
     if ra != rb do parent[rb] = ra
   }
   island_min := make([]f32, n, context.temp_allocator)
@@ -578,10 +609,11 @@ step_sensors :: proc(self: ^World) {
   }
 }
 
-// step advances the simulation by dt seconds.
+// step advances the simulation by dt seconds, at most MAX_STEP_DT.
 // Millisecond timing blocks compile out with PHYSICS_PERF_STATS=false;
 // the durations then stay zero.
 step :: proc(self: ^World, dt: f32) {
+  dt := min(dt, MAX_STEP_DT)
   warmstart_prep_time, ccd_time, bvh_build_time: time.Duration
   refit_time, broadphase_time, prepare_time, substep_time, finalize_time: time.Duration
   cleanup_time, total_time: time.Duration
@@ -629,7 +661,8 @@ step :: proc(self: ^World, dt: f32) {
     collision_detection(self)
     when PHYSICS_PERF_STATS do broadphase_time = time.since(mark)
 
-    // built after narrowphase, which can wake sleeping bodies
+    step_wake_joints(self)
+    // built after narrowphase and joint waking, which can wake sleeping bodies
     clear(&self.awake_list)
     c = 0
     for i in containers.slots_next(&self.body_slots, &c) {

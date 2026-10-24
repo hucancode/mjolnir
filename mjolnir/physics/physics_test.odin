@@ -152,8 +152,7 @@ test_physics_world_angular_integration :: proc(t: ^testing.T) {
   set_collider(&physics_world, body_handle, SphereCollider{radius = 1.0})
   body.angular_velocity = {0, math.PI, 0}
   initial_rotation := body.rotation
-  dt := f32(1.0)
-  step(&physics_world, dt)
+  for _ in 0 ..< 60 do step(&physics_world, 1.0 / 60.0)
   rotation_changed :=
     abs(body.rotation.w - initial_rotation.w) > 0.1 ||
     abs(body.rotation.x - initial_rotation.x) > 0.1 ||

@@ -918,6 +918,7 @@ narrowphase_pair :: proc(world: ^World, handle_a, handle_b: BodyHandle, out: ^[d
   body_a := lookup(world, handle_a) or_else nil
   body_b := lookup(world, handle_b) or_else nil
   if body_a == nil || body_b == nil do return
+  if body_a.jointed && body_b.jointed && joint_between(world, handle_a, handle_b) do return
   if !is_dynamic(body_a) {
     if !is_dynamic(body_b) do return
     body_a, body_b = body_b, body_a

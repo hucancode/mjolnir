@@ -382,12 +382,39 @@ worker_contact_phase :: proc(
   spin_barrier_wait(data.barrier, local_sense, expected)
 }
 
+// Joints share bodies with each other and with contacts, so thread 0 solves them alone
+// between the contact phases.
+@(private = "file")
+worker_joint_phase :: proc(
+  data: ^SolverWorkerData,
+  pass: SolverPass,
+  soft: Softness,
+  inv_h: f32,
+  local_sense: ^bool,
+) {
+  world := data.world
+  if world.joint_slots.count == 0 do return
+  if data.thread_id == 0 {
+    switch pass {
+    case .Warmstart:
+      warmstart_joints(world)
+    case .Bias:
+      solve_joints(world, soft, inv_h, true)
+    case .Relax:
+      solve_joints(world, soft, inv_h, false)
+    case .Restitution:
+    }
+  }
+  if data.num_threads > 1 do spin_barrier_wait(data.barrier, local_sense, i32(data.num_threads))
+}
+
 @(private = "file")
 solver_worker :: proc(data: ^SolverWorkerData) {
   world := data.world
   local_sense := false
   inv_h := data.h > 0 ? 1.0 / data.h : 0
   soft := make_softness(data.h)
+  joint_soft := joint_softness(data.h)
   body_count := len(world.awake_list)
   chunk := (body_count + data.num_threads - 1) / data.num_threads
   b_start := min(data.thread_id * chunk, body_count)
@@ -398,10 +425,13 @@ solver_worker :: proc(data: ^SolverWorkerData) {
   for _ in 0 ..< data.num_substeps {
     integrate_velocities_range(world, b_start, b_end, data.h)
     sync_bodies(data, &local_sense)
+    worker_joint_phase(data, .Warmstart, joint_soft, inv_h, &local_sense)
     worker_contact_phase(data, .Warmstart, soft, inv_h, &local_sense)
+    worker_joint_phase(data, .Bias, joint_soft, inv_h, &local_sense)
     worker_contact_phase(data, .Bias, soft, inv_h, &local_sense)
     integrate_positions_range(world, b_start, b_end, data.h, data.ccd_handled)
     sync_bodies(data, &local_sense)
+    worker_joint_phase(data, .Relax, joint_soft, inv_h, &local_sense)
     worker_contact_phase(data, .Relax, soft, inv_h, &local_sense)
   }
   worker_contact_phase(data, .Restitution, soft, inv_h, &local_sense)
