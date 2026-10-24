@@ -42,7 +42,7 @@ const link = (p) => el('a', { href: '#' + p.path, textContent: short(p.path) });
 const layers = [];
 for (const p of pkgs) (layers[p.layer] ??= { n: p.layer, name: p.layer_name, pkgs: [] }).pkgs.push(p);
 layers.reverse();
-for (const l of layers) nav.append(el('h2', { textContent: `${l.n} ${l.name}` }), ...l.pkgs.map(link));
+for (const l of layers) nav.append(el('h2', { textContent: l.name.toUpperCase() }), ...l.pkgs.map(link));
 
 // comments are hard-wrapped: join prose lines into paragraphs, keep indented lines (lists) as they are
 function prose(text) {
@@ -62,7 +62,7 @@ function diagram(current) {
   const chips = new Map();
   const fig = el('figure', { className: 'layers' });
   for (const l of layers) {
-    const row = el('div', {}, el('small', { textContent: `${l.n} ${l.name}` }));
+    const row = el('div', {}, el('small', { textContent: l.name.toUpperCase() }));
     for (const p of l.pkgs) {
       const a = link(p);
       a.addEventListener('mouseenter', () => mark(p));
@@ -91,7 +91,7 @@ function show() {
   const pkg = pkgs.find((p) => p.path === path) ?? pkgs[0];
   document.title = pkg.path + ' - Mjolnir';
   for (const a of nav.querySelectorAll('a')) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + pkg.path);
-  content.replaceChildren(el('h1', { textContent: pkg.path }), el('small', { textContent: `Layer ${pkg.layer}: ${pkg.layer_name}` }));
+  content.replaceChildren(el('h1', { textContent: pkg.path }), el('small', { textContent: `LAYER ${pkg.layer}: ${pkg.layer_name.toUpperCase()}` }));
   if (pkg.doc) content.append(...prose(pkg.doc));
   content.append(diagram(pkg));
   if (pkg.notes) content.append(el('h2', { textContent: 'Architecture' }), ...prose(pkg.notes));
