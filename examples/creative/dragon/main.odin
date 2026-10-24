@@ -155,7 +155,7 @@ main :: proc() {
   app.autoplay = true
   app.spin = 0.3
   app.seed = rand.uint32()
-  app.build.t = 1
+  build_play(app)
   if !platform.init(&app.platform, 1024, 720, "Dragon") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
