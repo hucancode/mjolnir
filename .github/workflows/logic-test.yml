@@ -58,7 +58,7 @@ jobs:
         make -v
 
     - name: Check Odin code
-      run: make shader shader-wgpu && odin check . && odin check . -define:RENDER_BACKEND=wgpu
+      run: make shader && odin check . && odin check . -define:RENDER_BACKEND=wgpu
 
     - name: Run tests
       run: odin test . --all-packages
