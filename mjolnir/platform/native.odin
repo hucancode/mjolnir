@@ -111,6 +111,9 @@ run :: proc(step: proc() -> bool) {
 // ready does nothing: the window shows the first frame as it comes.
 ready :: proc() {}
 
+// fail does nothing: the error is in the log already.
+fail :: proc() {}
+
 // sleep blocks the calling thread for `ms` milliseconds.
 sleep :: proc(ms: f64) {
   time.sleep(time.Duration(ms * f64(time.Millisecond)))

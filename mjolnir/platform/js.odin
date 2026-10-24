@@ -97,11 +97,18 @@ foreign import page "mjolnir"
 foreign page {
   @(link_name = "ready")
   page_ready :: proc() ---
+  @(link_name = "fail")
+  page_fail :: proc() ---
 }
 
 // ready tells the host page the first frame is coming, so it can drop its loading screen.
 ready :: proc() {
   page_ready()
+}
+
+// fail tells the host page the app stopped on an error, so it can show the log.
+fail :: proc() {
+  page_fail()
 }
 
 // sleep does nothing: the browser paces the animation frames.

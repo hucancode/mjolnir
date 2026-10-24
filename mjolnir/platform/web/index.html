@@ -27,11 +27,17 @@
     const consoleElement = document.getElementById("console");
     const statusElement = document.getElementById("status");
     const tell = (state, extra) => { if (embedded) window.parent.postMessage({ type: "mjolnir", state, ...extra }, "*"); };
+    let failed = false;
     const fail = (message) => {
+      if (failed) return;
+      failed = true;
       statusElement.textContent = message;
+      statusElement.style.display = "";
       consoleElement.textContent += message + "\n";
       tell("error", { message });
     };
+    // a trap (panic, failed assert) in a frame is thrown from the animation frame callback
+    window.addEventListener("error", (e) => fail(String(e.error ?? e.message)));
 
     // Downloads the .wasm, reporting progress; runWasm then reads it back from memory.
     async function download(url) {
@@ -56,12 +62,16 @@
     if (!navigator.gpu) {
       fail("This browser has no WebGPU.");
     } else {
-      const ready = () => { statusElement.style.display = "none"; tell("ready"); };
+      // what the engine calls (platform.ready, platform.fail; its log has the details)
+      const page = {
+        ready: () => { statusElement.style.display = "none"; tell("ready"); },
+        fail: () => fail("Stopped on an error, see the log."),
+      };
       download(`${example}.wasm`).then((url) => {
         statusElement.textContent = "Starting…";
         const mem = new odin.WasmMemoryInterface();
         const wgpu = new odin.WebGPUInterface(mem);
-        return odin.runWasm(url, consoleElement, { wgpu: wgpu.getInterface(), mjolnir: { ready } }, mem);
+        return odin.runWasm(url, consoleElement, { wgpu: wgpu.getInterface(), mjolnir: page }, mem);
       }).catch((e) => fail(String(e)));
     }
   </script>

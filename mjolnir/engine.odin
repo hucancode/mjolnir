@@ -95,6 +95,7 @@ step :: proc(r: ^Runner) -> bool {
         return true
       case .FAIL:
         log.error("Setup failed, exiting...")
+        platform.fail()
         return false
       case .READY:
       }
@@ -133,6 +134,7 @@ step :: proc(r: ^Runner) -> bool {
     r.error_count += 1
     if r.error_count >= MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
       log.errorf("Too many render errors, exiting...")
+      platform.fail()
       return false
     }
   }
