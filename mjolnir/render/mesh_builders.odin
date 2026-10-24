@@ -42,6 +42,37 @@ make_cube :: proc(
   return make_geometry(vertices, indices)
 }
 
+// make_wedge builds make_cube's 2x2x2 box with its top sloping down toward +Z: the front top
+// edge drops `taper` of the height (0 is the cube, 1 a full wedge).
+make_wedge :: proc(
+  taper: f32 = 1,
+  color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+) -> Geometry {
+  front := 1 - 2 * clamp(taper, 0, 1)
+  slope := linalg.normalize([3]f32{0, 1, taper})
+  faces := [6]struct {
+    normal:  [3]f32,
+    corners: [4][3]f32,
+  } {
+    {geometry.VEC_FORWARD, {{-1, -1, 1}, {1, -1, 1}, {1, front, 1}, {-1, front, 1}}},
+    {geometry.VEC_BACKWARD, {{-1, 1, -1}, {1, 1, -1}, {1, -1, -1}, {-1, -1, -1}}},
+    {slope, {{1, 1, -1}, {-1, 1, -1}, {-1, front, 1}, {1, front, 1}}},
+    {geometry.VEC_DOWN, {{1, -1, 1}, {-1, -1, 1}, {-1, -1, -1}, {1, -1, -1}}},
+    {geometry.VEC_RIGHT, {{1, -1, -1}, {1, 1, -1}, {1, front, 1}, {1, -1, 1}}},
+    {geometry.VEC_LEFT, {{-1, -1, 1}, {-1, front, 1}, {-1, 1, -1}, {-1, -1, -1}}},
+  }
+  uvs := [4][2]f32{{0, 1}, {1, 1}, {1, 0}, {0, 0}}
+  vertices := make([]Vertex, 24)
+  indices := make([]u32, 36)
+  for face, f in faces {
+    i := u32(f * 4)
+    for corner, c in face.corners do vertices[int(i) + c] = {corner, face.normal, color, uvs[c], {}}
+    p := indices[f * 6:]
+    p[0], p[1], p[2], p[3], p[4], p[5] = i, i + 1, i + 2, i + 2, i + 3, i
+  }
+  return make_geometry(vertices, indices)
+}
+
 // make_quad builds a quad on the XZ plane facing +Y.
 make_quad :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
@@ -139,53 +170,49 @@ make_sphere :: proc(
   return make_geometry(vertices, indices)
 }
 
-// make_cone builds a cone along Y with a capped base and its tip at +height/2.
+// make_cone builds a cone along Y with a capped base and its tip at +height/2. A top_radius
+// above 0 cuts the tip off into a capped frustum of that radius.
 make_cone :: proc(
   segments: u32 = 32,
   height: f32 = 2.0,
   radius: f32 = 1.0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  top_radius: f32 = 0,
 ) -> Geometry {
-  vert_count := segments + 3
-  idx_count := segments * 6
-  vertices := make([]Vertex, vert_count)
-  indices := make([]u32, idx_count)
-  vertices[0] = Vertex {
-    position = {0, height / 2, 0},
-    normal   = {0, 1, 0},
-    color    = color,
-    uv       = {0.5, 1.0},
-  }
-  vertices[1] = Vertex {
-    position = {0, -height / 2, 0},
-    normal   = {0, -1, 0},
-    color    = color,
-    uv       = {0.5, 0.0},
-  }
-  for i in 0 ..= segments {
+  // side columns (top then bottom vertex), then the bottom cap's center and rim, then the top cap's
+  ring := segments + 1
+  bottom_center := 2 * ring
+  top_center := bottom_center + 1 + ring
+  top_cap := top_radius > 0
+  vertices := make([]Vertex, top_center + (1 + ring if top_cap else 0))
+  indices := make([]u32, segments * (12 if top_cap else 6))
+  half_h := height * 0.5
+  for i in 0 ..< ring {
     theta := 2.0 * math.PI * f32(i) / f32(segments)
-    x := radius * math.cos(theta)
-    z := radius * math.sin(theta)
-      side_normal := linalg.normalize([3]f32{x, radius / height, z})
-    vertices[2 + i] = Vertex {
-      position = {x, -height / 2, z},
-      normal   = side_normal,
-      color    = color,
-      uv       = {0.5 + 0.5 * math.cos(theta), 0.5 + 0.5 * math.sin(theta)},
+    x, z := math.cos(theta), math.sin(theta)
+    u := f32(i) / f32(segments)
+    normal := linalg.normalize([3]f32{x * height, radius - top_radius, z * height})
+    vertices[i * 2] = {position = {top_radius * x, half_h, top_radius * z}, normal = normal, color = color, uv = {u, 0}}
+    vertices[i * 2 + 1] = {position = {radius * x, -half_h, radius * z}, normal = normal, color = color, uv = {u, 1}}
+    cap_uv := [2]f32{0.5 + 0.5 * x, 0.5 + 0.5 * z}
+    vertices[bottom_center + 1 + i] = {position = {radius * x, -half_h, radius * z}, normal = {0, -1, 0}, color = color, uv = cap_uv}
+    if top_cap do vertices[top_center + 1 + i] = {position = {top_radius * x, half_h, top_radius * z}, normal = {0, 1, 0}, color = color, uv = cap_uv}
+  }
+  vertices[bottom_center] = {position = {0, -half_h, 0}, normal = {0, -1, 0}, color = color, uv = {0.5, 0.5}}
+  if top_cap do vertices[top_center] = {position = {0, half_h, 0}, normal = {0, 1, 0}, color = color, uv = {0.5, 0.5}}
+  i := 0
+  for seg in 0 ..< segments {
+    a, c := seg * 2, seg * 2 + 2
+    if top_cap {
+      top_rim := top_center + 1 + seg
+      p := indices[i:]
+      p[0], p[1], p[2], p[3], p[4], p[5] = a, c, a + 1, top_center, top_rim + 1, top_rim
+      i += 6
     }
-  }
-  idx := 0
-  for i in 0 ..< segments {
-    next := 2 + ((i + 1) % (segments + 1))
-    p := indices[idx:]
-    p[0], p[1], p[2] = 0, next, 2 + i
-    idx += 3
-  }
-  for i in 0 ..< segments {
-    next := 2 + ((i + 1) % (segments + 1))
-    p := indices[idx:]
-    p[0], p[1], p[2] = 1, 2 + i, next
-    idx += 3
+    rim := bottom_center + 1 + seg
+    p := indices[i:]
+    p[0], p[1], p[2], p[3], p[4], p[5] = a + 1, c, c + 1, bottom_center, rim, rim + 1
+    i += 6
   }
   return make_geometry(vertices, indices)
 }
@@ -312,7 +339,9 @@ make_torus :: proc(
 }
 
 // make_cylinder builds a cylinder along Y centered at the origin, its side cut into `rings`
-// bands from top to bottom, capped at both ends when `caps`.
+// bands from top to bottom, capped at both ends when `caps`. The side sweeps `arc` radians
+// from +X toward +Z; under a full turn the cut is left open (math.PI makes a half cylinder
+// whose round side faces +Z).
 make_cylinder :: proc(
   segments: u32 = 32,
   rings: u32 = 1,
@@ -320,6 +349,7 @@ make_cylinder :: proc(
   radius: f32 = 1.0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
   caps := true,
+  arc: f32 = 2.0 * math.PI,
 ) -> Geometry {
   // side columns top to bottom, then each cap's center and rim; columns repeat the first for the UV seam
   ring := segments + 1
@@ -331,7 +361,7 @@ make_cylinder :: proc(
   indices := make([]u32, segments * rings * 6 + (segments * 6 if caps else 0))
   half_h := height * 0.5
   for i in 0 ..< ring {
-    theta := 2.0 * math.PI * f32(i) / f32(segments)
+    theta := arc * f32(i) / f32(segments)
     x, z := math.cos(theta), math.sin(theta)
     u := f32(i) / f32(segments)
     for r in 0 ..< column {
@@ -350,7 +380,7 @@ make_cylinder :: proc(
   vertices[top_center] = {position = {0, half_h, 0}, normal = {0, 1, 0}, color = color, uv = {0.5, 0.5}}
   vertices[bottom_center] = {position = {0, -half_h, 0}, normal = {0, -1, 0}, color = color, uv = {0.5, 0.5}}
   for i in 0 ..< ring {
-    theta := 2.0 * math.PI * f32(i) / f32(segments)
+    theta := arc * f32(i) / f32(segments)
     x, z := math.cos(theta), math.sin(theta)
     cap_uv := [2]f32{0.5 + 0.5 * x, 0.5 + 0.5 * z}
     vertices[top_center + 1 + i] = {position = {radius * x, half_h, radius * z}, normal = {0, 1, 0}, color = color, uv = cap_uv}

@@ -4,7 +4,7 @@ package mjolnir
 
 // The engine is four layers; a package imports only from the layers below it, never from its own:
 //   3  glue: mjolnir (the loop), gltf (glTF into render, animation and world), debugui
-//   2  systems: render, world, animation, physics, ui, platform, navigation (with bake).
+//   2  systems: render, world, animation, physics, mech, ui, platform, navigation (with bake).
 //      The application passes data between them, e.g.
 //      render.stage_transforms(&r, world.changes(&w)) or world.set_world_poses(&w, physics.body_poses(&p)).
 //   1  foundation: anchor, input, font, behavior_tree, fsm, navigation/detour, navigation/recast

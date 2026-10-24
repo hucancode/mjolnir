@@ -46,7 +46,7 @@ test_flat_quad_aabb_has_thickness :: proc(t: ^testing.T) {
 
 @(test)
 test_builders_generate_tangents :: proc(t: ^testing.T) {
-  shapes := [?]Geometry{make_cube(), make_quad(), make_sphere(), make_sphere(faceted = true), make_cone(), make_capsule(), make_torus(), make_cylinder(), make_cylinder(rings = 4, caps = false), make_circle()}
+  shapes := [?]Geometry{make_cube(), make_quad(), make_sphere(), make_sphere(faceted = true), make_cone(), make_cone(top_radius = 0.5), make_capsule(), make_torus(), make_cylinder(), make_cylinder(rings = 4, caps = false), make_cylinder(arc = math.PI), make_circle(), make_wedge(), make_wedge(0.5)}
   for g, s in shapes {
     defer geometry_destroy(g)
     for v, i in g.vertices {
