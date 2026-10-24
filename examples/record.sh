@@ -4,20 +4,18 @@
 # frames into docs/site/videos/<example>.mp4 with ffmpeg; one frame becomes the screenshot
 # docs/site/screenshots/<example>.png.
 #
-# Per-example overrides live in examples/<category>/<name>/record.cfg as key=value lines.
-# Recognized keys:
-#   frame_limit   total frames to render        (default 300)
-#   fps           render cadence + mp4 framerate (default 30)
-#   start         first frame to dump            (default 0; skips early garbage)
-#   shot          frame saved as the screenshot  (default: the middle recorded frame)
-#   crf           x264 CRF quality               (default 23)
-#   timeout       seconds to wait for the run    (default 120)
-#   skip          if 1, skip this example
-#
 # Usage:
-#   examples/record.sh                # all examples
-#   examples/record.sh cube physics   # specific ones
-#   OUT_DIR=foo examples/record.sh    # override video dir (SHOT_DIR for screenshots)
+#   examples/record.sh [options] [example...]    (no examples = all)
+#
+# Options:
+#   --frames N    total frames to render        (default 300)
+#   --fps N       render cadence + mp4 framerate (default 30)
+#   --start N     first frame to dump            (default 0; skips early garbage)
+#   --shot N      frame saved as the screenshot  (default: the middle recorded frame)
+#   --crf N       x264 CRF quality               (default 23)
+#   --timeout N   seconds to wait for the run    (default 120)
+#
+# Environment: OUT_DIR (videos), SHOT_DIR (screenshots), LOG_DIR, BIN_DIR, TMP_ROOT.
 set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,11 +27,29 @@ LOG_DIR="${LOG_DIR:-artifacts/record}"
 BIN_DIR="${BIN_DIR:-bin}"
 TMP_ROOT="${TMP_ROOT:-artifacts/record/frames}"
 
-DEFAULT_FRAME_LIMIT=300
-DEFAULT_FPS=30
-DEFAULT_START=0
-DEFAULT_CRF=23
-DEFAULT_TIMEOUT=120
+frame_limit=300
+fps=30
+start=0
+crf=23
+to_sec=120
+shot=""
+
+usage() { sed -n "2,/^set -u/p" "$0" | sed "s/^# \?//;/^set -u/d" >&2; exit 2; }
+
+targets=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --frames)  frame_limit="${2:?}"; shift 2 ;;
+        --fps)     fps="${2:?}"; shift 2 ;;
+        --start)   start="${2:?}"; shift 2 ;;
+        --shot)    shot="${2:?}"; shift 2 ;;
+        --crf)     crf="${2:?}"; shift 2 ;;
+        --timeout) to_sec="${2:?}"; shift 2 ;;
+        -h|--help) usage ;;
+        -*) echo "unknown option: $1" >&2; usage ;;
+        *) targets+=("$1"); shift ;;
+    esac
+done
 
 mkdir -p "$OUT_DIR" "$SHOT_DIR" "$LOG_DIR" "$BIN_DIR" "$TMP_ROOT"
 
@@ -41,52 +57,13 @@ for tool in ffmpeg odin awk magick xvfb-run; do
     command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 2; }
 done
 
-read_cfg() {
-    local file="$1" key="$2" default="$3" value
-    [[ -f "$file" ]] || { printf '%s' "$default"; return; }
-    value=$(awk -F= -v k="$key" '
-        /^[[:space:]]*#/ {next}
-        NF<2 {next}
-        {
-            gsub(/[[:space:]]/, "", $1)
-            if ($1 == k) {
-                sub(/^[[:space:]]+/, "", $2)
-                sub(/[[:space:]]+$/, "", $2)
-                print $2
-                exit
-            }
-        }
-    ' "$file")
-    if [[ -z "$value" ]]; then
-        printf '%s' "$default"
-    else
-        printf '%s' "$value"
-    fi
-}
-
 record_one() {
     local example="$1"
     local example_dir
     example_dir=$(ls -d examples/*/"$example" 2>/dev/null | head -1)
     [[ -f "$example_dir/main.odin" ]] || { echo "skip $example (no main.odin)"; return 0; }
 
-    local cfg="$example_dir/record.cfg"
-    local skip
-    skip=$(read_cfg "$cfg" skip 0)
-    if [[ "$skip" == "1" ]]; then
-        echo "=== $example: skipped via record.cfg"
-        return 0
-    fi
-
-    local frame_limit fps start crf to_sec
-    frame_limit=$(read_cfg "$cfg" frame_limit "$DEFAULT_FRAME_LIMIT")
-    fps=$(read_cfg "$cfg" fps "$DEFAULT_FPS")
-    start=$(read_cfg "$cfg" start "$DEFAULT_START")
-    crf=$(read_cfg "$cfg" crf "$DEFAULT_CRF")
-    to_sec=$(read_cfg "$cfg" timeout "$DEFAULT_TIMEOUT")
-
-    local shot
-    shot=$(read_cfg "$cfg" shot $(((start + frame_limit) / 2)))
+    local shot_frame="${shot:-$(((start + frame_limit) / 2))}"
 
     local count=$((frame_limit - start))
     if (( count <= 0 )); then
@@ -162,8 +139,8 @@ record_one() {
         return 1
     fi
 
-    if ! magick "$frame_dir/${shot}.ppm" "$shot_file" 2>> "$ffm_log"; then
-        echo "  screenshot FAILED (no frame $shot) — see $ffm_log" >&2
+    if ! magick "$frame_dir/${shot_frame}.ppm" "$shot_file" 2>> "$ffm_log"; then
+        echo "  screenshot FAILED (no frame $shot_frame) — see $ffm_log" >&2
         return 1
     fi
 
@@ -175,10 +152,7 @@ record_one() {
     echo "  done (${n} frames, ${size} bytes)"
 }
 
-declare -a targets
-if [[ $# -gt 0 ]]; then
-    targets=("$@")
-else
+if [[ ${#targets[@]} -eq 0 ]]; then
     for d in examples/*/*/; do
         targets+=("$(basename "$d")")
     done

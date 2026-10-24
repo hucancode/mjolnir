@@ -79,7 +79,7 @@ doc: shader
 
 # docs/site/videos/<example>.mp4 and docs/site/screenshots/<example>.png (see examples/record.sh).
 record: shader
-	./examples/record.sh $(EXAMPLE)
+	./examples/record.sh $(RECORD_ARGS) $(EXAMPLE)
 
 clean:
 	rm -rf bin/*
