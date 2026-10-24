@@ -1,4 +1,4 @@
-// Atlas: a robot built from hinges and ball joints, driven by mech. Watch it dance, or pose it.
+// Atlas: a robot built from hinges and ball joints, driven by channels. Watch it dance, or pose it.
 package main
 
 import "core:fmt"
@@ -9,9 +9,10 @@ import "core:math/linalg"
 import "core:math/rand"
 import mu "vendor:microui"
 import "mjolnir"
+import "mjolnir/animation"
 import "mjolnir/debugui"
+import "mjolnir/geometry"
 import "mjolnir/input"
-import "mjolnir/mech"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
@@ -56,31 +57,38 @@ RIGHT :: len(Channel) - int(Channel.SHOULDER)
 CHANNEL_COUNT :: len(Channel) + RIGHT
 Pose :: [CHANNEL_COUNT]f32
 
+Tier :: enum u8 {
+  CORE,
+  LIMB,
+  TIP,
+}
+
 Control :: struct {
   name:       string,
   min, max:   f32,
   big, ratio: bool,
+  tier:       Tier,
 }
 
 CONTROLS := [Channel]Control {
-  .HIP_LEVEL   = {"hip level", -1.5, 0, true, true},
-  .HEAD_YAW    = {"head yaw", -math.PI, math.PI, true, false},
-  .HEAD_PITCH  = {"head pitch", -30 * DEG, 30 * DEG, true, false},
-  .TWIST       = {"waist twist", -math.PI, math.PI, true, false},
-  .WAIST_BEND  = {"waist bend", -45 * DEG, 45 * DEG, true, false},
-  .WAIST_TILT  = {"waist tilt", -45 * DEG, 45 * DEG, true, false},
-  .SHOULDER    = {"arm swing", -math.PI, math.PI, true, false},
-  .ARM_OUT     = {"arm raise", -10 * DEG, math.PI, true, false},
-  .ARM_TWIST   = {"arm twist", -math.PI, math.PI, true, false},
-  .ELBOW       = {"elbow bend", -math.PI / 2, math.PI / 2, false, false},
-  .FORE_TWIST  = {"forearm twist", -math.PI, math.PI, false, false},
-  .WRIST_BEND  = {"wrist bend", -100 * DEG, 100 * DEG, false, false},
-  .WRIST_TILT  = {"wrist tilt", -100 * DEG, 100 * DEG, false, false},
-  .WRIST_TWIST = {"wrist twist", -math.PI, math.PI, false, false},
-  .CURL        = {"finger curl", 0, 1, false, true},
-  .HIP         = {"leg swing", -45 * DEG, 45 * DEG, true, false},
-  .KNEE        = {"knee bend", -math.PI / 3, 0, true, false},
-  .ANKLE       = {"ankle bend", -30 * DEG, 30 * DEG, false, false},
+  .HIP_LEVEL   = {"hip level", -1.5, 0, true, true, .CORE},
+  .HEAD_YAW    = {"head yaw", -math.PI, math.PI, true, false, .TIP},
+  .HEAD_PITCH  = {"head pitch", -30 * DEG, 30 * DEG, true, false, .TIP},
+  .TWIST       = {"waist twist", -math.PI, math.PI, true, false, .CORE},
+  .WAIST_BEND  = {"waist bend", -45 * DEG, 45 * DEG, true, false, .CORE},
+  .WAIST_TILT  = {"waist tilt", -45 * DEG, 45 * DEG, true, false, .CORE},
+  .SHOULDER    = {"arm swing", -math.PI, math.PI, true, false, .LIMB},
+  .ARM_OUT     = {"arm raise", -10 * DEG, math.PI, true, false, .LIMB},
+  .ARM_TWIST   = {"arm twist", -math.PI, math.PI, true, false, .LIMB},
+  .ELBOW       = {"elbow bend", -math.PI / 2, math.PI / 2, false, false, .LIMB},
+  .FORE_TWIST  = {"forearm twist", -math.PI, math.PI, false, false, .LIMB},
+  .WRIST_BEND  = {"wrist bend", -100 * DEG, 100 * DEG, false, false, .TIP},
+  .WRIST_TILT  = {"wrist tilt", -100 * DEG, 100 * DEG, false, false, .TIP},
+  .WRIST_TWIST = {"wrist twist", -math.PI, math.PI, false, false, .TIP},
+  .CURL        = {"finger curl", 0, 1, false, true, .TIP},
+  .HIP         = {"leg swing", -45 * DEG, 45 * DEG, true, false, .CORE},
+  .KNEE        = {"knee bend", -math.PI / 3, 0, true, false, .LIMB},
+  .ANKLE       = {"ankle bend", -30 * DEG, 30 * DEG, false, false, .TIP},
   .CURL_BASE   = {},
   .CURL_MID    = {},
   .CURL_TIP    = {},
@@ -204,6 +212,28 @@ Bind :: struct {
   sign:    f32,
 }
 
+Axis :: enum u8 {
+  X,
+  Y,
+  Z,
+}
+
+Bone :: struct {
+  parent:  int,
+  offset:  [3]f32,
+  rest:    quaternion128,
+  axis:    Axis,
+  channel: int,
+  sign:    f32,
+  node:    world.NodeHandle,
+}
+
+BonePose :: struct {
+  user:     world.NodeHandle,
+  position: [3]f32,
+  rotation: quaternion128,
+}
+
 Frame :: struct {
   bone:     int,
   position: [3]f32,
@@ -237,7 +267,9 @@ App :: struct {
   debug:     debugui.Context,
   input:     input.State,
   orbit:     render.Orbit,
-  mech:      mech.Mech,
+  bones:     [dynamic]Bone,
+  poses:     [dynamic]BonePose,
+  origin:    [3]f32,
   meshes:    [Mesh]render.MeshHandle,
   materials: [len(PALETTE)]render.MaterialHandle,
   pieces:    [dynamic]Piece,
@@ -253,6 +285,7 @@ App :: struct {
   pose:      Pose,
   choreo:    Choreo,
   dancing:   bool,
+  tempo:     f32,
 }
 
 chan :: proc(c: Channel, side := Side.L) -> int {
@@ -277,11 +310,11 @@ main :: proc() {
   app := new(App)
   app.pose = HOME
   app.dancing = true
+  app.tempo = 60 / PERIOD
   app.seed = rand.uint32()
   if !platform.init(&app.platform, 1024, 720, "Atlas") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
-  mech.init(&app.mech)
   choreo_init(&app.choreo, rand.uint32(), true)
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -337,7 +370,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 shutdown :: proc(app: ^App) {
   delete(app.pieces)
   choreo_destroy(&app.choreo)
-  mech.destroy(&app.mech)
+  delete(app.bones)
+  delete(app.poses)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -355,7 +389,7 @@ update :: proc(app: ^App, dt: f32) {
   render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  if app.dancing do choreo_step(&app.choreo, dt, &app.pose)
+  if app.dancing do choreo_step(&app.choreo, dt * app.tempo * PERIOD / 60, &app.pose)
   pose(app)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
@@ -375,12 +409,12 @@ pose :: proc(app: ^App) {
     z := app.thigh * math.sin(solved[hip]) + app.shin * math.sin(solved[hip] + solved[knee])
     y := app.thigh * math.cos(solved[hip]) + app.shin * math.cos(solved[hip] + solved[knee])
     floor := app.hip_y - drop - app.ankle_y
-    a, b, _ := mech.two_link(app.thigh, app.shin, {min(y, floor), z})
+    a, b, _ := animation.two_link(app.thigh, app.shin, {min(y, floor), z})
     solved[hip], solved[knee] = a, b
     if y >= floor - 1e-6 do solved[ankle] = -(a + b)
   }
-  app.mech.position = {0, app.root_y - drop, 0}
-  world.set_world_poses(&app.scene, mech.solve(&app.mech, solved[:]))
+  app.origin = {0, app.root_y - drop, 0}
+  world.set_world_poses(&app.scene, solve(app, solved[:]))
 }
 
 hip_drop :: proc(app: ^App, level: f32) -> f32 {
@@ -391,7 +425,7 @@ hip_drop :: proc(app: ^App, level: f32) -> f32 {
 
 stand :: proc(app: ^App) {
   rest: Pose
-  poses := mech.solve(&app.mech, rest[:])
+  poses := solve(app, rest[:])
   leg := app.legs[.L]
   hip, knee, ankle := poses[leg.hip].position, poses[leg.knee].position, poses[leg.ankle].position
   app.thigh, app.shin = linalg.length(hip - knee), linalg.length(knee - ankle)
@@ -408,34 +442,47 @@ recolor :: proc(app: ^App) {
 
 panel :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Atlas", {724, 10, 290, 700}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
-    mu.layout_row(ctx, {90, 90, -1}, 0)
+  if debugui.window(&app.debug, "Settings", {724, 10, 290, 245}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+    mu.layout_row(ctx, {90, -1}, 0)
     mu.checkbox(ctx, "Dance", &app.dancing)
     if .CHANGE in mu.checkbox(ctx, "Mirror", &app.choreo.mirror) do choreo_rewire(&app.choreo)
-    if .SUBMIT in mu.button(ctx, "Home") do app.pose = HOME
     mu.layout_row(ctx, {-1}, 0)
     if .SUBMIT in mu.button(ctx, "New colors") {
       app.seed = rand.uint32()
       recolor(app)
     }
     mu.layout_row(ctx, {110, -1}, 0)
+    mu.label(ctx, "tempo")
+    mu.slider(ctx, &app.tempo, 20, 160, 1, "%.0f bpm")
+    mu.label(ctx, "antic")
+    mu.slider(ctx, &app.choreo.weights[.ANTIC], 0.05, 1, 0, "%.2f")
+    mu.label(ctx, "move")
+    mu.slider(ctx, &app.choreo.weights[.MOVE], 0.05, 1, 0, "%.2f")
+    mu.label(ctx, "bounce")
+    mu.slider(ctx, &app.choreo.weights[.BOUNCE], 0, 0.5, 0, "%.2f")
+    mu.label(ctx, "rest")
+    mu.slider(ctx, &app.choreo.weights[.REST], 0, 1, 0, "%.2f")
+    mu.label(ctx, "bounce power")
+    mu.slider(ctx, &app.choreo.power, 0, 0.5, 0, "%.2f")
+  }
+  if debugui.window(&app.debug, "Rig", {724, 280, 290, 430}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     for c in Channel {
       ctl := CONTROLS[c]
       if ctl.max <= ctl.min do continue
+      if is_limb(c) do mu.layout_row(ctx, {110, 75, -1}, 0)
+      else do mu.layout_row(ctx, {110, -1}, 0)
+      mu.label(ctx, ctl.name)
+      scale: f32 = 1 if ctl.ratio else DEG
       for side in Side {
-        if side == .R && (!is_limb(c) || app.choreo.mirror) do continue
+        if side == .R && !is_limb(c) do continue
         key := chan(c, side)
-        label := ctl.name
-        if is_limb(c) && !app.choreo.mirror do label = fmt.tprintf("%s %v", ctl.name, side)
-        mu.label(ctx, label)
-        scale: f32 = 1 if ctl.ratio else DEG
         value := app.pose[key] / scale
         mu.push_id(ctx, uintptr(key))
         changed := .CHANGE in mu.slider(ctx, &value, ctl.min / scale, ctl.max / scale, 0 if ctl.ratio else 1, "%.2f" if ctl.ratio else "%.0f")
         mu.pop_id(ctx)
         if !changed do continue
         app.pose[key] = value * scale
-        if is_limb(c) && app.choreo.mirror do app.pose[chan(c, .R)] = app.pose[key]
+        if is_limb(c) && app.choreo.mirror do app.pose[chan(c, .R if side == .L else .L)] = app.pose[key]
       }
     }
   }
@@ -454,7 +501,7 @@ part :: proc(app: ^App, name: string) {
 }
 
 piece :: proc(app: ^App, f: Frame, mesh: Mesh, scale: [3]f32, position: [3]f32 = {}, rotation := linalg.QUATERNIONF32_IDENTITY, next := true) {
-  node := world.spawn(&app.scene, parent = world.NodeHandle(app.mech.bones[f.bone].user))
+  node := world.spawn(&app.scene, parent = app.bones[f.bone].node)
   placed := at(f, position, rotation)
   world.set_local(&app.scene, node, placed.position, placed.rotation, scale)
   key := fmt.tprintf("%s %d", app.part, app.count)
@@ -473,13 +520,26 @@ cylinder :: proc(app: ^App, f: Frame, radius, height: f32, position: [3]f32 = {}
   piece(app, f, mesh, {radius, height, radius}, center, rotation, next)
 }
 
-bone :: proc(app: ^App, parent: int, offset: [3]f32 = {}, rest := linalg.QUATERNIONF32_IDENTITY, axis := mech.Axis.X, bind := Bind{}) -> int {
-  node := world.spawn(&app.scene)
-  append(&app.mech.bones, mech.make_bone(parent, offset, rest, axis, bind.channel, bind.sign, user = mech.Handle(node)))
-  return len(app.mech.bones) - 1
+bone :: proc(app: ^App, parent: int, offset: [3]f32 = {}, rest := linalg.QUATERNIONF32_IDENTITY, axis := Axis.X, bind := Bind{}) -> int {
+  append(&app.bones, Bone{parent, offset, rest, axis, bind.channel, bind.sign, world.spawn(&app.scene)})
+  return len(app.bones) - 1
 }
 
-mounts :: proc(j: Joint) -> (a, b: mech.Face) {
+solve :: proc(app: ^App, channels: []f32) -> []BonePose {
+  resize(&app.poses, len(app.bones))
+  for b, i in app.bones {
+    position, rotation := app.origin, linalg.QUATERNIONF32_IDENTITY
+    if b.parent >= 0 do position, rotation = app.poses[b.parent].position, app.poses[b.parent].rotation
+    position += linalg.quaternion128_mul_vector3(rotation, b.offset)
+    axis: [3]f32
+    axis[b.axis] = 1
+    rotation *= b.rest * linalg.quaternion_angle_axis_f32(b.sign * channels[b.channel], axis)
+    app.poses[i] = {b.node, position, linalg.normalize(rotation)}
+  }
+  return app.poses[:]
+}
+
+mounts :: proc(j: Joint) -> (a, b: geometry.Face) {
   switch j.kind {
   case .BALL:
     return {{0, -(j.ball_r * 0.55 + j.flange_t), 0}, NEG_Y, Z}, {{0, j.ball_r + j.stud_len + j.flange_t, 0}, Y, Z}
@@ -490,9 +550,9 @@ mounts :: proc(j: Joint) -> (a, b: mech.Face) {
   return {{0, REACH, 0}, Y, X}, {{0, -REACH, 0}, NEG_Y, X}
 }
 
-joint :: proc(app: ^App, parent: Frame, slot: mech.Face, j: Joint, binds: [3]Bind, child: mech.Face) -> (Frame, int) {
+joint :: proc(app: ^App, parent: Frame, slot: geometry.Face, j: Joint, binds: [3]Bind, child: geometry.Face) -> (Frame, int) {
   a, b := mounts(j)
-  origin, rotation := mech.seat(slot, a)
+  origin, rotation := geometry.seat(slot, a)
   frame := at(parent, origin, rotation)
   part(app, j.name)
   #partial switch j.kind {
@@ -504,7 +564,7 @@ joint :: proc(app: ^App, parent: Frame, slot: mech.Face, j: Joint, binds: [3]Bin
     ball_female(app, frame, j)
   }
   dofs: [3]struct {
-    axis:     mech.Axis,
+    axis:     Axis,
     offset:   [3]f32,
     rest:     quaternion128,
   }
@@ -544,7 +604,7 @@ joint :: proc(app: ^App, parent: Frame, slot: mech.Face, j: Joint, binds: [3]Bin
   case .BALL:
     ball_male(app, ride(bones[2]), j)
   }
-  position, seated := mech.seat(b, child)
+  position, seated := geometry.seat(b, child)
   return {bones[count - 1], position, seated}, bones[0]
 }
 
@@ -656,7 +716,7 @@ limbs :: proc(app: ^App, pelvis, torso: Frame, side: Side) {
 
   knuckle_y: f32 = -PALM_H + 0.08
   knuckle_z: f32 = PALM_D / 2 + DIGIT_W / 2
-  fingers := [3]mech.Face{{{0, knuckle_y, -knuckle_z}, NEG_Y, NEG_X}, {{-PALM_W * 0.27, knuckle_y, knuckle_z}, NEG_Y, X}, {{PALM_W * 0.27, knuckle_y, knuckle_z}, NEG_Y, X}}
+  fingers := [3]geometry.Face{{{0, knuckle_y, -knuckle_z}, NEG_Y, NEG_X}, {{-PALM_W * 0.27, knuckle_y, knuckle_z}, NEG_Y, X}, {{PALM_W * 0.27, knuckle_y, knuckle_z}, NEG_Y, X}}
   for slot in fingers {
     parent, at_slot := palm, slot
     for i in 0 ..< 3 {

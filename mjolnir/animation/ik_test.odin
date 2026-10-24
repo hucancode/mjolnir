@@ -250,3 +250,17 @@ test_fabrik_constrained_folds_back :: proc(t: ^testing.T) {
   d := linalg.distance(pos[4], target)
   testing.expectf(t, d < 0.01, "folded chain reaches target, off by %f (tip %v)", d, pos[4])
 }
+
+@(test)
+test_two_link_reaches :: proc(t: ^testing.T) {
+  for target in ([][2]f32{{1.2, 0.3}, {0.5, -0.4}, {0.3, 0.9}}) {
+    a, b, reached := two_link(1, 0.8, target)
+    testing.expect(t, reached)
+    testing.expect(t, b <= 0)
+    tip := [2]f32{math.cos(a), math.sin(a)} + 0.8 * [2]f32{math.cos(a + b), math.sin(a + b)}
+    testing.expect(t, linalg.length(tip - target) < 1e-4)
+  }
+  a, b, reached := two_link(1, 0.8, {3, 0})
+  testing.expect(t, !reached)
+  testing.expect(t, abs(a) < 1e-4 && abs(b) < 1e-4)
+}

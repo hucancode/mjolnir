@@ -4,23 +4,21 @@ import "core:math"
 import "core:math/ease"
 
 PERIOD :: 1.5
-ANTIC_RATIO :: 0.18
-REST_RATIO :: 0.1
-BOUNCE_TIME :: 0.2
-BOUNCE_POWER :: 0.1
+BOUNCE_POWER :: 0.2
 STYLE_BEATS :: 10
 PULSE_CHANCE :: 0.25
 SPLIT_CHANCE :: 0.1
 MERGE_CHANCE :: 0.3
 NEAR_END :: 0.05
-HOME_CHANCE :: 0.05
-MONTAGE_CHANCE :: 0.1
-SETUP_RATIO :: 0.8
 GRID :: math.PI / 4
 NEAR_CHANCE :: 0.35
 MIN_TRAVEL :: 0.15
-MAIN_AT :: REST_RATIO * PERIOD
-MAIN_DUR :: PERIOD - MAIN_AT
+MAX_BEATS :: 4
+BEAT_TRAVEL := [Tier]f32 {
+  .CORE = 0.35,
+  .LIMB = 0.7,
+  .TIP  = 1,
+}
 
 Step :: enum {
   ANTIC,
@@ -31,11 +29,11 @@ Step :: enum {
 
 STYLES := [?][]Step{{.ANTIC, .MOVE, .BOUNCE, .REST}, {.ANTIC, .ANTIC, .MOVE, .BOUNCE}, {.ANTIC, .ANTIC, .ANTIC, .REST}}
 
-STEP_SHARE := [Step]f32 {
-  .ANTIC  = ANTIC_RATIO,
-  .MOVE   = (1 - REST_RATIO - ANTIC_RATIO) * (1 - BOUNCE_TIME),
-  .BOUNCE = (1 - REST_RATIO - ANTIC_RATIO) * BOUNCE_TIME,
-  .REST   = REST_RATIO,
+STEP_WEIGHT := [Step]f32 {
+  .ANTIC  = 0.2,
+  .MOVE   = 0.5,
+  .BOUNCE = 0.2,
+  .REST   = 0.1,
 }
 
 Track :: struct {
@@ -43,7 +41,8 @@ Track :: struct {
   from, to:     f32,
   t0, dur:      f32,
   ease:         ease.Ease,
-  hit:          bool,
+  settle:       f32,
+  power:        f32,
 }
 
 Slider :: struct {
@@ -53,27 +52,10 @@ Slider :: struct {
   grid:     f32,
 }
 
-Partial :: struct {
-  value: Pose,
-  set:   bit_set[0 ..< CHANNEL_COUNT],
-}
-
-Key :: struct {
-  hold: f32,
-  pose: Partial,
-}
-
-Montage :: struct {
-  setup: Partial,
-  keys:  [5]Key,
-  loops: int,
-}
-
 Choreo :: struct {
   rng:        u32,
   mirror:     bool,
   sliders:    [dynamic]Slider,
-  montages:   [dynamic]Montage,
   tracks:     [dynamic]Track,
   clock:      f32,
   span:       f32,
@@ -84,27 +66,31 @@ Choreo :: struct {
   busy:       bit_set[0 ..< CHANNEL_COUNT],
   was, cur:   Pose,
   stirred:    bit_set[0 ..< CHANNEL_COUNT],
+  locked:     bit_set[0 ..< CHANNEL_COUNT],
+  weights:    [Step]f32,
+  power:      f32,
 }
 
 choreo_init :: proc(self: ^Choreo, seed: u32, mirror: bool) {
   self.rng = seed
   self.mirror = mirror
+  self.weights = STEP_WEIGHT
+  self.power = BOUNCE_POWER
   choreo_rewire(self)
 }
 
 choreo_destroy :: proc(self: ^Choreo) {
   delete(self.sliders)
-  delete(self.montages)
   delete(self.tracks)
 }
 
 choreo_rewire :: proc(self: ^Choreo) {
   clear(&self.sliders)
-  clear(&self.montages)
   clear(&self.tracks)
   self.clock, self.span, self.style, self.style_left = 0, 0, -1, 0
   self.plays = {}
   self.busy = {}
+  self.locked = {}
   for c in Channel {
     ctl := CONTROLS[c]
     if ctl.max <= ctl.min do continue
@@ -114,8 +100,6 @@ choreo_rewire :: proc(self: ^Choreo) {
       append(&self.sliders, Slider{chan(c, side), ctl.min, ctl.max, ctl.big, 0 if ctl.ratio else GRID})
     }
   }
-  append(&self.montages, montage(.SIDE_OUT, .SIDE_OUT), montage(.FRONT, .FRONT))
-  if !self.mirror do append(&self.montages, montage(.FRONT, .BACK))
 }
 
 choreo_step :: proc(self: ^Choreo, dt: f32, pose: ^Pose) {
@@ -143,10 +127,30 @@ pick :: proc(self: ^Choreo, n: int) -> int {
 }
 
 @(private = "file")
+pace :: proc(key: int) -> f32 {
+  c, _ := channel_of(key)
+  ctl := CONTROLS[c]
+  return BEAT_TRAVEL[ctl.tier] * (ctl.max - ctl.min)
+}
+
+@(private = "file")
+beats :: proc(key: int, from, to: f32) -> f32 {
+  return clamp(math.ceil(abs(to - from) / pace(key)), 1, MAX_BEATS)
+}
+
+@(private = "file")
+lock :: proc(self: ^Choreo, key: int) {
+  self.locked += {key}
+  if t := twin(self, key); t >= 0 do self.locked += {t}
+  for r in rivals(key) do self.locked += {r}
+}
+
+@(private = "file")
 curve :: proc(t: Track, u: f32) -> f32 {
-  if !t.hit do return ease.ease(t.ease, u)
-  if u < 1 - BOUNCE_TIME do return (1 + BOUNCE_POWER) * u / (1 - BOUNCE_TIME)
-  return math.lerp(f32(1 + BOUNCE_POWER), 1, ease.bounce_out((u - (1 - BOUNCE_TIME)) / BOUNCE_TIME))
+  if t.settle <= 0 do return ease.ease(t.ease, u)
+  bounce := t.settle / t.dur
+  if u < 1 - bounce do return (1 + t.power) * u / (1 - bounce)
+  return math.lerp(1 + t.power, 1, ease.bounce_out((u - (1 - bounce)) / bounce))
 }
 
 @(private = "file")
@@ -178,6 +182,7 @@ twin :: proc(self: ^Choreo, key: int) -> int {
 
 @(private = "file")
 allowed :: proc(self: ^Choreo, key: int) -> bool {
+  if key in self.locked do return false
   c, side := channel_of(key)
   if !is_leg(c) do return true
   other := Side.R if side == .L else Side.L
@@ -189,24 +194,24 @@ allowed :: proc(self: ^Choreo, key: int) -> bool {
 }
 
 @(private = "file")
-push :: proc(self: ^Choreo, key: int, to, t0, dur: f32, e: ease.Ease, hit: bool) {
+push :: proc(self: ^Choreo, key: int, to, t0, dur: f32, e: ease.Ease, settle: f32) {
   laid := false
   for &t in self.tracks {
     if t.key != key || t.t0 != t0 do continue
-    t.to, t.dur, t.ease, t.hit = to, dur, e, hit
+    t.to, t.dur, t.ease, t.settle, t.power = to, dur, e, settle, self.power
     laid = true
   }
-  if !laid do append(&self.tracks, Track{key, self.cur[key], to, t0, dur, e, hit})
+  if !laid do append(&self.tracks, Track{key, self.cur[key], to, t0, dur, e, settle, self.power})
   if to != rest(key) do self.stirred += {key}
   self.cur[key] = to
 }
 
 @(private = "file")
-cut :: proc(self: ^Choreo, key: int, to, t0, dur: f32, e: ease.Ease, hit := false) {
-  push(self, key, to, t0, dur, e, hit)
-  if t := twin(self, key); t >= 0 do push(self, t, to, t0, dur, e, hit)
+cut :: proc(self: ^Choreo, key: int, to, t0, dur: f32, e: ease.Ease, settle: f32 = 0) {
+  push(self, key, to, t0, dur, e, settle)
+  if t := twin(self, key); t >= 0 do push(self, t, to, t0, dur, e, settle)
   if to == rest(key) do return
-  for r in rivals(key) do if r != key && self.cur[r] != rest(r) do push(self, r, rest(r), t0, dur, e, hit)
+  for r in rivals(key) do if r != key && self.cur[r] != rest(r) do push(self, r, rest(r), t0, dur, e, settle)
 }
 
 @(private = "file")
@@ -242,7 +247,8 @@ target :: proc(self: ^Choreo, s: Slider) -> f32 {
 
 @(private = "file")
 aim :: proc(self: ^Choreo, s: Slider) -> f32 {
-  to := target(self, s)
+  reach := MAX_BEATS * pace(s.key)
+  to := clamp(target(self, s), self.cur[s.key] - reach, self.cur[s.key] + reach)
   n := self.plays[s.key]
   if n < 2 do self.played[s.key][n] = to
   else do self.played[s.key] = {self.played[s.key][1], to}
@@ -273,46 +279,29 @@ draw :: proc(self: ^Choreo, pool: []Slider, n: int) -> []Slider {
 @(private = "file")
 plan :: proc(self: ^Choreo, pose: ^Pose) -> f32 {
   self.was, self.cur = pose^, pose^
-  self.stirred = {}
-  clear(&self.tracks)
+  self.stirred, self.locked = {}, {}
+  carried := 0
+  for t in self.tracks do if t.t0 + t.dur > self.span + 1e-4 {
+    self.tracks[carried] = t
+    self.tracks[carried].t0 -= self.span
+    carried += 1
+    self.cur[t.key] = t.to
+    lock(self, t.key)
+  }
+  resize(&self.tracks, carried)
   if self.mirror {
     for side in Side do for leg in ([3]Channel{.HIP, .KNEE, .ANKLE}) {
       k := chan(leg, side)
-      if self.cur[k] != rest(k) do cut(self, k, rest(k), MAIN_AT, MAIN_DUR, .Sine_In_Out)
+      if k not_in self.locked && self.cur[k] != rest(k) do cut(self, k, rest(k), 0, PERIOD, .Sine_In_Out)
     }
   }
-  roll := random(self)
-  if roll < HOME_CHANCE {
-    for s in self.sliders do cut(self, s.key, rest(s.key), MAIN_AT, MAIN_DUR, .Linear, true)
-    return PERIOD
-  }
-  if roll < HOME_CHANCE + MONTAGE_CHANCE do return play(self, self.montages[pick(self, len(self.montages))])
-  if roll < HOME_CHANCE + MONTAGE_CHANCE + (SPLIT_CHANCE if self.mirror else MERGE_CHANCE) {
+  if self.locked != {} do return improvise(self)
+  if random(self) < (SPLIT_CHANCE if self.mirror else MERGE_CHANCE) {
     self.mirror = !self.mirror
     choreo_rewire(self)
     return plan(self, pose)
   }
   return improvise(self)
-}
-
-@(private = "file")
-play :: proc(self: ^Choreo, m: Montage) -> f32 {
-  held: f32
-  for k in m.keys do held += k.hold
-  held *= f32(m.loops)
-  beats := max(1, math.round(SETUP_RATIO + held))
-  fit := (beats - SETUP_RATIO) / held
-  at: f32 = SETUP_RATIO * PERIOD
-  for key in m.setup.set do cut(self, key, m.setup.value[key], 0, at, .Linear, true)
-  t := at
-  for _ in 0 ..< m.loops {
-    for k in m.keys {
-      dur := k.hold * fit * PERIOD
-      for key in k.pose.set do cut(self, key, k.pose.value[key], t, dur, .Sine_In_Out)
-      t += dur
-    }
-  }
-  return beats * PERIOD
 }
 
 @(private = "file")
@@ -332,13 +321,18 @@ improvise :: proc(self: ^Choreo) -> f32 {
   for s in self.sliders {
     if s.key == int(Channel.HIP_LEVEL) {
       if random(self) < PULSE_CHANCE && allowed(self, s.key) {
-        cut(self, s.key, aim(self, s), 0, PERIOD, .Sine_In_Out)
+        from := self.cur[s.key]
+        to := aim(self, s)
+        cut(self, s.key, to, 0, beats(s.key, from, to) * PERIOD, .Sine_In_Out)
         moved += {s.key}
       }
       continue
     }
     if s.key == int(Channel.TWIST) && !has_move && allowed(self, s.key) {
-      cut(self, s.key, aim(self, s), 0, PERIOD, .Linear)
+      from := self.cur[s.key]
+      to := aim(self, s)
+      n := beats(s.key, from, to)
+      cut(self, s.key, to, 0, n * PERIOD, .Linear if n == 1 else .Sine_In_Out)
       moved += {s.key}
     }
     if s.big {
@@ -355,13 +349,13 @@ improvise :: proc(self: ^Choreo) -> f32 {
     copy(steps[1:len(style)], style[:len(style) - 1])
     steps[0] = .REST
   }
-  share: f32
-  for step in steps[:len(style)] do share += STEP_SHARE[step]
-  scale := PERIOD / share
+  weight: f32
+  for step in steps[:len(style)] do weight += self.weights[step]
+  durs: [4]f32
+  for step, i in steps[:len(style)] do durs[i] = self.weights[step] / weight * PERIOD
   t: f32
-  reel_key, reel_to := -1, f32(0)
-  for step in steps[:len(style)] {
-    dur := STEP_SHARE[step] * scale
+  for step, i in steps[:len(style)] {
+    dur := durs[i]
     switch step {
     case .ANTIC:
       n := 1 + pick(self, min(3, smalls))
@@ -378,69 +372,16 @@ improvise :: proc(self: ^Choreo) -> f32 {
       }
       if opens > 0 {
         s := draw(self, open[:opens], 1)[0]
+        from := self.cur[s.key]
         to := aim(self, s)
-        cut(self, s.key, to + BOUNCE_POWER * (to - self.cur[s.key]), t, dur, .Linear)
-        reel_key, reel_to = s.key, to
+        settle := durs[i + 1] if i + 1 < len(style) && steps[i + 1] == .BOUNCE else 0
+        cut(self, s.key, to, t, (beats(s.key, from, to) - 1) * PERIOD + dur + settle, .Linear, settle)
         moved += {s.key}
       }
-    case .BOUNCE:
-      if reel_key >= 0 do cut(self, reel_key, reel_to, t, dur, .Bounce_Out)
-      reel_key = -1
-    case .REST:
+    case .BOUNCE, .REST:
     }
     t += dur
   }
   self.busy = moved
   return PERIOD
-}
-
-Wave :: enum {
-  SIDE_OUT,
-  FRONT,
-  BACK,
-}
-
-@(private = "file")
-montage :: proc(left, right: Wave) -> (m: Montage) {
-  m.loops = 2
-  for c in Channel do if c != .HIP_LEVEL && CONTROLS[c].max > CONTROLS[c].min {
-    for side in Side do set(&m.setup, c, side, 0)
-  }
-  for wave, i in ([2]Wave{left, right}) {
-    side := Side(i)
-    level, n: f32 = math.PI / 2, 35 * DEG
-    lead_channel := Channel.SHOULDER
-    switch wave {
-    case .SIDE_OUT:
-      lead_channel = .ARM_OUT
-      set(&m.setup, .ARM_OUT, side, level)
-      set(&m.setup, .ARM_TWIST, side, -math.PI / 2)
-    case .FRONT:
-      set(&m.setup, .SHOULDER, side, level)
-    case .BACK:
-      level, n = -level, -n
-      set(&m.setup, .SHOULDER, side, level)
-    }
-    holds := [5]f32{0.15, 0.12, 0.12, 0.12, 0.15}
-    for h, k in holds do m.keys[k].hold = h
-    set(&m.keys[0].pose, lead_channel, side, level + n)
-    set(&m.keys[0].pose, .ELBOW, side, -2 * n)
-    set(&m.keys[0].pose, .WRIST_BEND, side, n)
-    set(&m.keys[1].pose, lead_channel, side, level)
-    set(&m.keys[1].pose, .ELBOW, side, n)
-    set(&m.keys[1].pose, .WRIST_BEND, side, -2 * n)
-    set(&m.keys[2].pose, .ELBOW, side, 0)
-    set(&m.keys[2].pose, .WRIST_BEND, side, n)
-    set(&m.keys[3].pose, .WRIST_BEND, side, 0)
-    set(&m.keys[3].pose, .CURL, side, abs(n) / (math.PI / 2))
-    set(&m.keys[4].pose, .CURL, side, 0)
-  }
-  return
-}
-
-@(private = "file")
-set :: proc(p: ^Partial, c: Channel, side: Side, v: f32) {
-  k := chan(c, side)
-  p.value[k] = v
-  p.set += {k}
 }

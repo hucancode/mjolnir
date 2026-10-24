@@ -303,3 +303,14 @@ update_transforms_from_positions :: proc(
   positions[bone_idx] = joints[last]
   rotations[bone_idx] = last_swing * fk_rotations[last]
 }
+
+// two_link solves a planar two-link chain of lengths l1 and l2 to reach `target`. a is the
+// first link's angle from +x toward +y, b the second's turn off the first, folding toward -y
+// (b <= 0). A target out of reach straightens or folds the chain toward it and reached is false.
+two_link :: proc(l1, l2: f32, target: [2]f32) -> (a, b: f32, reached: bool) {
+  r := linalg.length(target)
+  reached = r <= l1 + l2 && r >= abs(l1 - l2)
+  b = -math.acos(clamp((r * r - l1 * l1 - l2 * l2) / (2 * l1 * l2), -1, 1))
+  a = math.atan2(target.y, target.x) - math.atan2(l2 * math.sin(b), l1 + l2 * math.cos(b))
+  return
+}
