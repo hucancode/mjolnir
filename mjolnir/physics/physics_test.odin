@@ -23,7 +23,7 @@ test_physics_world_gravity_application :: proc(t: ^testing.T) {
   body, get_ok := lookup(&physics_world, body_handle)
   testing.expect(t, get_ok, "Body retrieval should succeed")
   initial_velocity := body.velocity.y
-  dt := f32(0.016)
+  dt := f32(1.0 / 60.0)
   step(&physics_world, dt)
   expected_velocity_change := physics_world.gravity.y * dt
   testing.expect(
@@ -44,7 +44,7 @@ test_physics_world_two_body_collision :: proc(t: ^testing.T) {
   body_b, _ := lookup(&physics_world, body_b_handle)
   body_a.velocity = {10, 0, 0}
   body_b.velocity = {-10, 0, 0}
-  dt := f32(0.016)
+  dt := f32(1.0 / 60.0)
   step(&physics_world, dt)
   testing.expect(
     t,
@@ -72,7 +72,7 @@ test_physics_world_static_body_collision :: proc(t: ^testing.T) {
   body_dynamic_handle, _ := body_create(&physics_world, {1.5, 0, 0}, linalg.QUATERNIONF32_IDENTITY, SphereCollider{radius = 1.0}, mass = 1.0)
   body_dynamic, _ := lookup(&physics_world, body_dynamic_handle)
   body_dynamic.velocity = {-10, 0, 0}
-  dt := f32(0.016)
+  dt := f32(1.0 / 60.0)
   step(&physics_world, dt)
   testing.expect(
     t,
@@ -101,7 +101,7 @@ test_resolve_contact_momentum_conservation :: proc(t: ^testing.T) {
     count       = 1,
     points      = {0 = {point = {0, 0, 0}, base_separation = -0.1}},
   }
-  dt := f32(0.016)
+  dt := f32(1.0 / 60.0)
   prepare_contact(&contact, &body_a, &body_b)
   soft := make_soft(CONTACT_HERTZ, CONTACT_DAMPING_RATIO, dt)
   resolve_velocity(&contact, &body_a, &body_b, soft, 1.0 / dt, true)
@@ -128,7 +128,7 @@ test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
   body_create(&physics_world, collider = BoxCollider{half_extents = {0.5, 5, 5}})
   body_bullet := lookup(&physics_world, body_bullet_handle)
   body_bullet.velocity = {100, 0, 0}
-  dt := f32(0.016)
+  dt := f32(1.0 / 60.0)
   step(&physics_world, dt)
   testing.expect(
     t,
@@ -560,7 +560,7 @@ test_torque_induces_angular_velocity :: proc(t: ^testing.T) {
   handle := body_create(&world, collider = BoxCollider{half_extents = {1, 1, 1}}, mass = 1.0)
   body := lookup(&world, handle)
   body.torque = {0, 10, 0}
-  step(&world, 0.016)
+  step(&world, 1.0 / 60.0)
   testing.expect(
     t,
     abs(body.angular_velocity.y) > 0.01,
@@ -624,7 +624,7 @@ test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
   body_create(&physics_world, {0.5, 0.5, 0}, linalg.QUATERNIONF32_IDENTITY, SphereCollider{radius = 1.0}, mass = 1.0)
   body_a := lookup(&physics_world, body_a_handle)
   body_a.velocity = {10, 0, 0}
-  dt := f32(0.016)
+  dt := f32(1.0 / 60.0)
   step(&physics_world, dt)
   if len(physics_world.contacts) > 0 {
     testing.expect(
@@ -647,7 +647,7 @@ test_resolve_contact_restitution_coefficient :: proc(t: ^testing.T) {
     count       = 1,
     points      = {0 = {point = {0, 0, 0}, base_separation = -0.01}},
   }
-  dt := f32(0.016)
+  dt := f32(1.0 / 60.0)
   prepare_contact(&contact, &body_dynamic, &body_static)
   soft := make_soft(CONTACT_HERTZ, CONTACT_DAMPING_RATIO, dt)
   resolve_velocity(&contact, &body_dynamic, &body_static, soft, 1.0 / dt, true)
@@ -679,7 +679,7 @@ test_resolve_contact_friction_reduces_tangent_velocity :: proc(t: ^testing.T) {
     points      = {0 = {point = {0, 0, 0}, base_separation = -0.01}},
   }
   initial_tangent_speed := abs(body_dynamic.velocity.x)
-  dt := f32(0.016)
+  dt := f32(1.0 / 60.0)
   prepare_contact(&contact, &body_dynamic, &body_static)
   soft := make_soft(CONTACT_HERTZ, CONTACT_DAMPING_RATIO, dt)
   resolve_velocity(&contact, &body_dynamic, &body_static, soft, 1.0 / dt, true)
@@ -708,7 +708,7 @@ test_integration_box_stack_stability :: proc(t: ^testing.T) {
   body_2, _ := lookup(&physics_world, body_2_h)
   body_3_h, _ := body_create(&physics_world, {0, 2.5, 0}, linalg.QUATERNIONF32_IDENTITY, BoxCollider{half_extents = {0.5, 0.5, 0.5}}, mass = 10.0)
   body_3, _ := lookup(&physics_world, body_3_h)
-  dt := f32(0.016)
+  dt := f32(1.0 / 60.0)
   for i in 0 ..< 120 {
     step(&physics_world, dt)
     log.infof("finished simulating step %v", i)
@@ -751,7 +751,7 @@ test_resolve_contact_bias_correction :: proc(t: ^testing.T) {
     count       = 1,
     points      = {0 = {point = {0, 0, 0}, base_separation = -0.5}},
   }
-  dt := f32(0.016)
+  dt := f32(1.0 / 60.0)
   prepare_contact(&contact, &body_a, &body_b)
   testing.expect(
     t,
@@ -775,7 +775,7 @@ test_disable_rotation_prevents_angular_velocity :: proc(t: ^testing.T) {
   body.enable_rotation = false
   update_world_inertia(body)
   body.torque = {0, 10, 0}
-  step(&world, 0.016)
+  step(&world, 1.0 / 60.0)
   testing.expect(
     t,
     abs(body.angular_velocity.x) < 0.001 &&
@@ -960,7 +960,7 @@ test_rotated_body_with_offset_collision :: proc(t: ^testing.T) {
     math.PI / 4.0,
     linalg.VECTOR3F32_Z_AXIS,
   )
-  dt := f32(0.016)
+  dt := f32(1.0 / 60.0)
   for i in 0 ..< 60 {
     step(&physics_world, dt)
   }

@@ -11,6 +11,11 @@ import "core:time"
 
 // KILL_Y is the height below which `step` destroys dynamic bodies (see World.killed).
 KILL_Y :: #config(PHYSICS_KILL_Y, -50.0)
+// PHYSICS_FPS is the highest rate `step` simulates at; calls coming faster are skipped and their
+// dt carried to the next step (-define:PHYSICS_FPS=n, default the engine's UPDATE_FPS).
+PHYSICS_FPS :: #config(PHYSICS_FPS, #config(UPDATE_FPS, #config(RENDER_FPS, 60)))
+@(private = "file")
+MIN_STEP_DT :: 1.0 / PHYSICS_FPS
 // MAX_STEP_DT is the longest time one `step` simulates; a longer dt (a stalled frame) is cut to it,
 // so the simulation slows down instead of breaking.
 MAX_STEP_DT :: #config(PHYSICS_MAX_STEP_DT, 1.0 / 30.0)
@@ -178,6 +183,7 @@ World_State :: struct {
   solver_color_buckets: [dynamic][dynamic]int, // per color: contact indices
   solver_overflow:      [dynamic]int,          // contacts that fit no color; solved single-threaded
   solver_color_count:   int,
+  pending_dt:           f32, // time skipped steps owe the next one
 }
 
 // init prepares the world and its thread pool.
@@ -241,6 +247,7 @@ teardown :: proc(self: ^World) {
   clear(&self.killed)
   clear(&self.prev_warmstart)
   clear(&self.awake_list)
+  self.pending_dt = 0
   self.dynamic_bvh_dirty = true
   self.static_bvh_dirty = true
 }
@@ -609,11 +616,18 @@ step_sensors :: proc(self: ^World) {
   }
 }
 
-// step advances the simulation by dt seconds, at most MAX_STEP_DT.
+// step advances the simulation by dt seconds, at most MAX_STEP_DT. Until PHYSICS_FPS allows the
+// next step it only banks dt, clears killed and returns false.
 // Millisecond timing blocks compile out with PHYSICS_PERF_STATS=false;
 // the durations then stay zero.
-step :: proc(self: ^World, dt: f32) {
-  dt := min(dt, MAX_STEP_DT)
+step :: proc(self: ^World, dt: f32) -> (stepped: bool) {
+  self.pending_dt += dt
+  if self.pending_dt < MIN_STEP_DT {
+    clear(&self.killed)
+    return false
+  }
+  dt := min(self.pending_dt, MAX_STEP_DT)
+  self.pending_dt = 0
   warmstart_prep_time, ccd_time, bvh_build_time: time.Duration
   refit_time, broadphase_time, prepare_time, substep_time, finalize_time: time.Duration
   cleanup_time, total_time: time.Duration
@@ -742,6 +756,7 @@ step :: proc(self: ^World, dt: f32) {
       self.last_perf.body_count, awake_body_count, len(self.contacts),
     )
   }
+  return true
 }
 
 // destroy frees a body, as body_destroy does.
