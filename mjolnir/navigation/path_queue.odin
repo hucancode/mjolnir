@@ -1,7 +1,7 @@
 #+private
-package crowd
+package navigation
 
-import "../detour"
+import "detour"
 
 @(private = "file")
 MAX_QUEUE :: 8

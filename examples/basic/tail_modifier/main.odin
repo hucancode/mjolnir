@@ -5,8 +5,9 @@ import "core:log"
 import "core:math"
 import mu "vendor:microui"
 import "mjolnir"
-import anim "mjolnir/animation"
+import "mjolnir/animation"
 import "mjolnir/debugui"
+import "mjolnir/geometry"
 import "mjolnir/gltf"
 import "mjolnir/input"
 import "mjolnir/platform"
@@ -17,7 +18,7 @@ GROUND_Y :: f32(-1)
 HEAD_BONE :: "root"
 
 App :: struct {
-  window:          platform.Platform,
+  platform:        platform.Platform,
   scene:           world.World,
   renderer:        render.Renderer,
   debug:           debugui.Context,
@@ -26,17 +27,17 @@ App :: struct {
   snake_model:     gltf.Model,
   snake:           gltf.Instance,
   snake_node:      world.NodeHandle,
-  rig:             ^anim.Rig,
-  animator:        anim.Animator,
-  tail:            anim.LayerHandle,
+  rig:             ^animation.Rig,
+  animator:        ^animation.Animator,
+  tail:            animation.LayerHandle,
   head_bone:       u32,
   time:            f32,
-  stiffness:       mu.Real,
-  damping:         mu.Real,
+  stiffness:       f32,
+  damping:         f32,
   stretch:         bool,
   auto_animate:    bool,
-  drive_frequency: mu.Real,
-  drive_amplitude: mu.Real,
+  drive_frequency: f32,
+  drive_amplitude: f32,
   dragging:        bool,
   drag_height:     f32,
   head_offset:     [3]f32,
@@ -50,9 +51,8 @@ main :: proc() {
   app.auto_animate = true
   app.drive_frequency = 0.7
   app.drive_amplitude = 0.5
-  w := &app.window
-  if !platform.init(w, 900, 700, "Tail Modifier") do return
-  if !render.init(&app.renderer, "Tail Modifier", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 900, 700, "Tail Modifier") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -67,25 +67,24 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  anim.destroy(&app.animator)
   gltf.destroy(&app.snake, &app.scene)
   gltf.destroy(&app.snake_model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {900, 700}) do return .FAIL
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 4, -4}, {0, 1, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
+  app.orbit = render.make_orbit({0, 4, -4}, {0, 1, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   ground := world.spawn(&app.scene, {0, GROUND_Y, 0})
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
   world.scale(&app.scene, ground, 20.0)
@@ -93,63 +92,59 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.snake = gltf.instance_create(&app.snake_model, &app.scene, &app.renderer)
   if len(app.snake.skinned) == 0 do return .FAIL
   app.snake_node = app.snake.skinned[0].node
-  app.rig = &app.snake_model.rigs[app.snake.skinned[0].rig]
+  rig := app.snake.skinned[0].rig
+  app.rig = &app.snake_model.rigs[rig]
+  app.animator = &app.snake.animators[rig]
   skel := &app.rig.skeleton
-  anim.animator_init(&app.animator, app.rig)
-  whole_body, _ := anim.bone_chain_down(skel, HEAD_BONE, u32(anim.bone_count(skel)), context.temp_allocator)
-  app.tail = anim.layer_create(&app.animator, app.rig, tail_params(app), whole_body)
-  app.head_bone = anim.bone_find(skel, HEAD_BONE)
+  whole_body, _ := animation.bone_chain_down(skel, HEAD_BONE, u32(animation.bone_count(skel)), context.temp_allocator)
+  app.tail = animation.layer_create(app.animator, app.rig, tail_params(app), whole_body)
+  app.head_bone = animation.bone_find(skel, HEAD_BONE)
   return .READY
 }
 
-tail_params :: proc(app: ^App) -> anim.TailParams {
-  return {stiffness = f32(app.stiffness), damping = f32(app.damping), stretch = app.stretch}
+tail_params :: proc(app: ^App) -> animation.TailParams {
+  return {stiffness = app.stiffness, damping = app.damping, stretch = app.stretch}
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  if app.rig != nil do animate(app, dt)
+  move_snake(app, dt)
   world.update(&app.scene)
-  if app.rig != nil do anim.animator_update(&app.animator, app.rig, dt, world.world_matrix(&app.scene, app.snake_node))
+  gltf.animate(&app.snake, &app.snake_model, &app.scene, &app.renderer, dt)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  if app.rig != nil do for sk in app.snake.skinned do render.stage_bones(&app.renderer, render.SlotHandle(sk.node.index), app.animator.palette)
   render.update(&app.renderer, dt)
 }
 
-animate :: proc(app: ^App, dt: f32) {
+move_snake :: proc(app: ^App, dt: f32) {
   if app.auto_animate {
     app.time += dt
-    y := f32(app.drive_amplitude) * math.sin(app.time * f32(app.drive_frequency) * 2 * math.PI)
+    y := app.drive_amplitude * math.sin(app.time * app.drive_frequency * 2 * math.PI)
     world.translate(&app.scene, app.snake_node, 0, y, 0)
     app.dragging = false
   } else {
     drag_head(app)
   }
-  if tail, ok := anim.layer_params(&app.animator, app.tail, anim.TailParams); ok do tail^ = tail_params(app)
+  if tail, ok := animation.layer_params(app.animator, app.tail, animation.TailParams); ok do tail^ = tail_params(app)
 }
 
 cursor_on_ground :: proc(app: ^App) -> (hit: [3]f32, ok: bool) {
   ray := render.cursor_ray(&app.renderer, app.input.cursor) or_return
-  if abs(ray.direction.y) < 1e-6 do return
-  t := (GROUND_Y - ray.origin.y) / ray.direction.y
-  if t <= 0 do return
-  return ray.origin + ray.direction * t, true
+  t: f32
+  ok, t = geometry.ray_plane_intersection(ray, {0, GROUND_Y, 0}, {0, 1, 0})
+  return ray.origin + ray.direction * t, ok
 }
 
 drag_head :: proc(app: ^App) {
   if input.mouse_pressed(&app.input, .RIGHT) && !app.input.mouse_captured {
     node_world := world.world_matrix(&app.scene, app.snake_node)
-    head_world := node_world * anim.bone_matrix(&app.animator, app.head_bone)
+    head_world := node_world * animation.bone_matrix(app.animator, app.head_bone)
     app.dragging = true
     app.drag_height = world.node(&app.scene, app.snake_node).transform.position.y
     app.head_offset = head_world[3].xyz - node_world[3].xyz
@@ -162,8 +157,8 @@ drag_head :: proc(app: ^App) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

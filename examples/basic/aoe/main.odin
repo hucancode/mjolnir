@@ -21,7 +21,7 @@ EFFECTOR_ORBIT_RADIUS :: f32(15.0)
 EFFECTOR_ORBIT_SPEED :: f32(0.5)
 
 App :: struct {
-  window:         platform.Platform,
+  platform:       platform.Platform,
   scene:          world.World,
   renderer:       render.Renderer,
   input:          input.State,
@@ -37,9 +37,8 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   if !physics.init(&app.phys) do return
-  w := &app.window
-  if !platform.init(w, 800, 600, "AOE Query") do return
-  if !render.init(&app.renderer, "AOE Query", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 800, 600, "AOE Query") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -67,8 +66,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.effector = world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(app.effector.index), render.primitive(&app.renderer, .SPHERE, effector_material, cast_shadow = false))
   world.scale(&app.scene, app.effector, 0.5)
-  render.camera_look_at(render.main_camera(&app.renderer), {10, 30, 10}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
+  app.orbit = render.make_orbit({10, 30, 10}, {0, 0, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   log.infof("AOE test setup complete: %d cubes", GRID_SIZE * GRID_SIZE)
   return .READY
 }
@@ -77,13 +76,13 @@ shutdown :: proc(app: ^App) {
   delete(app.affected)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   physics.shutdown(&app.phys)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 set_cube_half_extent :: proc(app: ^App, body: physics.BodyHandle, half_extent: f32) {
@@ -93,11 +92,8 @@ set_cube_half_extent :: proc(app: ^App, body: physics.BodyHandle, half_extent: f
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  platform.read_input(&app.platform, &app.input)
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   if input.mouse_pressed(&app.input, .LEFT) && !app.input.mouse_captured {
@@ -123,6 +119,6 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }

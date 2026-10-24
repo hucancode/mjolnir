@@ -40,8 +40,8 @@ Backend :: struct {
   frame_serial:               u64,
   // the device took indirect-first-instance (rhi.Caps.indirect_first_instance)
   indirect_first_instance:    bool,
-  // what init was given, for finishing once the device arrives
-  framebuffer_size:           [2]u32,
+  // the window init was given
+  window:                     WindowHandle,
   // the device is up and every resource made; failed: it never will be
   up, failed:                 bool,
   context_:                   runtime.Context,
@@ -75,9 +75,9 @@ Backend :: struct {
 // init brings WebGPU up on window: instance, surface, then adapter and device, which the web
 // hands over asynchronously; once they are there it makes the samplers and the push group
 // (ready). Paired with shutdown.
-init :: proc(b: ^Backend, app_name: string, window: WindowHandle, framebuffer_size: [2]u32) -> bool {
+init :: proc(b: ^Backend, window: WindowHandle) -> bool {
   b.context_ = context
-  b.framebuffer_size = framebuffer_size
+  b.window = window
   b.instance = wgpu.CreateInstance(nil)
   if b.instance == nil {
     log.errorf("WebGPU: no instance")
@@ -159,7 +159,8 @@ on_lost :: proc "c" (device: ^wgpu.Device, reason: wgpu.DeviceLostReason, messag
 // Everything but the device: made once it arrives.
 @(private = "file")
 resources_init :: proc(b: ^Backend) {
-  surface_configure(b, b.framebuffer_size)
+  size, _ := window_size(b)
+  surface_configure(b, size)
   b.textures = make([]Texture, rhi.MAX_TEXTURES)
   samplers_init(b)
   frame_group_init(b)

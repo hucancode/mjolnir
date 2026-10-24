@@ -11,7 +11,7 @@ import "core:log"
 import mu "vendor:microui"
 
 App :: struct {
-  window:   platform.Platform,
+  platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   debug:    debugui.Context,
@@ -37,28 +37,27 @@ blur_on: bool
 crosshatch_on: bool
 vignette_on: bool
 
-bloom_threshold: mu.Real = 1.0
-bloom_intensity: mu.Real = 1.0
-tonemap_exposure: mu.Real = 1.0
-tonemap_gamma: mu.Real = 1.0
-fog_start: mu.Real = 5.0
-fog_end: mu.Real = 40.0
-outline_thickness: mu.Real = 1.5
-dof_focus: mu.Real = 8.0
-dof_range: mu.Real = 3.0
-dof_blur: mu.Real = 20.0
-blur_radius: mu.Real = 3.0
-grayscale_strength: mu.Real = 1.0
-vignette_radius: mu.Real = 0.75
-vignette_softness: mu.Real = 0.45
-vignette_strength: mu.Real = 0.8
+bloom_threshold: f32 = 1.0
+bloom_intensity: f32 = 1.0
+tonemap_exposure: f32 = 1.0
+tonemap_gamma: f32 = 1.0
+fog_start: f32 = 5.0
+fog_end: f32 = 40.0
+outline_thickness: f32 = 1.5
+dof_focus: f32 = 8.0
+dof_range: f32 = 3.0
+dof_blur: f32 = 20.0
+blur_radius: f32 = 3.0
+grayscale_strength: f32 = 1.0
+vignette_radius: f32 = 0.75
+vignette_softness: f32 = 0.45
+vignette_strength: f32 = 0.8
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1000, 700, "Post-process Stack Panel") do return
-  if !render.init(&app.renderer, "Post-process Stack Panel", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1000, 700, "Post-process Stack Panel") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -76,19 +75,19 @@ shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
-  render.camera_look_at(render.main_camera(&app.renderer), {6, 5, 10}, {0, 1.0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1.0, 0})
+  app.orbit = render.make_orbit({6, 5, 10}, {0, 1.0, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   ok: bool
   app.vignette, ok = render.post_shader_create(&app.renderer, #load("vignette." + render.SHADER_EXT))
   if !ok do log.error("Failed to create the vignette shader")
@@ -127,26 +126,23 @@ spawn_mesh :: proc(app: ^App, shape: render.Primitive, material: render.Material
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   clear(&app.renderer.effect_stack)
-  if outline_on    do append(&app.renderer.effect_stack, render.OutlineEffect{thickness = f32(outline_thickness)})
-  if fog_on        do append(&app.renderer.effect_stack, render.FogEffect{color = {0.55, 0.6, 0.7}, start = f32(fog_start), end = f32(fog_end)})
-  if dof_on        do append(&app.renderer.effect_stack, render.DoFEffect{focus_distance = f32(dof_focus), focus_range = f32(dof_range), blur_strength = f32(dof_blur), bokeh_intensity = 0.5})
-  if bloom_on      do append(&app.renderer.effect_stack, render.BloomEffect{threshold = f32(bloom_threshold), intensity = f32(bloom_intensity), blur_radius = 32.0})
-  if blur_on       do append(&app.renderer.effect_stack, render.BlurEffect{radius = f32(blur_radius), weight_falloff = 1.0})
+  if outline_on    do append(&app.renderer.effect_stack, render.OutlineEffect{thickness = outline_thickness})
+  if fog_on        do append(&app.renderer.effect_stack, render.FogEffect{color = {0.55, 0.6, 0.7}, start = fog_start, end = fog_end})
+  if dof_on        do append(&app.renderer.effect_stack, render.DoFEffect{focus_distance = dof_focus, focus_range = dof_range, blur_strength = dof_blur, bokeh_intensity = 0.5})
+  if bloom_on      do append(&app.renderer.effect_stack, render.BloomEffect{threshold = bloom_threshold, intensity = bloom_intensity, blur_radius = 32.0})
+  if blur_on       do append(&app.renderer.effect_stack, render.BlurEffect{radius = blur_radius, weight_falloff = 1.0})
   if crosshatch_on do append(&app.renderer.effect_stack, render.CrossHatchEffect{hatch_offset_y = 5.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
-  if grayscale_on  do append(&app.renderer.effect_stack, render.GrayscaleEffect{strength = f32(grayscale_strength)})
-  if tonemap_on    do append(&app.renderer.effect_stack, render.ToneMapEffect{exposure = f32(tonemap_exposure), gamma = f32(tonemap_gamma)})
+  if grayscale_on  do append(&app.renderer.effect_stack, render.GrayscaleEffect{strength = grayscale_strength})
+  if tonemap_on    do append(&app.renderer.effect_stack, render.ToneMapEffect{exposure = tonemap_exposure, gamma = tonemap_gamma})
   if vignette_on && app.vignette != 0 {
-    params := VignetteParams{color = {0.02, 0.0, 0.05}, radius = f32(vignette_radius), softness = f32(vignette_softness), strength = f32(vignette_strength)}
+    params := VignetteParams{color = {0.02, 0.0, 0.05}, radius = vignette_radius, softness = vignette_softness, strength = vignette_strength}
     append(&app.renderer.effect_stack, render.make_custom_effect(app.vignette, params))
   }
   world.update(&app.scene)
@@ -155,8 +151,8 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

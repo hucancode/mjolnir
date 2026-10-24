@@ -328,10 +328,12 @@ Frame :: struct {
 // render calls the backend's procs directly, so none of this costs a dispatch.
 Procs :: struct($Device: typeid, $Window: typeid) {
   // lifecycle: init brings the device up on window (ready says when it is, the web finishes
-  // later); shutdown destroys everything. wait_idle lands every upload and waits for the GPU,
+  // later); shutdown destroys everything. window_size measures the window: its framebuffer in
+  // pixels and its DPI scale (pixels per window unit). wait_idle lands every upload and waits for the GPU,
   // then destroys what was retired. tick destroys what was retired RETIRE_GRACE frames ago,
   // once per frame. frame_serial counts presented frames; extent is the swapchain's size.
-  init:                          proc(d: ^Device, app_name: string, window: Window, framebuffer_size: [2]u32) -> bool,
+  init:                          proc(d: ^Device, window: Window) -> bool,
+  window_size:                   proc(d: ^Device) -> (framebuffer_size: [2]u32, dpi_scale: f32),
   ready:                         proc(d: ^Device) -> bool,
   shutdown:                      proc(d: ^Device),
   wait_idle:                     proc(d: ^Device),

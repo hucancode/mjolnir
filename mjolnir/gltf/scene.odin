@@ -14,7 +14,7 @@ import "vendor:cgltf"
 RigHandle :: distinct u32
 
 // Joint is the world node of a rig's bone: what hangs under it (a sword in a hand) follows the
-// bone once pose_joints runs.
+// bone as animate poses it.
 Joint :: struct {
   node: world.NodeHandle,
   rig:  RigHandle,
@@ -65,11 +65,13 @@ ModelJoint :: struct {
 }
 
 // Instance is one copy of a Model in the world (instance_create): the nodes under `roots`, the
-// skinned ones and the joints of each rig.
+// skinned ones, the joints of each rig, and an animator per rig of the model (indexed by
+// RigHandle) posing every skinned node and joint of that rig; animate runs them.
 Instance :: struct {
-  roots:   [dynamic]world.NodeHandle,
-  skinned: [dynamic]SkinnedNode,
-  joints:  [dynamic]Joint,
+  roots:     [dynamic]world.NodeHandle,
+  skinned:   [dynamic]SkinnedNode,
+  joints:    [dynamic]Joint,
+  animators: []animation.Animator,
 }
 
 // model_create loads a glTF held in memory, a .glb or a glTF whose buffers and images are all
@@ -105,8 +107,8 @@ model_destroy :: proc(self: ^Model, r: ^render.Renderer) {
 }
 
 // instance_create spawns one world node per glTF node of the model under `parent` (the world
-// root by default), each drawing its mesh. A skinned node moves once the app animates its rig
-// (animation.animator_update) and stages the palette each tick (render.stage_bones).
+// root by default), each drawing its mesh, and an animator per rig at its rest pose: play
+// clips or add layers on them, and call animate each tick.
 instance_create :: proc(
   model: ^Model,
   w: ^world.World,
@@ -136,12 +138,34 @@ instance_create :: proc(
   for j in model.joints do if nodes[j.node] != {} {
     append(&instance.joints, Joint{node = nodes[j.node], rig = j.rig, bone = j.bone})
   }
+  instance.animators = make([]animation.Animator, len(model.rigs))
+  for &rig, i in model.rigs do animation.animator_init(&instance.animators[i], &rig)
   return instance, len(instance.roots) > 0
 }
 
-// instance_destroy destroys the instance's nodes (roots and their descendants).
+// animate advances each rig's animator by dt, poses the rig's joints (what hangs under them
+// follows at the next world.update) and stages the palette of every skinned node, once per tick.
+// WORLD-space layers are placed by the world matrix of the rig's first skinned node as of the
+// last world.update: call it after world.update for this tick's.
+animate :: proc(self: ^Instance, model: ^Model, w: ^world.World, r: ^render.Renderer, dt: f32) {
+  for &a, i in self.animators {
+    rig := RigHandle(i)
+    root := linalg.MATRIX4F32_IDENTITY
+    for s in self.skinned do if s.rig == rig {
+      root = world.world_matrix(w, s.node)
+      break
+    }
+    animation.animator_update(&a, &model.rigs[i], dt, root)
+    pose_joints(self, w, model, rig, &a)
+  }
+  for s in self.skinned do render.stage_bones(r, render.SlotHandle(s.node.index), self.animators[s.rig].palette)
+}
+
+// instance_destroy destroys the instance's nodes (roots and their descendants) and animators.
 instance_destroy :: proc(self: ^Instance, w: ^world.World) {
   for h in self.roots do world.destroy(w, h)
+  for &a in self.animators do animation.destroy(&a)
+  delete(self.animators)
   delete(self.roots)
   delete(self.skinned)
   delete(self.joints)
@@ -259,8 +283,8 @@ load_light :: proc(r: ^render.Renderer, light: ^cgltf.light, model: ^Model) -> M
   return handle
 }
 
-// pose_joints moves the instance's joint nodes of `rig` to the animator's pose; call it after
-// animation.animator_update so nodes under them follow the animation.
+// Moves the instance's joint nodes of `rig` to the animator's pose.
+@(private = "file")
 pose_joints :: proc(self: ^Instance, w: ^world.World, model: ^Model, rig: RigHandle, animator: ^animation.Animator) {
   parents := model.rigs[rig].skeleton.parents
   for j in self.joints do if j.rig == rig {

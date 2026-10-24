@@ -1,10 +1,9 @@
-package crowd
+package navigation
 
 import "core:math"
 import "core:math/linalg"
-import "../../containers"
-import ".."
-import "../detour"
+import "../containers"
+import "detour"
 
 @(private = "file")
 DT_CROWDAGENT_MAX_NEIGHBOURS :: 6
@@ -143,7 +142,7 @@ Crowd :: struct {
 @(private)
 Crowd_State :: struct {
 	max_agents:                int,
-	// indexed by agent index; update moves them (agent reads a copy)
+	// indexed by agent index; crowd_update moves them (agent reads a copy)
 	agents:                    []Agent,
 	// every agent's corridor path, DEFAULT_MAX_PATH each
 	corridor_paths:            []detour.Poly_Ref,
@@ -162,10 +161,9 @@ Crowd_State :: struct {
 	poses:                     [dynamic]AgentPose,
 }
 
-// init prepares the crowd for up to max_agents agents on navmesh, which must outlive the
-// crowd. The crowd must not move after init; free it with
-// shutdown.
-init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh: ^navigation.NavMesh,
+// crowd_init prepares the crowd for up to max_agents agents on navmesh, which must outlive the
+// crowd. The crowd must not move after crowd_init; free it with crowd_shutdown.
+crowd_init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh: ^NavMesh,
              allocator := context.allocator) -> bool {
 	context.allocator = allocator
 	nav := &navmesh.detour_mesh
@@ -178,7 +176,7 @@ init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh: ^nav
 	obstacle_avoidance_query_init(&self.obstacle_query, 6, 8)
 	if !proximity_grid_init(&self.grid, max_agents*4, max_agent_radius*3) ||
 	   !path_queue_init(&self.path_queue, detour.DEFAULT_MAX_PATH, MAX_PATHQUEUE_NODES, nav) {
-		shutdown(self)
+		crowd_shutdown(self)
 		return false
 	}
 
@@ -214,15 +212,15 @@ init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh: ^nav
 
 	status := detour.nav_mesh_query_init(&self.nav_query, nav, MAX_PATHQUEUE_NODES)
 	if detour.status_failed(status) {
-		shutdown(self)
+		crowd_shutdown(self)
 		return false
 	}
 
 	return true
 }
 
-// shutdown frees all agent state.
-shutdown :: proc(self: ^Crowd) {
+// crowd_shutdown frees all agent state.
+crowd_shutdown :: proc(self: ^Crowd) {
 	delete(self.agents)
 	delete(self.corridor_paths)
 	delete(self.path_result)
@@ -236,7 +234,7 @@ shutdown :: proc(self: ^Crowd) {
 
 // agent_create places a new agent at the mesh point nearest pos and returns its handle; false when
 // the crowd is full or pos is off the mesh. `user` is its caller link (agent_poses).
-agent_create :: proc(self: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS, user: Handle = {}) -> (agent: AgentHandle, ok: bool) {
+agent_create :: proc(self: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS, user: Handle = {}) -> (agent: AgentHandle, ok: bool) #optional_ok {
 	idx := -1
 	for i in 0..<self.max_agents {
 		if self.agents[i].state == .INVALID {
@@ -330,8 +328,8 @@ stop :: proc(self: ^Crowd, handle: AgentHandle) {
 	ag.target_replan = false
 }
 
-// update advances every active agent by dt seconds.
-update :: proc(self: ^Crowd, dt: f32) {
+// crowd_update advances every active agent by dt seconds.
+crowd_update :: proc(self: ^Crowd, dt: f32) {
 	self.velocity_sample_count = 0
 
 	active_agents := make([]^Agent, self.max_agents, context.temp_allocator)
@@ -709,7 +707,7 @@ add_neighbour :: proc(idx: int, dist: f32, neis: []Neighbour, nneis: int, max_ne
 }
 
 // agent returns a copy of the agent; false when the handle is out of range or destroyed.
-// update moves it; give it a goal with move_to and tune it through agent_params.
+// crowd_update moves it; give it a goal with move_to and tune it through agent_params.
 agent :: proc(self: ^Crowd, handle: AgentHandle) -> (ag: Agent, ok: bool) #optional_ok {
 	idx := agent_index(self, handle) or_return
 	return self.agents[idx], true
@@ -727,7 +725,7 @@ agent_poses :: proc(self: ^Crowd) -> []AgentPose {
 	return self.poses[:]
 }
 
-// agent_params returns the agent's parameters, to edit in place; update only reads them.
+// agent_params returns the agent's parameters, to edit in place; crowd_update only reads them.
 agent_params :: proc(self: ^Crowd, handle: AgentHandle) -> (params: ^AgentParams, ok: bool) #optional_ok {
 	idx := agent_index(self, handle) or_return
 	return &self.agents[idx].params, true
@@ -740,6 +738,4 @@ filter :: proc(self: ^Crowd, i: int) -> (^detour.Query_Filter, bool) #optional_o
 }
 
 // destroy frees an agent, as agent_destroy does.
-destroy :: proc {
-	agent_destroy,
-}
+

@@ -186,7 +186,7 @@ buffer_destroy :: proc(self: ^Renderer, handle: BufferHandle) {
 
 // compute_shader_create makes a compute shader (entry point main) binding `bindings`, from a
 // compiled shader: #load("name." + SHADER_EXT).
-compute_shader_create :: proc(self: ^Renderer, source: []u8, bindings: ..Binding) -> (shader: ComputeShader, ok: bool) {
+compute_shader_create :: proc(self: ^Renderer, source: []u8, bindings: ..Binding) -> (shader: ComputeShader, ok: bool) #optional_ok {
   guard(self)
   layout, group := gpu_bindings(self, bindings, compute = true) or_return
   pipeline := dev.compute_pipeline_create(&self.gpu, {source, gpu_pipeline_layout(self, layout)}) or_return
@@ -203,7 +203,7 @@ draw_shader_create :: proc(
 ) -> (
   shader: DrawShader,
   ok: bool,
-) {
+) #optional_ok {
   guard(self)
   layout, group := gpu_bindings(self, bindings, compute = false) or_return
   desc := rhi.GraphicsPipelineDesc {

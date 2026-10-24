@@ -12,7 +12,7 @@ import "core:math"
 import mu "vendor:microui"
 
 App :: struct {
-  window:   platform.Platform,
+  platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   debug:    debugui.Context,
@@ -21,17 +21,16 @@ App :: struct {
   time:     f32,
 }
 
-ortho_width: mu.Real = 12.0
-ortho_height: mu.Real = 12.0
-cam_height: mu.Real = 10.0
-cam_yaw: mu.Real = 0.0
+ortho_width: f32 = 12.0
+ortho_height: f32 = 12.0
+cam_height: f32 = 10.0
+cam_yaw: f32 = 0.0
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1000, 700, "Orthographic Camera") do return
-  if !render.init(&app.renderer, "Orthographic Camera", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1000, 700, "Orthographic Camera") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -46,7 +45,7 @@ main :: proc() {
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, position: [3]f32, scale_factor: f32 = 1, cast_shadow := true) -> world.NodeHandle {
@@ -72,23 +71,23 @@ shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   app.time += dt
   world.rotate(&app.scene, app.spinner, app.time)
-  yaw := f32(cam_yaw)
-  pos := [3]f32{math.sin(yaw) * 0.5, f32(cam_height), math.cos(yaw) * 0.5}
+  yaw := cam_yaw
+  pos := [3]f32{math.sin(yaw) * 0.5, cam_height, math.cos(yaw) * 0.5}
   cam := render.main_camera(&app.renderer)
-  render.camera_set_orthographic(cam, f32(ortho_width), f32(ortho_height))
+  render.camera_set_orthographic(cam, ortho_width, ortho_height)
   render.camera_look_at(cam, pos, {0, 0, 0})
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
@@ -96,8 +95,8 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

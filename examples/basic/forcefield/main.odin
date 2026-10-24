@@ -15,7 +15,7 @@ EMITTER_SIZE_START :: 100
 EMITTER_SIZE_END :: 30
 
 App :: struct {
-  window:   platform.Platform,
+  platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   debug:    debugui.Context,
@@ -40,9 +40,8 @@ Field :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1100, 720, "Forcefield") do return
-  if !render.init(&app.renderer, "Forcefield", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1100, 720, "Forcefield") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -60,12 +59,12 @@ shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 spawn_field :: proc(
@@ -86,8 +85,8 @@ spawn_field :: proc(
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {1100, 720}) do return .FAIL
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 12, 3}, {0, 2, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 2, 0})
+  app.orbit = render.make_orbit({0, 12, 3}, {0, 2, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.renderer.skybox_intensity = 0
 
   if tex, ok := render.texture_create(&app.renderer, #load("assets/particles/star_09.png")); ok {
@@ -129,14 +128,11 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   app.time += dt
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   for f in ([]^Field{&app.repel, &app.attract}) do world.rotate(&app.scene, f.pivot, app.time * f.spin_speed * f.spin_dir, linalg.VECTOR3F32_Y_AXIS)
   world.update(&app.scene)
@@ -146,8 +142,8 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 field_panel :: proc(app: ^App, ctx: ^mu.Context, name: string, f: ^Field) {

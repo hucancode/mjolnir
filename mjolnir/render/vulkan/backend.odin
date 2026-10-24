@@ -21,6 +21,7 @@ LAYERED_RENDERING :: true
 // Backend is every Vulkan object the renderer draws with. render keeps it opaque and goes
 // through PROCS (rhi.odin) and the procs below; textures are indexed by render's TextureHandle.
 Backend :: struct {
+  window:           WindowHandle,
   gctx:             GPUContext,
   swapchain:        Swapchain,
   textures:         []Image,
@@ -60,8 +61,17 @@ WindowHandle :: glfw.WindowHandle
 
 // init brings Vulkan up on window: instance, surface, device, swapchain and the bindless
 // arrays. Paired with shutdown.
-init :: proc(b: ^Backend, app_name: string, window: WindowHandle, framebuffer_size: [2]u32) -> bool {
-  return check(init_vulkan(b, app_name, window, framebuffer_size), "Vulkan init")
+init :: proc(b: ^Backend, window: WindowHandle) -> bool {
+  b.window = window
+  return check(init_vulkan(b), "Vulkan init")
+}
+
+// window_size measures the window: its framebuffer in pixels and its content scale. GLFW
+// answers on the main thread only.
+window_size :: proc(b: ^Backend) -> (framebuffer_size: [2]u32, dpi_scale: f32) {
+  w, h := glfw.GetFramebufferSize(b.window)
+  sx, _ := glfw.GetWindowContentScale(b.window)
+  return {u32(w), u32(h)}, sx
 }
 
 // Logs a failed result; the bool is what render sees.
@@ -72,17 +82,17 @@ check :: proc(res: vk.Result, what: string) -> bool {
 }
 
 @(private = "file")
-init_vulkan :: proc(b: ^Backend, app_name: string, window: glfw.WindowHandle, framebuffer_size: [2]u32) -> vk.Result {
+init_vulkan :: proc(b: ^Backend) -> vk.Result {
   if !glfw.VulkanSupported() {
     log.errorf("GLFW: Vulkan Not Supported")
     return .ERROR_INITIALIZATION_FAILED
   }
   gctx := &b.gctx
-  name := strings.clone_to_cstring(app_name, context.temp_allocator)
-  instance_init(gctx, name, glfw.GetRequiredInstanceExtensions(), rawptr(glfw.GetInstanceProcAddress)) or_return
-  glfw.CreateWindowSurface(gctx.instance, window, nil, &gctx.surface) or_return
+  instance_init(gctx, "mjolnir", glfw.GetRequiredInstanceExtensions(), rawptr(glfw.GetInstanceProcAddress)) or_return
+  glfw.CreateWindowSurface(gctx.instance, b.window, nil, &gctx.surface) or_return
   device_init(gctx) or_return
-  swapchain_init(&b.swapchain, gctx, framebuffer_size) or_return
+  size, _ := window_size(b)
+  swapchain_init(&b.swapchain, gctx, size) or_return
   b.textures = make([]Image, rhi.MAX_TEXTURES)
   init_descriptor_pool(gctx) or_return
   bindless_init(b) or_return

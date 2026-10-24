@@ -1,9 +1,9 @@
 #+private
-package crowd
+package navigation
 
 import "core:math"
-import "../detour"
-import "../../geometry"
+import "detour"
+import "../geometry"
 
 @(private)
 MAX_LOCAL_SEGS :: 8

@@ -1,5 +1,6 @@
 // Docs data generator. Run from the repo root: `odin run docs/gen -- docs/build/data`
-// Writes api.json (from `odin doc`) and examples.json (from examples/); the pages import them as JSON modules.
+// Writes api.json (from `odin doc`) and examples.json (from examples/, and the example web builds
+// already in the output dir); the pages fetch them.
 package main
 
 import "core:encoding/json"
@@ -225,7 +226,8 @@ expand_reexport :: proc(sig: string) -> string {
 	return strings.concatenate({sig[:end], definition})
 }
 
-load_examples :: proc() -> []Example {
+// The examples with their web builds, `<name>.wasm` in wasm_dir.
+load_examples :: proc(wasm_dir: string) -> []Example {
 	categories, err := os.read_all_directory_by_path("examples", context.allocator)
 	if err != nil {die("cannot list examples: %v", err)}
 	out: [dynamic]Example
@@ -245,7 +247,7 @@ load_examples :: proc() -> []Example {
 			append(&desc, strings.trim_left_space(line[2:]))
 		}
 		video_path, _ := filepath.join({"docs", "site", "videos", fmt.tprintf("%s.mp4", fi.name)})
-		wasm_path, _ := filepath.join({"docs", "build", "live", fmt.tprintf("%s.wasm", fi.name)})
+		wasm_path, _ := filepath.join({wasm_dir, fmt.tprintf("%s.wasm", fi.name)})
 		append(&out, Example{
 			name = fi.name,
 			category = category.name,
@@ -289,7 +291,7 @@ main :: proc() {
 	pkgs: [dynamic]Pkg
 	for d in package_dirs() {append(&pkgs, load_pkg(d))}
 	emit(strings.concatenate({out, "/api.json"}), pkgs[:])
-	examples := load_examples()
+	examples := load_examples(out)
 	emit(strings.concatenate({out, "/examples.json"}), examples)
 	fmt.printfln("wrote %d packages, %d examples to %s", len(pkgs), len(examples), out)
 }

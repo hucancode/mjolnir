@@ -1,9 +1,8 @@
 #+build !js
 #+private
-package crowd
+package navigation
 
-import ".."
-import "../detour"
+import "detour"
 import "base:runtime"
 import "core:log"
 import "core:math"
@@ -239,14 +238,14 @@ test_obstacle_avoidance_query_capacity :: proc(t: ^testing.T) {
 // ---------------------------------------------------------------
 
 // test_plane.navmesh is a 20x20 walkable plane centered at the origin, baked by navigation/bake
-build_test_navmesh :: proc(t: ^testing.T) -> (^navigation.NavMesh, bool) {
-	nav := new(navigation.NavMesh)
-	if !navigation.init(nav, #load("test_plane.navmesh")) do testing.fail_now(t, "loading the plane fixture failed")
+build_test_navmesh :: proc(t: ^testing.T) -> (^NavMesh, bool) {
+	nav := new(NavMesh)
+	if !init(nav, #load("test_plane.navmesh")) do testing.fail_now(t, "loading the plane fixture failed")
 	return nav, true
 }
 
-destroy_test_navmesh :: proc(nav: ^navigation.NavMesh) {
-	navigation.destroy(nav)
+destroy_test_navmesh :: proc(nav: ^NavMesh) {
+	destroy(nav)
 	free(nav)
 }
 
@@ -270,8 +269,8 @@ test_crowd_lifecycle_add_remove :: proc(t: ^testing.T) {
 
 	cv: Crowd
 	c := &cv
-	testing.expect(t, init(c, 8, 0.6, nav), "init")
-	defer shutdown(c)
+	testing.expect(t, crowd_init(c, 8, 0.6, nav), "init")
+	defer crowd_shutdown(c)
 
 	params := default_agent_params()
 	a0, _ := agent_create(c, {0, 0, 0}, params)
@@ -298,8 +297,8 @@ test_crowd_add_agent_off_navmesh_fails :: proc(t: ^testing.T) {
 	defer destroy_test_navmesh(nav)
 	cv: Crowd
 	c := &cv
-	init(c, 4, 0.6, nav)
-	defer shutdown(c)
+	crowd_init(c, 4, 0.6, nav)
+	defer crowd_shutdown(c)
 
 	params := default_agent_params()
 	_, added := agent_create(c, {1000, 0, 1000}, params)
@@ -313,8 +312,8 @@ test_crowd_request_move_target_state :: proc(t: ^testing.T) {
 	defer destroy_test_navmesh(nav)
 	cv: Crowd
 	c := &cv
-	init(c, 4, 0.6, nav)
-	defer shutdown(c)
+	crowd_init(c, 4, 0.6, nav)
+	defer crowd_shutdown(c)
 	params := default_agent_params()
 	idx, _ := agent_create(c, {0, 0, 0}, params)
 	testing.expect(t, idx != {}, "agent add")
@@ -342,8 +341,8 @@ test_crowd_update_advances_agent :: proc(t: ^testing.T) {
 	defer destroy_test_navmesh(nav)
 	cv: Crowd
 	c := &cv
-	init(c, 4, 0.6, nav)
-	defer shutdown(c)
+	crowd_init(c, 4, 0.6, nav)
+	defer crowd_shutdown(c)
 
 	params := default_agent_params()
 	idx, _ := agent_create(c, {-5, 0, -5}, params)
@@ -359,7 +358,7 @@ test_crowd_update_advances_agent :: proc(t: ^testing.T) {
 	start_pos := c.agents[idx.index].position
 	// run several update ticks; path planning is sliced and may take several frames
 	for _ in 0 ..< 50 {
-		update(c, 0.1)
+		crowd_update(c, 0.1)
 	}
 	end_pos := c.agents[idx.index].position
 	moved_sq := (end_pos.x - start_pos.x) * (end_pos.x - start_pos.x) +
@@ -418,7 +417,7 @@ bench_proximity_grid_query :: proc(t: ^testing.T) {
 
 bench_crowd_state :: struct {
 	t:    ^testing.T,
-	nav:  ^navigation.NavMesh,
+	nav:  ^NavMesh,
 	crowd: ^Crowd,
 }
 
@@ -434,7 +433,7 @@ bench_crowd_update :: proc(t: ^testing.T) {
 			s.nav = nav
 			N :: 32
 			c := new(Crowd)
-			init(c, N, 0.6, nav)
+			crowd_init(c, N, 0.6, nav)
 			s.crowd = c
 			params := default_agent_params()
 			for i in 0 ..< N {
@@ -457,14 +456,14 @@ bench_crowd_update :: proc(t: ^testing.T) {
 		bench    = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_crowd_state)opts.user_data
 			for _ in 0 ..< opts.rounds {
-				update(s.crowd, 0.016)
+				crowd_update(s.crowd, 0.016)
 			}
 			opts.count = opts.rounds
 			return .Okay
 		},
 		teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_crowd_state)opts.user_data
-			shutdown(s.crowd)
+			crowd_shutdown(s.crowd)
 			free(s.crowd)
 			destroy_test_navmesh(s.nav)
 			return .Okay
@@ -484,12 +483,12 @@ test_crowd_move_to_reaches_goal :: proc(t: ^testing.T) {
 	defer destroy_test_navmesh(nav)
 	cv: Crowd
 	c := &cv
-	init(c, 4, 0.6, nav)
-	defer shutdown(c)
+	crowd_init(c, 4, 0.6, nav)
+	defer crowd_shutdown(c)
 	params := default_agent_params()
 	idx, _ := agent_create(c, {0, 0, 0}, params)
 	testing.expect(t, move_to(c, idx, {5, 0, 5}), "move_to on the mesh must succeed")
-	for _ in 0 ..< 100 do update(c, 0.1)
+	for _ in 0 ..< 100 do crowd_update(c, 0.1)
 	d := c.agents[idx.index].position - {5, 0, 5}
 	testing.expectf(t, d.x * d.x + d.z * d.z < 1.0, "agent should reach the goal, at %v", c.agents[idx.index].position)
 }
@@ -501,15 +500,15 @@ test_crowd_stop_halts_agent :: proc(t: ^testing.T) {
 	defer destroy_test_navmesh(nav)
 	cv: Crowd
 	c := &cv
-	init(c, 4, 0.6, nav)
-	defer shutdown(c)
+	crowd_init(c, 4, 0.6, nav)
+	defer crowd_shutdown(c)
 	idx, _ := agent_create(c, {-5, 0, 0}, default_agent_params())
 	move_to(c, idx, {5, 0, 0})
-	for _ in 0 ..< 10 do update(c, 0.1)
+	for _ in 0 ..< 10 do crowd_update(c, 0.1)
 	stop(c, idx)
-	for _ in 0 ..< 30 do update(c, 0.1)
+	for _ in 0 ..< 30 do crowd_update(c, 0.1)
 	halted := c.agents[idx.index].position
-	for _ in 0 ..< 10 do update(c, 0.1)
+	for _ in 0 ..< 10 do crowd_update(c, 0.1)
 	d := c.agents[idx.index].position - halted
 	testing.expectf(t, d.x * d.x + d.z * d.z < 0.01, "a stopped agent should stay put, moved %v", d)
 	testing.expectf(t, halted.x < 4, "a stopped agent should not reach its old goal, at %v", halted)
@@ -522,12 +521,12 @@ test_crowd_agent_poses_links_users :: proc(t: ^testing.T) {
 	defer destroy_test_navmesh(nav)
 	cv: Crowd
 	c := &cv
-	init(c, 4, 0.6, nav)
-	defer shutdown(c)
+	crowd_init(c, 4, 0.6, nav)
+	defer crowd_shutdown(c)
 	linked, _ := agent_create(c, {0, 0, 0}, default_agent_params(), user = {index = 7, generation = 1})
 	agent_create(c, {3, 0, 3}, default_agent_params())
 	move_to(c, linked, {0, 0, 5})
-	for _ in 0 ..< 10 do update(c, 0.1)
+	for _ in 0 ..< 10 do crowd_update(c, 0.1)
 	poses := agent_poses(c)
 	testing.expect_value(t, len(poses), 1)
 	testing.expect_value(t, poses[0].user, Handle{index = 7, generation = 1})

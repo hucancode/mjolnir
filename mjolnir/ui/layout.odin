@@ -13,14 +13,13 @@ ALIGN_FACTOR := [Align]f32 {
   .END    = 1,
 }
 
-// layout lays every node out in `reference`, a frame of your choosing (1024x768, say), then
-// fits it to `window`: scaled up or down until one axis matches, the other axis's leftover
-// space going to the roots by their pin. Rects, clips and lines come out in window pixels.
+// layout lays every node out in the reference frame (init), then fits it to `window`: scaled
+// up or down until one axis matches, the other axis's leftover space going to the roots by
+// their pin. Rects, clips and lines come out in window pixels.
 // A fixed sequence of passes over the nodes in tree order: widths resolve before text wraps,
 // heights after.
-layout :: proc(self: ^UI, reference, window: [2]f32, f: ^font.Font) {
-  self.reference = reference
-  self.frame = anchor.frame(reference, window)
+layout :: proc(self: ^UI, window: [2]f32, f: ^font.Font) {
+  self.frame = anchor.frame(self.reference, window)
   n := int(self.slots.high_water)
   resize(&self.rects, n)
   resize(&self.clips, n)

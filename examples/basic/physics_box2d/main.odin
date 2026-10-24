@@ -31,7 +31,7 @@ Piece :: struct {
 }
 
 App :: struct {
-  window:   platform.Platform,
+  platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
@@ -46,9 +46,8 @@ main :: proc() {
   world_def := b2.DefaultWorldDef()
   world_def.gravity = {0, -9.81}
   app.phys = b2.CreateWorld(world_def)
-  w := &app.window
-  if !platform.init(w, 800, 600, "Physics (Box2D)") do return
-  if !render.init(&app.renderer, "Physics (Box2D)", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 800, 600, "Physics (Box2D)") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -65,7 +64,7 @@ main :: proc() {
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   delete(app.pieces)
   b2.DestroyWorld(app.phys)
   free(app)
@@ -140,20 +139,20 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     append(&app.pieces, Piece{body, node})
   }
   log.infof("Created %d Box2D bodies", PIECE_COUNT)
-  render.camera_look_at(render.main_camera(&app.renderer), {10, 15, 10}, {0, 5, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 5, 0})
+  app.orbit = render.make_orbit({10, 15, 10}, {0, 5, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   return .READY
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
-  if !app.input.mouse_captured do render.orbit_drag(&app.orbit, 0, app.input.scroll.y)
+  platform.read_input(&app.platform, &app.input)
+  render.orbit_drag(&app.orbit, &app.input, rotate_with = {})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   b2.World_Step(app.phys, dt, BOX2D_SUBSTEPS)
   for i := len(app.pieces) - 1; i >= 0; i -= 1 {
@@ -175,6 +174,6 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }

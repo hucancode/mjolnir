@@ -1,11 +1,12 @@
 package render
 
+import "../anchor"
 import "../font"
 import "core:log"
 import "core:slice"
 
 // Positions and sizes are window coordinates, as input.State and ui report them; render
-// scales them by the DPI scale. `clip` is (x, y, w, h), zero = the whole window.
+// scales them by the DPI scale. A zero `clip` is the whole window.
 
 // DrawQuadCommand draws a solid or textured rectangle.
 DrawQuadCommand :: struct {
@@ -41,7 +42,7 @@ RenderCommand :: struct {
     DrawMeshCommand,
   },
   z_order: i32,
-  clip:    [4]f32,
+  clip:    anchor.Rect,
 }
 
 
@@ -153,7 +154,7 @@ batch_commands :: proc(self: ^Renderer, commands: []RenderCommand, text_font: ^f
   for key in keys {
     command := &commands[key.cmd_index]
     // a new batch wherever the clip changes
-    if s := clip_scissor(command.clip * scale, extent); s != scissor {
+    if s := clip_scissor({command.clip.pos * scale, command.clip.size * scale}, extent); s != scissor {
       scissor = s
       begin_batch(self, s)
     }
@@ -186,12 +187,12 @@ sync_font_atlas :: proc(self: ^Renderer, text_font: ^font.Font) {
 }
 
 @(private)
-clip_scissor :: proc(clip: [4]f32, extent: [2]u32) -> [4]i32 {
+clip_scissor :: proc(clip: anchor.Rect, extent: [2]u32) -> [4]i32 {
   if clip == {} do return {0, 0, i32(extent.x), i32(extent.y)}
-  x0 := clamp(i32(clip.x), 0, i32(extent.x))
-  y0 := clamp(i32(clip.y), 0, i32(extent.y))
-  x1 := clamp(i32(clip.x + clip.z), x0, i32(extent.x))
-  y1 := clamp(i32(clip.y + clip.w), y0, i32(extent.y))
+  x0 := clamp(i32(clip.pos.x), 0, i32(extent.x))
+  y0 := clamp(i32(clip.pos.y), 0, i32(extent.y))
+  x1 := clamp(i32(clip.pos.x + clip.size.x), x0, i32(extent.x))
+  y1 := clamp(i32(clip.pos.y + clip.size.y), y0, i32(extent.y))
   return {x0, y0, x1 - x0, y1 - y0}
 }
 

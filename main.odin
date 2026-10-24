@@ -13,7 +13,7 @@ import "mjolnir/render"
 import "mjolnir/world"
 
 App :: struct {
-  window:   platform.Platform,
+  platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   free_cam: bool,
@@ -35,12 +35,6 @@ Loaded :: struct {
   instance: gltf.Instance,
 }
 
-// A loaded glTF and one animator per skinned node in it.
-Character :: struct {
-  using loaded: Loaded,
-  animators:    [dynamic]animation.Animator,
-}
-
 // A node whose local transform plays a one-channel clip on top of `rest`.
 // With a socket, the result is placed in the space of a character's bone.
 NodeClip :: struct {
@@ -50,11 +44,11 @@ NodeClip :: struct {
   player:    animation.ClipPlayer,
   socket:    bool,
   character: int, // index into characters
-  skinned:   int, // index into characters[character].animators
+  rig:       gltf.RigHandle,
   bone:      u32,
 }
 
-characters: [dynamic]Character
+characters: [dynamic]Loaded
 models: [dynamic]Loaded
 node_clips: [dynamic]NodeClip
 
@@ -65,14 +59,8 @@ load_gltf :: proc(app: ^App, data: []u8) -> (loaded: Loaded, ok: bool) {
 }
 
 add_character :: proc(loaded: Loaded, clip: string) -> int {
-  c := Character{loaded = loaded}
-  for s in loaded.instance.skinned {
-    rig := &c.model.rigs[s.rig]
-    a: animation.Animator
-    animation.animator_init(&a, rig)
-    animation.play(&a, rig, clip)
-    append(&c.animators, a)
-  }
+  c := loaded
+  for &a, i in c.instance.animators do animation.play(&a, &c.model.rigs[i], clip)
   append(&characters, c)
   return len(characters) - 1
 }
@@ -112,13 +100,12 @@ fly_camera :: proc(app: ^App, dt: f32) {
 }
 
 update :: proc(app: ^App, dt: f32) {
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   if app.free_cam do fly_camera(app, dt)
   else {
     if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
-      orbit := render.orbit_from_camera(cam, {0, 1, 0})
-      drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-      render.orbit_drag(&orbit, drag, app.input.scroll.y)
+      orbit := render.make_orbit(cam.position, {0, 1, 0})
+      render.orbit_drag(&orbit, &app.input)
       render.camera_orbit(cam, orbit)
     }
   }
@@ -126,31 +113,25 @@ update :: proc(app: ^App, dt: f32) {
     it := 0
     for key, pressed in input.next_key_edge(&app.input, &it) do on_key(app, key, pressed)
   }
-  for &c in characters {
-    for s, i in c.instance.skinned do animation.animator_update(&c.animators[i], &c.model.rigs[s.rig], dt)
-  }
   for &nc in node_clips {
     m := animation.clip_player_update(&nc.player, &nc.clip, dt, nc.rest)
-    if nc.socket do m = animation.bone_matrix(&characters[nc.character].animators[nc.skinned], nc.bone) * m
+    if nc.socket do m = animation.bone_matrix(&characters[nc.character].instance.animators[nc.rig], nc.bone) * m
     world.set_local_matrix(&app.scene, nc.node, m)
   }
   // 99-frame sprite sheet looping at 24 fps
   warrior_time += dt
   render.set_sprite_frame(&app.renderer, warrior_sprite, u32(warrior_time * 24) % 99)
   world.update(&app.scene)
+  for &c in characters do gltf.animate(&c.instance, &c.model, &app.scene, &app.renderer, dt)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  for &c in characters {
-    for s, i in c.instance.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), c.animators[i].palette)
-  }
   render.update(&app.renderer, dt)
 }
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1280, 720, "Mjolnir") do return
-  if !render.init(&app.renderer, "Mjolnir", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1280, 720, "Mjolnir") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -166,8 +147,6 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   for &c in characters {
-    for &a in c.animators do animation.destroy(&a)
-    delete(c.animators)
     gltf.destroy(&c.instance, &app.scene)
     gltf.destroy(&c.model, &app.renderer)
   }
@@ -181,17 +160,17 @@ shutdown :: proc(app: ^App) {
   delete(node_clips)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  ok := render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  ok := render.frame(&app.renderer)
   on_post_render(app)
   return ok
 }
@@ -381,7 +360,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
       for armature in gltf_nodes.instance.roots do world.translate(&app.scene, armature, 0, 0, 1)
       character := add_character(gltf_nodes, "idle")
       // Attach a spinning cube to the hand.L bone of the first skinned mesh
-      for s, i in gltf_nodes.instance.skinned {
+      for s in gltf_nodes.instance.skinned {
         bone := animation.bone_find(&gltf_nodes.model.rigs[s.rig].skeleton, "hand.L") or_continue
         hand_cube_handle := spawn(
           app,
@@ -396,7 +375,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
         nc := add_node_clip(app, hand_cube_handle, spin_clip("cube_spin", 2.0, {0, math.PI, 0}, .CUBIC))
         nc.socket = true
         nc.character = character
-        nc.skinned = i
+        nc.rig = s.rig
         nc.bone = bone
         break
       }

@@ -18,7 +18,7 @@ Look :: struct {
 }
 
 App :: struct {
-  window:   platform.Platform,
+  platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
@@ -37,7 +37,6 @@ TEXT_COLOR :: [4]u8{235, 235, 245, 255}
 BUTTON_COLOR :: [4]u8{200, 80, 80, 255}
 BUTTON_HOVER :: [4]u8{230, 120, 90, 255}
 BUTTON_PRESSED :: [4]u8{110, 200, 110, 255}
-REFERENCE :: [2]f32{900, 700}
 LIST_ITEMS :: 12
 LIST_ITEM_HEIGHT :: 28
 LIST_GAP :: 4
@@ -47,9 +46,8 @@ LIST_MAX_SCROLL :: LIST_ITEMS * LIST_ITEM_HEIGHT + (LIST_ITEMS - 1) * LIST_GAP -
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 900, 700, "UI") do return
-  if !render.init(&app.renderer, "UI", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 900, 700, "UI") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -66,12 +64,12 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
-  ui.init(&app.gui)
+  ui.init(&app.gui, {900, 700})
   build_ui(app)
   cube := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .BLUE))
-  render.camera_look_at(render.main_camera(&app.renderer), {3, 2, 3}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
+  app.orbit = render.make_orbit({3, 2, 3}, {0, 0, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   return .READY
 }
 
@@ -81,7 +79,7 @@ shutdown :: proc(app: ^App) {
   font.destroy(&app.font)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
@@ -126,16 +124,14 @@ build_ui :: proc(app: ^App) {
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
-  size := platform.framebuffer_size(&app.window)
-  dpi := platform.dpi_scale(&app.window)
-  ui.layout(&app.gui, REFERENCE, {f32(size.x), f32(size.y)} / dpi, &app.font)
+  platform.read_input(&app.platform, &app.input)
+  ui.layout(&app.gui, render.window_size(&app.renderer), &app.font)
   ui.update_input(&app.gui, &app.input)
   if ui.clicked(&app.gui, app.button) {
     app.clicks += 1
@@ -147,10 +143,7 @@ update :: proc(app: ^App, dt: f32) {
     list := ui.node(&app.gui, app.list)
     list.scroll.y = clamp(list.scroll.y - app.input.scroll.y * 20, 0, LIST_MAX_SCROLL)
   }
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
@@ -159,15 +152,14 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 draw_hud :: proc(app: ^App) {
   commands := make([dynamic]render.RenderCommand, context.temp_allocator)
   for h, z in app.gui.draw_order {
-    r, c := ui.rect(&app.gui, h), ui.clip(&app.gui, h)
-    clip := [4]f32{c.pos.x, c.pos.y, c.size.x, c.size.y}
+    r, clip := ui.rect(&app.gui, h), ui.clip(&app.gui, h)
     if look, ok := app.looks[h]; ok {
       append(&commands, render.RenderCommand{render.DrawQuadCommand{r.pos, r.size, look.color, look.texture}, i32(z), clip})
     }

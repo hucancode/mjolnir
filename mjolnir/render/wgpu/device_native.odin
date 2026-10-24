@@ -9,6 +9,14 @@ import "vendor:wgpu/glfwglue"
 // WindowHandle is the window render draws into: a GLFW window on the desktop.
 WindowHandle :: glfw.WindowHandle
 
+// window_size measures the window: its framebuffer in pixels and its content scale. GLFW
+// answers on the main thread only.
+window_size :: proc(b: ^Backend) -> (framebuffer_size: [2]u32, dpi_scale: f32) {
+  w, h := glfw.GetFramebufferSize(b.window)
+  sx, _ := glfw.GetWindowContentScale(b.window)
+  return {u32(w), u32(h)}, sx
+}
+
 @(private)
 surface_create :: proc(instance: wgpu.Instance, window: WindowHandle) -> wgpu.Surface {
   // Odin dev-2026-10 asserts on glfwglue's Objective-C calls ("missing procedure

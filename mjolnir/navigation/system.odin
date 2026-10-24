@@ -18,8 +18,8 @@ NavMesh_State :: struct {
   filter:      detour.Query_Filter,
 }
 
-// destroy frees the mesh, its query and the tile data.
-destroy :: proc(self: ^NavMesh) {
+// navmesh_destroy frees the mesh, its query and the tile data.
+navmesh_destroy :: proc(self: ^NavMesh) {
   detour.nav_mesh_query_destroy(&self.query)
   detour.nav_mesh_destroy(&self.detour_mesh)
   self^ = {}
@@ -34,12 +34,12 @@ save :: proc(self: ^NavMesh, allocator := context.allocator) -> []u8 {
 // init decodes a mesh encoded by save or baked by navigation/bake, replacing any previous mesh.
 init :: proc(self: ^NavMesh, data: []u8, max_query_nodes: i32 = 2048) -> bool {
   mesh := detour.load_navmesh(data) or_return
-  destroy(self)
+  navmesh_destroy(self)
   self.detour_mesh = mesh^
   free(mesh)
   if status := detour.nav_mesh_query_init(&self.query, &self.detour_mesh, max_query_nodes); !detour.status_succeeded(status) {
     log.errorf("Failed to initialize navigation mesh query: %v", status)
-    destroy(self)
+    navmesh_destroy(self)
     return false
   }
   detour.query_filter_init(&self.filter)
@@ -203,4 +203,10 @@ debug_triangles :: proc(
     }
   }
   return verts[:], tris[:]
+}
+
+// destroy frees a NavMesh or a crowd agent, as navmesh_destroy and agent_destroy do.
+destroy :: proc {
+  navmesh_destroy,
+  agent_destroy,
 }

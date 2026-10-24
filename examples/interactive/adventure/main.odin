@@ -4,7 +4,7 @@
 package main
 
 import "mjolnir"
-import anim "mjolnir/animation"
+import "mjolnir/animation"
 import bt "mjolnir/behavior_tree"
 import "mjolnir/fsm"
 import "mjolnir/font"
@@ -13,7 +13,6 @@ import "mjolnir/gltf"
 import "mjolnir/input"
 import nav "mjolnir/navigation"
 import "mjolnir/navigation/bake"
-import "mjolnir/navigation/crowd"
 import "mjolnir/physics"
 import "mjolnir/platform"
 import "mjolnir/render"
@@ -240,9 +239,8 @@ Actor :: struct {
   model:    world.NodeHandle,
   chest:    world.NodeHandle,
   instance: gltf.Instance,
-  rig:      gltf.RigHandle,
-  animator: anim.Animator,
-  layers:   [Clip]anim.LayerHandle,
+  animator: ^animation.Animator,
+  layers:   [Clip]animation.LayerHandle,
   clip:     Clip,
 }
 
@@ -259,7 +257,7 @@ Player :: struct {
 Enemy :: struct {
   using actor: Actor,
   kind:        EnemyKind,
-  agent:       crowd.AgentHandle,
+  agent:       nav.AgentHandle,
   health:      f32,
   cooldown:    f32,
   strike:      f32,
@@ -316,7 +314,7 @@ Panel :: struct {
 }
 
 App :: struct {
-  window:       platform.Platform,
+  platform:     platform.Platform,
   scene:        world.World,
   renderer:     render.Renderer,
   phys:         physics.World,
@@ -325,7 +323,7 @@ App :: struct {
   gui:          ui.UI,
   panel:        Panel,
   orbit:        render.Orbit,
-  debug:        bool,
+  show_debug:   bool,
   bodies:       [dynamic]physics.BodyHandle,
   textures:     [Effect]render.TextureHandle,
   emitters:     [Effect]render.EmitterHandle,
@@ -351,7 +349,7 @@ App :: struct {
   projectiles:  [dynamic]Projectile,
   props:        [dynamic]gltf.Instance,
   navmesh:      nav.NavMesh,
-  crowd:        crowd.Crowd,
+  crowd:        nav.Crowd,
 }
 
 Mob :: struct {
@@ -389,10 +387,9 @@ BOSS := Behavior(Sequence{{
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  app.debug = DEBUG
-  w := &app.window
-  if !platform.init(w, 1280, 720, "Third Person") do return
-  if !render.init(&app.renderer, "Third Person", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  app.show_debug = DEBUG
+  if !platform.init(&app.platform, 1280, 720, "Third Person") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   if !physics.init(&app.phys, gravity = {0, -20, 0}) do return
   mjolnir.run(
@@ -413,7 +410,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !load_assets(app) do return .FAIL
   append(&app.renderer.effect_stack, render.OutlineEffect{thickness = 1.5}, render.CrossHatchEffect{hatch_offset_y = 5, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
   render.setup(&app.renderer)
-  ui.init(&app.gui)
+  ui.init(&app.gui, {1280, 720})
   build_panel(app)
   fsm.start(&app.screen, SCREENS, app, .SELECT)
   return .READY
@@ -437,7 +434,7 @@ shutdown :: proc(app: ^App) {
   physics.shutdown(&app.phys)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
@@ -456,7 +453,7 @@ load_assets :: proc(app: ^App) -> bool {
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 clear_scene :: proc(app: ^App) {
@@ -474,7 +471,7 @@ clear_scene :: proc(app: ^App) {
   clear(&app.projectiles)
   clear(&app.props)
   clear(&app.bodies)
-  crowd.shutdown(&app.crowd)
+  nav.crowd_shutdown(&app.crowd)
   nav.destroy(&app.navmesh)
   world.teardown(&app.scene)
   physics.teardown(&app.phys)
@@ -527,7 +524,7 @@ enter_level :: proc(app: ^App) {
     append(&app.bodies, physics.body_create(&app.phys, center + {0, 2, 0}, collider = physics.BoxCollider{half_extents = {0.5 + abs(center.z), 2, 0.5 + abs(center.x)}}))
   }
   data, baked := bake.build(&builder, allocator = context.temp_allocator)
-  if !baked || !nav.init(&app.navmesh, data) || !crowd.init(&app.crowd, 16, 1.2, &app.navmesh) {
+  if !baked || !nav.init(&app.navmesh, data) || !nav.crowd_init(&app.crowd, 16, 1.2, &app.navmesh) {
     log.error("Navigation mesh bake failed")
     return
   }
@@ -577,8 +574,8 @@ enter_level :: proc(app: ^App) {
     instance := gltf.instance_create(&app.powers[power], &app.scene, &app.renderer, parent = node)
     append(&app.pickups, Pickup{node = node, instance = instance, power = power, base = base})
   }
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 6, -10}, {0, 1.5, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1.5, 0})
+  app.orbit = render.make_orbit({0, 6, -10}, {0, 1.5, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 }
 
 spawn_ground :: proc(app: ^App) {
@@ -603,12 +600,12 @@ spawn_sun :: proc(app: ^App, intensity: f32) {
 spawn_enemy :: proc(app: ^App, kind: EnemyKind, position: [3]f32) {
   foe := FOES[kind]
   at := nav.nearest_point(&app.navmesh, position) or_else position
-  params := crowd.DEFAULT_AGENT_PARAMS
+  params := nav.DEFAULT_AGENT_PARAMS
   params.radius = 0.5 * foe.scale
   params.height = 2 * foe.scale
   params.max_speed = foe.speed
   e := Enemy{actor = actor_create(app, &app.foes[kind], foe.attack, at), kind = kind, health = foe.health}
-  e.agent = crowd.agent_create(&app.crowd, at, params, user = world.Handle(e.model)) or_else {}
+  e.agent = nav.agent_create(&app.crowd, at, params, user = world.Handle(e.model)) or_else {}
   world.scale(&app.scene, e.model, foe.scale)
   for &weapon, i in app.weapons[kind] {
     if len(weapon.nodes) == 0 do continue
@@ -641,19 +638,17 @@ actor_create :: proc(app: ^App, model: ^gltf.Model, attack: string, position: [3
   a.instance = gltf.instance_create(model, &app.scene, &app.renderer, parent = a.model)
   a.chest = world.find(&app.scene, "chest", a.model) or_else a.model
   if len(a.instance.skinned) == 0 do return
-  a.rig = a.instance.skinned[0].rig
-  rig := &model.rigs[a.rig]
-  anim.animator_init(&a.animator, rig)
+  rig := &model.rigs[a.instance.skinned[0].rig]
+  a.animator = &a.instance.animators[a.instance.skinned[0].rig]
   for name, clip in CLIPS {
-    mode: anim.PlayMode = .LOOP if clip == .IDLE || clip == .RUN else .ONCE
-    clip_params := anim.ClipParams{clip = anim.clip_find(rig, attack if clip == .ATTACK else name), speed = 1, mode = mode}
-    a.layers[clip] = anim.layer_create(&a.animator, rig, clip_params, weight = 1 if clip == .IDLE else 0)
+    mode: animation.PlayMode = .LOOP if clip == .IDLE || clip == .RUN else .ONCE
+    clip_params := animation.ClipParams{clip = animation.clip_find(rig, attack if clip == .ATTACK else name), speed = 1, mode = mode}
+    a.layers[clip] = animation.layer_create(a.animator, rig, clip_params, weight = 1 if clip == .IDLE else 0)
   }
   return
 }
 
 actor_destroy :: proc(app: ^App, a: ^Actor) {
-  anim.animator_destroy(&a.animator)
   gltf.destroy(&a.instance, &app.scene)
   world.destroy(&app.scene, a.model)
   a^ = {}
@@ -670,15 +665,15 @@ show_props :: proc(app: ^App, a: Actor, keep: []string) {
 
 actor_play :: proc(a: ^Actor, clip: Clip) {
   if clip == a.clip && (clip == .IDLE || clip == .RUN) do return
-  anim.layer_fade(&a.animator, a.layers[a.clip], 0, CROSS_FADE)
-  anim.layer_fade(&a.animator, a.layers[clip], 1, CROSS_FADE)
-  anim.clip_seek(&a.animator, a.layers[clip], 0)
+  animation.layer_fade(a.animator, a.layers[a.clip], 0, CROSS_FADE)
+  animation.layer_fade(a.animator, a.layers[clip], 1, CROSS_FADE)
+  animation.clip_seek(a.animator, a.layers[clip], 0)
   a.clip = clip
 }
 
 actor_busy :: proc(a: ^Actor) -> bool {
   if a.clip == .IDLE || a.clip == .RUN do return false
-  return a.clip == .DEATH || !anim.clip_done(&a.animator, a.layers[a.clip])
+  return a.clip == .DEATH || !animation.clip_done(a.animator, a.layers[a.clip])
 }
 
 actor_move :: proc(a: ^Actor, moving: bool) {
@@ -686,26 +681,17 @@ actor_move :: proc(a: ^Actor, moving: bool) {
 }
 
 actor_update :: proc(app: ^App, a: ^Actor, model: ^gltf.Model, dt: f32) {
-  if len(a.instance.skinned) == 0 do return
-  anim.animator_update(&a.animator, &model.rigs[a.rig], dt)
-  gltf.pose_joints(&a.instance, &app.scene, model, a.rig, &a.animator)
-}
-
-actor_stage :: proc(app: ^App, a: ^Actor) {
-  for s in a.instance.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), a.animator.palette)
+  gltf.animate(&a.instance, model, &app.scene, &app.renderer, dt)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
-  if input.key_pressed(&app.input, .F1) do app.debug = !app.debug
+  platform.read_input(&app.platform, &app.input)
+  if input.key_pressed(&app.input, .F1) do app.show_debug = !app.show_debug
   fsm.update(&app.screen, SCREENS, app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  for &a in app.lineup do actor_stage(app, &a)
-  actor_stage(app, &app.player)
-  for &e in app.enemies do actor_stage(app, &e)
   draw_hud(app)
   render.update(&app.renderer, dt)
 }
@@ -728,20 +714,19 @@ update_select :: proc(app: ^App, dt: f32) -> Screen {
 }
 
 update_level :: proc(app: ^App, dt: f32) -> Screen {
-  drag := app.input.mouse_delta if input.mouse_down(&app.input, .RIGHT) else 0
-  render.orbit_drag(&app.orbit, drag, app.input.scroll.y, min_distance = 4, max_distance = 20)
+  render.orbit_drag(&app.orbit, &app.input, {.RIGHT}, min_distance = 4, max_distance = 20)
   update_player(app, dt)
   physics.step(&app.phys, dt)
   world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
   app.feet = physics.body(&app.phys, app.player.body).position - {0, BODY_HALF_HEIGHT, 0}
-  crowd.update(&app.crowd, dt)
-  world.set_world_poses(&app.scene, crowd.agent_poses(&app.crowd))
+  nav.crowd_update(&app.crowd, dt)
+  world.set_world_poses(&app.scene, nav.agent_poses(&app.crowd))
   update_enemies(app, dt)
   update_projectiles(app, dt)
   update_pickups(app, dt)
   app.orbit.target = app.feet + {0, 1.8, 0}
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  if app.debug do draw_debug(app)
+  if app.show_debug do draw_debug(app)
   if app.result_timer == 0 && len(app.enemies) == 0 && app.player.health > 0 {
     actor_play(&app.player, .CHEER)
     finish(app, true)
@@ -841,7 +826,7 @@ finish :: proc(app: ^App, won: bool) {
 }
 
 enemy_position :: proc(app: ^App, e: ^Enemy) -> [3]f32 {
-  return crowd.agent(&app.crowd, e.agent).position
+  return nav.agent(&app.crowd, e.agent).position
 }
 
 enemy_distance :: proc(app: ^App, e: ^Enemy) -> f32 {
@@ -856,7 +841,7 @@ update_enemies :: proc(app: ^App, dt: f32) {
     if e.health <= 0 do e.dying += dt
     clear(&e.trace)
     if app.player.health > 0 || e.health <= 0 do bt.tick(brain(e.kind), &Mob{app, e}, &e.trace)
-    agent := crowd.agent(&app.crowd, e.agent)
+    agent := nav.agent(&app.crowd, e.agent)
     if e.health > 0 && (e.clip == .ATTACK || linalg.length(agent.velocity.xz) < 0.3) {
       to := app.feet - agent.position
       world.rotate(&app.scene, e.model, math.atan2(to.x, to.z))
@@ -868,7 +853,7 @@ update_enemies :: proc(app: ^App, dt: f32) {
     }
     actor_update(app, e, &app.foes[e.kind], dt)
     if e.dying > DESPAWN_TIME {
-      crowd.agent_destroy(&app.crowd, e.agent)
+      nav.agent_destroy(&app.crowd, e.agent)
       actor_destroy(app, e)
       delete(e.trace)
       unordered_remove(&app.enemies, i)
@@ -921,7 +906,7 @@ die :: proc(m: ^Mob) -> bt.Status {
   app, e := m.app, m.enemy
   if e.clip != .DEATH {
     actor_play(e, .DEATH)
-    crowd.stop(&app.crowd, e.agent)
+    nav.stop(&app.crowd, e.agent)
   }
   return .RUNNING
 }
@@ -933,7 +918,7 @@ in_range :: proc(m: ^Mob) -> bool {
 
 attack :: proc(m: ^Mob) -> bt.Status {
   app, e := m.app, m.enemy
-  crowd.stop(&app.crowd, e.agent)
+  nav.stop(&app.crowd, e.agent)
   if e.cooldown <= 0 {
     actor_play(e, .ATTACK)
     e.cooldown = FOES[e.kind].cooldown
@@ -951,7 +936,7 @@ chase :: proc(m: ^Mob) -> bt.Status {
   app, e := m.app, m.enemy
   if e.repath <= 0 {
     e.repath = 0.5
-    crowd.move_to(&app.crowd, e.agent, app.feet)
+    nav.move_to(&app.crowd, e.agent, app.feet)
   }
   return .RUNNING
 }
@@ -966,7 +951,7 @@ retreat :: proc(m: ^Mob) -> bt.Status {
   if e.repath <= 0 {
     e.repath = 0.5
     position := enemy_position(app, e)
-    crowd.move_to(&app.crowd, e.agent, position + linalg.normalize0(position - app.feet) * 4)
+    nav.move_to(&app.crowd, e.agent, position + linalg.normalize0(position - app.feet) * 4)
   }
   return .RUNNING
 }
@@ -975,7 +960,7 @@ patrol :: proc(m: ^Mob) -> bt.Status {
   app, e := m.app, m.enemy
   if e.repath <= 0 {
     e.repath = 3
-    crowd.move_to(&app.crowd, e.agent, {rand.float32_range(-ARENA, ARENA), 0, rand.float32_range(-ARENA, ARENA)} * 0.7)
+    nav.move_to(&app.crowd, e.agent, {rand.float32_range(-ARENA, ARENA), 0, rand.float32_range(-ARENA, ARENA)} * 0.7)
   }
   return .RUNNING
 }
@@ -987,7 +972,7 @@ enraged :: proc(m: ^Mob) -> bool {
 
 charge :: proc(m: ^Mob) -> bt.Status {
   app, e := m.app, m.enemy
-  crowd.agent_params(&app.crowd, e.agent).max_speed = FOES[e.kind].speed * 1.8
+  nav.agent_params(&app.crowd, e.agent).max_speed = FOES[e.kind].speed * 1.8
   return chase(m)
 }
 
@@ -1044,7 +1029,7 @@ draw_debug :: proc(app: ^App) {
   }
   render.debug_circle(&app.renderer, app.feet + {0, 0.05, 0}, {0, 1, 0}, REACH, render.DEBUG_RED)
   for &e in app.enemies {
-    agent := crowd.agent(&app.crowd, e.agent)
+    agent := nav.agent(&app.crowd, e.agent)
     lift := [3]f32{0, 0.1, 0}
     render.debug_circle(&app.renderer, agent.position + lift, {0, 1, 0}, agent.params.radius, render.DEBUG_YELLOW)
     from := agent.position + lift
@@ -1099,8 +1084,7 @@ exit_result :: proc(app: ^App) {
 }
 
 update_result :: proc(app: ^App, dt: f32) -> Screen {
-  size := platform.framebuffer_size(&app.window)
-  ui.layout(&app.gui, {1280, 720}, {f32(size.x), f32(size.y)} / platform.dpi_scale(&app.window), &app.font)
+  ui.layout(&app.gui, render.window_size(&app.renderer), &app.font)
   ui.update_input(&app.gui, &app.input)
   actor_update(app, &app.player, &app.heroes[app.hero], dt)
   for &e in app.enemies do actor_update(app, &e, &app.foes[e.kind], dt)
@@ -1117,14 +1101,13 @@ update_result :: proc(app: ^App, dt: f32) -> Screen {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 draw_hud :: proc(app: ^App) {
   commands := make([dynamic]render.RenderCommand, context.temp_allocator)
-  size := platform.framebuffer_size(&app.window)
-  screen := [2]f32{f32(size.x), f32(size.y)} / platform.dpi_scale(&app.window)
+  screen := render.window_size(&app.renderer)
   if app.screen.current == .SELECT {
     hero := HEROES[app.hero]
     text(&commands, "Choose your hero", {40, 36}, 40)
@@ -1168,7 +1151,7 @@ hud :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand) {
     head := enemy_position(app, &e) + {0, 2.4 * FOES[e.kind].scale, 0}
     point := render.world_to_screen(&app.renderer, head) or_continue
     bar(commands, point - {30, 0}, {60, 7}, e.health / FOES[e.kind].health, {230, 200, 60, 255})
-    if !app.debug do continue
+    if !app.show_debug do continue
     y := point.y - 6
     #reverse for step in e.trace {
       y -= 16

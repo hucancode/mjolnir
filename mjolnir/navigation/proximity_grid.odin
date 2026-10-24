@@ -1,5 +1,5 @@
 #+private
-package crowd
+package navigation
 
 import "core:math"
 

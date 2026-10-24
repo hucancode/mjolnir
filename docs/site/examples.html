@@ -104,7 +104,7 @@ function mount() {
   const ready = () => { if (current === e) loader.hidden = true; };
   modeBtn.textContent = live ? 'Video' : 'Run live';
   if (live) {
-    const f = el('iframe', { src: `live/index.html?example=${encodeURIComponent(e.name)}`, title: e.name, allow: 'fullscreen; gamepad' });
+    const f = el('iframe', { src: `data/index.html?example=${encodeURIComponent(e.name)}`, title: e.name, allow: 'fullscreen; gamepad' });
     f.addEventListener('load', ready);
     stage.replaceChildren(f);
   } else if (e.video) {
@@ -136,7 +136,6 @@ function show() {
 }
 
 modeBtn.addEventListener('click', () => { live = !live; mount(); });
-codeBtn.addEventListener('click', () => dialog.showModal());
 closeBtn.addEventListener('click', () => dialog.close());
 dialog.addEventListener('click', (ev) => { if (ev.target === dialog) dialog.close(); }); // backdrop click
 // logs live in the (same-origin) iframe's #console; mirror them while the dialog is open

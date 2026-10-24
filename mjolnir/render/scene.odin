@@ -184,6 +184,7 @@ Renderer_State :: struct {
   // sampled by text commands
   ui_font_atlas:          TextureHandle,
   ui_font_atlas_size:     [2]f32,
+  // the window's, as frame last measured it: maps window coordinates to pixels
   dpi_scale:              f32,
   mutex:                  sync.Recursive_Mutex,
   // your GPU programs (gpu.odin): [handle - 1], zero where free; work staged for the next
@@ -200,20 +201,15 @@ Renderer_State :: struct {
   initialized:            bool,
 }
 
-// init brings the renderer up on a window: the GPU backend, every resource and an empty scene
-// with a main camera. Paired with shutdown. A backend whose device arrives asynchronously
-// (wgpu on the web) finishes in ready: until it returns true, nothing but ready may be called.
-init :: proc(
-  self: ^Renderer,
-  app_name: string,
-  window: WindowHandle,
-  framebuffer_size: [2]u32,
-  dpi_scale: f32,
-) -> bool {
+// init brings the renderer up on a window (platform.Platform.window), sized as it is: the GPU
+// backend, every resource and an empty scene with a main camera. Paired with shutdown. A backend
+// whose device arrives asynchronously (wgpu on the web) finishes in ready: until it returns
+// true, nothing but ready may be called. Main thread.
+init :: proc(self: ^Renderer, window: WindowHandle) -> bool {
   for stream, s in MESH_STREAMS do containers.slab_init(&self.mesh_slabs[s], stream.slab)
-  dev.init(&self.gpu, app_name, window, framebuffer_size) or_return
+  dev.init(&self.gpu, window) or_return
   for t, i in TABLES do self.tables[i] = make([]u8, t.stride * t.capacity)
-  self.dpi_scale = dpi_scale
+  _, self.dpi_scale = dev.window_size(&self.gpu)
   if dev.ready(&self.gpu) do return ready(self)
   return true
 }
@@ -269,7 +265,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
   for &inbox in self.debug_lines do inbox = make([dynamic]DebugLineSegment, 0, 1024)
   overlay_init(self) or_return
   extent := dev.extent(&self.gpu)
-  cam, created := camera_create(self, extent.x, extent.y, position = {3, 4, 3}, far_plane = 1000.0)
+  cam, created := camera_create(self, extent.x, extent.y, position = {3, 4, 3}, far = 1000.0)
   if !created do return false
   self.main_camera = cam
   self.sun = DEFAULT_SUN
@@ -1259,13 +1255,13 @@ flush :: proc(self: ^Renderer, frame_index: u32) {
   overlay_flush(self)
 }
 
-// frame renders and presents one frame. An out-of-date swapchain is rebuilt at
-// framebuffer_size; dpi_scale maps window coordinates (the overlay, cursor_ray) to its
-// pixels. It returns false on a GPU error.
-frame :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool {
+// frame renders and presents one frame, following the window's size: an out-of-date swapchain
+// is rebuilt to it. It returns false on a GPU error. Main thread.
+frame :: proc(self: ^Renderer) -> bool {
   frame_index := current_frame(self)
   guard(self)
-  self.dpi_scale = dpi_scale
+  framebuffer_size: [2]u32
+  framebuffer_size, self.dpi_scale = dev.window_size(&self.gpu)
   tick_resource_pools(self)
   flush(self, frame_index)
   submitted, status := frame_run(self, framebuffer_size)

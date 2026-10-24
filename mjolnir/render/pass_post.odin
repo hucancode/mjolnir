@@ -75,7 +75,7 @@ post_pipelines_create :: proc(self: ^Renderer, source: rhi.ShaderSource) -> (pip
 // camera runs. Compile it from a .slang that declares `struct Effect` (its params) and includes
 // shader/post.slang; load it with #load("name." + SHADER_EXT). It reads render's time and the
 // image size (post_resolution).
-post_shader_create :: proc(self: ^Renderer, source: []u8) -> (PostShader, bool) {
+post_shader_create :: proc(self: ^Renderer, source: []u8) -> (PostShader, bool) #optional_ok {
   pipelines, ok := post_pipelines_create(self, source)
   if !ok do return 0, false
   for &slot, i in self.custom_post_pipelines {

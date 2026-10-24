@@ -15,7 +15,7 @@ import "core:math/rand"
 import mu "vendor:microui"
 
 App :: struct {
-  window:          platform.Platform,
+  platform:        platform.Platform,
   scene:           world.World,
   renderer:        render.Renderer,
   debug:           debugui.Context,
@@ -48,24 +48,23 @@ MIN_LIGHT_HEIGHT :: 0.5
 SPOT_TARGET :: [3]f32{0, 0.5, 0}
 
 dir_enabled: bool = true
-dir_intensity: mu.Real = 1.0
+dir_intensity: f32 = 1.0
 
 point_enabled: bool = true
-point_intensity: mu.Real = 25.0
-point_radius: mu.Real = 20.0
+point_intensity: f32 = 25.0
+point_radius: f32 = 20.0
 
 spot_enabled: bool = true
-spot_intensity: mu.Real = 25.0
-spot_radius: mu.Real = 20.0
-spot_outer_deg: mu.Real = 28.0
+spot_intensity: f32 = 25.0
+spot_radius: f32 = 20.0
+spot_outer_deg: f32 = 28.0
 
 main :: proc() {
   context.logger = log.create_console_logger()
   rand.reset(1)
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1000, 700, "Lights") do return
-  if !render.init(&app.renderer, "Lights", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1000, 700, "Lights") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -80,14 +79,14 @@ main :: proc() {
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
-  render.camera_look_at(render.main_camera(&app.renderer), {9, 8, 9}, {0, 1, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
+  app.orbit = render.make_orbit({9, 8, 9}, {0, 1, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.renderer.ibl_intensity = 0.3
 
   ground := world.spawn(&app.scene)
@@ -123,7 +122,7 @@ shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   delete(app.lights)
   free(app)
 }
@@ -180,16 +179,16 @@ light_position :: proc(l: MovingLight, t: f32) -> [3]f32 {
 light_settings :: proc(l: MovingLight) -> render.Light {
   switch l.kind {
   case .POINT:
-    return render.make_point_light(l.color, f32(point_intensity), f32(point_radius))
+    return render.make_point_light(l.color, point_intensity, point_radius)
   case .SPOT:
-    return render.make_spot_light(l.color, f32(spot_intensity), f32(spot_radius), math.to_radians(f32(spot_outer_deg)))
+    return render.make_spot_light(l.color, spot_intensity, spot_radius, math.to_radians(spot_outer_deg))
   }
   return {}
 }
 
 apply_light_settings :: proc(app: ^App) {
   app.renderer.sun.enabled = dir_enabled
-  app.renderer.sun.intensity = f32(dir_intensity)
+  app.renderer.sun.intensity = dir_intensity
   for l in app.lights {
     world.set_visible(&app.scene, l.node, point_enabled if l.kind == .POINT else spot_enabled)
     render.light(&app.renderer, l.light)^ = light_settings(l)
@@ -199,14 +198,11 @@ apply_light_settings :: proc(app: ^App) {
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   if input.key_pressed(&app.input, .P) do spawn_light(app, .POINT)
   if input.key_pressed(&app.input, .O) do spawn_light(app, .SPOT)
@@ -228,8 +224,8 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {
@@ -252,7 +248,7 @@ debug_ui :: proc(app: ^App) {
   }
 }
 
-light_block :: proc(ctx: ^mu.Context, name: string, enabled: ^bool, intensity: ^mu.Real, max_intensity: mu.Real, radius: ^mu.Real, cone: ^mu.Real) {
+light_block :: proc(ctx: ^mu.Context, name: string, enabled: ^bool, intensity: ^f32, max_intensity: f32, radius: ^f32, cone: ^f32) {
   mu.layout_row(ctx, {-1}, 0)
   mu.checkbox(ctx, name, enabled)
   mu.label(ctx, "Intensity:")

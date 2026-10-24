@@ -9,7 +9,6 @@ import "mjolnir/render"
 import "mjolnir/world"
 import nav "mjolnir/navigation"
 import "mjolnir/navigation/bake"
-import "mjolnir/navigation/crowd"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -41,20 +40,20 @@ OBSTACLES := [?]Box {
 PALETTE := [?][4]f32{{1, 0.25, 0.25, 1}, {0.25, 1, 0.25, 1}, {0.4, 0.4, 1, 1}, {1, 0.95, 0.2, 1}, {0.25, 0.95, 0.95, 1}, {1, 0.3, 0.95, 1}}
 
 Agent :: struct {
-  handle: crowd.AgentHandle,
+  handle: nav.AgentHandle,
   placed: bool,
   color:  [4]f32,
 }
 
 App :: struct {
-  window:   platform.Platform,
+  platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   debug:    debugui.Context,
   input:    input.State,
   orbit:    render.Orbit,
   navmesh:  nav.NavMesh,
-  crowd:    crowd.Crowd,
+  crowd:    nav.Crowd,
   agents:   [AGENT_COUNT]Agent,
   wander:   bool,
 }
@@ -63,9 +62,8 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   app.wander = true
-  w := &app.window
-  if !platform.init(w, 1000, 700, "Crowd Navigation") do return
-  if !render.init(&app.renderer, "Crowd Navigation", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1000, 700, "Crowd Navigation") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -82,14 +80,14 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
-  render.camera_look_at(render.main_camera(&app.renderer), {32, 28, 32}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
+  app.orbit = render.make_orbit({32, 28, 32}, {0, 0, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   if !build_level(app) {
     log.error("navmesh build failed")
     return .FAIL
   }
   show_navmesh(app)
-  if !crowd.init(&app.crowd, AGENT_COUNT, AGENT_RADIUS, &app.navmesh) {
+  if !nav.crowd_init(&app.crowd, AGENT_COUNT, AGENT_RADIUS, &app.navmesh) {
     log.error("crowd creation failed")
     return .FAIL
   }
@@ -99,17 +97,17 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 shutdown :: proc(app: ^App) {
-  crowd.shutdown(&app.crowd)
+  nav.crowd_shutdown(&app.crowd)
   nav.destroy(&app.navmesh)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 build_level :: proc(app: ^App) -> bool {
@@ -141,7 +139,7 @@ show_navmesh :: proc(app: ^App) {
 }
 
 spawn_agents :: proc(app: ^App) {
-  params := crowd.DEFAULT_AGENT_PARAMS
+  params := nav.DEFAULT_AGENT_PARAMS
   params.radius = AGENT_RADIUS
   params.height = AGENT_HEIGHT
   params.max_speed = AGENT_SPEED
@@ -156,7 +154,7 @@ spawn_agents :: proc(app: ^App) {
     node := world.spawn(&app.scene, position)
     body := world.spawn(&app.scene, {0, AGENT_HEIGHT * 0.5, 0}, parent = node)
     render.attach(&app.renderer, render.SlotHandle(body.index), render.MeshAttachment{mesh = capsule, material = materials[i % len(PALETTE)], cast_shadow = true})
-    a.handle, a.placed = crowd.agent_create(&app.crowd, position, params, user = world.Handle(node))
+    a.handle, a.placed = nav.agent_create(&app.crowd, position, params, user = world.Handle(node))
     a.color = PALETTE[i % len(PALETTE)]
   }
 }
@@ -174,50 +172,47 @@ random_goal :: proc(app: ^App, away_from: [3]f32) -> [3]f32 {
 
 send_to_random_goals :: proc(app: ^App) {
   for a in app.agents {
-    if a.placed do crowd.move_to(&app.crowd, a.handle, random_goal(app, crowd.agent(&app.crowd, a.handle).position))
+    if a.placed do nav.move_to(&app.crowd, a.handle, random_goal(app, nav.agent(&app.crowd, a.handle).position))
   }
 }
 
 reassign_arrived :: proc(app: ^App) {
   for a in app.agents {
     if !a.placed do continue
-    ag := crowd.agent(&app.crowd, a.handle)
-    if linalg.length(ag.target - ag.position) < GOAL_REACHED do crowd.move_to(&app.crowd, a.handle, random_goal(app, ag.position))
+    ag := nav.agent(&app.crowd, a.handle)
+    if linalg.length(ag.target - ag.position) < GOAL_REACHED do nav.move_to(&app.crowd, a.handle, random_goal(app, ag.position))
   }
 }
 
 send_all_to :: proc(app: ^App, goal: [3]f32) {
   for a in app.agents {
-    if a.placed do crowd.move_to(&app.crowd, a.handle, goal)
+    if a.placed do nav.move_to(&app.crowd, a.handle, goal)
   }
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-    if input.mouse_pressed(&app.input, .RIGHT) {
-      ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
-      if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do send_all_to(app, goal)
-    }
+  render.orbit_drag(&app.orbit, &app.input)
+  if !app.input.mouse_captured && input.mouse_pressed(&app.input, .RIGHT) {
+    ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
+    if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do send_all_to(app, goal)
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   if app.wander do reassign_arrived(app)
-  crowd.update(&app.crowd, dt)
-  world.set_world_poses(&app.scene, crowd.agent_poses(&app.crowd))
-  for a in app.agents do if a.placed do draw_corners(app, crowd.agent(&app.crowd, a.handle), a.color)
+  nav.crowd_update(&app.crowd, dt)
+  world.set_world_poses(&app.scene, nav.agent_poses(&app.crowd))
+  for a in app.agents do if a.placed do draw_corners(app, nav.agent(&app.crowd, a.handle), a.color)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
 }
 
-draw_corners :: proc(app: ^App, ag: crowd.Agent, color: [4]f32) {
+draw_corners :: proc(app: ^App, ag: nav.Agent, color: [4]f32) {
   ag := ag
   lift := [3]f32{0, 0.15, 0}
   prev := ag.position + lift
@@ -228,8 +223,8 @@ draw_corners :: proc(app: ^App, ag: crowd.Agent, color: [4]f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

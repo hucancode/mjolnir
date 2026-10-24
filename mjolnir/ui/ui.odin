@@ -106,7 +106,7 @@ UI :: struct {
 UI_State :: struct {
   // indexed by NodeHandle.index; slots says which are live
   nodes:        []Node,
-  reference:    [2]f32, // the reference frame of the last layout
+  reference:    [2]f32, // the frame nodes are laid out in (init)
   frame:        anchor.Frame, // ...fitted to the window
   slots:        containers.Slots,
   next_order:   i32,
@@ -127,8 +127,10 @@ UI_State :: struct {
   depth_z:      [dynamic]i32,
 }
 
-// init prepares `self` to hold up to `max_nodes` nodes.
-init :: proc(self: ^UI, max_nodes: u32 = 4096) {
+// init prepares `self` to hold up to `max_nodes` nodes, laid out in `reference`, a frame of
+// your choosing that layout fits to the window.
+init :: proc(self: ^UI, reference := [2]f32{1024, 768}, max_nodes: u32 = 4096) {
+  self.reference = reference
   containers.slots_init(&self.slots, max_nodes)
   self.nodes = make([]Node, max_nodes)
 }
@@ -199,21 +201,31 @@ set_text :: proc(self: ^UI, handle: NodeHandle, text: string) {
   n.text = strings.clone(text)
 }
 
-// rect returns the laid-out rect of a live node in window pixels; zero before its first layout.
+// rect returns the laid-out rect of a live node in window pixels; zero before its first layout
+// or for a stale handle.
 rect :: proc(self: ^UI, handle: NodeHandle) -> Rect {
-  return self.rects[handle.index] if int(handle.index) < len(self.rects) else {}
+  if !laid_out(self, handle) do return {}
+  return self.rects[handle.index]
 }
 
-// clip returns the region where a node is visible; zero before its first layout.
+// clip returns the region where a node is visible; zero before its first layout or for a
+// stale handle.
 clip :: proc(self: ^UI, handle: NodeHandle) -> Rect {
-  return self.clips[handle.index] if int(handle.index) < len(self.clips) else {}
+  if !laid_out(self, handle) do return {}
+  return self.clips[handle.index]
 }
 
-// lines returns the laid-out text lines of a node.
+// lines returns the laid-out text lines of a node; none for a stale handle.
 lines :: proc(self: ^UI, handle: NodeHandle) -> []Line {
-  if int(handle.index) >= len(self.line_ranges) do return nil
+  if !laid_out(self, handle) do return nil
   r := self.line_ranges[handle.index]
   return self.lines[r[0]:][:r[1]]
+}
+
+// A live node the last layout covered.
+@(private = "file")
+laid_out :: proc(self: ^UI, handle: NodeHandle) -> bool {
+  return containers.slots_valid(&self.slots, handle) && int(handle.index) < len(self.rects)
 }
 
 // within reports whether `handle` is `node` or one of its ancestors; false for none.

@@ -31,13 +31,13 @@ FLY_SPEED :: f32(16)
 DRAG_SPEED :: f32(30)
 
 auto_move := true
-auto_speed: mu.Real = 2.5
-propagation: mu.Real = 0.6
-max_bend: mu.Real = 60
-body_links: mu.Real = 20
-body_length: mu.Real = 10
-whisker_links: mu.Real = 6
-whisker_length: mu.Real = 3
+auto_speed: f32 = 2.5
+propagation: f32 = 0.6
+max_bend: f32 = 60
+body_links: f32 = 20
+body_length: f32 = 10
+whisker_links: f32 = 6
+whisker_length: f32 = 3
 
 Shape :: struct {
   body_links:    int,
@@ -47,30 +47,29 @@ Shape :: struct {
 }
 
 App :: struct {
-  window:       platform.Platform,
-  scene:        world.World,
-  renderer:     render.Renderer,
-  input:        input.State,
-  debug:        debugui.Context,
-  orbit:        render.Orbit,
-  chain:        animation.Chain([2]f32),
-  whiskers:     [2]animation.Chain([2]f32),
-  shape:        Shape,
-  head:         world.NodeHandle,
-  body_nodes:   [MAX_BODY]world.NodeHandle,
+  platform:      platform.Platform,
+  scene:         world.World,
+  renderer:      render.Renderer,
+  input:         input.State,
+  debug:         debugui.Context,
+  orbit:         render.Orbit,
+  chain:         animation.Chain([2]f32),
+  whiskers:      [2]animation.Chain([2]f32),
+  shape:         Shape,
+  head:          world.NodeHandle,
+  body_nodes:    [MAX_BODY]world.NodeHandle,
   whisker_nodes: [2][MAX_WHISKER]world.NodeHandle,
-  phase:        f32,
-  time:         f32,
-  grabbed:      bool,
-  grab_offset:  [2]f32,
+  phase:         f32,
+  time:          f32,
+  grabbed:       bool,
+  grab_offset:   [2]f32,
 }
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1024, 768, "Chain") do return
-  if !render.init(&app.renderer, "Chain", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1024, 768, "Chain") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -160,8 +159,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.shape = read_shape()
   shape_build(app, start, forward)
 
-  render.camera_look_at(render.main_camera(r), {0, 10, 3}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(r), {0, 0, 0})
+  app.orbit = render.make_orbit({0, 10, 3}, {0, 0, 0})
+  render.camera_orbit(render.main_camera(r), app.orbit)
   return .READY
 }
 
@@ -199,12 +198,12 @@ shutdown :: proc(app: ^App) {
   debugui.shutdown(&app.debug)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 debug_ui :: proc(app: ^App) {
@@ -237,9 +236,8 @@ approach :: proc(from, to: [2]f32, distance: f32) -> [2]f32 {
 }
 
 ground_hit :: proc(ray: geometry.Ray) -> (at: [2]f32, ok: bool) {
-  if abs(ray.direction.y) < 1e-4 do return
-  t := (PLANE_Y - ray.origin.y) / ray.direction.y
-  if t < 0 do return
+  hit, t := geometry.ray_plane_intersection(ray, {0, PLANE_Y, 0}, {0, 1, 0})
+  if !hit do return
   p := ray.origin + ray.direction * t
   return {p.x, p.z}, true
 }
@@ -259,7 +257,7 @@ update :: proc(app: ^App, dt: f32) {
   r := &app.renderer
   render.lock(r)
   defer render.unlock(r)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, r)
   debug_ui(app)
   render.stage_overlay(r, debugui.end(&app.debug))
@@ -274,10 +272,7 @@ update :: proc(app: ^App, dt: f32) {
     }
   }
   if !input.mouse_down(&app.input, .LEFT) do app.grabbed = false
-  if free_mouse && !app.grabbed {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  if !app.grabbed do render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(r), app.orbit)
 
   heading := linalg.normalize0(app.chain.head - app.chain.points[0])
@@ -356,6 +351,6 @@ pose :: proc(app: ^App, heading: [2]f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }

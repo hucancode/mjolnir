@@ -29,37 +29,36 @@ WAVELENGTH :: f32(4)
 ARENA :: f32(14)
 
 App :: struct {
-  window:   platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  debug:    debugui.Context,
-  input:    input.State,
-  orbit:    render.Orbit,
-  body:     world.NodeHandle,
-  head:     world.NodeHandle,
-  skin:     render.MaterialHandle,
+  platform:  platform.Platform,
+  scene:     world.World,
+  renderer:  render.Renderer,
+  debug:     debugui.Context,
+  input:     input.State,
+  orbit:     render.Orbit,
+  body:      world.NodeHandle,
+  head:      world.NodeHandle,
+  skin:      render.MaterialHandle,
   head_skin: render.MaterialHandle,
-  focus:    [2]f32, // what the camera looks at, follows the neck loosely so the weave doesn't shake it
-  heading:  f32,
-  look:     f32,
-  lean:     f32,
-  speed:    f32,
-  phase:    f32,
-  goal:     [2]f32, // where auto move is heading
-  goals:    int,
-  chain:    animation.Chain([2]f32), // the neck's path on the ground, (x, z)
+  focus:     [2]f32, // what the camera looks at, follows the neck loosely so the weave doesn't shake it
+  heading:   f32,
+  look:      f32,
+  lean:      f32,
+  speed:     f32,
+  phase:     f32,
+  goal:      [2]f32, // where auto move is heading
+  goals:     int,
+  chain:     animation.Chain([2]f32), // the neck's path on the ground, (x, z)
 }
 
-cruise_speed: mu.Real = 5.0
-color: [3]mu.Real = {0.3, 0.75, 0.25}
+cruise_speed: f32 = 5.0
+color: [3]f32 = {0.3, 0.75, 0.25}
 auto_move := true
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1000, 700, "Cartoon Snake") do return
-  if !render.init(&app.renderer, "Cartoon Snake", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1000, 700, "Cartoon Snake") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -77,8 +76,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
   if !debugui.init(&app.debug, r, {1000, 700}) do return .FAIL
-  render.camera_look_at(render.main_camera(r), {3, 6, 9}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(r), {0, 0, 0})
+  app.orbit = render.make_orbit({3, 6, 9}, {0, 0, 0})
+  render.camera_orbit(render.main_camera(r), app.orbit)
 
   body_shader, body_ok := render.material_shader_create(r, #load("snake_body." + render.SHADER_EXT), blend = .NONE)
   head_shader, head_ok := render.material_shader_create(r, #load("snake_head." + render.SHADER_EXT), blend = .NONE)
@@ -119,25 +118,22 @@ shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   steer(app, dt)
   pose(app)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
@@ -160,7 +156,7 @@ steer :: proc(app: ^App, dt: f32) {
   if want != 0 {
     auto_move = false
     aim = wrap(math.atan2(-want.x, -want.y) - app.heading)
-    target = f32(cruise_speed)
+    target = cruise_speed
   } else if auto_move {
     if linalg.distance(app.chain.head, app.goal) < 2 {
       app.goals += 1
@@ -168,7 +164,7 @@ steer :: proc(app: ^App, dt: f32) {
     }
     to := app.goal - app.chain.head
     aim = wrap(math.atan2(-to.x, -to.y) - app.heading)
-    target = f32(cruise_speed)
+    target = cruise_speed
   }
   app.speed += (target - app.speed) * min(dt * 4, 1)
   ds := app.speed * dt
@@ -199,7 +195,7 @@ pose :: proc(app: ^App) {
   app.orbit.target = {app.focus.x, 0.3, app.focus.y}
 
   head_skin := render.material(&app.renderer, app.head_skin)
-  head_skin.base_color_factor = {f32(color.r), f32(color.g), f32(color.b), 1}
+  head_skin.base_color_factor = {color.r, color.g, color.b, 1}
 
   world.translate(&app.scene, app.body, {neck.x, 0, neck.y})
   skin := render.material(&app.renderer, app.skin)
@@ -217,8 +213,8 @@ wrap :: proc(angle: f32) -> f32 {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

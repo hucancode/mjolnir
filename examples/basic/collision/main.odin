@@ -50,7 +50,7 @@ Body :: struct {
 }
 
 App :: struct {
-  window:        platform.Platform,
+  platform:      platform.Platform,
   scene:         world.World,
   renderer:      render.Renderer,
   debug:         debugui.Context,
@@ -76,9 +76,8 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   if !physics.init(&app.phys) do return
-  w := &app.window
-  if !platform.init(w, 1100, 760, "Collision") do return
-  if !render.init(&app.renderer, "Collision", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1100, 760, "Collision") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -96,26 +95,26 @@ shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   physics.shutdown(&app.phys)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {1100, 760}) do return .FAIL
   render.setup(&app.renderer)
-  render.camera_look_at(render.main_camera(&app.renderer), {16, 14, 16}, {0, 1.5, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1.5, 0})
+  app.orbit = render.make_orbit({16, 14, 16}, {0, 1.5, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   spawn_scene(app)
   return .READY
 }
@@ -227,14 +226,11 @@ drive_circle :: proc(app: ^App, b: ^Body) {
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   if app.reset_pending {
     app.reset_pending = false

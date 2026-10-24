@@ -10,11 +10,11 @@ import "mjolnir/world"
 import "core:log"
 import mu "vendor:microui"
 
-orbit_speed: mu.Real = 1.0
-spin_speed: mu.Real = 2.0
+orbit_speed: f32 = 1.0
+spin_speed: f32 = 2.0
 
 App :: struct {
-  window:   platform.Platform,
+  platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   debug:    debugui.Context,
@@ -29,9 +29,8 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1000, 700, "Scene Graph") do return
-  if !render.init(&app.renderer, "Scene Graph", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1000, 700, "Scene Graph") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -49,8 +48,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
 
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 10, 4}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
+  app.orbit = render.make_orbit({0, 10, 4}, {0, 0, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   ground := world.spawn(&app.scene, {0, -2, 0})
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
@@ -79,30 +78,27 @@ shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  app.phase += dt * f32(orbit_speed)
+  app.phase += dt * orbit_speed
   world.rotate(&app.scene, app.sun, app.phase * 0.3)
   for planet, i in app.planets {
-    world.rotate(&app.scene, planet, app.phase * f32(spin_speed) * f32(i + 1) * 0.5)
+    world.rotate(&app.scene, planet, app.phase * spin_speed * f32(i + 1) * 0.5)
   }
   world.rotate(&app.scene, app.moon, app.phase * 4.0)
   world.update(&app.scene)
@@ -111,8 +107,8 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

@@ -14,7 +14,7 @@ TRAIL_PERIOD :: 0.25
 TRAIL_LIFE :: 3.0
 
 App :: struct {
-  window:     platform.Platform,
+  platform:   platform.Platform,
   scene:      world.World,
   renderer:   render.Renderer,
   input:      input.State,
@@ -26,9 +26,8 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1024, 768, "Debug Draw") do return
-  if !render.init(&app.renderer, "Debug Draw", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1024, 768, "Debug Draw") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -53,30 +52,27 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.attach(&app.renderer, render.SlotHandle(occluder.index), render.primitive(&app.renderer, .CUBE, .BLUE))
   world.scale(&app.scene, occluder, 0.8)
 
-  render.camera_look_at(render.main_camera(&app.renderer), {12, 8, 14}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
+  app.orbit = render.make_orbit({12, 8, 14}, {0, 0, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   return .READY
 }
 
 shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  platform.read_input(&app.platform, &app.input)
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.time += dt
   t := app.time
@@ -120,6 +116,6 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }

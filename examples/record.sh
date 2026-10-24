@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Build and run each example, recording a video clip via the
 # VK_LAYER_LUNARG_screenshot layer (one PPM per frame) and stitching the
-# frames into docs/site/videos/<example>.mp4 with ffmpeg.
+# frames into docs/site/videos/<example>.mp4 with ffmpeg; one frame becomes the screenshot
+# docs/site/screenshots/<example>.png.
 #
 # Per-example overrides live in examples/<category>/<name>/record.cfg as key=value lines.
 # Recognized keys:
 #   frame_limit   total frames to render        (default 300)
 #   fps           render cadence + mp4 framerate (default 30)
 #   start         first frame to dump            (default 0; skips early garbage)
+#   shot          frame saved as the screenshot  (default: the middle recorded frame)
 #   crf           x264 CRF quality               (default 23)
 #   timeout       seconds to wait for the run    (default 120)
 #   skip          if 1, skip this example
@@ -15,13 +17,14 @@
 # Usage:
 #   examples/record.sh                # all examples
 #   examples/record.sh cube physics   # specific ones
-#   OUT_DIR=foo examples/record.sh    # override video dir
+#   OUT_DIR=foo examples/record.sh    # override video dir (SHOT_DIR for screenshots)
 set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 OUT_DIR="${OUT_DIR:-docs/site/videos}"
+SHOT_DIR="${SHOT_DIR:-docs/site/screenshots}"
 LOG_DIR="${LOG_DIR:-artifacts/record}"
 BIN_DIR="${BIN_DIR:-bin}"
 TMP_ROOT="${TMP_ROOT:-artifacts/record/frames}"
@@ -32,7 +35,7 @@ DEFAULT_START=0
 DEFAULT_CRF=23
 DEFAULT_TIMEOUT=120
 
-mkdir -p "$OUT_DIR" "$LOG_DIR" "$BIN_DIR" "$TMP_ROOT"
+mkdir -p "$OUT_DIR" "$SHOT_DIR" "$LOG_DIR" "$BIN_DIR" "$TMP_ROOT"
 
 for tool in ffmpeg odin awk magick xvfb-run; do
     command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 2; }
@@ -82,6 +85,9 @@ record_one() {
     crf=$(read_cfg "$cfg" crf "$DEFAULT_CRF")
     to_sec=$(read_cfg "$cfg" timeout "$DEFAULT_TIMEOUT")
 
+    local shot
+    shot=$(read_cfg "$cfg" shot $(((start + frame_limit) / 2)))
+
     local count=$((frame_limit - start))
     if (( count <= 0 )); then
         echo "  $example: start=$start >= frame_limit=$frame_limit; nothing to capture" >&2
@@ -93,6 +99,7 @@ record_one() {
     local run_log="$LOG_DIR/${example}.run.log"
     local ffm_log="$LOG_DIR/${example}.ffmpeg.log"
     local out_file="$OUT_DIR/${example}.mp4"
+    local shot_file="$SHOT_DIR/${example}.png"
     local frame_dir="$TMP_ROOT/$example"
 
     rm -rf "$frame_dir"
@@ -155,11 +162,16 @@ record_one() {
         return 1
     fi
 
+    if ! magick "$frame_dir/${shot}.ppm" "$shot_file" 2>> "$ffm_log"; then
+        echo "  screenshot FAILED (no frame $shot) — see $ffm_log" >&2
+        return 1
+    fi
+
     # drop frames once mux succeeds to keep disk usage sane
     rm -rf "$frame_dir"
 
     local size
-    size=$(stat -c%s "$out_file" 2>/dev/null || echo 0)
+    size=$(wc -c < "$out_file" | tr -d " ")
     echo "  done (${n} frames, ${size} bytes)"
 }
 

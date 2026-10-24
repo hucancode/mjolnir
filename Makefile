@@ -23,10 +23,7 @@ build: shader
 build-debug: shader
 	odin build . -out:bin/main-debug -debug
 
-shader: $(SPV_SHADERS)
-	@echo "Shader compilation complete."
-
-shader-wgpu: $(WGSL_SHADERS)
+shader: $(SPV_SHADERS) $(WGSL_SHADERS)
 	@echo "Shader compilation complete."
 
 # The WebGPU backend. Natively it needs wgpu-native in Odin's vendor/wgpu/lib (see
@@ -37,72 +34,51 @@ run-wgpu: shader-wgpu
 build-wgpu: shader-wgpu
 	odin build . -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
 
-# An example on the web: web/$(EXAMPLE).wasm beside Odin's JS runtime, WebGPU glue and the
-# host page (mjolnir/platform/web/index.html).
-# Linking needs wasm-ld (LLVM's lld) on PATH.
-ODIN_ROOT := $(shell odin root)
-EXAMPLE ?= cube
-
-web: shader-wgpu
-	mkdir -p web
-	odin build $(call example_dir,$(EXAMPLE)) -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
-		-target-features:"atomics,bulk-memory" -no-thread-local -extra-linker-flags:"--export-table" -out:web/$(EXAMPLE).wasm
-	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js mjolnir/platform/web/index.html web/
-
 # Examples live in examples/<category>/<name>; everything else addresses them by bare name.
+# EXAMPLE picks one (cube when unset); record takes all of them when unset.
 example_dir = $(firstword $(wildcard examples/*/$(1)))
 EXAMPLES := $(notdir $(patsubst %/main.odin,%,$(wildcard examples/*/*/main.odin)))
+ONE_EXAMPLE = $(or $(EXAMPLE),cube)
 
-examples:
-	@echo "Running all samples..."
-	@mkdir -p artifacts
-	@failed=0; \
-	for test_name in $(EXAMPLES); do \
-		echo "Testing $$test_name..."; \
-		date; \
-		./examples/run.sh "$$test_name" artifacts || failed=$$((failed + 1)); \
-	done; \
-	if [ $$failed -ne 0 ]; then \
-		echo "$$failed example(s) malfunctioned" >&2; \
-		exit 1; \
-	fi; \
-	echo "All examples are working normally."
+example: shader
+	odin run $(call example_dir,$(ONE_EXAMPLE)) -out:bin/$(ONE_EXAMPLE)
 
-golden:
-	@echo "Regenerating all golden images..."
-	@mkdir -p artifacts
-	@for test_name in $(EXAMPLES); do \
-		echo "Updating golden image for $$test_name..."; \
-		UPDATE_GOLDEN=1 ./examples/run.sh "$$test_name" artifacts || exit 1; \
+example-wgpu: shader-wgpu
+	odin run $(call example_dir,$(ONE_EXAMPLE)) -out:bin/$(ONE_EXAMPLE)-wgpu -define:RENDER_BACKEND=wgpu
+
+# Web builds go to WEB_OUT: <example>.wasm beside Odin's JS runtime, the WebGPU glue and the host
+# page (mjolnir/platform/web/index.html).
+# Linking needs wasm-ld (LLVM's lld) on PATH.
+ODIN_ROOT := $(shell odin root)
+WEB_OUT := docs/build/data
+WASM_FLAGS := -target:js_wasm32 -define:RENDER_BACKEND=wgpu -target-features:"atomics,bulk-memory" \
+	-no-thread-local -extra-linker-flags:"--export-table"
+define web_runtime
+	mkdir -p $(WEB_OUT)
+	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js mjolnir/platform/web/index.html $(WEB_OUT)/
+endef
+
+# Serve docs/build and open data/index.html?example=$(EXAMPLE).
+web: shader-wgpu
+	$(web_runtime)
+	odin build $(call example_dir,$(ONE_EXAMPLE)) $(WASM_FLAGS) -out:$(WEB_OUT)/$(ONE_EXAMPLE).wasm
+
+# The site: docs/site, every example that builds for the web (the rest fall back to their
+# video), and the API and examples data.
+doc: shader shader-wgpu
+	rm -rf docs/build
+	mkdir -p docs/build
+	cp -R docs/site/. docs/build/
+	$(web_runtime)
+	@for name in $(EXAMPLES); do \
+		echo "wasm: $$name"; \
+		odin build $$(ls -d examples/*/$$name) $(WASM_FLAGS) -out:$(WEB_OUT)/$$name.wasm >/dev/null 2>&1 \
+			|| echo "  skipped $$name (no web build)"; \
 	done
-	@echo "All golden images updated successfully."
+	odin run docs/gen -- $(WEB_OUT)
 
-capture: build
-	@# Capture settings
-	@APP_PATH="./bin/main"; \
-	FRAME_N="5,6"; \
-	OUT_DIR="screenshots"; \
-	TIMEOUT_SEC="10"; \
-	\
-	command -v xvfb-run >/dev/null || { echo "Error: 'xvfb-run' not found" >&2; exit 1; }; \
-	command -v magick >/dev/null || { echo "Error: 'magick' not found" >&2; exit 1; }; \
-	\
-	echo "Running $$APP_PATH for $$TIMEOUT_SEC seconds to capture frame $$FRAME_N..."; \
-	VK_INSTANCE_LAYERS="VK_LAYER_LUNARG_screenshot" \
-	VK_SCREENSHOT_FRAMES="$$FRAME_N" \
-	VK_SCREENSHOT_DIR="$$OUT_DIR" \
-	xvfb-run -a -s "-screen 0 1920x1080x24" \
-	timeout "$${TIMEOUT_SEC}s" "$$APP_PATH" || true; \
-	\
-	echo "Converting PPM to PNG..."; \
-	for ppm in $$OUT_DIR/*.ppm; do \
-		[ -f "$$ppm" ] || continue; \
-		magick "$$ppm" "$${ppm%.ppm}.png"; \
-	done; \
-	echo "Screenshots saved to $$OUT_DIR/"
-
+# docs/site/videos/<example>.mp4 and docs/site/screenshots/<example>.png (see examples/record.sh).
 record: shader
-	@mkdir -p docs/site/videos artifacts/record
 	./examples/record.sh $(EXAMPLE)
 
 clean:
@@ -129,25 +105,6 @@ long-file:
 long-example:
 	find examples -type f -name "main.odin" -exec wc -l {} + | sort -rn | head -n20
 
-# Live builds for the examples page: docs/build/live/<example>.wasm plus the host page.
-# Best effort: examples that do not build for the web are skipped and fall back to their video.
-doc-live: shader-wgpu
-	mkdir -p docs/build/live
-	cp $(ODIN_ROOT)core/sys/wasm/js/odin.js $(ODIN_ROOT)vendor/wgpu/wgpu.js mjolnir/platform/web/index.html docs/build/live/
-	@for name in $(EXAMPLES); do \
-		echo "wasm: $$name"; \
-		odin build $$(ls -d examples/*/$$name) -target:js_wasm32 -define:RENDER_BACKEND=wgpu \
-			-target-features:"atomics,bulk-memory" -no-thread-local -extra-linker-flags:"--export-table" \
-			-out:docs/build/live/$$name.wasm >/dev/null 2>&1 || echo "  skipped $$name (no web build)"; \
-	done
-
-doc: shader
-	rm -rf docs/build
-	mkdir -p docs/build
-	cp -R docs/site/. docs/build/
-	$(MAKE) doc-live
-	odin run docs/gen -- docs/build/data
-
 compare-physics:
 	git stash -u
 	odin build examples/basic/physics -out:bin/physics_before -disable-assert -no-bounds-check -o:speed -define:NX=30 -define:NY=30 -define:NZ=30
@@ -158,4 +115,4 @@ compare-physics:
 	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt
 	perf report -i perf.data --stdio --no-children -n --percent-limit 1 >perf_report_after.txt
 
-.PHONY: doc-live build build-debug build-wgpu run-wgpu web run run-max debug shader shader-wgpu check clean vtest examples golden capture long-proc long-file long-example doc doc-dev record compare-physics
+.PHONY: run debug build build-debug shader shader-wgpu run-wgpu build-wgpu example example-wgpu web doc record clean long-proc long-file long-example compare-physics

@@ -15,16 +15,16 @@ import mu "vendor:microui"
 GRID :: 6
 SPACING :: 2.5
 
-ibl_intensity: mu.Real = 1.0
-sun_intensity: mu.Real = 5.0
+ibl_intensity: f32 = 1.0
+sun_intensity: f32 = 5.0
 skybox_on: bool = true
-metallic_min: mu.Real = 0.0
-metallic_max: mu.Real = 1.0
-roughness_min: mu.Real = 0.0
-roughness_max: mu.Real = 1.0
+metallic_min: f32 = 0.0
+metallic_max: f32 = 1.0
+roughness_min: f32 = 0.0
+roughness_max: f32 = 1.0
 
 App :: struct {
-  window:           platform.Platform,
+  platform:         platform.Platform,
   scene:            world.World,
   renderer:         render.Renderer,
   debug:            debugui.Context,
@@ -36,9 +36,8 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1000, 700, "Material PBR Knobs") do return
-  if !render.init(&app.renderer, "Material PBR Knobs", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1000, 700, "Material PBR Knobs") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -57,8 +56,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
 
   half := f32(GRID - 1) * 0.5 * SPACING
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 0, half * 2.4}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
+  app.orbit = render.make_orbit({0, 0, half * 2.4}, {0, 0, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   base_color: [4]f32 = {0.85, 0.85, 0.9, 1}
   for row in 0 ..< GRID do for col in 0 ..< GRID {
@@ -74,11 +73,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
 
   sun_heading := linalg.quaternion_angle_axis(math.PI * 0.65, linalg.VECTOR3F32_Y_AXIS)
-  sun_elevation := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_Y_AXIS)
+  sun_elevation := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
   sun := &app.renderer.sun
   sun.color = {1, 0.97, 0.92}
-  sun.intensity = f32(sun_intensity)
-  sun.direction = linalg.quaternion_mul_vector3(sun_elevation * sun_heading, [3]f32{0, 0, -1})
+  sun.intensity = sun_intensity
+  sun.direction = linalg.quaternion_mul_vector3(sun_heading * sun_elevation, [3]f32{0, 0, -1})
   sun.shadow_distance = 12
   return .READY
 }
@@ -87,19 +86,19 @@ shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 axis_values :: proc(row, col: int) -> (metallic, roughness: f32) {
   t_row := f32(row) / f32(GRID - 1)
   t_col := f32(col) / f32(GRID - 1)
-  m_lo, m_hi := f32(metallic_min), f32(metallic_max)
-  r_lo, r_hi := f32(roughness_min), f32(roughness_max)
+  m_lo, m_hi := metallic_min, metallic_max
+  r_lo, r_hi := roughness_min, roughness_max
   metallic = math.lerp(m_lo, m_hi, t_row)
   roughness = math.lerp(r_lo, r_hi, t_col)
   return
@@ -108,17 +107,14 @@ axis_values :: proc(row, col: int) -> (metallic, roughness: f32) {
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  app.renderer.sun.intensity = f32(sun_intensity)
-  app.renderer.ibl_intensity = f32(ibl_intensity)
+  app.renderer.sun.intensity = sun_intensity
+  app.renderer.ibl_intensity = ibl_intensity
   app.renderer.skybox_intensity = skybox_on ? 1 : 0
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
@@ -132,8 +128,8 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

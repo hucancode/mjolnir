@@ -1,4 +1,8 @@
-// Package vulkan_backend is the Vulkan backend of render. It changes when Vulkan does; it never
+// The Vulkan backend of render: implements rhi's Procs on Vulkan for a GLFW window. Only
+// render uses it.
+package vulkan_backend
+
+// vulkan_backend is the Vulkan backend of render. It changes when Vulkan does; it never
 // imports render or platform and decides nothing. It is the graphics API behind rhi: rhi.odin
 // is its half of rhi's contract (PROCS, lifecycle included), the rest is what that needs. Beside
 // PROCS render takes only the names it aliases in backend_glue.odin: Backend, FRAMES_IN_FLIGHT,
@@ -17,4 +21,3 @@
 // (allocator.odin), pipeline helpers, deferred destruction (defer_destroy, memory.odin) and
 // batched staging uploads (queue_*, upload.odin). The window is a GLFW window it makes a Vulkan surface on. It owns no shaders,
 // scene data or passes: render does.
-package vulkan_backend

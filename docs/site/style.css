@@ -168,6 +168,7 @@ dl { margin: 0; }
 dl > div { padding: 0.5rem 0; border-top: var(--border) solid var(--color-base-300); }
 dt code { white-space: pre-wrap; word-break: break-word; }
 dd { margin: 0.25rem 0 0 1rem; color: var(--color-neutral); white-space: pre-line; }
+p.doc { white-space: pre-line; }
 
 @media (max-width: 40rem) {
   main > div, main > div:has(> section) { grid-template-columns: 1fr; }

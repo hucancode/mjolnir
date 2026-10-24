@@ -20,7 +20,7 @@ DISC_SEGMENTS :: 32
 DISC_RADIUS :: f32(4)
 
 App :: struct {
-  window:   platform.Platform,
+  platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   debug:    debugui.Context,
@@ -32,19 +32,18 @@ App :: struct {
 
 wireframe := false
 pop := true
-threshold: mu.Real = 0.1
-fade: mu.Real = 0.01
-tone1: [3]mu.Real = {0.0, 0.0, 0.0}
-tone2: [3]mu.Real = {0.9, 0.35, 1.2}
-tone3: [3]mu.Real = {0.5, 0.2, 2.0}
-field: [3]mu.Real = {0.15, 0.75, 0.3}
+threshold: f32 = 0.1
+fade: f32 = 0.01
+tone1: [3]f32 = {0.0, 0.0, 0.0}
+tone2: [3]f32 = {0.9, 0.35, 1.2}
+tone3: [3]f32 = {0.5, 0.2, 2.0}
+field: [3]f32 = {0.15, 0.75, 0.3}
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1000, 700, "Shield") do return
-  if !render.init(&app.renderer, "Shield", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1000, 700, "Shield") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -62,8 +61,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
   if !debugui.init(&app.debug, r, {1000, 700}) do return .FAIL
-  render.camera_look_at(render.main_camera(r), {0, 3.5, 6.5}, {0, 1.4, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(r), {0, 1.4, 0})
+  app.orbit = render.make_orbit({0, 3.5, 6.5}, {0, 1.4, 0})
+  render.camera_orbit(render.main_camera(r), app.orbit)
   // r.skybox_intensity = 0
 
   ring_shader, ring_ok := render.material_shader_create(r, #load("ring." + render.SHADER_EXT))
@@ -89,45 +88,42 @@ shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   if input.key_pressed(&app.input, .W) do wireframe = !wireframe
   if input.key_pressed(&app.input, .P) do pop = !pop
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   lines := f32(1) if wireframe else 0
   sphere := render.material(&app.renderer, app.field)
   sphere.params[0] = {f32(1) if pop else 0, lines, SEGMENTS, RINGS}
-  sphere.params[2].rgb = {f32(field.r), f32(field.g), f32(field.b)}
+  sphere.params[2].rgb = field
   ring := render.material(&app.renderer, app.ring)
-  ring.params[0] = {lines, DISC_SEGMENTS, RADIUS / DISC_RADIUS, f32(threshold)}
-  ring.params[1] = {f32(tone2.r), f32(tone2.g), f32(tone2.b), f32(fade)}
-  ring.params[2].rgb = {f32(tone1.r), f32(tone1.g), f32(tone1.b)}
-  ring.params[3].rgb = {f32(tone3.r), f32(tone3.g), f32(tone3.b)}
+  ring.params[0] = {lines, DISC_SEGMENTS, RADIUS / DISC_RADIUS, threshold}
+  ring.params[1] = {tone2.r, tone2.g, tone2.b, fade}
+  ring.params[2].rgb = tone1
+  ring.params[3].rgb = tone3
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {
@@ -145,7 +141,7 @@ debug_ui :: proc(app: ^App) {
   }
 }
 
-color_sliders :: proc(ctx: ^mu.Context, label: string, color: ^[3]mu.Real) {
+color_sliders :: proc(ctx: ^mu.Context, label: string, color: ^[3]f32) {
   mu.layout_row(ctx, {-1}, 0)
   mu.label(ctx, label)
   mu.layout_row(ctx, {74, 74, 74}, 0)

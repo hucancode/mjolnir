@@ -1,9 +1,9 @@
 #+private
-package crowd
+package navigation
 
 import "core:math"
 import "core:math/linalg"
-import "../../geometry"
+import "../geometry"
 
 @(private = "file")
 DT_PI :: math.PI

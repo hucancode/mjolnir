@@ -43,7 +43,7 @@ function show() {
   document.title = pkg.path + ' - Mjolnir';
   for (const a of nav.querySelectorAll('a')) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + pkg.path);
   content.replaceChildren(el('h1', { textContent: pkg.path }));
-  if (pkg.doc) content.append(el('p', { textContent: pkg.doc }));
+  if (pkg.doc) content.append(el('p', { className: 'doc', textContent: pkg.doc }));
   for (const s of pkg.sections) {
     content.append(el('h2', { textContent: s.name }));
     const dl = el('dl');

@@ -1,9 +1,9 @@
 #+private
-package crowd
+package navigation
 
 import "core:math"
 import "core:math/linalg"
-import "../detour"
+import "detour"
 
 @(private)
 Path_Corridor :: struct {

@@ -1,6 +1,8 @@
-// Package rhi is the render hardware interface: the contract between render and its GPU
-// backends (render/vulkan, render/wgpu). It is a leaf: render and each backend import it, it
-// imports neither, so the dependency runs one way, render to backend.
+// The render hardware interface: the contract between render and its GPU backends
+// (render/vulkan, render/wgpu). render and each backend import it; it imports neither.
+package rhi
+
+// The dependency runs one way, render to backend.
 // It knows devices, not scenes. types.odin is the vocabulary of textures and the few budgets a
 // device sizes itself by; device.odin is the rest: buffers, bind layouts and groups, pipelines
 // (shaders arrive as ShaderSource, SPIR-V or WGSL, from the pass that owns them), command lists
@@ -14,4 +16,3 @@
 // conformance check, and render calls those procs directly, so none of it costs a dispatch.
 // pool.odin is the handle storage both backends keep their objects in.
 // To add a backend, implement Procs; to add a pass, write it in render.
-package rhi

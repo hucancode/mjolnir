@@ -146,40 +146,39 @@ Enemy :: struct {
 }
 
 App :: struct {
-  window:      platform.Platform,
-  scene:       world.World,
-  renderer:    render.Renderer,
-  input:       input.State,
-  font:        font.Font,
-  physics:     b2.WorldId,
-  tiles:       [Tile]render.MaterialHandle,
-  coin_look:   render.MaterialHandle,
-  flag_look:   render.MaterialHandle,
-  backdrop:    world.NodeHandle,
-  player:      Player,
-  coins:       [dynamic]Coin,
-  enemies:     [dynamic]Enemy,
-  spikes:      [dynamic]b2.ShapeId,
-  flag:        b2.ShapeId,
-  run:         f32,
-  step_time:   f32,
-  time:        f32,
-  coin_count:  int,
-  score:       int,
-  won:         bool,
+  platform:   platform.Platform,
+  scene:      world.World,
+  renderer:   render.Renderer,
+  input:      input.State,
+  font:       font.Font,
+  phys:       b2.WorldId,
+  tiles:      [Tile]render.MaterialHandle,
+  coin_look:  render.MaterialHandle,
+  flag_look:  render.MaterialHandle,
+  backdrop:   world.NodeHandle,
+  player:     Player,
+  coins:      [dynamic]Coin,
+  enemies:    [dynamic]Enemy,
+  spikes:     [dynamic]b2.ShapeId,
+  flag:       b2.ShapeId,
+  run:        f32,
+  step_time:  f32,
+  time:       f32,
+  coin_count: int,
+  score:      int,
+  won:        bool,
 }
 
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 1280, 720, "Platformer") do return
-  if !render.init(&app.renderer, "Platformer", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1280, 720, "Platformer") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   world_def := b2.DefaultWorldDef()
   world_def.gravity = {0, GRAVITY}
-  app.physics = b2.CreateWorld(world_def)
-  b2.World_SetPreSolveCallback(app.physics, keep_one_way_contact, nil)
+  app.phys = b2.CreateWorld(world_def)
+  b2.World_SetPreSolveCallback(app.phys, keep_one_way_contact, nil)
   mjolnir.run(
     mjolnir.Loop(App) {
       app = app,
@@ -197,15 +196,15 @@ shutdown :: proc(app: ^App) {
   delete(app.enemies)
   delete(app.spikes)
   font.destroy(&app.font)
-  b2.DestroyWorld(app.physics)
+  b2.DestroyWorld(app.phys)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -323,7 +322,7 @@ body_create :: proc(app: ^App, type: b2.BodyType, position: [2]f32) -> b2.BodyId
   body.type = type
   body.position = position
   body.fixedRotation = true
-  return b2.CreateBody(app.physics, body)
+  return b2.CreateBody(app.phys, body)
 }
 
 sensor_create :: proc(app: ^App, type: b2.BodyType, position, half: [2]f32) -> (b2.BodyId, b2.ShapeId) {
@@ -380,7 +379,7 @@ keep_one_way_contact :: proc "c" (shape_a, shape_b: b2.ShapeId, manifold: ^b2.Ma
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   read_controls(app)
   app.time += dt
   app.step_time = min(app.step_time + dt, 0.25)
@@ -409,8 +408,8 @@ read_controls :: proc(app: ^App) {
 step_game :: proc(app: ^App) {
   step_player(app)
   for &enemy in app.enemies do step_enemy(&enemy)
-  b2.World_Step(app.physics, STEP, 4)
-  events := b2.World_GetSensorEvents(app.physics)
+  b2.World_Step(app.phys, STEP, 4)
+  events := b2.World_GetSensorEvents(app.phys)
   for event in events.beginEvents[:events.beginCount] {
     if event.visitorShapeId == app.player.shape do touch(app, event.sensorShapeId)
   }
@@ -437,7 +436,7 @@ on_ground :: proc(app: ^App) -> bool {
   floors := b2.QueryFilter{categoryBits = PLAYER, maskBits = GROUND | ONE_WAY}
   for side in ([2]f32{-1, 1}) {
     origin := feet + {side * PLAYER_HALF.x * 0.9, 0}
-    if b2.World_CastRayClosest(app.physics, origin, {0, -0.15}, floors).hit do return true
+    if b2.World_CastRayClosest(app.phys, origin, {0, -0.15}, floors).hit do return true
   }
   return false
 }
@@ -523,8 +522,8 @@ place_character :: proc(app: ^App, node: world.NodeHandle, feet: [2]f32, facing:
 }
 
 follow_player :: proc(app: ^App) {
-  size := platform.framebuffer_size(&app.window)
-  dpi_scale := platform.dpi_scale(&app.window)
+  size := platform.framebuffer_size(&app.platform)
+  dpi_scale := platform.dpi_scale(&app.platform)
   zoom := max(1, math.round(f32(size.y) / dpi_scale / (TILE_PIXELS * VIEW_TILES)))
   pixels_per_unit := TILE_PIXELS * math.round(zoom * dpi_scale)
   view := [2]f32{f32(size.x), f32(size.y)} / pixels_per_unit
@@ -541,12 +540,11 @@ follow_player :: proc(app: ^App) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 draw_hud :: proc(app: ^App) {
-  height := f32(platform.framebuffer_size(&app.window).y) / platform.dpi_scale(&app.window)
   white :: [4]u8{255, 255, 255, 255}
   hud := [?]render.RenderCommand {
     {shape = render.DrawTextCommand{text = fmt.tprintf("Coins: %d / %d", app.score, app.coin_count), position = {20, 20}, size = 28, color = white}},

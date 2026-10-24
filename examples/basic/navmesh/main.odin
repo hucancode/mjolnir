@@ -31,7 +31,7 @@ OBSTACLES := [?]Box {
 }
 
 App :: struct {
-  window:         platform.Platform,
+  platform:       platform.Platform,
   scene:          world.World,
   renderer:       render.Renderer,
   input:          input.State,
@@ -47,9 +47,8 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 800, 600, "Navigation Mesh") do return
-  if !render.init(&app.renderer, "Navigation Mesh", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 800, 600, "Navigation Mesh") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -64,18 +63,18 @@ main :: proc() {
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  render.camera_look_at(render.main_camera(&app.renderer), {35, 25, 35}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
+  app.orbit = render.make_orbit({35, 25, 35}, {0, 0, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
@@ -121,7 +120,7 @@ shutdown :: proc(app: ^App) {
   nav.destroy(&app.navmesh)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
@@ -137,14 +136,11 @@ go_to :: proc(app: ^App, goal: [3]f32) {
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-    if input.mouse_pressed(&app.input, .RIGHT) {
-      ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
-      if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do go_to(app, goal)
-    }
+  platform.read_input(&app.platform, &app.input)
+  render.orbit_drag(&app.orbit, &app.input)
+  if !app.input.mouse_captured && input.mouse_pressed(&app.input, .RIGHT) {
+    ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
+    if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do go_to(app, goal)
   }
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   follow_path(app, dt)

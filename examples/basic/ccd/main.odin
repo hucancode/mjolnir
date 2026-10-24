@@ -29,7 +29,7 @@ VOLLEY_SECONDS :: f32(2.5)
 TRACER_SECONDS :: f32(VOLLEY_SECONDS)
 
 App :: struct {
-  window:       platform.Platform,
+  platform:     platform.Platform,
   scene:        world.World,
   renderer:     render.Renderer,
   debug:        debugui.Context,
@@ -37,8 +37,8 @@ App :: struct {
   orbit:        render.Orbit,
   phys:         physics.World,
   bullets:      [WALL_COUNT]physics.BodyHandle,
-    volley_timer: f32,
-  speed:        mu.Real,
+  volley_timer: f32,
+  speed:        f32,
 }
 
 main :: proc() {
@@ -46,9 +46,8 @@ main :: proc() {
   app := new(App)
   app.speed = DEFAULT_SPEED
   if !physics.init(&app.phys, gravity = {0, 0, 0}) do return
-  w := &app.window
-  if !platform.init(w, 1000, 700, "Bullet vs Thin Wall (CCD)") do return
-  if !render.init(&app.renderer, "Bullet vs Thin Wall (CCD)", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 1000, 700, "Bullet vs Thin Wall (CCD)") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -66,13 +65,13 @@ shutdown :: proc(app: ^App) {
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   physics.shutdown(&app.phys)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 spawn_box :: proc(app: ^App, position, half_extents: [3]f32, color: render.Color) {
@@ -86,8 +85,8 @@ spawn_box :: proc(app: ^App, position, half_extents: [3]f32, color: render.Color
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
-  render.camera_look_at(render.main_camera(&app.renderer), {-12, 7, 13}, {0, 1, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
+  app.orbit = render.make_orbit({-12, 7, 13}, {0, 1, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   spawn_box(app, {0, -GROUND_HALF_EXTENTS.y, 0}, GROUND_HALF_EXTENTS, .GRAY)
   thickness := WALL_THICKNESS
@@ -123,7 +122,7 @@ start_volley :: proc(app: ^App) {
   app.volley_timer = 0
   for bullet, i in app.bullets {
     physics.set_pose(&app.phys, bullet, {START_X, BULLET_HEIGHT, wall_z(i)}, linalg.QUATERNIONF32_IDENTITY)
-    physics.set_velocity(&app.phys, bullet, {f32(app.speed), 0, 0})
+    physics.set_velocity(&app.phys, bullet, {app.speed, 0, 0})
     physics.set_angular_velocity(&app.phys, bullet, {})
   }
 }
@@ -139,14 +138,11 @@ draw_tracers :: proc(app: ^App, previous: [WALL_COUNT][3]f32) {
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.volley_timer += dt
   if app.volley_timer >= VOLLEY_SECONDS do start_volley(app)
@@ -161,8 +157,8 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

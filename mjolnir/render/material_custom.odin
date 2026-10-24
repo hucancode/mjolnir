@@ -29,7 +29,7 @@ material_shader_create :: proc(
 ) -> (
   shader: MaterialShader,
   ok: bool,
-) {
+) #optional_ok {
   slot := -1
   for p, i in self.custom_material_pipelines {
     if p == 0 {

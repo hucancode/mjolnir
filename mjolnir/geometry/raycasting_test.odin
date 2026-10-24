@@ -55,3 +55,17 @@ test_ray_sphere_intersection :: proc(t: ^testing.T) {
   testing.expect(t, hit5, "Should hit tiny sphere")
 }
 
+
+@(test)
+test_ray_plane_intersection :: proc(t: ^testing.T) {
+  down := Ray{origin = {1, 5, 2}, direction = {0, -1, 0}}
+  hit, dist := ray_plane_intersection(down, {0, 2, 0}, {0, 1, 0})
+  testing.expect(t, hit, "a ray toward the plane hits it")
+  testing.expect_value(t, dist, 3.0)
+  hit, _ = ray_plane_intersection({origin = {0, 5, 0}, direction = {0, 1, 0}}, {0, 2, 0}, {0, 1, 0})
+  testing.expect(t, !hit, "a ray away from the plane misses it")
+  hit, _ = ray_plane_intersection({origin = {0, 5, 0}, direction = {1, 0, 0}}, {0, 2, 0}, {0, 1, 0})
+  testing.expect(t, !hit, "a ray parallel to the plane misses it")
+  hit, _ = ray_plane_intersection(down, {0, 2, 0}, {0, 1, 0}, max_t = 2)
+  testing.expect(t, !hit, "a hit beyond max_t is a miss")
+}

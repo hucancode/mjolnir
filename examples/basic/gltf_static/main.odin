@@ -11,7 +11,7 @@ import "mjolnir/render"
 import "mjolnir/world"
 
 App :: struct {
-  window:   platform.Platform,
+  platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
   input:    input.State,
@@ -23,9 +23,8 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  w := &app.window
-  if !platform.init(w, 800, 600, "GLTF Static") do return
-  if !render.init(&app.renderer, "GLTF Static", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 800, 600, "GLTF Static") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -41,8 +40,8 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  render.camera_look_at(render.main_camera(&app.renderer), {1.5, 1, 1.5}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 1, 0})
+  app.orbit = render.make_orbit({1.5, 1, 1.5}, {0, 1, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.duck = gltf.model_create(&app.renderer, #load("assets/Duck.glb"))
   app.gltf = gltf.instance_create(&app.duck, &app.scene, &app.renderer)
   return .READY
@@ -53,22 +52,19 @@ shutdown :: proc(app: ^App) {
   gltf.destroy(&app.duck, &app.renderer)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  platform.read_input(&app.platform, &app.input)
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   rot := dt * math.PI * 0.5
   for h in app.gltf.roots do world.rotate_by(&app.scene, h, rot)
@@ -78,6 +74,6 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }

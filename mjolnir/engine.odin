@@ -64,7 +64,7 @@ Runner :: struct {
   last_frame:  time.Time,
   frame:       int,
   error_count: int,
-  // setup returned true
+  // setup returned READY
   started:     bool,
   // the update thread runs ticks while true
   active:      bool,

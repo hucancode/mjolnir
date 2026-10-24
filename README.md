@@ -3,9 +3,6 @@
 Mjolnir is a minimalistic game engine to help people enjoy game programming.
 * Disclaimer: this is a project under active development, it may contain bugs and surprise
 
-[![Logic Tests](https://github.com/hucancode/mjolnir/actions/workflows/logic-test.yml/badge.svg)](https://github.com/hucancode/mjolnir/actions/workflows/logic-test.yml)
-[![Graphics Tests](https://github.com/hucancode/mjolnir/actions/workflows/graphics-test.yml/badge.svg)](https://github.com/hucancode/mjolnir/actions/workflows/graphics-test.yml)
-
 ![](./readme/4-more-shader.png)
 
 # Get Started

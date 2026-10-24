@@ -35,7 +35,7 @@ GROUND_SIZE :: 60
 BODY_RANGE :: GROUND_SIZE / 2 - 1
 
 App :: struct {
-  window:         platform.Platform,
+  platform:       platform.Platform,
   scene:          world.World,
   renderer:       render.Renderer,
   debug:          debugui.Context,
@@ -46,13 +46,13 @@ App :: struct {
   spider_root:    world.NodeHandle,
   spider_mesh:    world.NodeHandle,
   rig:            ^animation.Rig,
-  animator:       animation.Animator,
+  animator:       ^animation.Animator,
   legs:           [LEG_COUNT]animation.LayerHandle,
   time:           f32,
-  lift_height:    mu.Real,
+  lift_height:    f32,
   lift_period:    f32,
   autopilot:      bool,
-  lap_time:       mu.Real,
+  lap_time:       f32,
   body_speed_max: f32,
   body_position:  [3]f32,
   body_height:    f32,
@@ -69,9 +69,8 @@ main :: proc() {
   app.body_speed_max = 5
   app.body_height = 2
   app.body_position = {0, app.body_height, 0}
-  w := &app.window
-  if !platform.init(w, 900, 700, "Spider") do return
-  if !render.init(&app.renderer, "Spider", w.window, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  if !platform.init(&app.platform, 900, 700, "Spider") do return
+  if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
     mjolnir.Loop(App) {
@@ -86,25 +85,24 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  animation.destroy(&app.animator)
   gltf.destroy(&app.spider, &app.scene)
   gltf.destroy(&app.spider_model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
-  platform.shutdown(&app.window)
+  platform.shutdown(&app.platform)
   free(app)
 }
 
 should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.window)
+  return platform.should_close(&app.platform)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer, {900, 700}) do return .FAIL
-  render.camera_look_at(render.main_camera(&app.renderer), {0, 20, 20}, {0, 0, 0})
-  app.orbit = render.orbit_from_camera(render.main_camera(&app.renderer), {0, 0, 0})
+  app.orbit = render.make_orbit({0, 20, 20}, {0, 0, 0})
+  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))
@@ -117,23 +115,24 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if len(app.spider.roots) == 0 || len(app.spider.skinned) == 0 do return .FAIL
   app.spider_root = app.spider.roots[0]
   app.spider_mesh = app.spider.skinned[0].node
-  app.rig = &app.spider_model.rigs[app.spider.skinned[0].rig]
+  rig := app.spider.skinned[0].rig
+  app.rig = &app.spider_model.rigs[rig]
+  app.animator = &app.spider.animators[rig]
   skel := &app.rig.skeleton
-  animation.animator_init(&app.animator, app.rig)
-  limits := animation.bone_limits(&app.animator)
+  limits := animation.bone_limits(app.animator)
   for chain, i in LEG_CHAINS {
     offset, _ := animation.rest_offset(skel, chain.root, chain.tip)
     bones, _ := animation.bone_chain(skel, chain.root, chain.tip, context.temp_allocator)
     for b, k in bones do limits[b] = HIP_LIMIT if k == 0 else JOINT_LIMIT
     leg := animation.LegParams{offset = offset}
     tripod_step(app, &leg, i)
-    app.legs[i] = animation.layer_create(&app.animator, app.rig, leg, bones)
+    app.legs[i] = animation.layer_create(app.animator, app.rig, leg, bones)
   }
   return .READY
 }
 
 tripod_step :: proc(app: ^App, leg: ^animation.LegParams, index: int) {
-  leg.lift_height = f32(app.lift_height)
+  leg.lift_height = app.lift_height
   leg.lift_frequency = app.lift_period
   leg.lift_duration = leg.lift_frequency / 2
   leg.time_offset = leg.lift_frequency / 2 if index % 2 == 1 else 0
@@ -142,22 +141,17 @@ tripod_step :: proc(app: ^App, leg: ^animation.LegParams, index: int) {
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
-  platform.read_input(&app.window, &app.input)
+  platform.read_input(&app.platform, &app.input)
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  if !app.input.mouse_captured {
-    drag := app.input.mouse_delta if input.mouse_down(&app.input, .LEFT) else 0
-    render.orbit_drag(&app.orbit, drag, app.input.scroll.y)
-  }
+  render.orbit_drag(&app.orbit, &app.input)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  if app.rig != nil do walk(app, dt)
+  walk(app, dt)
   world.update(&app.scene)
-  calibrating := app.rig != nil && !app.grounded
-  if calibrating do ground_body(app)
-  if app.rig != nil && !calibrating do pose_legs(app, dt)
+  if app.grounded do pose_legs(app, dt)
+  else do ground_body(app)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  if app.rig != nil && !calibrating do for s in app.spider.skinned do render.stage_bones(&app.renderer, render.SlotHandle(s.node.index), app.animator.palette)
   render.update(&app.renderer, dt)
 }
 
@@ -182,14 +176,14 @@ walk :: proc(app: ^App, dt: f32) {
   app.lift_period = clamp(STRIDE / app.body_speed_max, MIN_PERIOD, MAX_PERIOD)
   world.translate(&app.scene, app.spider_root, app.body_position)
   for layer, i in app.legs {
-    if leg, ok := animation.layer_params(&app.animator, layer, animation.LegParams); ok do tripod_step(app, leg, i)
+    if leg, ok := animation.layer_params(app.animator, layer, animation.LegParams); ok do tripod_step(app, leg, i)
   }
 }
 
 pose_legs :: proc(app: ^App, dt: f32) {
-  animation.animator_update(&app.animator, app.rig, dt, world.world_matrix(&app.scene, app.spider_mesh))
+  gltf.animate(&app.spider, &app.spider_model, &app.scene, &app.renderer, dt)
   for layer in app.legs {
-    if foot, ok := animation.leg_foot(&app.animator, layer); ok do render.debug_sphere(&app.renderer, foot, 0.2, {1, 0.2, 0.2, 1})
+    if foot, ok := animation.leg_foot(app.animator, layer); ok do render.debug_sphere(&app.renderer, foot, 0.2, {1, 0.2, 0.2, 1})
   }
 }
 
@@ -201,7 +195,7 @@ move_body :: proc(app: ^App, dt: f32) {
     }
   }
   if app.autopilot {
-    lap := f32(app.lap_time)
+    lap := app.lap_time
     app.time = math.mod(app.time + dt, 2 * lap)
     direction: f32 = 1 if app.time < lap else -1
     app.body_position.x = clamp(app.body_position.x + direction * app.body_speed_max * dt, -BODY_RANGE, BODY_RANGE)
@@ -218,8 +212,8 @@ move_body :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.window)
-  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  platform.poll_events(&app.platform)
+  return render.frame(&app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

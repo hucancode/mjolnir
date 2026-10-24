@@ -15,6 +15,7 @@ import wgpu "vendor:wgpu"
 
 PROCS :: rhi.Procs(Backend, WindowHandle) {
   init                            = init,
+  window_size                     = window_size,
   ready                           = ready,
   shutdown                        = shutdown,
   wait_idle                       = wait_idle,

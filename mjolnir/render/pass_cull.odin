@@ -29,7 +29,7 @@ DRAW_LISTS :: DRAW_LIST_HEADER
 // MAX_MATERIAL_SHADERS is how many material shaders (material_shader_create) exist at once.
 MAX_MATERIAL_SHADERS :: 3
 #assert(int(MaterialType.CUSTOM) + MAX_MATERIAL_SHADERS == DRAW_LISTS)
-// Mip 0 texels a depth pyramid group reduces per side (depth_reduce.comp).
+// Mip 0 texels a depth pyramid group reduces per side (shader/depth_reduce.slang).
 @(private = "file")
 PYRAMID_TILE :: 32
 // words of an indirect draw

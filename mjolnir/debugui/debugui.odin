@@ -56,7 +56,7 @@ shutdown :: proc(self: ^Context) {
 
 // window opens a microui window, as mu.window does, with `rect` in the reference frame: it
 // starts there, and when the window size changes it holds to the edges `pin` says
-// (one choice per axis; stretch widens it). Close it with end_window, which `if` blocks do for you.
+// (one choice per axis; stretch widens it). It closes itself at the end of the enclosing scope.
 @(deferred_in_out = window_end)
 window :: proc(self: ^Context, title: string, rect: mu.Rect, pin: anchor.Anchor = {}, opt := mu.Options{}) -> bool {
   id := mu.get_id(&self.mu, title)
@@ -110,7 +110,7 @@ end :: proc(self: ^Context) -> []render.RenderCommand {
   self.open = false
   // one mesh command per clip rect; the vertices are sliced once they stop growing
   Run :: struct {
-    clip:          [4]f32,
+    clip:          anchor.Rect,
     first_vertex:  int,
     first_index:   int,
   }
@@ -141,8 +141,9 @@ end :: proc(self: ^Context) -> []render.RenderCommand {
     case ^mu.Command_Clip:
       // a zero clip would mean the whole framebuffer to render: skip what it hides
       hidden = c.rect.w <= 0 || c.rect.h <= 0
+      clip := to_anchor_rect(c.rect)
       append(&runs, Run{
-        clip = [4]f32{f32(c.rect.x), f32(c.rect.y), f32(c.rect.w), f32(c.rect.h)} * self.frame.scale,
+        clip = {clip.pos * self.frame.scale, clip.size * self.frame.scale},
         first_vertex = len(self.vertices),
         first_index = len(self.indices),
       })

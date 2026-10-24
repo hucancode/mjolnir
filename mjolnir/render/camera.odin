@@ -2,6 +2,7 @@ package render
 
 import "../geometry"
 import "../containers"
+import "../input"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -142,9 +143,9 @@ Orbit :: struct {
   target:               [3]f32,
 }
 
-// orbit_from_camera returns the Orbit around target that reproduces the camera's position.
-orbit_from_camera :: proc(self: ^Camera, target: [3]f32) -> Orbit {
-  offset := self.position - target
+// make_orbit returns the Orbit around target that puts the camera at eye.
+make_orbit :: proc(eye, target: [3]f32) -> Orbit {
+  offset := eye - target
   distance := max(linalg.length(offset), 0.001)
   return {
     yaw = math.atan2(offset.z, offset.x),
@@ -154,19 +155,23 @@ orbit_from_camera :: proc(self: ^Camera, target: [3]f32) -> Orbit {
   }
 }
 
-// orbit_drag turns the orbit by drag (e.g. mouse delta in pixels) times speed and moves it
-// zoom steps closer (e.g. scroll), keeping pitch short of the poles and distance in range.
+// orbit_drag steers the orbit from a tick of input, unless a consumer captured the mouse: it
+// turns by the mouse movement times speed while a button of `rotate_with` is held ({} only
+// zooms) and moves a step closer per scroll, keeping pitch short of the poles and distance in range.
 orbit_drag :: proc(
   self: ^Orbit,
-  drag: [2]f32,
-  zoom: f32,
+  s: ^input.State,
+  rotate_with: input.ButtonSet = {.LEFT},
   speed: f32 = 0.02,
   min_distance: f32 = 1,
   max_distance: f32 = 200,
 ) {
-  self.yaw += drag.x * speed
-  self.pitch = clamp(self.pitch + drag.y * speed, -1.5, 1.5)
-  self.distance = clamp(self.distance - zoom * 2, min_distance, max_distance)
+  if s.mouse_captured do return
+  if s.buttons & rotate_with != {} {
+    self.yaw += s.mouse_delta.x * speed
+    self.pitch = clamp(self.pitch + s.mouse_delta.y * speed, -1.5, 1.5)
+  }
+  self.distance = clamp(self.distance - s.scroll.y * 2, min_distance, max_distance)
 }
 
 // camera_orbit places the camera at orbit, looking at its target.
@@ -294,8 +299,8 @@ camera_create :: proc(
   position: [3]f32 = {0, 0, 3},
   target: [3]f32 = {0, 0, 0},
   fov: f32 = math.PI * 0.5,
-  near_plane: f32 = 0.1,
-  far_plane: f32 = 100.0,
+  near: f32 = 0.1,
+  far: f32 = 100.0,
 ) -> (
   handle: CameraHandle,
   ok: bool,
@@ -304,7 +309,7 @@ camera_create :: proc(
   cam := &self.cameras[handle]
   cam^ = {}
   self.camera_targets[handle] = {extent = {width, height}}
-  camera_set_perspective(cam, fov, near_plane, far_plane)
+  camera_set_perspective(cam, fov, near, far)
   camera_look_at(cam, position, target)
   // the lists' size does not depend on the camera's extent
   lists, capacity := draw_list_shape(self, shadow = false)

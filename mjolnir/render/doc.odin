@@ -1,14 +1,14 @@
-// Draws your scene: meshes, lights, particles, post effects, debug lines and a 2D overlay, and
-// runs your own GPU programs (buffers, compute and draw shaders). Create meshes, materials,
-// textures, lights, emitters and cameras, attach them to slots (one per world node), feed node
-// transforms each tick and call frame.
+// Draws your scene (meshes, lights, particles, post effects, debug lines, a 2D overlay) and runs
+// your own GPU programs. Create meshes, materials, textures, lights and cameras, attach them to
+// slots (one per world node), stage node transforms each tick and call frame.
 package render
 
 // Architecture. render is the renderer: deferred shading with GPU culling, on a GPU backend picked
 // at compile time (RENDER_BACKEND: vulkan, the default, or wgpu, which also runs on the web).
 // Renderer (scene.odin) is the hub: init/shutdown own the backend and what init makes (application
 // lifetime); ready finishes init once a backend's device is up (the web hands it over after init
-// returns); setup/teardown bracket a map, and teardown frees everything made since init in one go.
+// returns); setup keeps what the application made so far, and teardown frees everything made after
+// the last setup (or init) in one go: one map's resources.
 // Each tick, stage_* and attach write scene data, update advances time and frame renders and presents.
 // Cameras are in camera.odin, materials, meshes and textures in bindless_*.odin, CPU geometry in mesh*.odin.
 // render makes every decision. It keeps the one CPU copy of each scene table (tables.odin,
@@ -25,4 +25,4 @@ package render
 // Its seams are rhi, the contract both sides share, and the backend, which it imports and which
 // never imports it: backend.odin (names in render's API) and backend_glue.odin (the rest) are
 // the only files naming a backend. It never touches the host: images, environment maps and
-// glTF arrive as bytes, the window as platform's handle, its size with each frame.
+// glTF arrive as bytes and the window as platform's handle, which the backend measures.
