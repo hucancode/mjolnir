@@ -186,9 +186,9 @@ void main() {
   };
   const gauss = () => rng() + rng() + rng() - 1.5;
   const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
-  const add = (a, ...rest) => rest.reduce((s, b) => [s[0] + b[0], s[1] + b[1], s[2] + b[2]], a);
-  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-  const scale = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+  const add = (a, ...b) => a.map((x, i) => b.reduce((s, v) => s + v[i], x));
+  const sub = (a, b) => a.map((x, i) => x - b[i]);
+  const scale = (a, k) => a.map((x) => x * k);
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
   const len = (v) => Math.hypot(v[0], v[1], v[2]);
@@ -197,13 +197,9 @@ void main() {
 
   // column-major perspective * view, from the camera basis (x = right, y = up, z = backward)
   const viewProjection = (fov, asp, eye, x, y, z) => {
-    const t = 1 / Math.tan(fov / 2), n = 0.3, f = 600;
-    const ex = -dot(x, eye), ey = -dot(y, eye), ez = -dot(z, eye);
-    const A = (f + n) / (n - f), B = (2 * f * n) / (n - f);
-    return [t / asp * x[0], t * y[0], A * z[0], -z[0],
-            t / asp * x[1], t * y[1], A * z[1], -z[1],
-            t / asp * x[2], t * y[2], A * z[2], -z[2],
-            t / asp * ex, t * ey, A * ez + B, -ez];
+    const t = 1 / Math.tan(fov / 2), n = 0.3, f = 600, A = (f + n) / (n - f), B = (2 * f * n) / (n - f);
+    const e = [x, y, z].map((v) => -dot(v, eye));
+    return [0, 1, 2].flatMap((i) => [t / asp * x[i], t * y[i], A * z[i], -z[i]]).concat(t / asp * e[0], t * e[1], A * e[2] + B, -e[2]);
   };
 
   // ---------- parameters (driven by the control panel) ----------
@@ -215,7 +211,7 @@ void main() {
   // every RAGE_EVERY seconds the storm rolls against S.rage; a hit rages for RAGE_LEN seconds,
   // multiplying the strike rate by RAGE_RATE_MUL and the re-strike count by RAGE_RESTRIKE_MUL
   const RAGE_EVERY = 5, RAGE_LEN = 2, RAGE_RATE_MUL = 5, RAGE_RESTRIKE_MUL = 2;
-  let rage = 1, restrikeMul = 1, rageEnd = 0, nextRage = RAGE_EVERY;
+  let rageEnd = 0, nextRage = RAGE_EVERY;
 
   // ---------- Mjolnir: lofted head + wrapped handle, interleaved pos / normal / color ----------
   // built head-down in hammer units (head centred on y = 0), emitted lifted onto the floor and scaled
@@ -251,41 +247,35 @@ void main() {
   const hammerData = new Float32Array(verts);
 
   // ---------- gl wrapper ----------
-  // shader sources live in <script type="x-shader/x-glsl"> tags in the page
-  const glsl = (id) => document.getElementById(id).textContent;
   const compile = (vs, fs) => {
     const p = gl.createProgram();
+    const header = "#version 300 es\nprecision highp float;\n" + glsl("glsl-common");
     for (const [type, id] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
       const s = gl.createShader(type);
-      gl.shaderSource(s, "#version 300 es\nprecision highp float;\n" + glsl("glsl-common") + glsl(id));
-      gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      gl.shaderSource(s, header + glsl(id));
+      gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
       gl.attachShader(p, s);
     }
-    gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
     const cache = {};
-    return { p, u: (n) => (n in cache ? cache[n] : (cache[n] = gl.getUniformLocation(p, n))) };
+    return { p, u: (n) => (cache[n] ??= gl.getUniformLocation(p, n)) };
   };
   // set uniforms by value shape: number, vec2, vec3, mat4, or a flat vec4 array
   const use = (prog, values) => {
     gl.useProgram(prog.p);
     for (const [k, v] of Object.entries(values)) {
-      if (typeof v === "number") gl.uniform1f(prog.u(k), v);
-      else if (v.length === 16) gl.uniformMatrix4fv(prog.u(k), false, v);
-      else gl[`uniform${Math.min(v.length, 4)}fv`](prog.u(k), v);
+      const u = prog.u(k);
+      typeof v === "number" ? gl.uniform1f(u, v) : v.length === 16 ? gl.uniformMatrix4fv(u, false, v) : gl["uniform" + Math.min(v.length, 4) + "fv"](u, v);
     }
   };
   const sample = (prog, name, unit, tex) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(prog.u(name), unit); };
   // `rgba` targets hold colour; the rest hold a single intensity channel
   const target = (w, h, depth, rgba) => {
-    const tex = gl.createTexture();
+    const tex = gl.createTexture(), fbo = gl.createFramebuffer();
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, rgba ? (floatRT ? gl.RGBA16F : gl.RGBA8) : (floatRT ? gl.R16F : gl.R8), w, h);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    const fbo = gl.createFramebuffer();
+    gl.texStorage2D(gl.TEXTURE_2D, 1, floatRT ? (rgba ? gl.RGBA16F : gl.R16F) : (rgba ? gl.RGBA8 : gl.R8), w, h);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
+      gl.texParameteri(gl.TEXTURE_2D, k, v);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
     if (depth) gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
@@ -307,17 +297,7 @@ void main() {
   };
 
   // ---------- shaders ----------
-
-  // plain night gradient behind the grid
-
-  // grid floor (uFloor = 1) or hammer (vCol = albedo), lit by bolt point lights
-
-  // bolt segments as screen-space ribbons, depth tested against the scene
-
-  // bloom: each level is a 5-tap blur of the one above; the composite sums them all
-
-  const BLOOM_LEVELS = [1, 2, 3, 4, 5].map((i) => "uB" + i);
-
+  const glsl = (id) => document.getElementById(id).textContent;
   const skyProg = compile("full-vs", "sky-fs");
   const meshProg = compile("mesh-vs", "mesh-fs");
   const segProg = compile("seg-vs", "seg-fs");
@@ -336,7 +316,7 @@ void main() {
   let scene = null, emis = null, depth = null, down = [], aspect = 1;
   const syncSize = () => {
     const dpr = Math.min(devicePixelRatio || 1, 2);
-    const w = Math.max(1, Math.floor(canvas.clientWidth * dpr)), h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+    const w = Math.max(1, canvas.clientWidth * dpr | 0), h = Math.max(1, canvas.clientHeight * dpr | 0);
     aspect = w / h;
     if (scene && canvas.width === w && canvas.height === h) return;
     canvas.width = w; canvas.height = h;
@@ -347,8 +327,7 @@ void main() {
     depth = gl.createRenderbuffer();
     gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
     gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
-    scene = target(w, h, depth, true);
-    emis = target(w, h, depth);
+    [scene, emis] = [target(w, h, depth, true), target(w, h, depth)];
     down = [1, 2, 3, 4, 5].map((i) => target(Math.max(1, w >> i), Math.max(1, h >> i)));
   };
 
@@ -357,8 +336,8 @@ void main() {
   const cam = { yaw: 0.9, pitch: 0.12, dist: 9 };
   let eye, fwd, right, camUp, viewProj;
   const updateCamera = () => {
-    const cp = Math.cos(cam.pitch);
-    eye = add(LOOK, [cam.dist * cp * Math.sin(cam.yaw), cam.dist * Math.sin(cam.pitch), cam.dist * cp * Math.cos(cam.yaw)]);
+    const { yaw, pitch, dist } = cam, cp = Math.cos(pitch);
+    eye = add(LOOK, scale([cp * Math.sin(yaw), Math.sin(pitch), cp * Math.cos(yaw)], dist));
     eye[1] = Math.max(eye[1], 0.4);
     fwd = norm(sub(LOOK, eye)); right = norm(cross(fwd, [0, 1, 0])); camUp = cross(right, fwd);
     viewProj = viewProjection(FOV, aspect, eye, right, camUp, scale(fwd, -1));
@@ -389,7 +368,7 @@ void main() {
   const walk = (a, b, step, jag) => {
     const pts = [a];
     let p = a, drift = [0, 0, 0];
-    for (let n = 0; n < 600; n++) {
+    for (let n = 600; n--;) {
       const d = sub(b, p), rem = len(d);
       if (rem < step * 1.2) break;
       drift = scale(add(drift, scale(randDir(), 0.25)), 0.88);
@@ -441,7 +420,7 @@ void main() {
     const end = toHammer ? HAMMER_TIP : to;
     const pts = walk([end[0] + gauss() * 6, SKY_Y - rng() * 1.5, end[2] + gauss() * 6], end, 0.35, S.jag);
     const leaderDur = 0.12 + rng() * 0.1, strokes = [{ t: leaderDur, amp: 1 }];
-    const restrikes = Math.min(S.restrikes * restrikeMul, 120);
+    const restrikes = Math.min(S.restrikes * (time < rageEnd ? RAGE_RESTRIKE_MUL : 1), 120);
     for (let i = 0; i < restrikes; i++) strokes.push({ t: strokes[i].t + 0.05 + rng() * 0.09, amp: Math.max(0.75 - i * 0.12, 0.06) });
     const parts = grow(pts, power, leaderDur, S.branching * 0.2 * (0.6 + power * 0.4));
     bolts.push({ born: time, segs: parts, pts, leaderDur, strokes, power, toHammer, end: strokes.at(-1).t + 1.2 });
@@ -478,28 +457,22 @@ void main() {
     if (e.type === "pointerup" && !pointer.drag) strike(pointer.hit, 1 + rng() * 0.5, pointer.toHammer);
     pointer = null;
   };
-  canvas.addEventListener("pointerup", release);
-  canvas.addEventListener("pointercancel", release);
+  for (const t of ["pointerup", "pointercancel"]) canvas.addEventListener(t, release);
 
   // ---------- frame ----------
   let flash = 0, lastFlash = -1, hammerGlow = 0, nextAuto = 0.8;
-  const lights = new Float32Array(16 * 4);
+  const lights = new Float32Array(64);
   const update = (dt) => {
     time += dt;
     if (S.orbit && !pointer) cam.yaw += dt * 0.04;
     updateCamera();
-    if (time >= nextRage) {
-      nextRage = time + RAGE_EVERY;
-      if (rng() < S.rage) rageEnd = time + RAGE_LEN;
-    }
-    rage = time < rageEnd ? RAGE_RATE_MUL : 1;
-    restrikeMul = time < rageEnd ? RAGE_RESTRIKE_MUL : 1;
-    const rate = S.rate * rage;
+    if (time >= nextRage) nextRage = time + RAGE_EVERY, rng() < S.rage && (rageEnd = time + RAGE_LEN);
+    const hot = time < rageEnd, rate = S.rate * (hot ? RAGE_RATE_MUL : 1);
     if (rate > 0 && time >= nextAuto) {
       const a = rng() * Math.PI * 2;
       // raging thunder only hammers down around Mjolnir, everything else lands out in the storm
-      const d = rage > 1 ? 0.6 + rng() * 3 : 4 + rng() * 40;
-      strike([Math.sin(a) * d, 0, Math.cos(a) * d], 0.7 + rng() * 0.7, rage > 1 ? rng() < 0.7 : rng() < 0.25);
+      const d = hot ? 0.6 + rng() * 3 : 4 + rng() * 40;
+      strike([Math.sin(a) * d, 0, Math.cos(a) * d], 0.7 + rng() * 0.7, hot ? rng() < 0.7 : rng() < 0.25);
       nextAuto = time + (0.4 + rng() * 1.6) / Math.max(rate, 0.05);
     }
 
@@ -549,7 +522,6 @@ void main() {
       segData.set([...s.a, ...s.b, s.w, I], SEG_STRIDE * v++);
     }
     bind(emis);
-    gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     if (v) {
       gl.depthMask(false);
@@ -580,7 +552,7 @@ void main() {
     use(compProg, { uBloom: S.bloom });
     sample(compProg, "uScene", 0, scene.tex);
     sample(compProg, "uEmis", 1, emis.tex);
-    down.forEach((d, i) => sample(compProg, BLOOM_LEVELS[i], i + 2, d.tex));
+    down.forEach((d, i) => sample(compProg, "uB" + (i + 1), i + 2, d.tex));
     fullscreen();
   };
 
@@ -604,17 +576,13 @@ void main() {
   toggle.onclick = () => {
     panel.hidden = !panel.hidden;
     toggle.textContent = panel.hidden ? "«" : "»";
-    toggle.setAttribute("aria-expanded", String(!panel.hidden));
+    toggle.setAttribute("aria-expanded", !panel.hidden);
   };
-  for (const input of panel.querySelectorAll("input[data-key]")) {
-    const key = input.dataset.key, box = input.type === "checkbox";
-    if (box) input.checked = S[key]; else input.value = S[key];
-    input.oninput = () => {
-      S[key] = box ? input.checked : +input.value;
-      if (key === "rate") nextAuto = time + 0.3;
-    };
+  for (const i of panel.querySelectorAll("input[data-key]")) {
+    const { key } = i.dataset, box = i.type === "checkbox";
+    i[box ? "checked" : "value"] = S[key];
+    i.oninput = () => (S[key] = box ? i.checked : +i.value, key === "rate" && (nextAuto = time + 0.3));
   }
-  panel.hidden = true;
 
   new IntersectionObserver((e) => { visible = e[0].isIntersecting; start(); }).observe(canvas);
   document.addEventListener("visibilitychange", start);
@@ -623,27 +591,24 @@ void main() {
 </script>
 <script>
   const vids = [...document.querySelectorAll("main > ul video")];
-  const bars = vids.map((v) => v.nextElementSibling);
-  vids.forEach((v, i) => v.addEventListener("timeupdate", () => { bars[i].value = v.currentTime / (v.duration || 1); }));
-  const rest = (v) => { if (v.duration && Math.abs(v.currentTime - v.duration * 0.4) > 0.05) v.currentTime = v.duration * 0.4; };
-  vids.forEach((v) => { v.addEventListener("loadedmetadata", () => rest(v)); rest(v); });
+  const rest = (v) => v.duration && Math.abs(v.currentTime - v.duration * 0.4) > 0.05 && (v.currentTime = v.duration * 0.4);
   let cur = 0, hover = null, visible = false, started = false;
-  const active = () => hover ?? cur;
-  function sync() {
-    vids.forEach((v, i) => {
-      const on = visible && i === active();
-      v.loop = i === hover;
-      bars[i].hidden = !on;
-      if (on && i === cur && !started) { started = true; v.currentTime = 0; }
-      if (on) v.play().catch(() => {});
-      else { v.pause(); if (i !== cur && i !== hover) rest(v); }
-    });
-  }
+  const sync = () => vids.forEach((v, i) => {
+    const on = visible && i === (hover ?? cur);
+    v.loop = i === hover;
+    v.nextElementSibling.hidden = !on;
+    if (on && i === cur && !started) { started = true; v.currentTime = 0; }
+    if (on) v.play().catch(() => {});
+    else { v.pause(); if (i !== cur && i !== hover) rest(v); }
+  });
   vids.forEach((v, i) => {
+    v.addEventListener("timeupdate", () => { v.nextElementSibling.value = v.currentTime / (v.duration || 1); });
+    v.addEventListener("loadedmetadata", () => rest(v));
     v.addEventListener("ended", () => { cur = (i + 1) % vids.length; vids[cur].currentTime = 0; sync(); });
     const li = v.closest("li");
     li.addEventListener("mouseenter", () => { hover = i; sync(); });
     li.addEventListener("mouseleave", () => { hover = null; sync(); });
+    rest(v);
   });
   new IntersectionObserver((es) => { visible = es.some((e) => e.isIntersecting); sync(); })
     .observe(document.querySelector("main > ul"));
