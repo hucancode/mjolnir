@@ -91,13 +91,14 @@ float4 post_original(float2 uv)
 #endif
 }
 
-// The G-buffer normal at uv, as the G-buffer stores it.
+// The G-buffer normal at uv, as the G-buffer stores it. Lod 0 (it has one), so branches may
+// call it.
 float3 post_normal(float2 uv)
 {
 #if BACKEND_WGPU
-    return normal_texture.Sample(nearest_clamp, uv).xyz;
+    return normal_texture.SampleLevel(nearest_clamp, uv, 0.0).xyz;
 #else
-    return textures[NonUniformResourceIndex(post_push.normal_texture_index)].Sample(samplers[SAMPLER_NEAREST_CLAMP], uv).xyz;
+    return textures[NonUniformResourceIndex(post_push.normal_texture_index)].SampleLevel(samplers[SAMPLER_NEAREST_CLAMP], uv, 0.0).xyz;
 #endif
 }
 

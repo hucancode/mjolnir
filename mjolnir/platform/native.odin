@@ -108,6 +108,9 @@ run :: proc(step: proc() -> bool) {
   for step() {}
 }
 
+// ready does nothing: the window shows the first frame as it comes.
+ready :: proc() {}
+
 // sleep blocks the calling thread for `ms` milliseconds.
 sleep :: proc(ms: f64) {
   time.sleep(time.Duration(ms * f64(time.Millisecond)))

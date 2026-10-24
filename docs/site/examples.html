@@ -52,7 +52,7 @@ const list = await (await fetch("data/examples.json")).json();
 const hasGpu = !!navigator.gpu;
 const $ = (s) => document.querySelector(s);
 const nav = $('search nav'), thumbBtn = $('search button');
-const stage = $('.stage'), loader = $('.loader'), panel = $('.help-panel');
+const stage = $('.stage'), loader = $('.loader'), loaderText = $('.loader span:last-child'), panel = $('.help-panel');
 const desc = $('.help-panel p'), [modeBtn, codeBtn, logBtn] = panel.querySelectorAll('button');
 const helpBtn = $('#help');
 const [dialog, logDialog] = document.querySelectorAll('dialog');
@@ -101,12 +101,12 @@ function mount() {
   modeBtn.hidden = !(e.wasm && e.video && hasGpu);
   logBtn.hidden = !live;
   loader.hidden = false;
+  loaderText.textContent = 'Loading…';
   const ready = () => { if (current === e) loader.hidden = true; };
   modeBtn.textContent = live ? 'Video' : 'Run live';
   if (live) {
     const f = el('iframe', { src: `data/index.html?example=${encodeURIComponent(e.name)}`, title: e.name, allow: 'fullscreen; gamepad' });
-    f.addEventListener('load', ready);
-    stage.replaceChildren(f);
+    stage.replaceChildren(f); // the loader goes on its 'ready' message (see below)
   } else if (e.video) {
     const v = el('video', { src: `videos/${e.name}.mp4`, autoplay: true, muted: true, loop: true, playsInline: true, controls: true });
     v.addEventListener('loadeddata', ready);
@@ -117,6 +117,22 @@ function mount() {
     ready();
   }
 }
+
+// a live example's page reports its download, then its first frame or a failure
+const MB = (n) => (n / 1e6).toFixed(1);
+window.addEventListener('message', (ev) => {
+  const m = ev.data;
+  if (m?.type !== 'mjolnir' || ev.source !== stage.querySelector('iframe')?.contentWindow) return;
+  if (m.state === 'progress') {
+    // a compressed download's total is smaller than what arrives, so drop it once passed
+    loaderText.textContent = m.total >= m.loaded ? `Loading… ${MB(m.loaded)} / ${MB(m.total)} MB` : `Loading… ${MB(m.loaded)} MB`;
+  } else if (m.state === 'ready') {
+    loader.hidden = true;
+  } else if (m.state === 'error') {
+    loader.hidden = true;
+    logBtn.click();
+  }
+});
 
 function show() {
   const name = decodeURIComponent(location.hash.slice(1));

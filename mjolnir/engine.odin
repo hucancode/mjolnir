@@ -100,6 +100,7 @@ step :: proc(r: ^Runner) -> bool {
       }
     }
     r.started = true
+    platform.ready()
     r.last_update = time.now()
     when USE_PARALLEL_UPDATE {
       r.active = true

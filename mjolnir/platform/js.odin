@@ -90,6 +90,20 @@ step_js :: proc "contextless" (dt: f64) -> bool {
   return false
 }
 
+// The host page's imports (web/index.html).
+foreign import page "mjolnir"
+
+@(private = "file", default_calling_convention = "contextless")
+foreign page {
+  @(link_name = "ready")
+  page_ready :: proc() ---
+}
+
+// ready tells the host page the first frame is coming, so it can drop its loading screen.
+ready :: proc() {
+  page_ready()
+}
+
 // sleep does nothing: the browser paces the animation frames.
 sleep :: proc(ms: f64) {}
 

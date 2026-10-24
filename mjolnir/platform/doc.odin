@@ -9,7 +9,8 @@ package platform
 //   window and input: init, poll_events, read_input (fills an input.State), framebuffer_size,
 //   dpi_scale, should_close, shutdown. Platform.window is what render.init takes.
 //   run loop: run calls a step until it returns false; on the web the browser calls it each
-//   animation frame and run returns at once. sleep idles until the next frame.
+//   animation frame and run returns at once. sleep idles until the next frame. ready tells the
+//   web page the first frame is coming (its loading screen goes).
 //   files: read_file, write_file. The engine itself takes and returns bytes.
 // On the web, web/index.html is the host page holding the canvas (CANVAS_ID); `make web`
 // copies it beside the .wasm.
