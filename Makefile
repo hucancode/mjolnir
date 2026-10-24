@@ -28,10 +28,10 @@ shader: $(SPV_SHADERS) $(WGSL_SHADERS)
 
 # The WebGPU backend. Natively it needs wgpu-native in Odin's vendor/wgpu/lib (see
 # vendor/wgpu/doc.odin).
-run-wgpu: shader-wgpu
+run-wgpu: shader
 	odin run . -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
 
-build-wgpu: shader-wgpu
+build-wgpu: shader
 	odin build . -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
 
 # Examples live in examples/<category>/<name>; everything else addresses them by bare name.
@@ -43,7 +43,7 @@ ONE_EXAMPLE = $(or $(EXAMPLE),cube)
 example: shader
 	odin run $(call example_dir,$(ONE_EXAMPLE)) -out:bin/$(ONE_EXAMPLE)
 
-example-wgpu: shader-wgpu
+example-wgpu: shader
 	odin run $(call example_dir,$(ONE_EXAMPLE)) -out:bin/$(ONE_EXAMPLE)-wgpu -define:RENDER_BACKEND=wgpu
 
 # Web builds go to WEB_OUT: <example>.wasm beside Odin's JS runtime, the WebGPU glue and the host
@@ -59,13 +59,13 @@ define web_runtime
 endef
 
 # Serve docs/build and open data/index.html?example=$(EXAMPLE).
-web: shader-wgpu
+web: shader
 	$(web_runtime)
 	odin build $(call example_dir,$(ONE_EXAMPLE)) $(WASM_FLAGS) -out:$(WEB_OUT)/$(ONE_EXAMPLE).wasm
 
 # The site: docs/site, every example that builds for the web (the rest fall back to their
 # video), and the API and examples data.
-doc: shader shader-wgpu
+doc: shader
 	rm -rf docs/build
 	mkdir -p docs/build
 	cp -R docs/site/. docs/build/
@@ -115,4 +115,4 @@ compare-physics:
 	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt
 	perf report -i perf.data --stdio --no-children -n --percent-limit 1 >perf_report_after.txt
 
-.PHONY: run debug build build-debug shader shader-wgpu run-wgpu build-wgpu example example-wgpu web doc record clean long-proc long-file long-example compare-physics
+.PHONY: run debug build build-debug shader run-wgpu build-wgpu example example-wgpu web doc record clean long-proc long-file long-example compare-physics
