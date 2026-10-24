@@ -4,17 +4,11 @@ package mjolnir
 
 // Layer 3: glue
 
-// The engine is four layers; a package imports only from the layers below it, never from its own,
-// and names its layer after its package clause (`// Layer 2: systems`, checked by docs/gen):
+// The engine has four layers; a package imports only from the layers below it:
 //   3  glue: wires systems together
 //   2  systems: each owns one part of a game's state. The application passes data between them, e.g.
 //      render.stage_transforms(&r, world.changes(&w)) or world.set_world_poses(&w, physics.body_poses(&p)).
 //   1  foundation: self-contained tools a system builds on, and the GPU backends
-//   0  core: shared data structures, math and the GPU contract
-// Nothing above platform reads files or names a host: the engine takes and returns bytes
-// (#load them, or platform.read_file / write_file) and an opaque window handle.
-// An app builds its scene in Loop.setup, returning WAIT until render.ready, and frees it in
-// Loop.shutdown: on the web the device arrives after init, and main returns as soon as run does.
 //
 // API conventions, the same in every package:
 //   make_x returns a value (make_point_light, make_material, make_cube); x_create stores one

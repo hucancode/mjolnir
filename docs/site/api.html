@@ -71,9 +71,6 @@ function diagram(current) {
     }
     fig.append(row);
   }
-  fig.append(el('figcaption', {},
-    el('span', { className: 'dep', textContent: 'imports' }), ' ',
-    el('span', { className: 'user', textContent: 'imported by' }), ' — hover a package to see its own'));
   function mark(pkg) {
     for (const [path, a] of chips) {
       a.toggleAttribute('aria-current', path === pkg.path);
