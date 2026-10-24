@@ -340,8 +340,8 @@ make_torus :: proc(
 
 // make_cylinder builds a cylinder along Y centered at the origin, its side cut into `rings`
 // bands from top to bottom, capped at both ends when `caps`. The side sweeps `arc` radians
-// from +X toward +Z; under a full turn the cut is left open (math.PI makes a half cylinder
-// whose round side faces +Z).
+// from +X toward +Z (math.PI makes a half cylinder whose round side faces +Z); under a full
+// turn `caps` also closes the two flat cut faces.
 make_cylinder :: proc(
   segments: u32 = 32,
   rings: u32 = 1,
@@ -351,14 +351,17 @@ make_cylinder :: proc(
   caps := true,
   arc: f32 = 2.0 * math.PI,
 ) -> Geometry {
-  // side columns top to bottom, then each cap's center and rim; columns repeat the first for the UV seam
+  // side columns top to bottom, then each cap's center and rim, then the two cut faces (axis top,
+  // axis bottom, rim top, rim bottom); columns repeat the first for the UV seam
   ring := segments + 1
   column := rings + 1
   side := ring * column
   top_center := side
   bottom_center := top_center + 1 + ring
-  vertices := make([]Vertex, side + (2 * (ring + 1) if caps else 0))
-  indices := make([]u32, segments * rings * 6 + (segments * 6 if caps else 0))
+  cut := caps && arc < 2.0 * math.PI - 1e-4
+  cut_start := bottom_center + 1 + ring
+  vertices := make([]Vertex, side + (2 * (ring + 1) if caps else 0) + (8 if cut else 0))
+  indices := make([]u32, segments * rings * 6 + (segments * 6 if caps else 0) + (12 if cut else 0))
   half_h := height * 0.5
   for i in 0 ..< ring {
     theta := arc * f32(i) / f32(segments)
@@ -391,6 +394,19 @@ make_cylinder :: proc(
     p := indices[segments * rings * 6 + seg * 6:]
     p[0], p[1], p[2] = top_center, top_rim + 1, top_rim
     p[3], p[4], p[5] = bottom_center, bottom_rim, bottom_rim + 1
+  }
+  if !cut do return make_geometry(vertices, indices)
+  for face in 0 ..< u32(2) {
+    theta := arc * f32(face)
+    x, z := math.cos(theta), math.sin(theta)
+    normal := [3]f32{0, 0, -1} if face == 0 else [3]f32{-z, 0, x}
+    a := cut_start + face * 4
+    corners := [4][3]f32{{0, half_h, 0}, {0, -half_h, 0}, {radius * x, half_h, radius * z}, {radius * x, -half_h, radius * z}}
+    uvs := [4][2]f32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
+    for c in 0 ..< 4 do vertices[int(a) + c] = {position = corners[c], normal = normal, color = color, uv = uvs[c]}
+    p := indices[segments * rings * 6 + segments * 6 + face * 6:]
+    if face == 0 do p[0], p[1], p[2], p[3], p[4], p[5] = a, a + 2, a + 1, a + 1, a + 2, a + 3
+    else do p[0], p[1], p[2], p[3], p[4], p[5] = a, a + 1, a + 2, a + 1, a + 3, a + 2
   }
   return make_geometry(vertices, indices)
 }

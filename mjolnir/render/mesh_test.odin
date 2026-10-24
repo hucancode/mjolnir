@@ -56,3 +56,20 @@ test_builders_generate_tangents :: proc(t: ^testing.T) {
     }
   }
 }
+
+@(test)
+test_partial_cylinder_is_closed_and_winds_outward :: proc(t: ^testing.T) {
+  g := make_cylinder(segments = 8, arc = math.PI / 2)
+  defer geometry_destroy(g)
+  open := make_cylinder(segments = 8, arc = math.PI / 2, caps = false)
+  defer geometry_destroy(open)
+  testing.expect_value(t, len(g.indices), len(open.indices) + 8 * 6 + 12)
+  for i := 0; i + 2 < len(g.indices); i += 3 {
+    a, b, c := g.vertices[g.indices[i]], g.vertices[g.indices[i + 1]], g.vertices[g.indices[i + 2]]
+    face := linalg.cross(b.position - a.position, c.position - a.position)
+    if linalg.length(face) < 1e-6 do continue
+    ok := linalg.dot(face, a.normal + b.normal + c.normal) > 0
+    testing.expectf(t, ok, "triangle %d winds against its normals", i / 3)
+    if !ok do break
+  }
+}
