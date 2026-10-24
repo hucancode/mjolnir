@@ -23,9 +23,13 @@ Section :: struct {
 }
 
 Pkg :: struct {
-	path:     string,
-	doc:      string,
-	sections: []Section,
+	path:       string,
+	doc:        string,
+	layer:      int, // from the `// Layer N: name` line after the package clause
+	layer_name: string,
+	notes:      string, // the rest of the comments after the package clause
+	imports:    []string, // the engine packages it imports
+	sections:   []Section,
 }
 
 Example :: struct {
@@ -165,7 +169,79 @@ load_pkg :: proc(path: string) -> Pkg {
 		}
 		if len(syms) > 0 {append(&sections, Section{name = r.name, syms = syms[:]})}
 	}
-	return {path = path, doc = strings.join(doc[:], "\n"), sections = sections[:]}
+	p := Pkg{path = path, doc = strings.join(doc[:], "\n"), sections = sections[:]}
+	load_layer(&p)
+	p.imports = imports(path)
+	return p
+}
+
+// The layer line and notes: the comments after the package clause of the package's doc.odin.
+load_layer :: proc(p: ^Pkg) {
+	source := read(strings.concatenate({p.path, "/doc.odin"}))
+	notes: [dynamic]string
+	after := false
+	for line in strings.split_lines_iterator(&source) {
+		if !after {
+			after = strings.has_prefix(line, "package ")
+			continue
+		}
+		text := strings.trim_space(line)
+		if text == "" {
+			if len(notes) > 0 && notes[len(notes) - 1] != "" {append(&notes, "")}
+			continue
+		}
+		if !strings.has_prefix(text, "//") {break}
+		text = strings.trim_prefix(text[2:], " ")
+		if p.layer_name == "" && strings.has_prefix(text, "Layer ") {
+			colon := strings.index(text, ": ")
+			if colon < 0 || colon != 7 || text[6] < '0' || text[6] > '9' {die("%s: bad layer line %q", p.path, text)}
+			p.layer, p.layer_name = int(text[6] - '0'), text[colon + 2:]
+			continue
+		}
+		append(&notes, text)
+	}
+	if p.layer_name == "" {die("%s/doc.odin: no `// Layer N: name` line after the package clause", p.path)}
+	for len(notes) > 0 && notes[len(notes) - 1] == "" {pop(&notes)}
+	p.notes = strings.join(notes[:], "\n")
+}
+
+// The engine packages a package's sources (tests aside) import, as repo paths.
+imports :: proc(path: string) -> []string {
+	out: [dynamic]string
+	infos, err := os.read_all_directory_by_path(path, context.allocator)
+	if err != nil {die("cannot list %s: %v", path, err)}
+	for fi in infos {
+		if !strings.has_suffix(fi.name, ".odin") || strings.has_suffix(fi.name, "_test.odin") {continue}
+		source := read(fi.fullpath)
+		for line in strings.split_lines_iterator(&source) {
+			if !strings.has_prefix(line, "import ") {continue}
+			open := strings.index_byte(line, '"')
+			close := strings.last_index_byte(line, '"')
+			if open < 0 || close <= open {continue}
+			target := line[open + 1:close]
+			if strings.contains_rune(target, ':') {continue} // core:, vendor:
+			dir, _ := filepath.join({path, target})
+			if !slice.contains(out[:], dir) {append(&out, dir)}
+		}
+	}
+	slice.sort(out[:])
+	return out[:]
+}
+
+// A package imports only from the layers below its own, and every layer number has one name.
+check_layers :: proc(pkgs: []Pkg) {
+	for p in pkgs {
+		found := 0
+		for q in pkgs {
+			if p.layer == q.layer && p.layer_name != q.layer_name {
+				die("layer %d is %q in %s but %q in %s", p.layer, p.layer_name, p.path, q.layer_name, q.path)
+			}
+			if !slice.contains(p.imports, q.path) {continue}
+			if q.layer >= p.layer {die("%s (layer %d) imports %s (layer %d)", p.path, p.layer, q.path, q.layer)}
+			found += 1
+		}
+		if found != len(p.imports) {die("%s imports a package outside the engine: %v", p.path, p.imports)}
+	}
 }
 
 // The names of the package's `alias :: target` procedure aliases, by target: `odin doc` lists an
@@ -290,6 +366,7 @@ main :: proc() {
 
 	pkgs: [dynamic]Pkg
 	for d in package_dirs() {append(&pkgs, load_pkg(d))}
+	check_layers(pkgs[:])
 	emit(strings.concatenate({out, "/api.json"}), pkgs[:])
 	examples := load_examples(out)
 	emit(strings.concatenate({out, "/examples.json"}), examples)

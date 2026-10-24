@@ -2,6 +2,8 @@
 // read input each tick and give the window to render.
 package platform
 
+// Layer 2: systems
+
 // The host the engine runs on, desktop (a GLFW window, the file system) or web (a canvas, no
 // file system); the rest of the engine names neither.
 //   window and input: init, poll_events, read_input (fills an input.State), framebuffer_size,

@@ -2,6 +2,8 @@
 // render uses it.
 package vulkan_backend
 
+// Layer 1: foundation
+
 // vulkan_backend is the Vulkan backend of render. It changes when Vulkan does; it never
 // imports render or platform and decides nothing. It is the graphics API behind rhi: rhi.odin
 // is its half of rhi's contract (PROCS, lifecycle included), the rest is what that needs. Beside

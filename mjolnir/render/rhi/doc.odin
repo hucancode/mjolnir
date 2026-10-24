@@ -2,6 +2,8 @@
 // (render/vulkan, render/wgpu). render and each backend import it; it imports neither.
 package rhi
 
+// Layer 0: core
+
 // The dependency runs one way, render to backend.
 // It knows devices, not scenes. types.odin is the vocabulary of textures and the few budgets a
 // device sizes itself by; device.odin is the rest: buffers, bind layouts and groups, pipelines

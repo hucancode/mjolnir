@@ -3,6 +3,8 @@
 // slots (one per world node), stage node transforms each tick and call frame.
 package render
 
+// Layer 2: systems
+
 // Architecture. render is the renderer: deferred shading with GPU culling, on a GPU backend picked
 // at compile time (RENDER_BACKEND: vulkan, the default, or wgpu, which also runs on the web).
 // Renderer (scene.odin) is the hub: init/shutdown own the backend and what init makes (application

@@ -2,5 +2,7 @@
 // body_poses back into your scene; raycast and overlap to ask what is where.
 package physics
 
+// Layer 2: systems
+
 // Internals: narrowphase, CCD, the TGS-soft solver, integration and threading are
 // package-private (narrowphase.odin, ccd.odin, solver.odin, integration.odin, parallel.odin).
