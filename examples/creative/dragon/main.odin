@@ -198,7 +198,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   build(app)
 
-  app.orbit = {yaw = 0.7, pitch = 0.25, distance = 24, target = {0, 3, 0}}
+  app.orbit = {yaw = 0.7, pitch = 0.25, distance = 20, target = {0, 3, 0}}
   render.camera_orbit(render.main_camera(r), app.orbit)
   return .READY
 }
@@ -254,7 +254,7 @@ place :: proc(app: ^App) {
 
 panel :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Dragon", {724, 10, 290, 200}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Dragon", {724, 10, 290, 180}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Autoplay", &app.autoplay)
     mu.layout_row(ctx, {110, -1}, 0)
@@ -272,7 +272,7 @@ panel :: proc(app: ^App) {
     before := app.build.t
     if .CHANGE in mu.slider(ctx, &app.build.t, 0, 1, 0, "%.2f") do build_scrub(app, before)
   }
-  if debugui.window(&app.debug, "Rig", {724, 220, 290, 170}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Rig", {724, 200, 290, 200}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {110, -1}, 0)
     angle_slider(ctx, "jaw open", &app.pose.jaw, 0, 45)
     angle_slider(ctx, "arm swing", &app.pose.arm_swing, -180, 180)
@@ -572,4 +572,3 @@ snapshot_destroy :: proc(s: ^Snapshot) {
   delete(s.centers)
   delete(s.normals)
 }
-
