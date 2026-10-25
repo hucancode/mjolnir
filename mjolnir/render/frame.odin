@@ -194,6 +194,7 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
   slot, waited := dev.frame_wait(&self.gpu)
   if !waited do return false, .ERROR
   f := slot.index
+  dump_collect(self, f)
   tables_sync(self, f)
   overlay_upload(self, f)
   if !shadow_atlas_reserve(self, f, self.shadow_view_count) do return false, .ERROR
@@ -267,6 +268,7 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
     scope(self, compute, "cull")
     cull_record(self, compute, f)
   }}
+  dump_record(self, cmd, f)
   dev.cmd_end(&self.gpu, cmd)
   graphics_cmds := [1]rhi.CommandList{cmd}
   if !async {

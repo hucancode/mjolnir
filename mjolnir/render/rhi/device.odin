@@ -44,7 +44,14 @@ Caps :: struct {
   indirect_first_instance:   bool,
   // label scopes are timed on the GPU (frame_timings)
   timestamps:                bool,
+  // cmd_copy_backbuffer works
+  backbuffer_copy:           bool,
+  // the backbuffer's texels are blue, green, red, alpha rather than red, green, blue, alpha
+  backbuffer_bgra:           bool,
 }
+
+// The byte alignment of a row of the backbuffer copy.
+BACKBUFFER_PITCH :: 256
 
 // Threads that may record command lists at once: cmd_begin's `thread` is below it.
 MAX_RECORD_THREADS :: 8
@@ -415,6 +422,10 @@ Procs :: struct($Device: typeid, $Window: typeid) {
   cmd_dispatch_indirect:         proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset: int),
   cmd_fill_buffer:               proc(d: ^Device, cmd: CommandList, buffer: Buffer, offset, size: int),
   cmd_copy_buffer:               proc(d: ^Device, cmd: CommandList, src: Buffer, src_offset: int, dst: Buffer, dst_offset, size: int),
+  // After everything that draws the backbuffer in `cmd`: copies it into a READBACK buffer as
+  // rows of 4 byte texels, `pitch` bytes apart (width * 4 rounded up to BACKBUFFER_PITCH).
+  // Only where Caps.backbuffer_copy.
+  cmd_copy_backbuffer:           proc(d: ^Device, cmd: CommandList, dst: Buffer),
   // one dependency: every barrier, and `discards`, textures about to be written whole whose old
   // contents are dropped (ordered after all earlier work)
   cmd_barrier:                   proc(d: ^Device, cmd: CommandList, barriers: []Barrier, discards: []TextureHandle),

@@ -68,6 +68,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   cmd_dispatch_indirect           = rhi_cmd_dispatch_indirect,
   cmd_fill_buffer                 = rhi_cmd_fill_buffer,
   cmd_copy_buffer                 = rhi_cmd_copy_buffer,
+  cmd_copy_backbuffer             = rhi_cmd_copy_backbuffer,
   cmd_barrier                     = rhi_cmd_barrier,
 }
 
@@ -767,6 +768,9 @@ rhi_cmd_dispatch_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi
 rhi_cmd_fill_buffer :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset, size: int) {
   wgpu.CommandEncoderClearBuffer(b.cmds[cmd].encoder, b.buffers.items[buffer], u64(offset), u64(size))
 }
+
+// Caps.backbuffer_copy is false: the surface is not a copy source.
+rhi_cmd_copy_backbuffer :: proc(b: ^Backend, cmd: rhi.CommandList, dst: rhi.Buffer) {}
 
 rhi_cmd_copy_buffer :: proc(b: ^Backend, cmd: rhi.CommandList, src: rhi.Buffer, src_offset: int, dst: rhi.Buffer, dst_offset, size: int) {
   target := b.buffers.items[dst]

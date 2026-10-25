@@ -167,6 +167,10 @@ tick :: proc(r: ^Runner) -> bool {
   dt := f32(time.duration_seconds(time.since(r.last_update)))
   if dt < UPDATE_FRAME_TIME do return false
   r.last_update = time.now()
+  // a frame dump (render.FRAME_DUMP) is slower than real time: steps are fixed so it plays right
+  when #config(FRAME_DUMP, "") != "" {
+    dt = UPDATE_FRAME_TIME
+  }
   r.loop.update(r.loop.app, dt)
   return true
 }

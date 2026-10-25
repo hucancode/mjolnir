@@ -68,6 +68,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   cmd_dispatch_indirect           = rhi_cmd_dispatch_indirect,
   cmd_fill_buffer                 = rhi_cmd_fill_buffer,
   cmd_copy_buffer                 = rhi_cmd_copy_buffer,
+  cmd_copy_backbuffer             = rhi_cmd_copy_backbuffer,
   cmd_barrier                     = rhi_cmd_barrier,
 }
 
@@ -221,6 +222,8 @@ rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
     async_compute = has_async_compute(&b.gctx),
     indirect_first_instance = true,
     timestamps = timestamps_supported(&b.gctx),
+    backbuffer_copy = true,
+    backbuffer_bgra = b.swapchain.format.format == .B8G8R8A8_SRGB || b.swapchain.format.format == .B8G8R8A8_UNORM,
   }
 }
 
@@ -1012,6 +1015,39 @@ rhi_cmd_fill_buffer :: proc(b: ^Backend, handle: rhi.CommandList, buffer: rhi.Bu
 rhi_cmd_copy_buffer :: proc(b: ^Backend, handle: rhi.CommandList, src: rhi.Buffer, src_offset: int, dst: rhi.Buffer, dst_offset, size: int) {
   region := vk.BufferCopy{srcOffset = vk.DeviceSize(src_offset), dstOffset = vk.DeviceSize(dst_offset), size = vk.DeviceSize(size)}
   vk.CmdCopyBuffer(cmd_get(b, handle).cb, b.buffers.items[src].buffer, b.buffers.items[dst].buffer, 1, &region)
+}
+
+rhi_cmd_copy_backbuffer :: proc(b: ^Backend, handle: rhi.CommandList, dst: rhi.Buffer) {
+  cmd := cmd_get(b, handle)
+  sc := &b.swapchain
+  image := sc.images[sc.image_index]
+  // the backbuffer stays in GENERAL: only its color writes must land before the copy reads
+  barrier := vk.ImageMemoryBarrier2 {
+    sType = .IMAGE_MEMORY_BARRIER_2,
+    srcStageMask = {.COLOR_ATTACHMENT_OUTPUT},
+    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    dstStageMask = {.COPY},
+    dstAccessMask = {.TRANSFER_READ},
+    oldLayout = .GENERAL,
+    newLayout = .GENERAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = image,
+    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
+  }
+  dep := vk.DependencyInfo {
+    sType                   = .DEPENDENCY_INFO,
+    imageMemoryBarrierCount = 1,
+    pImageMemoryBarriers    = &barrier,
+  }
+  vk.CmdPipelineBarrier2(cmd.cb, &dep)
+  pitch := (sc.extent.width * 4 + rhi.BACKBUFFER_PITCH - 1) / rhi.BACKBUFFER_PITCH * rhi.BACKBUFFER_PITCH
+  region := vk.BufferImageCopy {
+    bufferRowLength = pitch / 4,
+    imageSubresource = {aspectMask = {.COLOR}, layerCount = 1},
+    imageExtent = {sc.extent.width, sc.extent.height, 1},
+  }
+  vk.CmdCopyImageToBuffer(cmd.cb, image, .GENERAL, b.buffers.items[dst].buffer, 1, &region)
 }
 
 @(private = "file")

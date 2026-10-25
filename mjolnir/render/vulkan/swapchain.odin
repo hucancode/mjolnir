@@ -84,7 +84,7 @@ swapchain_init :: proc(
     imageColorSpace  = self.format.colorSpace,
     imageExtent      = self.extent,
     imageArrayLayers = 1,
-    imageUsage       = {.COLOR_ATTACHMENT},
+    imageUsage       = {.COLOR_ATTACHMENT, .TRANSFER_SRC},
     preTransform     = capabilities.currentTransform,
     compositeAlpha   = {.OPAQUE},
     presentMode      = pick_swap_present_mode(present_modes),

@@ -55,6 +55,7 @@ Renderer_State :: struct {
   // presented to the swapchain (main_camera)
   main_camera:            CameraHandle,
   gpu:                    Backend,
+  dump:                   FrameDump,
   // render's tables, the one copy; bit r of dirty[t] is region r of tables[t] (TABLE_REGIONS),
   // written since the last submitted frame. tables_sync brings the GPU copies up to date.
   tables:                 [Table][]u8,
@@ -360,6 +361,7 @@ environment_map_load :: proc(self: ^Renderer, data: []u8) -> bool {
 
 // shutdown destroys everything, whatever map is up.
 shutdown :: proc(self: ^Renderer) {
+  dump_finish(self)
   delete(self.cull_groups)
   delete(self.reduce_groups)
   delete(self.lighting_output_groups)
