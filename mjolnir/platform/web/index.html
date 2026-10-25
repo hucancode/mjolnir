@@ -19,8 +19,6 @@
   <script src="odin.js"></script>
   <script src="wgpu.js"></script>
   <script>
-    // The page that embeds this one (docs/site/examples.html) hears {type: 'mjolnir', state} with
-    // state 'progress' (loaded, total bytes; total 0 when unknown), 'ready' or 'error'.
     const embedded = window.parent !== window;
     if (embedded) document.documentElement.classList.add("embedded");
     const example = new URLSearchParams(location.search).get("example") || "cube";
@@ -43,8 +41,6 @@
     async function download(url) {
       const response = await fetch(url);
       if (!response.ok) throw new Error(`${url}: ${response.status} ${response.statusText}`);
-      // Content-Length is the compressed size when the server compresses, so it only bounds progress
-      const total = Number(response.headers.get("Content-Length")) || 0;
       const reader = response.body.getReader();
       const chunks = [];
       let loaded = 0;
@@ -53,8 +49,8 @@
         if (done) break;
         chunks.push(value);
         loaded += value.length;
-        statusElement.textContent = total ? `Loading… ${Math.min(100, Math.round(loaded / total * 100))}%` : `Loading… ${(loaded / 1e6).toFixed(1)} MB`;
-        tell("progress", { loaded, total });
+        statusElement.textContent = `Loading… ${(loaded / 1e6).toFixed(1)} MB`;
+        tell("progress", { loaded });
       }
       return URL.createObjectURL(new Blob(chunks, { type: "application/wasm" }));
     }

@@ -124,8 +124,7 @@ window.addEventListener('message', (ev) => {
   const m = ev.data;
   if (m?.type !== 'mjolnir' || ev.source !== stage.querySelector('iframe')?.contentWindow) return;
   if (m.state === 'progress') {
-    // a compressed download's total is smaller than what arrives, so drop it once passed
-    loaderText.textContent = m.total >= m.loaded ? `Loading… ${MB(m.loaded)} / ${MB(m.total)} MB` : `Loading… ${MB(m.loaded)} MB`;
+    loaderText.textContent = `Loading… ${MB(m.loaded)} MB`;
   } else if (m.state === 'ready') {
     loader.hidden = true;
   } else if (m.state === 'error') {
