@@ -10,11 +10,14 @@ MAX_BOLTS :: 256
 MAX_LIGHTS :: 8
 LIGHT_GAIN :: f32(30)
 RAGE_EVERY :: f32(5)
-RAGE_LENGTH :: f32(2)
+RAGE_SMALL_FACTOR :: f32(0.3)
+RAGE_SMALL_RESTRIKE_FACTOR :: f32(0.4)
+RAGE_OVERSHOOT_GAP :: f32(0.5)
+RAGE_AFTERGLOW :: f32(1.5)
 RAGE_RESTRIKE_FACTOR :: f32(5)
 RAGE_IMPACT_FACTOR :: f32(2)
-RAGE_THIN_FACTOR :: f32(1.5)
-RAGE_THICK_FACTOR :: f32(1.5)
+RAGE_THIN_FACTOR :: f32(1.2)
+RAGE_THICK_FACTOR :: f32(2.0)
 HAMMER_TIP :: [3]f32{0, 2.24, 0}
 
 JOINTS :: TRUNK_SEGMENTS + 1
@@ -72,6 +75,17 @@ BoltInstance :: struct {
   joints: [JOINTS]Joint,
 }
 
+Phase :: enum {
+  Anticipation,
+  Main,
+  Overshoot,
+}
+
+Queued :: struct {
+  at:    f32,
+  phase: Phase,
+}
+
 Stroke :: struct {
   t, amp: f32,
 }
@@ -111,6 +125,7 @@ Storm :: struct {
   next_auto:   f32,
   next_rage:   f32,
   rage_end:    f32,
+  queue:       [dynamic]Queued,
 }
 
 rate: f32 = 0.8
@@ -118,8 +133,12 @@ rage: f32 = 0.4
 jag: f32 = 0.3
 restrikes: f32 = 1
 thickness_min: f32 = 0.1
-thickness_max: f32 = 5.0
+thickness_max: f32 = 3.0
 tones: f32 = 3
+ANTICIPATION_PERIOD :: f32(1)
+ANTICIPATION_COUNT :: 5
+OVERSHOOT_PERIOD :: f32(0.2)
+OVERSHOOT_COUNT :: 3
 sharpness: f32 = 0.6
 color_a := [3]f32{0.3, 0.3, 0.7}
 color_b := [3]f32{1, 1, 1}
@@ -191,11 +210,43 @@ brush :: proc(joints: ^[JOINTS]Joint) {
   }
 }
 
+// Raging thunder: a few small flickers, the big strike, then a couple of normal strikes after it.
+// Offsets are spread over `period`, bunched early for the first few, evenly for the rest.
+rage_begin :: proc(s: ^Storm) {
+  antic := ANTICIPATION_COUNT
+  over := OVERSHOOT_COUNT
+  main_at := s.time + (ANTICIPATION_PERIOD if antic > 0 else 0)
+  for i in 0 ..< antic {
+    f := f32(i) / f32(max(antic - 1, 1)) if antic > 1 else 0
+    append(&s.queue, Queued{s.time + math.pow(f, 1.737) * ANTICIPATION_PERIOD, .Anticipation})
+  }
+  append(&s.queue, Queued{main_at, .Main})
+  start := main_at + RAGE_OVERSHOOT_GAP
+  for i in 0 ..< over {
+    f := f32(i) / f32(max(over - 1, 1)) if over > 1 else 0
+    append(&s.queue, Queued{start + f * OVERSHOOT_PERIOD, .Overshoot})
+  }
+  s.rage_end = start + (OVERSHOOT_PERIOD if over > 0 else 0) + RAGE_AFTERGLOW
+}
+
+rage_strike :: proc(s: ^Storm, phase: Phase) {
+  a := rand.float32() * math.TAU
+  at := [3]f32{math.sin(a) * 2, 0, math.cos(a) * 2}
+  switch phase {
+  case .Anticipation:
+    strike(s, at, 0.7 * RAGE_SMALL_FACTOR, true, false, RAGE_SMALL_FACTOR, RAGE_SMALL_RESTRIKE_FACTOR)
+  case .Main:
+    strike(s, at, 8, true, true)
+  case .Overshoot:
+    strike(s, at, 0.7 + rand.float32() * 0.7, true)
+  }
+}
+
 raging :: proc(s: ^Storm) -> bool {
   return s.time < s.rage_end
 }
 
-strike :: proc(s: ^Storm, to: [3]f32, power: f32, to_hammer: bool, furious := false) {
+strike :: proc(s: ^Storm, to: [3]f32, power: f32, to_hammer: bool, furious := false, size := f32(1), restrike_scale := f32(1)) {
   end := HAMMER_TIP if to_hammer else to
   start := [3]f32{end.x + gauss() * 6, SKY_Y - rand.float32() * 1.5, end.z + gauss() * 6}
   axis := linalg.normalize0(start - end)
@@ -206,7 +257,7 @@ strike :: proc(s: ^Storm, to: [3]f32, power: f32, to_hammer: bool, furious := fa
     base      = end,
     top       = start,
     right     = right,
-    radius    = 0.035 * (0.7 + power * 0.3),
+    radius    = 0.035 * (0.7 + min(power, 1.4) * 0.3) * size,
     color     = linalg.lerp(color_a, color_b, rand.float32()),
     leader    = 0.12 + rand.float32() * 0.1,
     power     = power,
@@ -219,7 +270,7 @@ strike :: proc(s: ^Storm, to: [3]f32, power: f32, to_hammer: bool, furious := fa
     bolt.rods[i] = Rod{branch(bolt.rods[0].joints, pass), pass.thickness, pass.opacity}
   }
   append(&bolt.strokes, Stroke{bolt.leader, 1})
-  count := min(int(restrikes * (RAGE_RESTRIKE_FACTOR if furious else 1)), 120)
+  count := min(int(restrikes * (RAGE_RESTRIKE_FACTOR if furious else restrike_scale)), 120)
   for i in 0 ..< count {
     append(&bolt.strokes, Stroke{bolt.strokes[i].t + 0.05 + rand.float32() * 0.09, max(0.75 - f32(i) * 0.12, 0.06)})
   }
@@ -239,6 +290,7 @@ storm_destroy :: proc(s: ^Storm) {
   for &b in s.bolts do bolt_destroy(&b)
   delete(s.bolts)
   delete(s.impacts)
+  delete(s.queue)
 }
 
 envelope :: proc(b: ^Bolt, age, tau: f32) -> (e: f32) {
@@ -274,10 +326,12 @@ advance :: proc(s: ^Storm, dt: f32, eye: [3]f32) -> (lights: [MAX_LIGHTS]LightSa
   s.eye = eye
   if s.time >= s.next_rage {
     s.next_rage = s.time + RAGE_EVERY
-    if rand.float32() < rage {
-      s.rage_end = s.time + RAGE_LENGTH
-      a := rand.float32() * math.TAU
-      strike(s, {math.sin(a) * 2, 0, math.cos(a) * 2}, 1.4, true, true)
+    if !raging(s) && rand.float32() < rage do rage_begin(s)
+  }
+  for i := len(s.queue) - 1; i >= 0; i -= 1 {
+    if s.time >= s.queue[i].at {
+      rage_strike(s, s.queue[i].phase)
+      unordered_remove(&s.queue, i)
     }
   }
   hot := raging(s)
