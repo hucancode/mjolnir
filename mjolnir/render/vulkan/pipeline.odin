@@ -31,6 +31,18 @@ BLEND_ADDITIVE := vk.PipelineColorBlendAttachmentState {
   colorWriteMask      = {.R, .G, .B, .A},
 }
 
+// BLEND_MAX keeps the brighter of the source and the target per channel.
+BLEND_MAX := vk.PipelineColorBlendAttachmentState {
+  blendEnable         = true,
+  srcColorBlendFactor = .ONE,
+  dstColorBlendFactor = .ONE,
+  colorBlendOp        = .MAX,
+  srcAlphaBlendFactor = .ONE,
+  dstAlphaBlendFactor = .ONE,
+  alphaBlendOp        = .MAX,
+  colorWriteMask      = {.R, .G, .B, .A},
+}
+
 // begin_record begins command_buffer, fresh or of a pool reset since, one-time submit by default.
 begin_record :: proc(
   command_buffer: vk.CommandBuffer,

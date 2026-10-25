@@ -529,6 +529,7 @@ rhi_graphics_pipeline_create :: proc(b: ^Backend, desc: rhi.GraphicsPipelineDesc
     case .NONE:     blends[i] = BLEND_OVERRIDE
     case .ALPHA:    blends[i] = BLEND_ALPHA
     case .ADDITIVE: blends[i] = BLEND_ADDITIVE
+    case .MAX:      blends[i] = BLEND_MAX
     }
   }
   specialization: vk.SpecializationInfo

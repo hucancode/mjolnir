@@ -11,7 +11,8 @@ MAX_LIGHTS :: 8
 LIGHT_GAIN :: f32(30)
 RAGE_EVERY :: f32(5)
 RAGE_LENGTH :: f32(2)
-RAGE_RESTRIKE_FACTOR :: f32(2)
+RAGE_RESTRIKE_FACTOR :: f32(5)
+RAGE_IMPACT_FACTOR :: f32(2)
 RAGE_THIN_FACTOR :: f32(1.5)
 RAGE_THICK_FACTOR :: f32(1.5)
 HAMMER_TIP :: [3]f32{0, 2.24, 0}
@@ -35,8 +36,8 @@ Pass :: struct {
 }
 
 PRIMARY :: Pass{1, 1, 0, 1, 1, 1}
-SECONDARY :: Pass{0.3, 1, 0.08, 0.5, 0.3, 0.6}
-TERTIARY :: Pass{0.1, 1, 0.06, 0.25, 0.3, 0.7}
+SECONDARY :: Pass{0.3, 0.5, 0.08, 0.3, 0.3, 0.6}
+TERTIARY :: Pass{0.1, 0.25, 0.06, 0.1, 0.3, 0.7}
 SECONDARIES :: 1
 TERTIARIES :: 2
 RODS :: 1 + SECONDARIES + TERTIARIES
@@ -63,7 +64,7 @@ BoltInstance :: struct {
   trunk:  f32,
   thin:   f32,
   thick:  f32,
-  halo:   f32,
+  sharpness: f32,
   tones:  f32,
   _:      [2]f32,
   color:  [3]f32,
@@ -100,6 +101,7 @@ LightSample :: struct {
 
 Storm :: struct {
   bolts:       [dynamic]Bolt,
+  impacts:     [dynamic]Impact,
   eye:         [3]f32,
   time:        f32,
   flash:       f32,
@@ -114,12 +116,12 @@ Storm :: struct {
 rate: f32 = 0.8
 rage: f32 = 0.4
 jag: f32 = 0.3
-restrikes: f32 = 4
+restrikes: f32 = 1
 thickness_min: f32 = 0.1
 thickness_max: f32 = 5.0
 tones: f32 = 3
-halo: f32 = 0.4
-color_a := [3]f32{0.5, 0.5, 1}
+sharpness: f32 = 0.6
+color_a := [3]f32{0.3, 0.3, 0.7}
 color_b := [3]f32{1, 1, 1}
 
 gauss :: proc() -> f32 {
@@ -236,11 +238,12 @@ bolt_destroy :: proc(b: ^Bolt) {
 storm_destroy :: proc(s: ^Storm) {
   for &b in s.bolts do bolt_destroy(&b)
   delete(s.bolts)
+  delete(s.impacts)
 }
 
 envelope :: proc(b: ^Bolt, age, tau: f32) -> (e: f32) {
   for s in b.strokes do if age >= s.t do e += s.amp * math.exp(-(age - s.t) / tau)
-  if age >= b.leader do e += 0.12 * math.exp(-(age - b.leader) / 0.4)
+  if age >= b.leader do e += 0.12 * math.exp(-(age - b.leader) / 0.25)
   return
 }
 
@@ -256,12 +259,12 @@ instance :: proc(b: ^Bolt, rod: int, age: f32) -> BoltInstance {
     thin   = min(thickness_min, thickness_max) * (RAGE_THIN_FACTOR if b.furious else 1),
     thick  = max(thickness_min, thickness_max) * (RAGE_THICK_FACTOR if b.furious else 1),
     tones  = tones,
-    halo   = halo,
+    sharpness = sharpness,
     age    = age,
     leader = b.leader,
   }
   if age >= b.leader {
-    inst.trunk = envelope(b, age, 0.045) * 1.6 * b.power
+    inst.trunk = envelope(b, age, 0.03) * 1.6 * b.power
   }
   return inst
 }
@@ -308,6 +311,7 @@ advance :: proc(s: ^Storm, dt: f32, eye: [3]f32) -> (lights: [MAX_LIGHTS]LightSa
     if !b.struck {
       b.struck = true
       s.tint = b.color
+      impact_spawn(s, b.base, b.color, b.power * (RAGE_IMPACT_FACTOR if b.furious else 1), b.furious)
       if s.time - s.last_flash > 0.45 {
         s.flash = max(s.flash, b.power * clamp(1.4 - linalg.length(b.base - eye) / 60, 0.3, 1))
         s.last_flash = s.time
@@ -319,6 +323,7 @@ advance :: proc(s: ^Storm, dt: f32, eye: [3]f32) -> (lights: [MAX_LIGHTS]LightSa
     light(&lights, &n, linalg.lerp(b.base, b.top, 0.5), e * 0.8, b.color)
     light(&lights, &n, b.top, e * 0.8, b.color)
   }
+  impact_expire(s)
   s.hammer_glow *= math.exp(-dt / 1.5)
   if s.hammer_glow > 0.02 do light(&lights, &n, HAMMER_TIP - {0, 1, 0}, s.hammer_glow * 0.4, s.tint)
   s.flash *= math.exp(-dt / 0.25)

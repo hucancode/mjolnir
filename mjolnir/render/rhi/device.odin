@@ -232,6 +232,7 @@ BlendMode :: enum {
   NONE,
   ALPHA,
   ADDITIVE,
+  MAX,
 }
 
 CompareOp :: enum {

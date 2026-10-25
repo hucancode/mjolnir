@@ -49,6 +49,11 @@ jobs:
       - name: Patch libc-shim strncpy
         run: patch -p1 -d /home/runner/odin/vendor/libc-shim < "$GITHUB_WORKSPACE/.github/workflows/libc-shim-strncpy.patch"
 
+      # vendor:wgpu's BlendOperation lacks the header's Undefined = 0, so .Max reaches wgpu-native as
+      # Min (black BlendMode.MAX draws); the patch also fixes the web enum table in wgpu.js
+      - name: Patch vendor:wgpu BlendOperation
+        run: patch -p1 -d /home/runner/odin/vendor/wgpu < "$GITHUB_WORKSPACE/.github/workflows/wgpu-blend-operation.patch"
+
       # render imports both backends, so vendor:wgpu is compiled even for the vulkan build
       - name: Get wgpu-native
         run: |

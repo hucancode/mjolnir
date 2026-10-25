@@ -416,6 +416,7 @@ rhi_graphics_pipeline_create :: proc(b: ^Backend, desc: rhi.GraphicsPipelineDesc
   case .NONE:
   case .ALPHA:    blend = &BLEND_ALPHA
   case .ADDITIVE: blend = &BLEND_ADDITIVE
+  case .MAX:      blend = &BLEND_MAX
   }
   targets := make([]wgpu.ColorTargetState, len(desc.color_formats), context.temp_allocator)
   for format, i in desc.color_formats {

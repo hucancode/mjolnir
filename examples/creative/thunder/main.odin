@@ -36,11 +36,17 @@ App :: struct {
   hammer:   gltf.Instance,
   bolts:    render.BufferHandle,
   bolt:     render.DrawShader,
+  impacts_buffer: render.BufferHandle,
+  sparks:   [2]render.EmitterHandle,
+  spark_nodes: [SPARK_SLOTS]world.NodeHandle,
+  next_spark: int,
+  impact:   render.DrawShader,
   lamps:    [MAX_LIGHTS]world.NodeHandle,
   lights:   [MAX_LIGHTS]render.LightHandle,
   pressed:  bool,
   dragged:  f32,
   instances: [MAX_BOLTS]BoltInstance,
+  impacts:  [MAX_IMPACTS]ImpactInstance,
 }
 
 bloom: f32 = 1
@@ -68,7 +74,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
   if !debugui.init(&app.debug, r, {1100, 720}) do return .FAIL
-  app.orbit = render.make_orbit({7, 3, 5}, {0, 1.6, 0})
+  app.orbit = render.make_orbit({12, 10, 12}, {0, 1.6, 0})
   render.camera_orbit(render.main_camera(r), app.orbit)
   render.camera_set_perspective(render.main_camera(r), math.to_radians(f32(50)), 0.3, 600)
 
@@ -98,10 +104,30 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.bolt, ok = render.draw_shader_create(
     r,
     #load("bolt." + render.SHADER_EXT),
-    render.DrawState{mesh_vertices = true, topology = .TRIANGLE_LIST, cull = .NONE, blend = .ADDITIVE, depth_test = true},
+    render.DrawState{mesh_vertices = true, topology = .TRIANGLE_LIST, cull = .NONE, blend = .MAX, depth_test = true},
     app.bolts,
   )
   if !ok do return .FAIL
+  app.impacts_buffer = render.buffer_create(r, make([]ImpactInstance, MAX_IMPACTS, context.temp_allocator))
+  app.impact, ok = render.draw_shader_create(
+    r,
+    #load("impact." + render.SHADER_EXT),
+    render.DrawState{topology = .TRIANGLE_LIST, cull = .NONE, blend = .MAX, depth_test = true},
+    app.impacts_buffer,
+  )
+  if !ok do return .FAIL
+  glow := render.texture_create(r, #load("assets/particles/light_01.png"))
+  app.sparks[0] = render.emitter_create(r, render.make_emitter(
+    texture = glow, emission_rate = 0, initial_velocity = {0, 3, 0}, velocity_spread = 4,
+    color_start = {4, 4.5, 6, 1}, color_end = {0.6, 0.7, 1, 0}, particle_lifetime = 0.8,
+    size_start = 45, size_end = 8, weight = 1, weight_spread = 0.3,
+  ))
+  app.sparks[1] = render.emitter_create(r, render.make_emitter(
+    texture = glow, emission_rate = 0, initial_velocity = {0, 5, 0}, velocity_spread = 8,
+    color_start = {4, 4.5, 6, 1}, color_end = {0.6, 0.7, 1, 0}, particle_lifetime = 1.1,
+    size_start = 70, size_end = 12, weight = 1, weight_spread = 0.3,
+  ))
+  for i in 0 ..< SPARK_SLOTS do app.spark_nodes[i] = world.spawn(&app.scene)
 
   app.storm.tint = color_a
   r.skybox_intensity = 0
@@ -154,6 +180,7 @@ update :: proc(app: ^App, dt: f32) {
   r.effect_stack[0] = render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32}
 
   stage_bolts(app)
+  stage_impacts(app)
 
   world.update(&app.scene)
   render.stage_transforms(r, world.changes(&app.scene))
@@ -177,6 +204,22 @@ stage_bolts :: proc(app: ^App) {
   if bolts == 0 do return
   render.buffer_write(r, app.bolts, app.instances[:bolts])
   render.stage_draw(r, app.bolt, rod, u32(bolts), BoltParams{})
+}
+
+stage_impacts :: proc(app: ^App) {
+  r := &app.renderer
+  for &i in app.storm.impacts do if !i.sparked {
+    i.sparked = true
+    node := app.spark_nodes[app.next_spark]
+    app.next_spark = (app.next_spark + 1) % SPARK_SLOTS
+    world.translate(&app.scene, node, i.position)
+    render.emit(r, app.sparks[1 if i.furious else 0], render.SlotHandle(node.index), u32(SPARKS * i.power))
+  }
+  n := min(len(app.storm.impacts), MAX_IMPACTS)
+  if n == 0 do return
+  for i in 0 ..< n do app.impacts[i] = impact_instance(&app.storm, app.storm.impacts[i])
+  render.buffer_write(r, app.impacts_buffer, app.impacts[:n])
+  render.stage_draw(r, app.impact, render.VertexCount(IMPACT_VERTICES), u32(n), ImpactParams{})
 }
 
 click_to_strike :: proc(app: ^App) {
@@ -236,7 +279,7 @@ debug_ui :: proc(app: ^App) {
     mu.slider(ctx, &thickness_max, 0.05, 20)
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Width tones"); mu.slider(ctx, &tones, 2, 8, 1)
-    mu.label(ctx, "Halo"); mu.slider(ctx, &halo, 0, 1)
+    mu.label(ctx, "Sharpness"); mu.slider(ctx, &sharpness, 0, 1)
     mu.label(ctx, "Color A / color B")
     mu.layout_row(ctx, {85, 85, -1}, 0)
     for &channel in color_a do mu.slider(ctx, &channel, 0, 1)

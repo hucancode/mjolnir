@@ -50,6 +50,16 @@ BLEND_ADDITIVE := wgpu.BlendState {
   color = {operation = .Add, srcFactor = .One, dstFactor = .One},
   alpha = {operation = .Add, srcFactor = .One, dstFactor = .One},
 }
+// The header's Max is 5, but an unpatched vendor:wgpu has no BlendOperation.Undefined = 0, so its .Max
+// (4) reaches wgpu-native as Min and draws black. The raw value works on native either way; on web it
+// needs .github/workflows/wgpu-blend-operation.patch (which also fixes wgpu.js).
+@(private)
+BLEND_OP_MAX :: wgpu.BlendOperation(5)
+@(private)
+BLEND_MAX := wgpu.BlendState {
+  color = {operation = BLEND_OP_MAX, srcFactor = .One, dstFactor = .One},
+  alpha = {operation = BLEND_OP_MAX, srcFactor = .One, dstFactor = .One},
+}
 
 @(private)
 buffer_create :: proc(b: ^Backend, size: int, usage: wgpu.BufferUsageFlags) -> wgpu.Buffer {

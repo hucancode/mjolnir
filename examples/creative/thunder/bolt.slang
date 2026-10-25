@@ -2,7 +2,7 @@
 // carries the width of the stroke there, and the width eases along each segment from one joint's to
 // the next's, so it never jumps. The rod has uv spanning 0 to 1 across and the joint number
 // along; the fragment draws a straight line across it, fading out smoothly: sharply at the line's
-// edge, or more gradually the more halo there is, by the same distance for thin and thick alike.
+// edge at full sharpness, or more gradually the less sharpness there is, by the same distance for thin and thick alike.
 struct Params {
     uint first;
 }
@@ -29,8 +29,8 @@ struct Bolt {
     // how thin and how thick the glow gets, against the ribbon's width
     float thin;
     float thick;
-    // how far out toward the ribbon's border the halo reaches, from 0 to 1
-    float halo;
+    // how crisp the line edge is, from 0 (fades out toward the ribbon border) to 1 (hard edge)
+    float sharpness;
     // how many widths, evenly spread from thin to thick, the glow tends to
     float tones;
     float _pad1;
@@ -55,7 +55,7 @@ struct VertexOut {
     [vk::location(3)] float intensity : TEXCOORD3;
     [vk::location(5)] nointerpolation float age : TEXCOORD5;
     [vk::location(6)] nointerpolation float3 tones : TEXCOORD6;
-    // when the leader reaches the ground, and how far the halo fades out beyond the line, in pixels
+    // when the leader reaches the ground, and how far the soft edge fades out beyond the line, in pixels
     [vk::location(7)] nointerpolation float2 stroke : TEXCOORD7;
     [vk::location(8)] nointerpolation float3 color : TEXCOORD8;
 }
@@ -64,8 +64,8 @@ struct VertexOut {
 // The width flares as the return stroke lands by this much, settling over this many seconds.
 static const float WIDTH_FLARE = 0.6;
 static const float FLARE_SETTLING = 0.15;
-// the halo fades the line out over this many base line widths on either side of its edge at full
-// halo, however thick the line is there, and over this many pixels when there is no halo
+// the soft edge fades the line out over this many base line widths on either side of its edge at zero
+// sharpness, however thick the line is there, and over this many pixels at full sharpness
 static const float BORDER = 3.0;
 static const float EDGE = 0.75;
 
@@ -101,6 +101,20 @@ float bolt_intensity(Bolt b, float birth)
     return b.trunk;
 }
 
+// As the bolt fades its path writhes: how far a joint is pushed sideways, in the rod's own units,
+// grows as the trunk's brightness drops below 1 and is gone while the bolt is still bright.
+static const float WRITHE_AMPLITUDE = 0.01;
+static const float WRITHE_SPEED = 1.0;
+
+float3 writhe(Bolt b, int joint, float3 position)
+{
+    float fade = b.age >= b.leader ? 1.0 - saturate(b.trunk) : 0.0;
+    float phase = float(joint) * 0.35 + b.age * WRITHE_SPEED;
+    float ends = smoothstep(0.0, 0.2, min(position.y, 1.0 - position.y));
+    float3 push = float3(sin(phase), 0.0, cos(phase * 0.8 + 0.6));
+    return position + push * (fade * fade * WRITHE_AMPLITUDE * ends);
+}
+
 [shader("vertex")]
 VertexOut vs_main(MeshVertex v, uint instance : SV_VulkanInstanceID)
 {
@@ -108,9 +122,11 @@ VertexOut vs_main(MeshVertex v, uint instance : SV_VulkanInstanceID)
     Bolt b = bolts[gpu.params.first + instance];
     int joint = int(v.uv.y);
     int first = v.normal.y > 0.0 ? joint : joint - 1;
-    float3 center_rod = b.joints[joint].position;
-    float3 previous = b.joints[max(joint - 1, 0)].position;
-    float3 next = b.joints[min(joint + 1, JOINTS - 1)].position;
+    int before_joint = max(joint - 1, 0);
+    int after_joint = min(joint + 1, JOINTS - 1);
+    float3 center_rod = writhe(b, joint, b.joints[joint].position);
+    float3 previous = writhe(b, before_joint, b.joints[before_joint].position);
+    float3 next = writhe(b, after_joint, b.joints[after_joint].position);
     float2 before = safe_normalize(center_rod.xy - previous.xy, float2(0.0, 1.0));
     float2 after = safe_normalize(next.xy - center_rod.xy, before);
     float2 heading = safe_normalize(before + after, after);
@@ -148,7 +164,7 @@ VertexOut vs_main(MeshVertex v, uint instance : SV_VulkanInstanceID)
 
     float focal = abs(view.projection[1][1]) * view.extent.y * 0.5;
     float plain = max(b.radius * focal / clip_center.w, 0.7);
-    float spread = b.halo * plain * BORDER;
+    float spread = (1.0 - b.sharpness) * plain * BORDER;
     float core = max(plain * miter, 0.7);
     float widest = core * b.thick * (1.0 + WIDTH_FLARE);
     // as wide as the line gets, but not so wide that the inside of a sharp turn folds over itself
@@ -174,7 +190,7 @@ float4 fs_main(VertexOut v) : SV_Target0
     float core = max(v.size.y * line_width(v.widths, v.along_segment, v.age, v.tones, v.stroke.x), 0.7);
     float from_middle = abs(v.across) * v.size.x;
     float inner = max(core - EDGE - v.stroke.y, 0.0);
-    float outer = min(core + EDGE + v.stroke.y, v.size.x);
+    float outer = max(min(core + EDGE + v.stroke.y, v.size.x), inner + 1e-3);
     float glow = 1.0 - smoothstep(inner, outer, from_middle);
     return float4(v.color * v.intensity * glow, 0.0);
 }
