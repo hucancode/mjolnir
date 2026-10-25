@@ -24,6 +24,8 @@ Particle :: struct {
   max_life:      f32,
   weight:        f32,
   texture_index: u32,
+  drag:          f32,
+  _pad:          [3]f32,
 }
 
 // The alive list's indirect draw: vertex count, instance count, first vertex, first instance.

@@ -15,6 +15,10 @@ struct Particle {
     float max_life;
     float weight;
     uint texture_index;
+    float drag;
+    float _pad0;
+    float _pad1;
+    float _pad2;
 }
 
 struct Emitter {
@@ -31,6 +35,10 @@ struct Emitter {
     // read by render, which counts each frame's new particles
     float emission_rate;
     uint texture;
+    float drag;
+    float _pad0;
+    float _pad1;
+    float _pad2;
 }
 
 // Where an emitter is attached; placement i emits the frame's new particles
@@ -141,5 +149,9 @@ void main(uint3 gid : SV_DispatchThreadID)
     p.max_life = lifetime;
     p.weight = weight;
     p.texture_index = emitter.texture;
+    p.drag = emitter.drag;
+    p._pad0 = 0.0;
+    p._pad1 = 0.0;
+    p._pad2 = 0.0;
     particles[idx] = p;
 }

@@ -32,8 +32,11 @@ Emitter :: struct #align(16) {
   emission_rate:     f32,
   // the particles' texture, NO_TEXTURE for none
   texture:           TextureHandle,
+  // per second, the fraction of speed a particle sheds: 0 flies free, 4 stops within about a second
+  drag:              f32,
+  _pad:              [3]f32,
 }
-#assert(size_of(Emitter) == 80)
+#assert(size_of(Emitter) == 96)
 
 // EmitterHandle identifies an emitter (emitter_create).
 EmitterHandle :: distinct u32
@@ -131,6 +134,7 @@ make_emitter :: proc(
   size_end: f32 = 100.0,
   weight: f32 = 1.0,
   weight_spread: f32 = 0.0,
+  drag: f32 = 0.0,
 ) -> Emitter {
   return {
     emission_rate     = emission_rate,
@@ -145,6 +149,7 @@ make_emitter :: proc(
     weight            = weight,
     weight_spread     = weight_spread,
     texture           = texture,
+    drag              = drag,
   }
 }
 

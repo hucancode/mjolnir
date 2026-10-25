@@ -103,8 +103,8 @@ float bolt_intensity(Bolt b, float birth)
 
 // As the bolt fades its path writhes: how far a joint is pushed sideways, in the rod's own units,
 // grows as the trunk's brightness drops below 1 and is gone while the bolt is still bright.
-static const float WRITHE_AMPLITUDE = 0.01;
-static const float WRITHE_SPEED = 1.0;
+static const float WRITHE_AMPLITUDE = 0.03;
+static const float WRITHE_SPEED = 1.5;
 
 float3 writhe(Bolt b, int joint, float3 position)
 {

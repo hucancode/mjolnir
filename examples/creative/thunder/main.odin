@@ -118,14 +118,14 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !ok do return .FAIL
   glow := render.texture_create(r, #load("assets/particles/light_01.png"))
   app.sparks[0] = render.emitter_create(r, render.make_emitter(
-    texture = glow, emission_rate = 0, initial_velocity = {0, 3, 0}, velocity_spread = 4,
-    color_start = {4, 4.5, 6, 1}, color_end = {0.6, 0.7, 1, 0}, particle_lifetime = 0.8,
-    size_start = 45, size_end = 8, weight = 1, weight_spread = 0.3,
+    texture = glow, emission_rate = 0, initial_velocity = {0, 8, 0}, velocity_spread = 16, drag = 7,
+    color_start = {6, 6.5, 8, 1}, color_end = {0.6, 0.7, 1, 0}, particle_lifetime = 0.35,
+    size_start = 18, size_end = 2, weight = 0.25, weight_spread = 0.1,
   ))
   app.sparks[1] = render.emitter_create(r, render.make_emitter(
-    texture = glow, emission_rate = 0, initial_velocity = {0, 5, 0}, velocity_spread = 8,
-    color_start = {4, 4.5, 6, 1}, color_end = {0.6, 0.7, 1, 0}, particle_lifetime = 1.1,
-    size_start = 70, size_end = 12, weight = 1, weight_spread = 0.3,
+    texture = glow, emission_rate = 0, initial_velocity = {0, 12, 0}, velocity_spread = 26, drag = 7,
+    color_start = {6, 6.5, 8, 1}, color_end = {0.6, 0.7, 1, 0}, particle_lifetime = 0.5,
+    size_start = 28, size_end = 3, weight = 0.25, weight_spread = 0.1,
   ))
   for i in 0 ..< SPARK_SLOTS do app.spark_nodes[i] = world.spawn(&app.scene)
 

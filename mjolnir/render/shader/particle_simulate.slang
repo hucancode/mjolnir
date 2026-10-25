@@ -18,6 +18,10 @@ struct Particle {
     float max_life;
     float weight;
     uint texture_index;
+    float drag;
+    float _pad0;
+    float _pad1;
+    float _pad2;
 }
 
 struct ForceField {
@@ -77,9 +81,11 @@ bool simulate(uint i)
         v += force * effect * params.delta_time;
     }
     v += GRAVITY * particles[i].weight * params.delta_time;
+    // drag bleeds speed off exponentially, so a burst slows down without ever reversing
+    v *= exp(-particles[i].drag * params.delta_time);
     // limit speed (branchless div-by-zero guard)
     float speed = length(v);
-    v *= min(speed, 5.0) / max(speed, 1e-6);
+    v *= min(speed, 50.0) / max(speed, 1e-6);
     particles[i].velocity = v;
     particles[i].position = p + v * params.delta_time;
     float life = particles[i].life - params.delta_time;

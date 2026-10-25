@@ -15,6 +15,10 @@ struct Particle {
     float max_life;
     float weight;
     uint texture_index;
+    float drag;
+    float _pad0;
+    float _pad1;
+    float _pad2;
 }
 
 SCENE_BUFFER(Particle, particles, 8, 1)

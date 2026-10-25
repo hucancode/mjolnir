@@ -7,7 +7,7 @@ IMPACT_VERTICES :: 12
 IMPACT_LIFE :: f32(1.2)
 MAX_IMPACTS :: 64
 SPARK_SLOTS :: 8
-SPARKS :: f32(28)
+SPARKS :: f32(12)
 
 Impact :: struct {
   born:     f32,
