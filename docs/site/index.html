@@ -249,15 +249,15 @@ void main() {
   // ---------- parameters (driven by the control panel) ----------
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const S = {
-    rate: reduce ? 0 : 0.5, rage: reduce ? 0 : 0.2, jag: 0.5, thickness: 2, restrikes: 4,
+    rate: reduce ? 0 : 0.5, rage: reduce ? 0 : 0.5, jag: 0.5, thickness: 2, restrikes: 4,
     bloom: 2, orbit: !reduce,
   };
   // every RAGE_EVERY seconds the storm rolls against S.rage; a hit rages: a few small flickers
   // (anticipation), one furious strike on Mjolnir (main), then a few normal strikes (overshoot).
   // Auto strikes hold off until the sequence and RAGE_AFTERGLOW are over.
-  const RAGE_EVERY = 5, RAGE_SMALL = 0.5, RAGE_SMALL_RESTRIKE = 0.4, RAGE_OVERSHOOT_GAP = 0.3, RAGE_AFTERGLOW = 1.5;
-  const ANTICIPATION_PERIOD = 1, ANTICIPATION_COUNT = 5, OVERSHOOT_PERIOD = 0.2, OVERSHOOT_COUNT = 3;
-  const RAGE_POWER = 8, RAGE_WIDTH = 2.5, RAGE_RESTRIKE = 8;
+  const RAGE_EVERY = 5, RAGE_SMALL = 0.5, RAGE_SMALL_RESTRIKE = 0.4, RAGE_OVERSHOOT_GAP = 0.3, RAGE_AFTERGLOW = 1.0;
+  const ANTICIPATION_PERIOD = 1, ANTICIPATION_COUNT = 8, OVERSHOOT_PERIOD = 0.5, OVERSHOOT_COUNT = 3;
+  const RAGE_POWER = 5, RAGE_WIDTH = 2, RAGE_RESTRIKE = 10;
   let rageEnd = 0, nextRage = RAGE_EVERY;
   const rageQueue = [];
 
@@ -381,8 +381,8 @@ void main() {
   };
 
   // ---------- camera ----------
-  const FOV = (50 * Math.PI) / 180, TAN = Math.tan(FOV / 2), LOOK = [0, 1.8, 0];
-  const cam = { yaw: 0.9, pitch: 0.12, dist: 9 };
+  const FOV = (50 * Math.PI) / 180, TAN = Math.tan(FOV / 2), LOOK = [0, 1.5, 0];
+  const cam = { yaw: 0.1, pitch: 0.0, dist: 20 };
   let eye, fwd, right, camUp, viewProj;
   const updateCamera = () => {
     const { yaw, pitch, dist } = cam, cp = Math.cos(pitch);
