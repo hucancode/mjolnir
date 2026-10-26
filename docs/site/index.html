@@ -67,6 +67,12 @@
 <script type="x-shader/x-glsl" id="glsl-common">
 #define GLOW vec3(0.65, 0.7, 1.0)
 #define HORIZON vec3(0.1, 0.09, 0.16)
+#define THIN 0.1
+#define THICK 3.0
+#define TONES 3.0
+#define SHARPNESS 0.9
+#define BORDER 3.0
+#define EDGE 0.6
 </script>
 <script type="x-shader/x-glsl" id="full-vs">
 out vec2 vUv;
@@ -133,11 +139,12 @@ void main() {
 <script type="x-shader/x-glsl" id="seg-vs">
 layout(location = 0) in vec3 aA;
 layout(location = 1) in vec3 aB;
-layout(location = 2) in vec2 aMeta; // world radius, intensity
+layout(location = 2) in vec4 aMeta; // world radius, intensity, joint width at a and at b
+layout(location = 3) in vec2 aLeft; // how much of the width is left at a and at b
 uniform mat4 uVP;
 uniform vec2 uRes;
 uniform float uFocal;
-out vec2 vP, vA, vB; out float vR, vI;
+out vec2 vP, vA, vB, vW, vL; out vec2 vR; out float vI;
 // quad corners: along the segment (0..1), side (-1..1)
 const vec2 C[6] = vec2[6](vec2(0.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0), vec2(0.0, -1.0), vec2(1.0, 1.0), vec2(0.0, 1.0));
 void main() {
@@ -146,32 +153,59 @@ void main() {
   if (ca.w < 0.3 || cb.w < 0.3) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }
   vec2 sa = (ca.xy / ca.w * 0.5 + 0.5) * uRes, sb = (cb.xy / cb.w * 0.5 + 0.5) * uRes;
   vec2 t = length(sb - sa) > 1e-4 ? normalize(sb - sa) : vec2(0.0, 1.0), n = vec2(-t.y, t.x);
-  float rc = max(aMeta.x * uFocal / mix(ca.w, cb.w, c.x), 0.7), R = rc * 5.0 + 2.0;
+  vec2 rp = aMeta.x * uFocal / vec2(ca.w, cb.w);
+  float R = max(max(rp.x, rp.y) * THICK, 0.7) * 5.0 + 2.0;
   vP = mix(sa, sb, c.x) + t * (c.x * 2.0 - 1.0) * R + n * c.y * R;
-  vA = sa; vB = sb; vR = rc; vI = aMeta.y;
+  vA = sa; vB = sb; vR = rp; vW = aMeta.zw; vL = aLeft; vI = aMeta.y;
   gl_Position = vec4(vP / uRes * 2.0 - 1.0, mix(ca.z / ca.w, cb.z / cb.w, c.x), 1.0);
 }</script>
 <script type="x-shader/x-glsl" id="seg-fs">
-in vec2 vP, vA, vB; in float vR, vI;
+in vec2 vP, vA, vB, vW, vL, vR; in float vI;
 out vec4 o;
+// how wide the line is, against the rod's radius: eases from one joint's width to the next's, then
+// settles onto the nearest of the evenly spread tones between thin and thick
+float lineWidth(float w) {
+  float steps = max(TONES - 1.0, 1.0), thickness = w * steps, lower = min(floor(thickness), steps - 1.0);
+  return mix(THIN, THICK, (lower + smoothstep(0.25, 0.75, thickness - lower)) / steps);
+}
 void main() {
   vec2 pa = vP - vA, ba = vB - vA;
-  float k = length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0)) / vR;
-  o = vec4(vI * (exp(-k * k) + 0.15 * exp(-k * 0.8)), 0.0, 0.0, 1.0);
+  float t = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+  float e = smoothstep(0.0, 1.0, t), left = mix(vL.x, vL.y, e);
+  float r = max(mix(vR.x, vR.y, t) * lineWidth(mix(vW.x, vW.y, e)) * left, 0.7);
+  float d = length(pa - ba * t);
+  float spread = (1.0 - SHARPNESS) * mix(vR.x, vR.y, t) * BORDER;
+  float inner = max(r - EDGE - spread, 0.0), outer = max(r + EDGE + spread, inner + 1e-3);
+  o = vec4(vI * smoothstep(0.0, 0.1, left) * (1.0 - smoothstep(inner, outer, d)), 0.0, 0.0, 1.0);
 }</script>
 <script type="x-shader/x-glsl" id="down-fs">
 in vec2 vUv; uniform sampler2D uSrc; uniform vec2 uTexel; out vec4 o;
+// 13 taps over a 4x4 texel area, weighted as four overlapping boxes, so no bright pixel is skipped or shimmers
+float tap(vec2 d) { return texture(uSrc, vUv + d * uTexel).r; }
 void main() {
-  vec2 t = uTexel, u = vec2(t.x, -t.y);
-  o = (texture(uSrc, vUv) * 4.0 + texture(uSrc, vUv - t) + texture(uSrc, vUv + t) + texture(uSrc, vUv + u) + texture(uSrc, vUv - u)) / 8.0;
+  float e = tap(vec2(0.0));
+  float corners = tap(vec2(-2.0, 2.0)) + tap(vec2(2.0, 2.0)) + tap(vec2(-2.0, -2.0)) + tap(vec2(2.0, -2.0));
+  float edges = tap(vec2(0.0, 2.0)) + tap(vec2(-2.0, 0.0)) + tap(vec2(2.0, 0.0)) + tap(vec2(0.0, -2.0));
+  float inner = tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0)) + tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0));
+  o = vec4(e * 0.125 + corners * 0.03125 + edges * 0.0625 + inner * 0.125, 0.0, 0.0, 1.0);
+}</script>
+<script type="x-shader/x-glsl" id="up-fs">
+in vec2 vUv; uniform sampler2D uSrc; uniform vec2 uTexel; out vec4 o;
+// 3x3 tent filter, added onto the next larger level
+float tap(vec2 d) { return texture(uSrc, vUv + d * uTexel).r; }
+void main() {
+  float sum = tap(vec2(0.0)) * 4.0
+    + (tap(vec2(0.0, 1.0)) + tap(vec2(-1.0, 0.0)) + tap(vec2(1.0, 0.0)) + tap(vec2(0.0, -1.0))) * 2.0
+    + tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0)) + tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0));
+  o = vec4(sum / 16.0, 0.0, 0.0, 1.0);
 }</script>
 <script type="x-shader/x-glsl" id="comp-fs">
 in vec2 vUv;
 uniform float uBloom;
-uniform sampler2D uScene, uEmis, uB1, uB2, uB3, uB4, uB5;
+uniform sampler2D uScene, uEmis, uBloomTex;
 out vec4 o;
 void main() {
-  float bloom = texture(uB1, vUv).r + texture(uB2, vUv).r + texture(uB3, vUv).r + texture(uB4, vUv).r + texture(uB5, vUv).r;
+  float bloom = texture(uBloomTex, vUv).r;
   vec3 col = texture(uScene, vUv).rgb + GLOW * bloom * uBloom * 0.6 + texture(uEmis, vUv).r;
   o = vec4(mix(col, 1.0 - 0.2 * exp(-(col - 0.8) / 0.2), step(0.8, col)), 1.0); // soft shoulder above 0.8
 }</script>
@@ -215,7 +249,7 @@ void main() {
   // ---------- parameters (driven by the control panel) ----------
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const S = {
-    rate: reduce ? 0 : 0.5, rage: reduce ? 0 : 0.2, jag: 0.5, thickness: 1, restrikes: 2,
+    rate: reduce ? 0 : 0.5, rage: reduce ? 0 : 0.2, jag: 0.5, thickness: 2, restrikes: 4,
     bloom: 2, orbit: !reduce,
   };
   // every RAGE_EVERY seconds the storm rolls against S.rage; a hit rages: a few small flickers
@@ -316,15 +350,16 @@ void main() {
   const meshProg = compile("mesh-vs", "mesh-fs");
   const segProg = compile("seg-vs", "seg-fs");
   const downProg = compile("full-vs", "down-fs");
+  const upProg = compile("full-vs", "up-fs");
   const compProg = compile("full-vs", "comp-fs");
 
   // ---------- meshes ----------
   const G = 400;
   const floor = vertexArray(new Float32Array([[-G, -G], [-G, G], [G, G], [-G, -G], [G, G], [G, -G]].flatMap(([x, z]) => [x, 0, z])), [3]);
   const hammer = vertexArray(hammerData, [3, 3, 3]);
-  const MAX_SEGS = 8000, SEG_STRIDE = 8; // one instance per bolt segment: a, b, radius, intensity
+  const MAX_SEGS = 8000, SEG_STRIDE = 12; // one instance per bolt segment: a, b, radius, intensity, joint widths
   const segData = new Float32Array(MAX_SEGS * SEG_STRIDE);
-  const segs = vertexArray(segData.byteLength, [3, 3, 2], gl.DYNAMIC_DRAW, 1);
+  const segs = vertexArray(segData.byteLength, [3, 3, 4, 2], gl.DYNAMIC_DRAW, 1);
 
   // ---------- sizing ----------
   let scene = null, emis = null, depth = null, down = [], aspect = 1;
@@ -388,7 +423,6 @@ void main() {
   const SECONDARY = { thickness: 0.3, jaggedness: 0.5, deviation: 0.08, shortest: 0.3, longest: 0.6, lvl: 1 };
   const TERTIARY = { thickness: 0.1, jaggedness: 0.25, deviation: 0.06, shortest: 0.3, longest: 0.7, lvl: 2 };
   const SECONDARIES = 1, TERTIARIES = 2;
-  const THIN = 0.4, THICK = 2; // segment radius against the rod's, for a joint width of 0 and 1
 
   const lerp = (a, b, t) => a + (b - a) * t;
   const mix3 = (a, b, t) => a.map((x, i) => lerp(x, b[i], t));
@@ -465,26 +499,34 @@ void main() {
     const passes = furious ? [PRIMARY] : [PRIMARY, ...Array(SECONDARIES).fill(SECONDARY), ...Array(TERTIARIES).fill(TERTIARY)];
     const radius = 0.035 * S.thickness * (0.7 + Math.min(power, 1.4) * 0.3) * size * (furious ? RAGE_WIDTH : 1), parts = [];
     for (const pass of passes) {
-      const joints = pass === PRIMARY ? primary : branchRod(primary.map((j) => j), pass);
+      const joints = pass === PRIMARY ? primary : branchRod(primary.map((j) => j), pass), seed = randSeed() % 1000;
       for (let i = 0; i < TRUNK_SEGMENTS; i++) {
         const j0 = joints[i], j1 = joints[i + 1];
         parts.push({
-          i, p0: j0.p, p1: j1.p, lvl: pass.lvl,
+          i, p0: j0.p, p1: j1.p, lvl: pass.lvl, seed,
           t: (1 - (j0.p[1] + j1.p[1]) / 2) * leaderDur,
-          w: radius * pass.thickness * lerp(THIN, THICK, (j0.w + j1.w) / 2),
+          w: radius * pass.thickness, w0: j0.w, w1: j1.w,
         });
       }
     }
     const pts = primary.map((j) => world(j.p)).reverse();
-    bolts.push({ born: time, segs: parts, pts, world, leaderDur, strokes, power, toHammer, end: strokes.at(-1).t + 1.2 });
+    bolts.push({ born: time, segs: parts, pts, world, leaderDur, strokes, power, toHammer, end: strokes.at(-1).t + LINGER_TIME });
   };
 
-  // as the bolt fades its path writhes: a joint is pushed sideways, in rod units, more the dimmer the trunk
-  const WRITHE_AMPLITUDE = 0.01, WRITHE_SPEED = 1;
-  const writhe = (p, joint, fade, age) => {
-    const phase = joint * 0.35 + age * WRITHE_SPEED, k = fade * fade * WRITHE_AMPLITUDE * smoothstep(0, 0.2, Math.min(p[1], 1 - p[1]));
-    return [p[0] + Math.sin(phase) * k, p[1], p[2] + Math.cos(phase * 0.8 + 0.6) * k];
+  // as the trunk dims the bolt erodes from its edges inward: the line gets thinner until it is gone.
+  // each point along the bolt erodes up to ERODE_UNEVENNESS faster than an even rate, so it thins unevenly
+  // the width flares as the return stroke lands by this much, settling over this many seconds
+  const WIDTH_FLARE = 0.6, FLARE_SETTLING = 0.15;
+  const ERODE_UNEVENNESS = 4.0, ERODE_COARSE = 9, ERODE_FINE = 17, ERODE_GRAIN = 31;
+  const erosionRemaining = (s, joint, eroded) => {
+    const t = joint / TRUNK_SEGMENTS;
+    const unevenness = 0.4 * (noise(s.seed, t * ERODE_COARSE) + 1) / 2 + 0.3 * (noise(s.seed + 17, t * ERODE_FINE) + 1) / 2 + 0.3 * (noise(s.seed + 31, t * ERODE_GRAIN) + 1) / 2;
+    return clamp(1 - eroded * (1 + ERODE_UNEVENNESS * unevenness), 0, 1);
   };
+
+  // the bolt lingers after its last stroke, so there is time to watch it erode; a raging bolt lingers no longer than a normal one
+  const LINGER_TIME = 3, LINGER_DECAY = 0.7;
+  const trunk = (b, a, tau) => 1.6 * (envelope(b, a, tau) * b.power + (a >= b.leaderDur ? Math.min(b.power, 1.4) * Math.exp(-(a - b.leaderDur) / LINGER_DECAY) : 0));
 
   const envelope = (b, a, tau) => b.strokes.reduce((e, s) => e + (a >= s.t ? s.amp * Math.exp(-(a - s.t) / tau) : 0), 0)
     + (a >= b.leaderDur ? 0.12 * Math.exp(-(a - b.leaderDur) / 0.4) : 0);
@@ -492,7 +534,7 @@ void main() {
     if (a < s.t) return 0;
     const fresh = Math.exp(-(a - s.t) / 0.015), k = [1, 0.55, 0.4, 0.3][s.lvl];
     if (a < b.leaderDur) return (0.22 + fresh * 0.7) * k;
-    if (s.lvl === 0) return envelope(b, a, 0.045) * 1.6 * b.power;
+    if (s.lvl === 0) return trunk(b, a, 0.045);
     return k * (0.8 * Math.exp(-(a - b.leaderDur) / 0.035) + 0.15 * Math.max(0, envelope(b, a, 0.03) - 1));
   };
 
@@ -595,11 +637,12 @@ void main() {
     // 2. bolts into the emissive target, depth tested against the scene
     let v = 0;
     for (const b of bolts) {
-      const age = time - b.born, fade = age >= b.leaderDur ? 1 - clamp(envelope(b, age, 0.03) * 1.6 * b.power, 0, 1) : 0;
+      const age = time - b.born, eroded = age >= b.leaderDur ? 1 - clamp(trunk(b, age, 0.03), 0, 1) : 0;
+      const flare = age >= b.leaderDur ? 1 + WIDTH_FLARE * Math.exp(-(age - b.leaderDur) / FLARE_SETTLING) : 1;
       for (const s of b.segs) {
         const I = intensity(b, s, age);
         if (I < 0.003 || v >= MAX_SEGS) continue;
-        segData.set([...b.world(writhe(s.p0, s.i, fade, age)), ...b.world(writhe(s.p1, s.i + 1, fade, age)), s.w, I], SEG_STRIDE * v++);
+        segData.set([...b.world(s.p0), ...b.world(s.p1), s.w * flare, I, s.w0, s.w1, erosionRemaining(s, s.i, eroded), erosionRemaining(s, s.i + 1, eroded)], SEG_STRIDE * v++);
       }
     }
     bind(emis);
@@ -627,13 +670,24 @@ void main() {
       fullscreen();
       src = d;
     }
+    // each level is smoothed up onto the next larger one, so the widest glow stays smooth instead of blocky
+    gl.enable(gl.BLEND);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    for (let i = down.length - 1; i > 0; i--) {
+      bind(down[i - 1]);
+      use(upProg, { uTexel: [1 / down[i].w, 1 / down[i].h] });
+      sample(upProg, "uSrc", 0, down[i].tex);
+      fullscreen();
+    }
+    gl.disable(gl.BLEND);
 
     // 4. composite
     bind(null);
     use(compProg, { uBloom: S.bloom });
     sample(compProg, "uScene", 0, scene.tex);
     sample(compProg, "uEmis", 1, emis.tex);
-    down.forEach((d, i) => sample(compProg, "uB" + (i + 1), i + 2, d.tex));
+    sample(compProg, "uBloomTex", 2, down[0].tex);
     fullscreen();
   };
 
