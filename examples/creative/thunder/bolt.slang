@@ -58,6 +58,8 @@ struct VertexOut {
     // when the leader reaches the ground, and how far the soft edge fades out beyond the line, in pixels
     [vk::location(7)] nointerpolation float2 stroke : TEXCOORD7;
     [vk::location(8)] nointerpolation float3 color : TEXCOORD8;
+    // the joint this segment starts at, how much of the bolt has eroded, and this rod's noise seed
+    [vk::location(9)] nointerpolation float3 erode : TEXCOORD9;
 }
 
 
@@ -101,18 +103,36 @@ float bolt_intensity(Bolt b, float birth)
     return b.trunk;
 }
 
-// As the bolt fades its path writhes: how far a joint is pushed sideways, in the rod's own units,
-// grows as the trunk's brightness drops below 1 and is gone while the bolt is still bright.
-static const float WRITHE_AMPLITUDE = 0.03;
-static const float WRITHE_SPEED = 1.5;
+// As the trunk dims the bolt erodes from its edges inward: the line gets thinner until it is gone.
+// How much has eroded is 0 while the bolt is still bright and 1 once it is gone. Each point along
+// the bolt erodes a little faster than the one before by up to this much, so it thins unevenly.
+static const float ERODE_UNEVENNESS = 0.6;
+static const float ERODE_COARSE = 9.0;
+static const float ERODE_FINE = 37.0;
 
-float3 writhe(Bolt b, int joint, float3 position)
+float hash11(float x)
 {
-    float fade = b.age >= b.leader ? 1.0 - saturate(b.trunk) : 0.0;
-    float phase = float(joint) * 0.35 + b.age * WRITHE_SPEED;
-    float ends = smoothstep(0.0, 0.2, min(position.y, 1.0 - position.y));
-    float3 push = float3(sin(phase), 0.0, cos(phase * 0.8 + 0.6));
-    return position + push * (fade * fade * WRITHE_AMPLITUDE * ends);
+    return frac(sin(x * 127.1 + 311.7) * 43758.5453);
+}
+
+float value_noise(float x, float seed)
+{
+    float cell = floor(x);
+    float f = frac(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return lerp(hash11(cell + seed), hash11(cell + 1.0 + seed), f);
+}
+
+float erosion_amount(Bolt b)
+{
+    return b.age >= b.leader ? 1.0 - saturate(b.trunk) : 0.0;
+}
+
+// How much of the line's width is left at `t` of the way up the bolt, from 0 (gone) to 1 (intact).
+float erosion_remaining(float t, float seed, float eroded)
+{
+    float unevenness = 0.6 * value_noise(t * ERODE_COARSE, seed) + 0.4 * value_noise(t * ERODE_FINE, seed + 17.0);
+    return saturate(1.0 - eroded * (1.0 + ERODE_UNEVENNESS * unevenness));
 }
 
 [shader("vertex")]
@@ -124,9 +144,9 @@ VertexOut vs_main(MeshVertex v, uint instance : SV_VulkanInstanceID)
     int first = v.normal.y > 0.0 ? joint : joint - 1;
     int before_joint = max(joint - 1, 0);
     int after_joint = min(joint + 1, JOINTS - 1);
-    float3 center_rod = writhe(b, joint, b.joints[joint].position);
-    float3 previous = writhe(b, before_joint, b.joints[before_joint].position);
-    float3 next = writhe(b, after_joint, b.joints[after_joint].position);
+    float3 center_rod = b.joints[joint].position;
+    float3 previous = b.joints[before_joint].position;
+    float3 next = b.joints[after_joint].position;
     float2 before = safe_normalize(center_rod.xy - previous.xy, float2(0.0, 1.0));
     float2 after = safe_normalize(next.xy - center_rod.xy, before);
     float2 heading = safe_normalize(before + after, after);
@@ -153,6 +173,7 @@ VertexOut vs_main(MeshVertex v, uint instance : SV_VulkanInstanceID)
     o.tones = float3(b.thin, b.thick, b.tones);
     o.stroke = float2(b.leader, 0.0);
     o.color = b.color;
+    o.erode = float3(float(first), erosion_amount(b), hash11(b.joints[3].position.x * 91.7 + b.joints[5].position.z * 53.3) * 100.0);
     if (clip_center.w < 0.3) {
         o.clip = CLIP_DISCARD;
         return o;
@@ -187,10 +208,12 @@ VertexOut vs_main(MeshVertex v, uint instance : SV_VulkanInstanceID)
 [shader("fragment")]
 float4 fs_main(VertexOut v) : SV_Target0
 {
-    float core = max(v.size.y * line_width(v.widths, v.along_segment, v.age, v.tones, v.stroke.x), 0.7);
+    float t = (v.erode.x + v.along_segment) / float(JOINTS - 1);
+    float left = erosion_remaining(t, v.erode.z, v.erode.y);
+    float core = max(v.size.y * line_width(v.widths, v.along_segment, v.age, v.tones, v.stroke.x), 0.7) * left;
     float from_middle = abs(v.across) * v.size.x;
     float inner = max(core - EDGE - v.stroke.y, 0.0);
     float outer = max(min(core + EDGE + v.stroke.y, v.size.x), inner + 1e-3);
     float glow = 1.0 - smoothstep(inner, outer, from_middle);
-    return float4(v.color * v.intensity * glow, 0.0);
+    return float4(v.color * v.intensity * glow * smoothstep(0.0, 0.1, left), 0.0);
 }

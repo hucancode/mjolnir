@@ -135,6 +135,8 @@ restrikes: f32 = 1
 thickness_min: f32 = 0.1
 thickness_max: f32 = 3.0
 tones: f32 = 3
+LINGER_TIME :: f32(1.5)
+LINGER_DECAY :: f32(0.2)
 ANTICIPATION_PERIOD :: f32(1)
 ANTICIPATION_COUNT :: 5
 OVERSHOOT_PERIOD :: f32(0.2)
@@ -274,7 +276,7 @@ strike :: proc(s: ^Storm, to: [3]f32, power: f32, to_hammer: bool, furious := fa
   for i in 0 ..< count {
     append(&bolt.strokes, Stroke{bolt.strokes[i].t + 0.05 + rand.float32() * 0.09, max(0.75 - f32(i) * 0.12, 0.06)})
   }
-  bolt.end = bolt.strokes[len(bolt.strokes) - 1].t + 1.2
+  bolt.end = bolt.strokes[len(bolt.strokes) - 1].t + LINGER_TIME
   append(&s.bolts, bolt)
 }
 
@@ -316,7 +318,8 @@ instance :: proc(b: ^Bolt, rod: int, age: f32) -> BoltInstance {
     leader = b.leader,
   }
   if age >= b.leader {
-    inst.trunk = envelope(b, age, 0.03) * 1.6 * b.power
+    linger := math.exp(-(age - b.leader) / LINGER_DECAY)
+    inst.trunk = (envelope(b, age, 0.03) + linger) * 1.6 * b.power
   }
   return inst
 }
