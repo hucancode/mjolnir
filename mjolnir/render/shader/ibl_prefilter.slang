@@ -1,6 +1,5 @@
-// Specular prefilter of one mip: GGX importance samples of the environment cube at roughness
-// `value`, weighted by n·l.
-#define IBL_SOURCE_CUBE 1
+// Specular prefilter of one mip: GGX importance samples of the environment at roughness `value`,
+// weighted by n·l, each read at the mip matching the solid angle it stands for.
 #include "ibl_common.slang"
 
 float radical_inverse_vdc(uint b)
@@ -16,6 +15,14 @@ float radical_inverse_vdc(uint b)
 float2 hammersley(uint i, uint n)
 {
     return float2(float(i) / float(n), radical_inverse_vdc(i));
+}
+
+// The GGX normal distribution at half vector cosine n_dot_h.
+float distribution_ggx(float n_dot_h, float a)
+{
+    float a2 = a * a;
+    float d = n_dot_h * n_dot_h * (a2 - 1.0) + 1.0;
+    return a2 / (PI * d * d);
 }
 
 float3 importance_sample_ggx(float2 xi, float3 n, float a)
@@ -45,7 +52,10 @@ void main(uint3 gid : SV_DispatchThreadID)
         float3 l = normalize(2.0 * dot(v, h) * h - v);
         float n_dot_l = max(dot(n, l), 0.0);
         if (n_dot_l <= 0.0) continue;
-        color += sample_source(l) * n_dot_l;
+        // pdf of l with v = n: D * n_dot_h / (4 * v_dot_h) = D / 4
+        float pdf = distribution_ggx(max(dot(n, h), 0.0), a) * 0.25;
+        float solid_angle = 1.0 / (float(precompute_push.sample_count) * pdf + 1e-4);
+        color += sample_source(l, source_lod(l, solid_angle) + 1.0) * n_dot_l;
         weight += n_dot_l;
     }
     color /= max(weight, 1e-4);

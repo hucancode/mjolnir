@@ -1,6 +1,5 @@
-// Diffuse irradiance: the environment cube integrated over each texel's hemisphere, one
+// Diffuse irradiance: the environment integrated over each texel's hemisphere, one
 // sample per `value` radians of each angle.
-#define IBL_SOURCE_CUBE 1
 #include "ibl_common.slang"
 
 [shader("compute")]
@@ -20,7 +19,8 @@ void main(uint3 gid : SV_DispatchThreadID)
             float s = sin(theta);
             float3 tangent = float3(s * cos(phi), s * sin(phi), cos(theta));
             float3 world = tangent.x * right + tangent.y * up + tangent.z * n;
-            irradiance += sample_source(world) * cos(theta) * s;
+            // each sample stands for the patch delta x delta of angles, delta^2 * sin(theta) sr
+            irradiance += sample_source(world, source_lod(world, delta * delta * max(s, 0.1)) + 1.0) * cos(theta) * s;
             count += 1.0;
         }
     }

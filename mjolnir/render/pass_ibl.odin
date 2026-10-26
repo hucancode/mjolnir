@@ -5,7 +5,6 @@ import "rhi"
 
 @(private = "file")
 PrecomputeShader :: enum {
-  EQUIRECT,
   IRRADIANCE,
   PREFILTER,
 }
@@ -20,9 +19,9 @@ IRRADIANCE_SAMPLE_DELTA :: f32(0.025)
 @(private)
 PRECOMPUTE_STORAGE_BASE :: MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS
 @(private)
-PRECOMPUTE_DISPATCHES :: 2 + PREFILTER_MIPS
+PRECOMPUTE_DISPATCHES :: 1 + PREFILTER_MIPS
 
-// `src` is 2D for the equirect step, a cube otherwise; `value` is the irradiance sample delta
+// `src` is the equirect map; `value` is the irradiance sample delta
 // or the prefilter roughness.
 @(private = "file")
 PrecomputePush :: struct {
@@ -33,11 +32,11 @@ PrecomputePush :: struct {
   sample_count: u32,
 }
 
-// precompute_ibl fills the cubes render made for image-based lighting, in one submission:
-// equirect into env_cube, then irradiance and every prefilter mip (PREFILTER_MIPS) from it.
+// precompute_ibl fills the cubes render made for image-based lighting from the mipped equirect
+// map, in one submission: the irradiance and every prefilter mip (PREFILTER_MIPS).
 // Each dispatch writes one cube level as six storage layers.
 @(private)
-precompute_ibl :: proc(self: ^Renderer, equirect, env_cube, irradiance_cube, prefilter_cube: TextureHandle) -> bool {
+precompute_ibl :: proc(self: ^Renderer, equirect, irradiance_cube, prefilter_cube: TextureHandle) -> bool {
   Dispatch :: struct {
     shader: PrecomputeShader,
     src:    TextureHandle,
@@ -49,14 +48,12 @@ precompute_ibl :: proc(self: ^Renderer, equirect, env_cube, irradiance_cube, pre
     count:  u32,
   }
   dispatches: [PRECOMPUTE_DISPATCHES]Dispatch
-  dispatches[0] = {.EQUIRECT, equirect, env_cube, ENV_CUBE_SIZE, 0, 0, 0}
-  dispatches[1] = {.IRRADIANCE, env_cube, irradiance_cube, IRRADIANCE_SIZE, 0, IRRADIANCE_SAMPLE_DELTA, 0}
+  dispatches[0] = {.IRRADIANCE, equirect, irradiance_cube, IRRADIANCE_SIZE, 0, IRRADIANCE_SAMPLE_DELTA, 0}
   for mip in 0 ..< u32(PREFILTER_MIPS) {
     roughness := f32(mip) / f32(PREFILTER_MIPS - 1)
-    dispatches[2 + mip] = {.PREFILTER, env_cube, prefilter_cube, PREFILTER_SIZE, mip, roughness, PREFILTER_SAMPLES}
+    dispatches[1 + mip] = {.PREFILTER, equirect, prefilter_cube, PREFILTER_SIZE, mip, roughness, PREFILTER_SAMPLES}
   }
   sources := [PrecomputeShader]rhi.ShaderSource {
-    .EQUIRECT   = shader_source("ibl_equirect"),
     .IRRADIANCE = shader_source("ibl_irradiance"),
     .PREFILTER  = shader_source("ibl_prefilter"),
   }
@@ -71,7 +68,7 @@ precompute_ibl :: proc(self: ^Renderer, equirect, env_cube, irradiance_cube, pre
     layout := pipeline_layout(self, .NONE)
     when !BINDLESS {
       stages := bit_set[rhi.ShaderStage]{.COMPUTE}
-      entries := [?]rhi.BindEntry{{kind = .TEXTURE_FLOAT if shader == .EQUIRECT else .TEXTURE_CUBE, stages = stages}, {kind = .STORAGE_TEXTURE_ARRAY, stages = stages, format = .RGBA16F}}
+      entries := [?]rhi.BindEntry{{kind = .TEXTURE_FLOAT, stages = stages}, {kind = .STORAGE_TEXTURE_ARRAY, stages = stages, format = .RGBA16F}}
       layouts[shader] = dev.bind_layout_create(&self.gpu, {entries = entries[:]}) or_return
       layout = pipeline_layout(self, .NONE, .NONE, layouts[shader])
     }
@@ -89,7 +86,7 @@ precompute_ibl :: proc(self: ^Renderer, equirect, env_cube, irradiance_cube, pre
   // the equirect source may still be staged
   dev.cmd_flush_uploads(&self.gpu, cmd)
   dev.cmd_label_begin(&self.gpu, cmd, "ibl precompute")
-  cubes := [3]TextureHandle{env_cube, irradiance_cube, prefilter_cube}
+  cubes := [2]TextureHandle{irradiance_cube, prefilter_cube}
   dev.cmd_barrier(&self.gpu, cmd, nil, cubes[:])
   dev.cmd_begin_compute(&self.gpu, cmd)
   for d, i in dispatches {
@@ -98,7 +95,7 @@ precompute_ibl :: proc(self: ^Renderer, equirect, env_cube, irradiance_cube, pre
     pipeline_bind(self, cmd, pipelines[d.shader], .NONE, 0, &push, .NONE)
     when !BINDLESS do dev.cmd_bind_group(&self.gpu, cmd, 3, groups[i])
     dev.cmd_dispatch(&self.gpu, cmd, (size + 7) / 8, (size + 7) / 8, 6)
-    // later dispatches sample the env cube, the lighting passes the outputs
+    // the lighting passes sample the outputs
     written := [1]rhi.Barrier{{{.COMPUTE_SHADER}, {.COMPUTE_SHADER, .FRAGMENT_SHADER}, {.SHADER_WRITE}, {.SHADER_READ}}}
     dev.cmd_barrier(&self.gpu, cmd, written[:], nil)
   }
@@ -109,8 +106,8 @@ precompute_ibl :: proc(self: ^Renderer, equirect, env_cube, irradiance_cube, pre
   dev.submit(&self.gpu, {queue = .GRAPHICS, cmds = cmds[:]})
   dev.wait_idle(&self.gpu)
   log.infof(
-    "IBL precompute done: env=%d^2, irradiance=%d^2, prefilter=%d^2 x %d mips",
-    ENV_CUBE_SIZE, IRRADIANCE_SIZE, PREFILTER_SIZE, PREFILTER_MIPS,
+    "IBL precompute done: irradiance=%d^2, prefilter=%d^2 x %d mips",
+    IRRADIANCE_SIZE, PREFILTER_SIZE, PREFILTER_MIPS,
   )
   return true
 }

@@ -5,10 +5,9 @@ package render
 TEXTURE_LUT_GGX :: #load("assets/lut_ggx.png")
 // lights the scene until the application loads its own (environment_map_load)
 @(private = "file")
-DEFAULT_ENVIRONMENT :: #load("assets/environment.hdr")
+DEFAULT_ENVIRONMENT :: #load("assets/environment2.hdr")
 
 // face sizes of the image-based lighting cubes (pass_ibl.odin)
-ENV_CUBE_SIZE :: 512
 IRRADIANCE_SIZE :: 32
 PREFILTER_SIZE :: 128
 
@@ -20,8 +19,8 @@ ambient_init :: proc(self: ^Renderer) -> bool {
   return ambient_load_environment(self)
 }
 
-// The irradiance and prefiltered cubes are precomputed from a temporary env cube made from
-// the equirectangular image encoded in data.
+// The irradiance and prefiltered cubes are precomputed from the equirectangular image encoded
+// in data.
 ambient_load_environment :: proc(self: ^Renderer, data := DEFAULT_ENVIRONMENT) -> (ok: bool) {
   ambient_free_environment(self)
   defer if !ok do ambient_free_environment(self)
@@ -29,11 +28,9 @@ ambient_load_environment :: proc(self: ^Renderer, data := DEFAULT_ENVIRONMENT) -
   cube :: proc(size, mips: u32) -> TextureDesc {
     return {extent = {size, size}, format = .RGBA16F, usage = {.SAMPLED, .STORAGE}, mip_levels = mips, cube = true}
   }
-  env_cube := allocate_texture(self, cube(ENV_CUBE_SIZE, 1)) or_return
-  defer texture_destroy(self, env_cube)
   self.irradiance_cube = allocate_texture(self, cube(IRRADIANCE_SIZE, 1)) or_return
   self.prefilter_cube = allocate_texture(self, cube(PREFILTER_SIZE, PREFILTER_MIPS)) or_return
-  return precompute_ibl(self, self.environment_map, env_cube, self.irradiance_cube, self.prefilter_cube)
+  return precompute_ibl(self, self.environment_map, self.irradiance_cube, self.prefilter_cube)
 }
 
 @(private = "file")

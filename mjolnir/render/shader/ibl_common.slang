@@ -1,6 +1,5 @@
 // Bindings and helpers of the IBL precompute (pass_ibl.odin): each dispatch writes one cube
-// level as six storage layers, one thread per texel per face. Define IBL_SOURCE_CUBE as 1
-// (the environment cube) or 0 (the equirect map) before including: sample_source reads it.
+// level as six storage layers, one thread per texel per face, from the mipped equirect map.
 #pragma once
 #include "common.slang"
 
@@ -19,42 +18,39 @@ PUSH_BLOCK(PrecomputePush, precompute_push)
 
 #if BACKEND_WGPU
 [vk::binding(1, 3)] [format("rgba16f")] WTexture2DArray<float4> destination;
-#if IBL_SOURCE_CUBE
-[vk::binding(0, 3)] TextureCube source;
-#else
 [vk::binding(0, 3)] Texture2D source;
-#endif
 #else
 // aliases the depth pyramid's storage images
 [vk::binding(2, TEXTURES_SET)] [format("rgba16f")] RWTexture2DArray<float4> storage_cubes[];
-// the cube textures alias the 2D ones
-#if IBL_SOURCE_CUBE
-[vk::binding(0, TEXTURES_SET)] TextureCube cube_textures[];
-#else
 [vk::binding(0, TEXTURES_SET)] Texture2D textures[];
 #endif
-#endif
 
-// The source at lod 0: by direction (cube) or uv (equirect).
-#if IBL_SOURCE_CUBE
-float3 sample_source(float3 dir)
+// The source in direction `dir` at mip `lod`.
+float3 sample_source(float3 dir, float lod)
 {
+    float2 uv = dir_to_equirect_uv(dir);
 #if BACKEND_WGPU
-    return source.SampleLevel(linear_repeat, dir, 0.0).rgb;
+    return source.SampleLevel(linear_repeat, uv, lod).rgb;
 #else
-    return cube_textures[NonUniformResourceIndex(precompute_push.source_index)].SampleLevel(samplers[SAMPLER_LINEAR_REPEAT], dir, 0.0).rgb;
+    return textures[NonUniformResourceIndex(precompute_push.source_index)].SampleLevel(samplers[SAMPLER_LINEAR_REPEAT], uv, lod).rgb;
 #endif
 }
-#else
-float3 sample_source(float2 uv)
+
+// The mip whose texels cover about `solid_angle` steradians around `dir`. A sample standing
+// for more than its own texel reads a filtered one, so a tiny bright sun is spread over the
+// samples that represent it and does not speckle the result.
+float source_lod(float3 dir, float solid_angle)
 {
+    uint w, h, levels;
 #if BACKEND_WGPU
-    return source.SampleLevel(linear_repeat, uv, 0.0).rgb;
+    source.GetDimensions(0, w, h, levels);
 #else
-    return textures[NonUniformResourceIndex(precompute_push.source_index)].SampleLevel(samplers[SAMPLER_LINEAR_REPEAT], uv, 0.0).rgb;
+    textures[NonUniformResourceIndex(precompute_push.source_index)].GetDimensions(0, w, h, levels);
 #endif
+    float sin_theta = max(sqrt(1.0 - dir.y * dir.y), 0.01);
+    float texel = (2.0 * PI / float(w)) * (PI / float(h)) * sin_theta;
+    return clamp(0.5 * log2(solid_angle / texel), 0.0, float(levels - 1));
 }
-#endif
 
 void store_destination(uint3 gid, float4 value)
 {

@@ -130,8 +130,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   for i in 0 ..< SPARK_SLOTS do app.spark_nodes[i] = world.spawn(&app.scene)
 
   app.storm.tint = color_a
-  r.skybox_intensity = 0
-  r.ibl_intensity = 0
+  r.skybox_intensity = 0.05
+  r.ibl_intensity = 0.1
   r.sun = render.Sun{enabled = true, color = color_a, intensity = MOONLIGHT, direction = {-0.3, -1, -0.2}}
   append(&r.effect_stack, render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32})
   return .READY
