@@ -1,6 +1,7 @@
 package render
 
 import "base:intrinsics"
+import "../containers"
 import "core:reflect"
 import "rhi"
 
@@ -75,25 +76,19 @@ post_pipelines_create :: proc(self: ^Renderer, source: rhi.ShaderSource) -> (pip
 // camera runs. Compile it from a .slang that declares `struct Effect` (its params) and includes
 // shader/post.slang; load it with #load("name." + SHADER_EXT). It reads render's time and the
 // image size (post_resolution).
-post_shader_create :: proc(self: ^Renderer, source: []u8) -> (PostShader, bool) #optional_ok {
-  pipelines, ok := post_pipelines_create(self, source)
-  if !ok do return 0, false
-  for &slot, i in self.custom_post_pipelines {
-    if slot[0] != 0 do continue
-    slot = pipelines
-    return PostShader(i + 1), true
-  }
-  append(&self.custom_post_pipelines, pipelines)
-  return PostShader(len(self.custom_post_pipelines)), true
+post_shader_create :: proc(self: ^Renderer, source: []u8) -> (shader: PostShader, ok: bool) #optional_ok {
+  shader = PostShader(containers.slots_alloc(&self.slots[.POST_SHADERS]) or_return)
+  self.custom_post_pipelines[shader], ok = post_pipelines_create(self, source)
+  if !ok do post_shader_destroy(self, shader)
+  return
 }
 
 // post_shader_destroy frees a shader from post_shader_create; take its effects off the stack
 // first.
 post_shader_destroy :: proc(self: ^Renderer, shader: PostShader) {
-  if shader == 0 || int(shader) > len(self.custom_post_pipelines) do return
-  slot := &self.custom_post_pipelines[shader - 1]
-  for p in slot do if p != 0 do dev.pipeline_retire(&self.gpu, p)
-  slot^ = {}
+  if !containers.slots_free(&self.slots[.POST_SHADERS], u32(shader)) do return
+  for p in self.custom_post_pipelines[shader] do dev.pipeline_retire(&self.gpu, p)
+  self.custom_post_pipelines[shader] = {}
 }
 
 // make_custom_effect packs `params` into a CustomEffect of `shader`, laid out as the shader's push
@@ -107,89 +102,71 @@ make_custom_effect :: proc(shader: PostShader, params: $T, passes: u32 = 1) -> C
   return e
 }
 
-// One fullscreen pass of the effect stack: pass `pass` of effect (blur and bloom take two)
-// reads input, the previous pass's output, and original, the previous pass's input, and
-// writes output; NO_TEXTURE (0) is the presented image. A nil effect copies input.
+// How many fullscreen passes an effect takes: blur and bloom two (horizontal, then vertical).
 @(private = "file")
-PostPass :: struct {
-  effect:                  PostprocessEffect,
-  pass:                    u32,
-  input, original, output: TextureHandle,
-}
-
-// The effect stack as passes over the main camera's image: pass i writes ring slot
-// i % POST_PROCESS_RING, the last one the presented image. Blur and bloom take two passes
-// (horizontal, then vertical); an empty stack copies the image unchanged (nil effect).
-@(private = "file")
-post_passes :: proc(self: ^Renderer, f: u32, cam: u32) -> []PostPass {
-  effects := self.effect_stack[:]
-  copy_only := [1]PostprocessEffect{nil}
-  if len(effects) == 0 do effects = copy_only[:]
-  passes := make([dynamic]PostPass, 0, 2 * len(effects), context.temp_allocator)
-  input := self.camera_targets[cam].images[.FINAL_IMAGE][f]
-  original := input
-  for effect in effects {
-    pass_count: u32 = 1
-    #partial switch e in effect {
-    case BlurEffect, BloomEffect:
-      pass_count = 2
-    case CustomEffect:
-      pass_count = max(e.passes, 1)
-    }
-    for pass in 0 ..< pass_count {
-      output := self.post_process_ring[f][len(passes) % POST_PROCESS_RING]
-      append(&passes, PostPass{effect, pass, input, original, output})
-      original, input = input, output
-    }
+post_pass_count :: proc(effect: PostprocessEffect) -> u32 {
+  #partial switch e in effect {
+  case BlurEffect, BloomEffect:
+    return 2
+  case CustomEffect:
+    return max(e.passes, 1)
   }
-  passes[len(passes) - 1].output = NO_TEXTURE
-  return passes[:]
+  return 1
 }
 
-// Every pass but the last writes a texture; the last writes the backbuffer.
+// The effect stack as fullscreen passes over the main camera's image: pass `pass` of an effect
+// reads input, the previous pass's output, and original, the previous pass's input. Pass i
+// writes ring slot i % POST_PROCESS_RING, the last one the backbuffer. An empty stack copies the
+// image unchanged (nil effect).
 @(private)
 post_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
   camera, targets := &self.cameras[cam], &self.camera_targets[cam]
-  passes := post_passes(self, f, cam)
-  outputs := make([dynamic]TextureHandle, 0, len(passes), context.temp_allocator)
-  outer: for &p, i in passes {
-    if p.output == 0 do continue
-    for q in passes[:i] do if q.output == p.output do continue outer
-    append(&outputs, p.output)
-  }
+  effects := self.effect_stack[:]
+  copy_only := [1]PostprocessEffect{nil}
+  if len(effects) == 0 do effects = copy_only[:]
+  total: u32
+  for effect in effects do total += post_pass_count(effect)
+  barrier_discard(self, cmd, self.post_process_ring[f][:min(total - 1, POST_PROCESS_RING)])
   normal, depth := targets.images[.NORMAL][f], targets.images[.DEPTH][f]
-  for &p, i in passes {
-    if i == 0 do barrier_discard(self, cmd, outputs[:])
-    else do barrier(self, cmd, .POST_PASS)
-    is_last := p.output == 0
-    colors := [1]rhi.ColorTarget{{texture = BACKBUFFER if is_last else p.output, load = .DONT_CARE}}
-    dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:]})
-    push := PostPush {
-      camera_near          = camera.near,
-      camera_far           = camera.far,
-      normal_texture_index = u32(normal),
-      depth_texture_index  = u32(depth),
-      input_image_index    = u32(p.input),
-      original_image_index = u32(p.original),
-      pass                 = p.pass,
-      time                 = self.time,
-      effect               = p.effect,
+  input := targets.images[.FINAL_IMAGE][f]
+  original := input
+  i: u32
+  for effect in effects {
+    for pass in 0 ..< post_pass_count(effect) {
+      if i > 0 do barrier(self, cmd, .POST_PASS)
+      is_last := i == total - 1
+      output := self.post_process_ring[f][i % POST_PROCESS_RING]
+      colors := [1]rhi.ColorTarget{{texture = BACKBUFFER if is_last else output, load = .DONT_CARE}}
+      dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:]})
+      push := PostPush {
+        camera_near          = camera.near,
+        camera_far           = camera.far,
+        normal_texture_index = u32(normal),
+        depth_texture_index  = u32(depth),
+        input_image_index    = u32(input),
+        original_image_index = u32(original),
+        pass                 = pass,
+        time                 = self.time,
+        effect               = effect,
+      }
+      pipeline := self.post_pipelines[int(is_last)][reflect.get_union_variant_raw_tag(effect)]
+      if custom, is_custom := effect.(CustomEffect); is_custom {
+        pipeline = post_shader_pipeline(self, custom.shader, is_last)
+      }
+      pipeline_bind(self, cmd, pipeline, .NONE, f, &push, .POST, input, original, normal, depth)
+      dev.cmd_draw(&self.gpu, cmd, 3, 1, 0, 0)
+      dev.cmd_end_pass(&self.gpu, cmd)
+      original, input = input, output
+      i += 1
     }
-    pipeline := self.post_pipelines[int(is_last)][reflect.get_union_variant_raw_tag(p.effect)]
-    if custom, is_custom := p.effect.(CustomEffect); is_custom {
-      pipeline = post_shader_pipeline(self, custom.shader, is_last)
-    }
-    pipeline_bind(self, cmd, pipeline, .NONE, f, &push, .POST, p.input, p.original, normal, depth)
-    dev.cmd_draw(&self.gpu, cmd, 3, 1, 0, 0)
-    dev.cmd_end_pass(&self.gpu, cmd)
   }
 }
 
 // A CustomEffect's pipeline; the copy pipeline stands in for a shader that is gone.
 @(private = "file")
 post_shader_pipeline :: proc(self: ^Renderer, shader: PostShader, is_last: bool) -> rhi.Pipeline {
-  if shader > 0 && int(shader) <= len(self.custom_post_pipelines) {
-    if p := self.custom_post_pipelines[shader - 1][int(is_last)]; p != 0 do return p
+  if containers.slots_live(&self.slots[.POST_SHADERS], u32(shader)) {
+    if p := self.custom_post_pipelines[shader][int(is_last)]; p != 0 do return p
   }
   return self.post_pipelines[int(is_last)][0]
 }

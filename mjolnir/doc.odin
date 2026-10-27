@@ -9,6 +9,7 @@ package mjolnir
 //   2  systems: each owns one part of a game's state. The application passes data between them, e.g.
 //      render.stage_transforms(&r, world.changes(&w)) or world.set_world_poses(&w, physics.body_poses(&p)).
 //   1  foundation: self-contained tools a system builds on, and the GPU backends
+//   0  core: containers, geometry math and the render hardware interface (rhi)
 //
 // API conventions, the same in every package:
 //   make_x returns a value (make_point_light, make_material, make_cube); x_create stores one

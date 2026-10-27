@@ -1,3 +1,4 @@
+#+private
 package vulkan_backend
 
 import "core:mem"
@@ -174,9 +175,29 @@ record_uploads :: proc(gctx: ^GPUContext, cmd: vk.CommandBuffer) {
 // submit_uploads records every queued upload into a one-shot command buffer and waits for it,
 // so a following deferred_flush drops none. Not while a frame is being recorded.
 submit_uploads :: proc(gctx: ^GPUContext) -> vk.Result {
-  cmd := begin_single_time_command(gctx) or_return
+  alloc_info := vk.CommandBufferAllocateInfo {
+    sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
+    level              = .PRIMARY,
+    commandPool        = gctx.command_pool,
+    commandBufferCount = 1,
+  }
+  cmd: vk.CommandBuffer
+  vk.AllocateCommandBuffers(gctx.device, &alloc_info, &cmd) or_return
+  defer vk.FreeCommandBuffers(gctx.device, gctx.command_pool, 1, &cmd)
+  begin_record(cmd) or_return
   record_uploads(gctx, cmd)
-  return end_single_time_command(gctx, &cmd)
+  vk.EndCommandBuffer(cmd) or_return
+  cmd_info := vk.CommandBufferSubmitInfo {
+    sType         = .COMMAND_BUFFER_SUBMIT_INFO,
+    commandBuffer = cmd,
+  }
+  submit_info := vk.SubmitInfo2 {
+    sType                  = .SUBMIT_INFO_2,
+    commandBufferInfoCount = 1,
+    pCommandBufferInfos    = &cmd_info,
+  }
+  vk.QueueSubmit2(gctx.graphics_queue, 1, &submit_info, 0) or_return
+  return vk.QueueWaitIdle(gctx.graphics_queue)
 }
 
 @(private = "file")

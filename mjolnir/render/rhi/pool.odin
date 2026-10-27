@@ -6,15 +6,15 @@ Pool :: struct($T: typeid) {
   free:  [dynamic]u32,
 }
 
-// pool_take returns a free slot, its item zeroed.
-pool_take :: proc(p: ^Pool($T)) -> u32 {
+// pool_take stores item in a free slot and returns the slot.
+pool_take :: proc(p: ^Pool($T), item: T) -> u32 {
   if len(p.items) == 0 do append(&p.items, T{})
   if len(p.free) > 0 {
     slot := pop(&p.free)
-    p.items[slot] = {}
+    p.items[slot] = item
     return slot
   }
-  append(&p.items, T{})
+  append(&p.items, item)
   return u32(len(p.items) - 1)
 }
 
@@ -25,6 +25,7 @@ pool_release :: proc(p: ^Pool($T), slot: u32) {
   append(&p.free, slot)
 }
 
+// pool_destroy frees the pool's storage; what its items hold is the caller's to release first.
 pool_destroy :: proc(p: ^Pool($T)) {
   delete(p.items)
   delete(p.free)

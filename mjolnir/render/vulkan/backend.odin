@@ -18,6 +18,11 @@ BINDLESS :: true
 // One pass renders into several layers of a texture (rhi.PassDesc.layer_count).
 LAYERED_RENDERING :: true
 
+// Depth pyramids and draw lists live in slots render assigns: a pyramid and a draw-list slot
+// per camera and frame in flight, plus a draw-list slot per frame for the shadow views.
+MAX_PYRAMID_SLOTS :: rhi.MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
+MAX_DRAW_LIST_SLOTS :: (rhi.MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
+
 // Backend is every Vulkan object the renderer draws with. render keeps it opaque and goes
 // through PROCS (rhi.odin) and the procs below; textures are indexed by render's TextureHandle.
 Backend :: struct {
@@ -25,7 +30,7 @@ Backend :: struct {
   gctx:             GPUContext,
   swapchain:        Swapchain,
   textures:         []Image,
-  samplers:         [SamplerType]vk.Sampler,
+  samplers:         [rhi.SamplerType]vk.Sampler,
   // set 1 of every pipeline that asks: the global texture, sampler, storage image, draw list
   // and pyramid counter arrays (textures.odin)
   bindless_layout:  vk.DescriptorSetLayout,
@@ -94,26 +99,20 @@ init_vulkan :: proc(b: ^Backend) -> vk.Result {
   size, _ := window_size(b)
   swapchain_init(&b.swapchain, gctx, size) or_return
   b.textures = make([]Image, rhi.MAX_TEXTURES)
-  init_descriptor_pool(gctx) or_return
+  // the pool of the one set the backend itself makes, the bindless arrays (a type may repeat);
+  // rhi's bind groups have a pool of their own
+  sizes: [len(BINDLESS_BINDINGS)]vk.DescriptorPoolSize
+  for binding, i in BINDLESS_BINDINGS do sizes[i] = {binding.type, binding.count}
+  pool_info := vk.DescriptorPoolCreateInfo {
+    sType         = .DESCRIPTOR_POOL_CREATE_INFO,
+    poolSizeCount = len(sizes),
+    pPoolSizes    = &sizes[0],
+    maxSets       = 1,
+  }
+  vk.CreateDescriptorPool(gctx.device, &pool_info, nil, &gctx.descriptor_pool) or_return
   bindless_init(b) or_return
   rhi_init(b) or_return
   return .SUCCESS
-}
-
-// The pool of the one set the backend itself makes, the bindless arrays; rhi's bind groups
-// have a pool of their own.
-@(private = "file")
-init_descriptor_pool :: proc(gctx: ^GPUContext) -> vk.Result {
-  sizes := make([dynamic]vk.DescriptorPoolSize, context.temp_allocator)
-  for binding in BINDLESS_BINDINGS {
-    found := false
-    for &s in sizes do if s.type == binding.type {
-      s.descriptorCount += binding.count
-      found = true
-    }
-    if !found do append(&sizes, vk.DescriptorPoolSize{binding.type, binding.count})
-  }
-  return descriptor_pool_init(gctx, sizes[:], 1)
 }
 
 // ready reports whether init has finished: Vulkan is up when init returns.

@@ -33,10 +33,6 @@ LightingPush :: struct {
   ibl_intensity:    f32,
   // view of the sun's first shadow cascade, 0 for none
   sun_shadow_map:   u32,
-  _:                u32,
-  // the sun's radiance (color * intensity, 0 when off) and the direction towards it
-  sun_radiance:     [4]f32,
-  sun_direction:    [4]f32,
 }
 
 @(private)
@@ -80,11 +76,10 @@ lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32)
     skybox_intensity = self.skybox_intensity,
     skybox_blur      = self.skybox_blur,
     output_index     = LIT_STORAGE_BASE + camera_slot(cam) + f,
-    light_count      = self.light_placement_slots.high_water,
+    light_count      = self.slots[.LIGHT_PLACEMENTS].high_water,
     ibl_intensity    = self.ibl_intensity,
     sun_shadow_map   = self.sun_shadow_map,
   }
-  push.sun_radiance, push.sun_direction = sun_light(self.sun)
   dev.cmd_begin_compute(&self.gpu, cmd)
   defer dev.cmd_end_compute(&self.gpu, cmd)
   pipeline_bind(

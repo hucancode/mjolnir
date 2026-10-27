@@ -122,8 +122,6 @@ Cmd :: struct {
   compute:  wgpu.ComputePassEncoder,
   finished: wgpu.CommandBuffer,
   push_set: u32,
-  // views of layers made for its passes, released once it is submitted
-  views:    [dynamic]wgpu.TextureView,
 }
 
 rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
@@ -131,29 +129,20 @@ rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
 }
 
 rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, bool) {
+  // every buffer takes writes (buffer_write)
   usage := wgpu.BufferUsageFlags{.CopyDst}
-  for u in desc.usage {
-    switch u {
-    case .STORAGE:  usage += {.Storage}
-    case .VERTEX:   usage += {.Vertex}
-    case .INDEX:    usage += {.Index}
-    case .INDIRECT: usage += {.Indirect}
-    case .COPY_SRC: usage += {.CopySrc}
-    case .COPY_DST:
-    }
-  }
+  for u in desc.usage do usage += {BUFFER_USAGES[u]}
   if desc.memory == .READBACK {
     rb := Readback{data = make([]u8, (max(desc.size, 4) + 3) &~ 3)}
     for &s in rb.slots do s.buffer = buffer_create(b, len(rb.data), {.MapRead, .CopyDst})
-    slot := rhi.pool_take(&b.buffers)
-    b.buffers.items[slot] = rb.slots[0].buffer
+    // the handle only: the readback owns its ring, and b.buffers holds nil
+    slot := rhi.pool_take(&b.buffers, nil)
     b.readbacks[rhi.Buffer(slot)] = rb
     return rhi.Buffer(slot), true
   }
   buffer := buffer_create(b, max(desc.size, 16), usage)
   if buffer == nil do return 0, false
-  slot := rhi.pool_take(&b.buffers)
-  b.buffers.items[slot] = buffer
+  slot := rhi.pool_take(&b.buffers, buffer)
   return rhi.Buffer(slot), true
 }
 
@@ -243,16 +232,26 @@ rhi_buffer_write :: proc(b: ^Backend, buffer: rhi.Buffer, offset: int, data: []u
 }
 
 @(private = "file")
-stage_flags :: proc(stages: bit_set[rhi.ShaderStage]) -> wgpu.ShaderStageFlags {
-  flags: wgpu.ShaderStageFlags
-  for s in stages {
-    switch s {
-    case .VERTEX:   flags += {.Vertex}
-    case .FRAGMENT: flags += {.Fragment}
-    case .COMPUTE:  flags += {.Compute}
-    }
-  }
-  return flags
+BUFFER_USAGES := [rhi.BufferUsage]wgpu.BufferUsage {
+  .STORAGE  = .Storage,
+  .VERTEX   = .Vertex,
+  .INDEX    = .Index,
+  .INDIRECT = .Indirect,
+  .COPY_SRC = .CopySrc,
+  .COPY_DST = .CopyDst,
+}
+
+@(private = "file")
+SHADER_STAGES := [rhi.ShaderStage]wgpu.ShaderStage {
+  .VERTEX   = .Vertex,
+  .FRAGMENT = .Fragment,
+  .COMPUTE  = .Compute,
+}
+
+@(private = "file")
+stage_flags :: proc(stages: bit_set[rhi.ShaderStage]) -> (flags: wgpu.ShaderStageFlags) {
+  for s in stages do flags += {SHADER_STAGES[s]}
+  return
 }
 
 rhi_bind_layout_create :: proc(b: ^Backend, desc: rhi.BindLayoutDesc) -> (rhi.BindLayout, bool) {
@@ -274,14 +273,13 @@ rhi_bind_layout_create :: proc(b: ^Backend, desc: rhi.BindLayoutDesc) -> (rhi.Bi
   }
   layout := wgpu.DeviceCreateBindGroupLayout(b.device, &{entryCount = uint(len(entries)), entries = raw_data(entries)})
   if layout == nil do return 0, false
-  slot := rhi.pool_take(&b.layouts)
-  b.layouts.items[slot] = layout
+  slot := rhi.pool_take(&b.layouts, layout)
   return rhi.BindLayout(slot), true
 }
 
 rhi_bind_group_create :: proc(b: ^Backend, desc: rhi.BindGroupDesc) -> (rhi.BindGroup, bool) {
   entries := make([]wgpu.BindGroupEntry, len(desc.resources), context.temp_allocator)
-  slot := rhi.pool_take(&b.groups)
+  slot := rhi.pool_take(&b.groups, {})
   group := &b.groups.items[slot]
   for r, i in desc.resources {
     entries[i].binding = u32(i)
@@ -344,13 +342,6 @@ pipeline_layout_make :: proc(b: ^Backend, desc: rhi.PipelineLayoutDesc) -> (wgpu
   return layout, push_set
 }
 
-@(private = "file")
-pipeline_store :: proc(b: ^Backend, p: Pipeline) -> rhi.Pipeline {
-  slot := rhi.pool_take(&b.pipelines)
-  b.pipelines.items[slot] = p
-  return rhi.Pipeline(slot)
-}
-
 rhi_compute_pipeline_create :: proc(b: ^Backend, desc: rhi.ComputePipelineDesc) -> (rhi.Pipeline, bool) {
   module := shader_module(b, string(desc.shader))
   defer wgpu.ShaderModuleRelease(module)
@@ -361,7 +352,7 @@ rhi_compute_pipeline_create :: proc(b: ^Backend, desc: rhi.ComputePipelineDesc) 
     log.errorf("Compute pipeline creation failed")
     return 0, false
   }
-  return pipeline_store(b, {compute = pipeline, push_set = push_set}), true
+  return rhi.Pipeline(rhi.pool_take(&b.pipelines, Pipeline{compute = pipeline, push_set = push_set})), true
 }
 
 @(private = "file")
@@ -466,7 +457,7 @@ rhi_graphics_pipeline_create :: proc(b: ^Backend, desc: rhi.GraphicsPipelineDesc
     log.errorf("Render pipeline creation failed")
     return 0, false
   }
-  return pipeline_store(b, {render = pipeline, push_set = push_set}), true
+  return rhi.Pipeline(rhi.pool_take(&b.pipelines, Pipeline{render = pipeline, push_set = push_set})), true
 }
 
 rhi_pipeline_retire :: proc(b: ^Backend, handle: rhi.Pipeline) {
@@ -478,8 +469,8 @@ rhi_pipeline_retire :: proc(b: ^Backend, handle: rhi.Pipeline) {
 }
 
 // Queue order is the only sync: no frame slot to wait for.
-rhi_frame_wait :: proc(b: ^Backend) -> (rhi.Frame, bool) {
-  return {index = 0}, b.up
+rhi_frame_wait :: proc(b: ^Backend) -> bool {
+  return b.up
 }
 
 rhi_frame_begin :: proc(b: ^Backend, framebuffer_size: [2]u32) -> rhi.FrameStatus {
@@ -525,11 +516,7 @@ rhi_submit :: proc(b: ^Backend, desc: rhi.SubmitDesc) -> rhi.SyncPoint {
     state := &b.cmds[c]
     wgpu.CommandBufferRelease(state.finished)
     wgpu.CommandEncoderRelease(state.encoder)
-    for v in state.views do wgpu.TextureViewRelease(v)
-    // the slot is free again; its views array is kept for the next list
-    views := state.views
-    clear(&views)
-    state^ = {views = views}
+    state^ = {}
   }
   readbacks_map(b)
   // one queue orders everything: nothing waits on a value
@@ -575,13 +562,10 @@ texture_view_of :: proc(b: ^Backend, texture: rhi.TextureHandle) -> wgpu.Texture
 
 // WebGPU has no undefined load: DONT_CARE clears.
 @(private = "file")
-load_op :: proc(op: rhi.LoadOp) -> wgpu.LoadOp {
-  switch op {
-  case .LOAD:      return .Load
-  case .CLEAR:     return .Clear
-  case .DONT_CARE: return .Clear
-  }
-  return .Load
+LOAD_OPS := [rhi.LoadOp]wgpu.LoadOp {
+  .LOAD      = .Load,
+  .CLEAR     = .Clear,
+  .DONT_CARE = .Clear,
 }
 
 rhi_cmd_begin_pass :: proc(b: ^Backend, cmd: rhi.CommandList, desc: rhi.PassDesc) {
@@ -591,7 +575,7 @@ rhi_cmd_begin_pass :: proc(b: ^Backend, cmd: rhi.CommandList, desc: rhi.PassDesc
     colors[i] = {
       view       = texture_view_of(b, c.texture),
       depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-      loadOp     = load_op(c.load),
+      loadOp     = LOAD_OPS[c.load],
       storeOp    = .Store,
       clearValue = {f64(c.clear.r), f64(c.clear.g), f64(c.clear.b), f64(c.clear.a)},
     }
@@ -599,15 +583,10 @@ rhi_cmd_begin_pass :: proc(b: ^Backend, cmd: rhi.CommandList, desc: rhi.PassDesc
   info := wgpu.RenderPassDescriptor{colorAttachmentCount = uint(len(colors)), colorAttachments = raw_data(colors)}
   depth: wgpu.RenderPassDepthStencilAttachment
   if target, ok := desc.depth.?; ok {
-    view := texture_view_of(b, target.texture)
-    if t := &b.textures[target.texture]; target.texture != rhi.BACKBUFFER && t.desc.layers > 1 {
-      // one layer of the atlas
-      view = wgpu.TextureCreateView(t.texture, &{dimension = ._2D, mipLevelCount = 1, baseArrayLayer = target.layer, arrayLayerCount = 1})
-      append(&state.views, view)
-    }
-    depth = {view = view, depthClearValue = target.clear, depthReadOnly = b32(target.read_only)}
+    // no layered rendering: a depth target is one 2D layer
+    depth = {view = texture_view_of(b, target.texture), depthClearValue = target.clear, depthReadOnly = b32(target.read_only)}
     if !target.read_only {
-      depth.depthLoadOp = load_op(target.load)
+      depth.depthLoadOp = LOAD_OPS[target.load]
       depth.depthStoreOp = .Store if target.store else .Discard
     }
     info.depthStencilAttachment = &depth
@@ -776,7 +755,6 @@ rhi_cmd_copy_backbuffer :: proc(b: ^Backend, cmd: rhi.CommandList, dst: rhi.Buff
 rhi_cmd_copy_buffer :: proc(b: ^Backend, cmd: rhi.CommandList, src: rhi.Buffer, src_offset: int, dst: rhi.Buffer, dst_offset, size: int) {
   target := b.buffers.items[dst]
   if dst in b.readbacks {
-    target = nil
     rb := &b.readbacks[dst]
     for &s in rb.slots do if !s.pending {
       target = s.buffer
@@ -802,14 +780,11 @@ rhi_cmd_barrier :: proc(b: ^Backend, cmd: rhi.CommandList, barriers: []rhi.Barri
 // Releases what rhi made that shutdown has not: buffers, layouts, groups and pipelines.
 @(private)
 rhi_shutdown :: proc(b: ^Backend) {
-  // a readback's ring holds the buffer b.buffers names
-  for handle, rb in b.readbacks {
-    b.buffers.items[handle] = nil
+  for _, rb in b.readbacks {
     for s in rb.slots do wgpu.BufferRelease(s.buffer)
     delete(rb.data)
   }
   delete(b.readbacks)
-  for &c in b.cmds do delete(c.views)
   for buffer in b.buffers.items do if buffer != nil do wgpu.BufferRelease(buffer)
   for layout in b.layouts.items do if layout != nil do wgpu.BindGroupLayoutRelease(layout)
   for &g in b.groups.items {

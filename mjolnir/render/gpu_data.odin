@@ -51,10 +51,10 @@ UI_MAX_INDICES :: 98304
 @(private)
 MAX_BATCHES :: 4096
 
-// TABLE_REGIONS is the granularity of Renderer.dirty: region r of a table of n bytes is
-// bytes [r * size, (r + 1) * size), size = ceil(n / TABLE_REGIONS).
+// TABLE_REGION_BYTES is the granularity of Renderer.dirty: bit r of a table's bits is its bytes
+// [r * TABLE_REGION_BYTES, (r + 1) * TABLE_REGION_BYTES).
 @(private)
-TABLE_REGIONS :: 64
+TABLE_REGION_BYTES :: 4096
 
 // HDR_COLOR_FORMAT is the format of the scene color target.
 @(private)
@@ -251,6 +251,9 @@ DoFEffect :: struct {
 
 // PostShader is a user fragment shader made by post_shader_create; 0 is none.
 PostShader :: distinct u32
+
+// MAX_POST_SHADERS is how many post shaders (post_shader_create) exist at once.
+MAX_POST_SHADERS :: 64
 
 // CUSTOM_EFFECT_PARAM_BYTES is the size of a CustomEffect's params.
 CUSTOM_EFFECT_PARAM_BYTES :: 80

@@ -46,7 +46,7 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   app.orbit = render.make_orbit({0, 10, 4}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)

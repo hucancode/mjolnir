@@ -45,8 +45,7 @@ App :: struct {
   spider:         gltf.Instance,
   spider_root:    world.NodeHandle,
   spider_mesh:    world.NodeHandle,
-  rig:            ^animation.Rig,
-  animator:       ^animation.Animator,
+  rig:            gltf.RigHandle,
   legs:           [LEG_COUNT]animation.LayerHandle,
   time:           f32,
   lift_height:    f32,
@@ -100,7 +99,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {900, 700}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 20, 20}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
@@ -115,18 +114,17 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if len(app.spider.roots) == 0 || len(app.spider.skinned) == 0 do return .FAIL
   app.spider_root = app.spider.roots[0]
   app.spider_mesh = app.spider.skinned[0].node
-  rig := app.spider.skinned[0].rig
-  app.rig = &app.spider_model.rigs[rig]
-  app.animator = &app.spider.animators[rig]
-  skel := &app.rig.skeleton
-  limits := animation.bone_limits(app.animator)
+  app.rig = app.spider.skinned[0].rig
+  rig, animator := &app.spider_model.rigs[app.rig], &app.spider.animators[app.rig]
+  skel := &rig.skeleton
+  limits := animation.bone_limits(animator)
   for chain, i in LEG_CHAINS {
     offset, _ := animation.rest_offset(skel, chain.root, chain.tip)
     bones, _ := animation.bone_chain(skel, chain.root, chain.tip, context.temp_allocator)
     for b, k in bones do limits[b] = HIP_LIMIT if k == 0 else JOINT_LIMIT
     leg := animation.LegParams{offset = offset}
     tripod_step(app, &leg, i)
-    app.legs[i] = animation.layer_create(app.animator, app.rig, leg, bones)
+    app.legs[i] = animation.layer_create(animator, rig, leg, bones)
   }
   return .READY
 }
@@ -155,10 +153,8 @@ update :: proc(app: ^App, dt: f32) {
   render.update(&app.renderer, dt)
 }
 
-// ground_body lowers the body so the lowest foot rest position touches the ground.
-// Runs once, on the first frame, before any leg is posed (needs world matrices).
 ground_body :: proc(app: ^App) {
-  skel := &app.rig.skeleton
+  skel := &app.spider_model.rigs[app.rig].skeleton
   mesh_m := world.world_matrix(&app.scene, app.spider_mesh)
   lowest := f32(1e9)
   for chain in LEG_CHAINS {
@@ -172,18 +168,17 @@ ground_body :: proc(app: ^App) {
 
 walk :: proc(app: ^App, dt: f32) {
   move_body(app, dt)
-  // constant while walking: the leg phase is time mod period, so a changing period scrambles it
   app.lift_period = clamp(STRIDE / app.body_speed_max, MIN_PERIOD, MAX_PERIOD)
   world.translate(&app.scene, app.spider_root, app.body_position)
   for layer, i in app.legs {
-    if leg, ok := animation.layer_params(app.animator, layer, animation.LegParams); ok do tripod_step(app, leg, i)
+    if leg, ok := animation.layer_params(&app.spider.animators[app.rig], layer, animation.LegParams); ok do tripod_step(app, leg, i)
   }
 }
 
 pose_legs :: proc(app: ^App, dt: f32) {
   gltf.animate(&app.spider, &app.spider_model, &app.scene, &app.renderer, dt)
   for layer in app.legs {
-    if foot, ok := animation.leg_foot(app.animator, layer); ok do render.debug_sphere(&app.renderer, foot, 0.2, {1, 0.2, 0.2, 1})
+    if foot, ok := animation.leg_foot(&app.spider.animators[app.rig], layer); ok do render.debug_sphere(&app.renderer, foot, 0.2, {1, 0.2, 0.2, 1})
   }
 }
 

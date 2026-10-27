@@ -56,6 +56,7 @@ Channel :: enum u8 {
 RIGHT :: len(Channel) - int(Channel.SHOULDER)
 CHANNEL_COUNT :: len(Channel) + RIGHT
 Pose :: [CHANNEL_COUNT]f32
+MAX_JOINT_SPEED :: 3.5
 
 Tier :: enum u8 {
   CORE,
@@ -294,6 +295,7 @@ App :: struct {
   ankle_y:   f32,
   root_y:    f32,
   pose:      Pose,
+  current:   Pose,
   choreo:    Choreo,
   dancing:   bool,
   tempo:     f32,
@@ -320,6 +322,7 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   app.pose = HOME
+  app.current = HOME
   app.dancing = true
   app.tempo = 60 / PERIOD
   app.seed = rand.uint32()
@@ -420,6 +423,8 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   if app.dancing do choreo_step(&app.choreo, dt * app.tempo * PERIOD / 60, &app.pose)
+  step := MAX_JOINT_SPEED * dt
+  for &v, i in app.current do v += clamp(app.pose[i] - v, -step, step)
   pose(app)
   app.elapsed += dt
   for orb in app.orbs do world.translate(&app.scene, orb.node, orb_position(orb, app.elapsed))
@@ -434,7 +439,7 @@ orb_position :: proc(o: Orb, t: f32) -> [3]f32 {
 }
 
 pose :: proc(app: ^App) {
-  solved := app.pose
+  solved := app.current
   drop := hip_drop(app, solved[Channel.HIP_LEVEL])
   for side in Side {
     curl := solved[chan(.CURL, side)]

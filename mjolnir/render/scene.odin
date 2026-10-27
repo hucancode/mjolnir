@@ -32,6 +32,58 @@ MaterialHandle :: distinct u32
 // CameraHandle identifies a camera.
 CameraHandle :: distinct u32
 
+// The kinds of handle render hands out, each its own containers.Slots.
+@(private)
+Pool :: enum {
+  MESHES,
+  MATERIALS,
+  LIGHTS,
+  EMITTERS,
+  FORCE_FIELDS,
+  // where lights, emitters and force fields are attached
+  LIGHT_PLACEMENTS,
+  EMITTER_PLACEMENTS,
+  FORCE_FIELD_PLACEMENTS,
+  CAMERAS,
+  // render targets below MAX_RENDER_TARGETS, every other texture above (bindless_textures.odin)
+  TARGETS,
+  TEXTURES,
+  // your GPU programs (gpu.odin) and post shaders, kept through teardown
+  GPU_BUFFERS,
+  GPU_SHADERS,
+  POST_SHADERS,
+}
+
+// Each pool's capacity, first index and reuse grace; `kept` pools keep what was made before
+// setup through teardown. The pools before CAMERAS index the rows of `table`.
+@(private)
+POOLS := [Pool]struct {
+  capacity: u32,
+  first:    u32,
+  grace:    u64,
+  kept:     bool,
+  table:    Table,
+} {
+  .MESHES                 = {MAX_MESHES, 1, RETIRE_GRACE, true, .MESHES},
+  .MATERIALS              = {MAX_MATERIALS, 1, RETIRE_GRACE, true, .MATERIALS},
+  .LIGHTS                 = {MAX_LIGHTS, 1, RETIRE_GRACE, true, .LIGHTS},
+  .EMITTERS               = {MAX_EMITTERS, 1, RETIRE_GRACE, true, .EMITTERS},
+  .FORCE_FIELDS           = {MAX_FORCE_FIELDS, 1, RETIRE_GRACE, true, .FORCE_FIELDS},
+  // placements have no handle to go stale and each frame reads its own copy of the table,
+  // so no grace; teardown empties every slot, so none is kept
+  .LIGHT_PLACEMENTS       = {MAX_LIGHTS, 1, 0, false, .LIGHT_PLACEMENTS},
+  .EMITTER_PLACEMENTS     = {MAX_EMITTERS, 1, 0, false, .EMITTER_PLACEMENTS},
+  .FORCE_FIELD_PLACEMENTS = {MAX_FORCE_FIELDS, 1, 0, false, .FORCE_FIELD_PLACEMENTS},
+  .CAMERAS                = {MAX_ACTIVE_CAMERAS, 1, RETIRE_GRACE, true, {}},
+  // retired, not reclaimed: submitted frames may still sample the slot
+  .TARGETS                = {MAX_RENDER_TARGETS, 1, RETIRE_GRACE, false, {}},
+  .TEXTURES               = {MAX_TEXTURES, MAX_RENDER_TARGETS, RETIRE_GRACE, true, {}},
+  // the device retires what they hold
+  .GPU_BUFFERS            = {MAX_GPU_BUFFERS, 1, 0, false, {}},
+  .GPU_SHADERS            = {MAX_GPU_SHADERS, 1, 0, false, {}},
+  .POST_SHADERS           = {MAX_POST_SHADERS, 1, 0, false, {}},
+}
+
 // Renderer is the whole renderer; its fields are the settings an application edits.
 // init/shutdown own the GPU backend and what init makes (builtin meshes and
 // materials, the main camera): application lifetime. Everything made after the last setup
@@ -56,10 +108,11 @@ Renderer_State :: struct {
   main_camera:            CameraHandle,
   gpu:                    Backend,
   dump:                   FrameDump,
-  // render's tables, the one copy; bit r of dirty[t] is region r of tables[t] (TABLE_REGIONS),
-  // written since the last submitted frame. tables_sync brings the GPU copies up to date.
+  // render's tables, the one copy; bit r of dirty[t] is region r of tables[t]
+  // (TABLE_REGION_BYTES), written since the last submitted frame. tables_sync brings the GPU
+  // copies up to date.
   tables:                 [Table][]u8,
-  dirty:                  [Table]u64,
+  dirty:                  [Table][]u64,
   // cull dispatches cover the slots below this
   node_count:             u32,
   // the skinning dispatch covers skinned vertices below this
@@ -72,24 +125,13 @@ Renderer_State :: struct {
   irradiance_cube:        TextureHandle,
   prefilter_cube:         TextureHandle,
   particle_params:        ParticleSystemParams,
-  mesh_slots:             containers.Slots,
-  material_slots:         containers.Slots,
-  // lights, emitters and force fields: their tables' rows
-  light_slots:            containers.Slots,
-  emitter_slots:          containers.Slots,
-  force_field_slots:       containers.Slots,
-  // where they are attached: the rows of the *_PLACEMENTS tables
-  light_placement_slots:      containers.Slots,
-  emitter_placement_slots:    containers.Slots,
-  force_field_placement_slots: containers.Slots,
+  // which handles of each kind are live (POOLS)
+  slots:                  [Pool]containers.Slots,
   cameras:                []Camera,
   camera_targets:         []CameraTargets,
   camera_slots:           containers.Slots,
   // pass i writes slot i % POST_PROCESS_RING; its input and original are the two slots before
   post_process_ring:      [FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
-  // render targets below MAX_RENDER_TARGETS, every other texture above (bindless_textures.odin)
-  target_slots:           containers.Slots,
-  texture_slots:          containers.Slots,
   mesh_slabs:             [MeshStream]containers.SlabAllocator,
   bone_matrix_slab:       containers.SlabAllocator,
   // the skinned vertex ranges of skinned slots (pass_skin.odin)
@@ -106,15 +148,13 @@ Renderer_State :: struct {
   time:                   f32,
   debug_mutex:            sync.Mutex,
   shadow_casters:         [MAX_SHADOW_MAPS]Caster,
-  // per pyramid slot: the depth pyramid camera_slot(c) + frame of camera c
-  pyramids:               [MAX_PYRAMID_SLOTS]TextureHandle,
   // the last compute submission, which the next frame's graphics waits for
   last_compute:           rhi.SyncPoint,
   // the buffers render owns on the device (resources.odin): a copy per frame in flight of
   // each table, one of the rest
   buffers:                [SceneBuffer][FRAMES_IN_FLIGHT]rhi.Buffer,
   // per table and frame in flight: the regions render wrote that the copy lacks
-  table_stale:            [Table][FRAMES_IN_FLIGHT]u64,
+  table_stale:            [Table][FRAMES_IN_FLIGHT][]u64,
   ui_vertex_buffers:      [FRAMES_IN_FLIGHT]rhi.Buffer,
   ui_index_buffers:       [FRAMES_IN_FLIGHT]rhi.Buffer,
   // bound where a slot has none: white 2D and black cube
@@ -139,16 +179,13 @@ Renderer_State :: struct {
   cull_groups:            map[CullKey]rhi.BindGroup,
   reduce_groups:          map[ReduceKey]rhi.BindGroup,
   draw_lists:             [MAX_DRAW_LIST_SLOTS]GpuDrawList,
-  // the slot's storage views are in the bindless array
-  pyramid_bound:          [MAX_PYRAMID_SLOTS]bool,
   pyramid_counters:       rhi.Buffer,
   // the main camera's visible opaque draws, copied out per frame in flight
   draw_count_readback:    [FRAMES_IN_FLIGHT]rhi.Buffer,
   // draws are batched per mesh and material where they are not compacted (batches.odin):
-  // (material, mesh) -> batch id, the nodes in each batch, the freed ids, the ids below
-  // batch_high in use or free, and whether first_instance and capacity are stale
+  // (material, mesh) -> batch id, the freed ids, the ids below batch_high in use or free,
+  // and whether first_instance is stale
   batch_ids:              map[u64]u32,
-  batch_members:          [MAX_BATCHES]u32,
   batch_free:             [dynamic]u32,
   batch_high:             u32,
   batch_stale:            bool,
@@ -162,8 +199,8 @@ Renderer_State :: struct {
   lighting_output_groups: map[TextureHandle]rhi.BindGroup,
   // [is_last][tag]: every pass writes an HDR ring image but the last, which writes the backbuffer
   post_pipelines:         [2][POST_EFFECT_COUNT]rhi.Pipeline,
-  // [PostShader - 1][is_last]; a destroyed shader's slot is zero until reused
-  custom_post_pipelines:  [dynamic][2]rhi.Pipeline,
+  // [PostShader][is_last]
+  custom_post_pipelines:  [MAX_POST_SHADERS][2]rhi.Pipeline,
   // [MaterialShader - 1], 0 where free
   custom_material_pipelines: [MAX_MATERIAL_SHADERS]rhi.Pipeline,
   particle_emit_pipeline: rhi.Pipeline,
@@ -173,25 +210,22 @@ Renderer_State :: struct {
   // by ring
   debug_line_pipelines:   [2]rhi.Pipeline,
   overlay_pipeline:       rhi.Pipeline,
-  // the 2D overlay (overlay_renderer.odin): UI_MAX_VERTICES and UI_MAX_INDICES, the first
-  // ui_vertex_count and ui_index_count this frame's, in batches of one scissor and texture
-  ui_vertices:            []Vertex2D,
-  ui_indices:             []u32,
-  ui_vertex_count:        u32,
-  ui_index_count:         u32,
+  // the 2D overlay (overlay_renderer.odin): this frame's vertices and indices, at most
+  // UI_MAX_VERTICES and UI_MAX_INDICES, in batches of one scissor and texture
+  ui_vertices:            [dynamic]Vertex2D,
+  ui_indices:             [dynamic]u32,
   ui_batches:             [dynamic]UIBatch,
   // the overlay was drawn or a tick ended since it was staged: the next stage_overlay replaces it
   ui_stale:               bool,
   // sampled by text commands
   ui_font_atlas:          TextureHandle,
-  ui_font_atlas_size:     [2]f32,
   // the window's, as frame last measured it: maps window coordinates to pixels
   dpi_scale:              f32,
   mutex:                  sync.Recursive_Mutex,
-  // your GPU programs (gpu.odin): [handle - 1], zero where free; work staged for the next
-  // frame; the draws frames draw, stale once drawn or a tick ended
-  gpu_buffers:            [dynamic]GpuBuffer,
-  gpu_shaders:            [dynamic]GpuShader,
+  // your GPU programs (gpu.odin), by handle; work staged for the next frame; the draws frames
+  // draw, stale once drawn or a tick ended
+  gpu_buffers:            [MAX_GPU_BUFFERS]GpuBuffer,
+  gpu_shaders:            [MAX_GPU_SHADERS]GpuShader,
   gpu_work:               [dynamic]GpuWork,
   gpu_draws:              [dynamic]GpuDraw,
   gpu_draws_stale:        bool,
@@ -209,7 +243,12 @@ Renderer_State :: struct {
 init :: proc(self: ^Renderer, window: WindowHandle) -> bool {
   for stream, s in MESH_STREAMS do containers.slab_init(&self.mesh_slabs[s], stream.slab)
   dev.init(&self.gpu, window) or_return
-  for t, i in TABLES do self.tables[i] = make([]u8, t.stride * t.capacity)
+  for t, i in TABLES {
+    self.tables[i] = make([]u8, t.stride * t.capacity)
+    words := (t.stride * t.capacity + TABLE_REGION_BYTES * 64 - 1) / (TABLE_REGION_BYTES * 64)
+    self.dirty[i] = make([]u64, words)
+    for &s in self.table_stale[i] do s = make([]u64, words)
+  }
   _, self.dpi_scale = dev.window_size(&self.gpu)
   if dev.ready(&self.gpu) do return ready(self)
   return true
@@ -225,12 +264,7 @@ ready :: proc(self: ^Renderer) -> bool {
 
 @(private = "file")
 init_resources :: proc(self: ^Renderer) -> bool {
-  containers.slots_init(&self.camera_slots, MAX_ACTIVE_CAMERAS, RETIRE_GRACE)
-  containers.slots_init(&self.mesh_slots, MAX_MESHES, RETIRE_GRACE)
-  containers.slots_init(&self.material_slots, MAX_MATERIALS, RETIRE_GRACE)
-  // retired, not reclaimed: submitted frames may still sample the slot
-  containers.slots_init(&self.target_slots, MAX_RENDER_TARGETS, RETIRE_GRACE)
-  containers.slots_init(&self.texture_slots, MAX_TEXTURES, RETIRE_GRACE, first = MAX_RENDER_TARGETS)
+  for &slots, p in self.slots do containers.slots_init(&slots, POOLS[p].capacity, POOLS[p].grace, POOLS[p].first)
   resources_init(self) or_return
   resources_bind(self) or_return
   cull_init(self) or_return
@@ -241,19 +275,10 @@ init_resources :: proc(self: ^Renderer) -> bool {
   particles_init(self) or_return
   skin_init(self) or_return
   debug_line_init(self) or_return
-  overlay_init_pass(self) or_return
+  overlay_init(self) or_return
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    lists, capacity := draw_list_shape(self, shadow = true)
-    draw_list_create(self, SHADOW_DRAW_SLOT_BASE + frame, lists, capacity) or_return
+    draw_list_create(self, SHADOW_DRAW_SLOT_BASE + frame, shadow = true) or_return
   }
-  containers.slots_init(&self.light_slots, MAX_LIGHTS, RETIRE_GRACE)
-  containers.slots_init(&self.emitter_slots, MAX_EMITTERS, RETIRE_GRACE)
-  containers.slots_init(&self.force_field_slots, MAX_FORCE_FIELDS, RETIRE_GRACE)
-  // placements have no handle to go stale and each frame reads its own copy of the
-  // table, so no grace
-  containers.slots_init(&self.light_placement_slots, MAX_LIGHTS)
-  containers.slots_init(&self.emitter_placement_slots, MAX_EMITTERS)
-  containers.slots_init(&self.force_field_placement_slots, MAX_FORCE_FIELDS)
   containers.slab_init(&self.bone_matrix_slab, BONE_SLAB_CONFIG)
   containers.slab_init(&self.skin_slab, SKIN_SLAB_CONFIG)
   self.cameras = make([]Camera, MAX_ACTIVE_CAMERAS)
@@ -264,7 +289,6 @@ init_resources :: proc(self: ^Renderer) -> bool {
   self.effect_stack = make([dynamic]PostprocessEffect)
   post_process_create_images(self) or_return
   for &inbox in self.debug_lines do inbox = make([dynamic]DebugLineSegment, 0, 1024)
-  overlay_init(self) or_return
   extent := dev.extent(&self.gpu)
   cam, created := camera_create(self, extent.x, extent.y, position = {3, 4, 3}, far = 1000.0)
   if !created do return false
@@ -286,14 +310,8 @@ setup :: proc(self: ^Renderer) {
 // teardown frees from the marks on
 @(private)
 mark_resources :: proc(self: ^Renderer) {
-  containers.slots_mark(&self.mesh_slots)
+  for &slots, p in self.slots do if POOLS[p].kept do containers.slots_mark(&slots)
   for &slab in self.mesh_slabs do containers.slab_mark(&slab)
-  containers.slots_mark(&self.material_slots)
-  containers.slots_mark(&self.light_slots)
-  containers.slots_mark(&self.emitter_slots)
-  containers.slots_mark(&self.force_field_slots)
-  containers.slots_mark(&self.texture_slots)
-  containers.slots_mark(&self.camera_slots)
 }
 
 // teardown ends a map in one go, waiting for the GPU: no particle stays alive, every slot
@@ -306,44 +324,37 @@ mark_resources :: proc(self: ^Renderer) {
 teardown :: proc(self: ^Renderer) {
   guard(self)
   // their render targets and draw lists retire, and go with the flushes below
-  c := self.camera_slots.mark
-  for i in containers.slots_next(&self.camera_slots, &c) do camera_destroy(self, CameraHandle(i))
+  c := self.slots[.CAMERAS].mark
+  for i in containers.slots_next(&self.slots[.CAMERAS], &c) do camera_destroy(self, CameraHandle(i))
   // queued uploads may be init's: they land before anything is freed
   dev.wait_idle(&self.gpu)
-  for r in containers.slots_flush(&self.target_slots) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
-  for i in self.texture_slots.mark ..< self.texture_slots.high_water do dev.texture_destroy(&self.gpu, TextureHandle(i))
+  for r in containers.slots_flush(&self.slots[.TARGETS]) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
+  for i in self.slots[.TEXTURES].mark ..< self.slots[.TEXTURES].high_water {
+    dev.texture_destroy(&self.gpu, TextureHandle(i))
+    delete_key(&self.storage_formats, TextureHandle(i))
+  }
   groups_clear(self)
-  containers.slots_rewind(&self.texture_slots)
-  if u32(self.environment_map) >= self.texture_slots.mark {
+  containers.slots_rewind(&self.slots[.TEXTURES])
+  if u32(self.environment_map) >= self.slots[.TEXTURES].mark {
     self.environment_map, self.irradiance_cube, self.prefilter_cube = 0, 0, 0
     if !ambient_load_environment(self) do log.error("teardown: cannot restore the default environment map")
   }
   // the next text staged uploads the font atlas again
-  if u32(self.ui_font_atlas) >= self.texture_slots.mark do self.ui_font_atlas = 0
-  containers.slots_rewind(&self.camera_slots)
-  clear_entry(self, .MESHES, self.mesh_slots.mark, self.mesh_slots.high_water - self.mesh_slots.mark)
-  containers.slots_rewind(&self.mesh_slots)
+  if u32(self.ui_font_atlas) >= self.slots[.TEXTURES].mark do self.ui_font_atlas = 0
+  containers.slots_rewind(&self.slots[.CAMERAS])
+  for p in Pool.MESHES ..= Pool.FORCE_FIELD_PLACEMENTS {
+    slots := &self.slots[p]
+    clear_entry(self, POOLS[p].table, slots.mark, slots.high_water - slots.mark)
+    containers.slots_rewind(slots)
+  }
   for &slab in self.mesh_slabs do containers.slab_rewind(&slab)
-  clear_entry(self, .MATERIALS, self.material_slots.mark, self.material_slots.high_water - self.material_slots.mark)
-  containers.slots_rewind(&self.material_slots)
-  slice.zero(write_table(self, .NODES, Node)[:self.node_count])
-  mark_dirty(self, .NODES, 0, int(self.node_count))
+  clear_entry(self, .NODES, 0, self.node_count)
   self.node_count = 0
   when !BINDLESS do batches_reset(self)
   containers.slab_rewind(&self.bone_matrix_slab)
   containers.slab_rewind(&self.skin_slab)
   clear_entry(self, .SKIN_OWNERS, 0, self.skinned_vertex_count)
   self.skinned_vertex_count = 0
-  rewind :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table) {
-    clear_entry(self, table, slots.mark, slots.high_water - slots.mark)
-    containers.slots_rewind(slots)
-  }
-  rewind(self, &self.light_slots, .LIGHTS)
-  rewind(self, &self.emitter_slots, .EMITTERS)
-  rewind(self, &self.force_field_slots, .FORCE_FIELDS)
-  rewind(self, &self.light_placement_slots, .LIGHT_PLACEMENTS)
-  rewind(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS)
-  rewind(self, &self.force_field_placement_slots, .FORCE_FIELD_PLACEMENTS)
   self.shadow_casters = {}
   clear(&self.bursts)
   gpu_reset(self)
@@ -368,30 +379,21 @@ shutdown :: proc(self: ^Renderer) {
   delete(self.texture_groups)
   dev.shutdown(&self.gpu)
   for table in self.tables do delete(table)
+  for bits in self.dirty do delete(bits)
+  for frames in self.table_stale do for bits in frames do delete(bits)
   delete(self.batch_ids)
   delete(self.batch_free)
   delete(self.ui_batches)
   delete(self.ui_vertices)
   delete(self.ui_indices)
   delete(self.effect_stack)
-  delete(self.custom_post_pipelines)
   gpu_shutdown(self)
   for inbox in self.debug_lines do delete(inbox)
   delete(self.bursts)
   for &slab in self.mesh_slabs do containers.slab_destroy(&slab)
   containers.slab_destroy(&self.bone_matrix_slab)
   containers.slab_destroy(&self.skin_slab)
-  containers.slots_destroy(&self.camera_slots)
-  containers.slots_destroy(&self.mesh_slots)
-  containers.slots_destroy(&self.material_slots)
-  containers.slots_destroy(&self.light_slots)
-  containers.slots_destroy(&self.emitter_slots)
-  containers.slots_destroy(&self.force_field_slots)
-  containers.slots_destroy(&self.light_placement_slots)
-  containers.slots_destroy(&self.emitter_placement_slots)
-  containers.slots_destroy(&self.force_field_placement_slots)
-  containers.slots_destroy(&self.texture_slots)
-  containers.slots_destroy(&self.target_slots)
+  for &slots in self.slots do containers.slots_destroy(&slots)
   delete(self.cameras)
   delete(self.camera_targets)
 }
@@ -403,7 +405,7 @@ recreate_swapchain :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> bool {
   dev.resize(&self.gpu, framebuffer_size) or_return
   extent := dev.extent(&self.gpu)
   c: u32
-  for i in containers.slots_next(&self.camera_slots, &c) {
+  for i in containers.slots_next(&self.slots[.CAMERAS], &c) {
     if self.camera_targets[i].extent != old do continue
     camera_resize(self, CameraHandle(i), extent.x, extent.y) or_return
   }
@@ -468,21 +470,19 @@ tick_resource_pools :: proc(self: ^Renderer) {
   dev.tick(&self.gpu)
   // bind groups name textures by handle: a destroyed one's go
   destroyed := false
-  for r in containers.slots_tick(&self.target_slots) {
-    dev.texture_destroy(&self.gpu, TextureHandle(r.index))
-    destroyed = true
-  }
-  for r in containers.slots_tick(&self.texture_slots) {
-    dev.texture_destroy(&self.gpu, TextureHandle(r.index))
-    destroyed = true
+  for &slots, p in self.slots {
+    for r in containers.slots_tick(&slots) {
+      #partial switch p {
+      case .TARGETS, .TEXTURES:
+        dev.texture_destroy(&self.gpu, TextureHandle(r.index))
+        destroyed = true
+      case .MESHES:
+        free_mesh(self, write_table(self, .MESHES, MeshData)[r.index])
+        clear_entry(self, .MESHES, r.index)
+      }
+    }
   }
   if destroyed do groups_clear(self)
-  for r in containers.slots_tick(&self.mesh_slots) {
-    free_mesh(self, write_table(self, .MESHES, MeshData)[r.index])
-    clear_entry(self, .MESHES, r.index)
-  }
-  containers.slots_tick(&self.material_slots)
-  containers.slots_tick(&self.camera_slots)
 }
 
 // update advances the render clock (shaders' time, debug line lifetimes) and the particle
@@ -507,6 +507,8 @@ NodeFlag :: enum u32 {
   // attachment_data_index holds a bone range; only set while the mesh is skinned, so the
   // shaders skin by this flag alone
   SKINNED,
+  // a light, emitter or force field is attached: a placement row names the slot
+  PLACED,
 }
 
 @(private)
@@ -580,71 +582,64 @@ stage_transforms :: proc(self: ^Renderer, changes: []$T) {
 
 // A placement table holds at most one row per slot. The live row of `table` placed at `slot`.
 @(private = "file")
-placed_at :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, $T: typeid, slot: u32) -> (index: u32, ok: bool) {
-  rows := write_table(self, table, T)
+placed_at :: proc(self: ^Renderer, pool: Pool, $T: typeid, slot: u32) -> (index: u32, ok: bool) {
+  rows := write_table(self, POOLS[pool].table, T)
   c: u32
-  for i in containers.slots_next(slots, &c) do if rows[i].node == slot && !burst_row(self, table, i) do return i, true
+  for i in containers.slots_next(&self.slots[pool], &c) {
+    // no attachment owns a burst's row
+    when T == EmitterPlacement do if rows[i].burst != 0 do continue
+    if rows[i].node == slot do return i, true
+  }
   return
 }
 
-// Whether row i of `table` is a burst's, which no attachment owns.
+// Frees the slot's placement row of `pool`, if any.
 @(private = "file")
-burst_row :: proc(self: ^Renderer, table: Table, i: u32) -> bool {
-  if table != .EMITTER_PLACEMENTS do return false
-  for b in self.bursts do if b.row == i do return true
-  return false
-}
-
-// Takes a placement row of `table` for `row`.
-@(private = "file")
-place :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, row: $T) -> bool {
-  i := containers.slots_alloc(slots) or_return
-  write_table(self, table, T)[i] = row
-  mark_dirty(self, table, int(i))
-  return true
-}
-
-// Frees the slot's placement row of `table`, if any.
-@(private = "file")
-unplace :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, $T: typeid, slot: u32) {
-  i := placed_at(self, slots, table, T, slot) or_else 0
+unplace :: proc(self: ^Renderer, pool: Pool, $T: typeid, slot: u32) {
+  i := placed_at(self, pool, T, slot) or_else 0
   if i == 0 do return
-  containers.slots_free(slots, i)
-  clear_entry(self, table, i)
+  containers.slots_free(&self.slots[pool], i)
+  clear_entry(self, POOLS[pool].table, i)
 }
 
 // Drops the slot's light, emitter and force field. Caller holds the render mutex.
 @(private = "file")
 unbind :: proc(self: ^Renderer, slot: u32) {
-  unplace(self, &self.light_placement_slots, .LIGHT_PLACEMENTS, LightPlacement, slot)
-  unplace(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS, EmitterPlacement, slot)
-  unplace(self, &self.force_field_placement_slots, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement, slot)
+  if slot >= self.node_count do return
+  node := &write_table(self, .NODES, Node)[slot]
+  if .PLACED not_in node.flags do return
+  node.flags -= {.PLACED}
+  mark_dirty(self, .NODES, int(slot))
+  unplace(self, .LIGHT_PLACEMENTS, LightPlacement, slot)
+  unplace(self, .EMITTER_PLACEMENTS, EmitterPlacement, slot)
+  unplace(self, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement, slot)
 }
 
-// Stores `value` in a free row of `table`; the row is the resource's handle.
+// Stores `value` in a free row of the pool's table; the row is the resource's handle (or a
+// placement's row).
 @(private)
-resource_create :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, value: $T) -> (index: u32, ok: bool) {
+resource_create :: proc(self: ^Renderer, pool: Pool, value: $T) -> (index: u32, ok: bool) {
   guard(self)
-  index = containers.slots_alloc(slots) or_return
-  write_table(self, table, T)[index] = value
-  mark_dirty(self, table, int(index))
+  index = containers.slots_alloc(&self.slots[pool]) or_return
+  write_table(self, POOLS[pool].table, T)[index] = value
+  mark_dirty(self, POOLS[pool].table, int(index))
   return index, true
 }
 
 // The row of a live handle, to edit in place: valid until the next frame, as render.material's.
 @(private)
-resource :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, $T: typeid, index: u32) -> (^T, bool) {
-  if !containers.slots_live(slots, index) do return nil, false
-  mark_dirty(self, table, int(index))
-  return &write_table(self, table, T)[index], true
+resource :: proc(self: ^Renderer, pool: Pool, $T: typeid, index: u32) -> (^T, bool) {
+  if !containers.slots_live(&self.slots[pool], index) do return nil, false
+  mark_dirty(self, POOLS[pool].table, int(index))
+  return &write_table(self, POOLS[pool].table, T)[index], true
 }
 
 // Frees a row; what still refers to it reads zeros.
 @(private)
-resource_destroy :: proc(self: ^Renderer, slots: ^containers.Slots, table: Table, index: u32) {
+resource_destroy :: proc(self: ^Renderer, pool: Pool, index: u32) {
   guard(self)
-  if !containers.slots_free(slots, index) do return
-  clear_entry(self, table, index)
+  if !containers.slots_free(&self.slots[pool], index) do return
+  clear_entry(self, POOLS[pool].table, index)
 }
 
 // Forget everything drawn at a slot; meshes and materials are shared and stay.
@@ -748,15 +743,21 @@ attach :: proc(self: ^Renderer, slot: SlotHandle, attachment: Attachment) {
     batch_join(self, slot, node.mesh_id, node.material_id)
     if a.cast_shadow do node.flags += {.CASTS_SHADOW}
   case LightHandle:
-    if !place(self, &self.light_placement_slots, .LIGHT_PLACEMENTS, LightPlacement{light = a, node = slot}) {
+    if _, placed := resource_create(self, .LIGHT_PLACEMENTS, LightPlacement{light = a, node = slot}); placed {
+      node.flags += {.PLACED}
+    } else {
       log.warnf("No room for more than %d placed lights; the light is dropped", MAX_LIGHTS - 1)
     }
   case EmitterHandle:
-    if !place(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS, EmitterPlacement{emitter = a, node = slot}) {
+    if _, placed := resource_create(self, .EMITTER_PLACEMENTS, EmitterPlacement{emitter = a, node = slot}); placed {
+      node.flags += {.PLACED}
+    } else {
       log.warnf("No room for more than %d placed emitters; the emitter is dropped", MAX_EMITTERS - 1)
     }
   case ForceFieldHandle:
-    if !place(self, &self.force_field_placement_slots, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement{force_field = a, node = slot}) {
+    if _, placed := resource_create(self, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement{force_field = a, node = slot}); placed {
+      node.flags += {.PLACED}
+    } else {
       log.warnf("No room for more than %d placed force fields; the force field is dropped", MAX_FORCE_FIELDS - 1)
     }
   }
@@ -783,13 +784,13 @@ attachment :: proc(
     if node.mesh_id == 0 do return
     return {MeshHandle(node.mesh_id), MaterialHandle(node.material_id), .CASTS_SHADOW in node.flags}, true
   } else when T == LightHandle {
-    i := placed_at(self, &self.light_placement_slots, .LIGHT_PLACEMENTS, LightPlacement, slot) or_return
+    i := placed_at(self, .LIGHT_PLACEMENTS, LightPlacement, slot) or_return
     return write_table(self, .LIGHT_PLACEMENTS, LightPlacement)[i].light, true
   } else when T == EmitterHandle {
-    i := placed_at(self, &self.emitter_placement_slots, .EMITTER_PLACEMENTS, EmitterPlacement, slot) or_return
+    i := placed_at(self, .EMITTER_PLACEMENTS, EmitterPlacement, slot) or_return
     return write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[i].emitter, true
   } else when T == ForceFieldHandle {
-    i := placed_at(self, &self.force_field_placement_slots, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement, slot) or_return
+    i := placed_at(self, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement, slot) or_return
     return write_table(self, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement)[i].force_field, true
   }
   return
@@ -853,7 +854,7 @@ LightPlacement :: struct {
 
 // light_create stores `l`; attach places it at slots. It lives until light_destroy or teardown.
 light_create :: proc(self: ^Renderer, l: Light) -> (handle: LightHandle, ok: bool) #optional_ok {
-  i := resource_create(self, &self.light_slots, .LIGHTS, l) or_return
+  i := resource_create(self, .LIGHTS, l) or_return
   return LightHandle(i), true
 }
 
@@ -861,12 +862,12 @@ light_create :: proc(self: ^Renderer, l: Light) -> (handle: LightHandle, ok: boo
 // The pointer is valid for this tick: getting it marks the data for upload, so get it again
 // next tick.
 light :: proc(self: ^Renderer, handle: LightHandle) -> (^Light, bool) #optional_ok {
-  return resource(self, &self.light_slots, .LIGHTS, Light, u32(handle))
+  return resource(self, .LIGHTS, Light, u32(handle))
 }
 
 // light_destroy frees the light; slots it stays attached to shine nothing.
 light_destroy :: proc(self: ^Renderer, handle: LightHandle) {
-  resource_destroy(self, &self.light_slots, .LIGHTS, u32(handle))
+  resource_destroy(self, .LIGHTS, u32(handle))
 }
 
 // Where a light at a node's transform sits and shines: its translation and normalized forward
@@ -934,7 +935,6 @@ CUBE_FACES := [6][2][3]f32 {
 // A shadow-casting light this frame, or the holder of a shadow map.
 @(private)
 Caster :: struct {
-  light:       int, // light placement row
   owner:       u32, // light placement row + 1; 0 for a free map
   score:       f32,
   // frame serial when the owner last ranked in the top SHADOW_RANKED_CASTERS
@@ -1052,14 +1052,14 @@ assign_shadow_views :: proc(placements: []LightPlacement, lights: []Light, picke
 @(private)
 collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   views := write_table(self, .VIEWS, View)
-  cameras := views[CAMERA_VIEW_BASE:][:self.camera_slots.high_water]
+  cameras := views[CAMERA_VIEW_BASE:][:self.slots[.CAMERAS].high_water]
   casters: [MAX_LIGHTS]Caster
   caster_count := 0
   _, has_eye := main_camera(self)
   eye := &views[CAMERA_VIEW_BASE + u32(self.main_camera)]
   nodes := write_table(self, .NODES, Node)
   lights := write_table(self, .LIGHTS, Light)
-  placements := write_table(self, .LIGHT_PLACEMENTS, LightPlacement)[:self.light_placement_slots.high_water]
+  placements := write_table(self, .LIGHT_PLACEMENTS, LightPlacement)[:self.slots[.LIGHT_PLACEMENTS].high_water]
   for p, i in placements {
     if p.light == 0 do continue
     light := lights[p.light]
@@ -1075,7 +1075,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
       score = max(score, shadow_score(bounds, light.intensity, v.position.xyz))
     }
     if score < 0 do continue
-    casters[caster_count] = {light = i, owner = u32(i) + 1, score = score}
+    casters[caster_count] = {owner = u32(i) + 1, score = score}
     caster_count += 1
   }
   slice.sort_by(casters[:caster_count], proc(a, b: Caster) -> bool {return a.score > b.score})
@@ -1084,7 +1084,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   maps := &self.shadow_casters
   selected := select_shadow_casters(casters[:caster_count], maps, dev.frame_serial(&self.gpu))
   picked: [MAX_LIGHTS]bool
-  for c in maps[:selected] do picked[c.light] = true
+  for c in maps[:selected] do picked[c.owner - 1] = true
   self.shadow_view_count = assign_shadow_views(placements, lights, picked[:len(placements)], sun_layers)
   mark_dirty(self, .LIGHT_PLACEMENTS, 0, len(placements))
   mark_dirty(self, .VIEWS, SHADOW_VIEW_BASE, int(self.shadow_view_count))
@@ -1153,16 +1153,16 @@ place_bursts :: proc(self: ^Renderer) {
   kept := 0
   for b in self.bursts {
     if b.row != 0 {
-      containers.slots_free(&self.emitter_placement_slots, b.row)
+      containers.slots_free(&self.slots[.EMITTER_PLACEMENTS], b.row)
       clear_entry(self, .EMITTER_PLACEMENTS, b.row)
       continue
     }
-    row, ok := containers.slots_alloc(&self.emitter_placement_slots)
+    row, ok := containers.slots_alloc(&self.slots[.EMITTER_PLACEMENTS])
     if !ok {
       log.warnf("No room for more than %d placed emitters; the burst is dropped", MAX_EMITTERS - 1)
       continue
     }
-    write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[row] = {emitter = b.emitter, node = b.slot}
+    write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[row] = {emitter = b.emitter, node = b.slot, burst = b.count}
     mark_dirty(self, .EMITTER_PLACEMENTS, int(row))
     self.bursts[kept] = b
     self.bursts[kept].row = row
@@ -1178,18 +1178,17 @@ place_bursts :: proc(self: ^Renderer) {
 flush_particles :: proc(self: ^Renderer) {
   place_bursts(self)
   emitters := write_table(self, .EMITTERS, Emitter)
-  placements := write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[:self.emitter_placement_slots.high_water]
+  placements := write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[:self.slots[.EMITTER_PLACEMENTS].high_water]
   p := &self.particle_params
   p.emit_cursor = (p.emit_cursor + p.emit_total) % MAX_PARTICLES
   t0 := self.particle_time
   t1 := t0 + f64(p.delta_time)
   self.particle_time = t1
   total: u32
-  for &pl, i in placements {
+  for &pl in placements {
     // a free row reads emitter 0, whose rate is 0
     rate := f64(max(emitters[pl.emitter].emission_rate, 0))
-    emit := u32(u64(rate * t1) - u64(rate * t0))
-    for b in self.bursts do if b.row == u32(i) do emit = b.count
+    emit := pl.burst if pl.burst != 0 else u32(u64(rate * t1) - u64(rate * t0))
     pl.emit_first = total
     total += emit
   }
@@ -1197,7 +1196,7 @@ flush_particles :: proc(self: ^Renderer) {
   // a ring slot takes at most one new particle per frame
   p.emit_total = min(total, MAX_PARTICLES)
   p.emitter_placement_count = u32(len(placements))
-  p.force_field_placement_count = self.force_field_placement_slots.high_water
+  p.force_field_placement_count = self.slots[.FORCE_FIELD_PLACEMENTS].high_water
   p.frame_counter += 1
 }
 
@@ -1206,12 +1205,12 @@ flush_particles :: proc(self: ^Renderer) {
 flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
   views := write_table(self, .VIEWS, View)
   // a slot without a camera keeps an empty view that draws no type
-  slot_count := self.camera_slots.high_water
+  slot_count := self.slots[.CAMERAS].high_water
   slice.zero(views[CAMERA_VIEW_BASE:][:slot_count])
   mark_dirty(self, .VIEWS, CAMERA_VIEW_BASE, int(slot_count))
   all_types := u32(1 << len(MaterialType) - 1)
   c: u32
-  for i in containers.slots_next(&self.camera_slots, &c) {
+  for i in containers.slots_next(&self.slots[.CAMERAS], &c) {
     cam, targets := &self.cameras[i], &self.camera_targets[i]
     view := camera_view_matrix(cam)
     projection := camera_projection_matrix(cam, targets.extent)
@@ -1227,7 +1226,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       extent              = {f32(targets.extent[0]), f32(targets.extent[1])},
       near                = cam.near,
       far                 = cam.far,
-      pyramid             = u32(self.pyramids[camera_slot(i) + frame_index]),
+      pyramid             = u32(targets.pyramid[frame_index]),
       occlusion_mask      = GBUFFER_TYPES if camera_ready(self, i) else 0,
       list_stride         = 1,
       type_mask           = all_types,
@@ -1274,7 +1273,7 @@ frame :: proc(self: ^Renderer) -> bool {
     // simulated: the next frame's time accumulates from zero
     self.particle_params.delta_time = 0
     // the backend has every write so far
-    self.dirty = {}
+    for bits in self.dirty do slice.zero(bits)
   }
   switch status {
   case .OK:

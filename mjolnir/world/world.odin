@@ -5,29 +5,28 @@ import "../geometry"
 import "core:math/linalg"
 import "core:slice"
 
-// Node is one scene-graph entry: links, local transform, visibility and user tags.
+// Node is one scene-graph entry: links, local transform and visibility.
 Node :: struct {
-  parent:         NodeHandle,
-  transform:      Transform,
-  name:           string,
-  visible:        bool, // node's own visibility state
-  tags:           u32, // user-defined bit flags
+  parent:    NodeHandle,
+  transform: Transform,
+  name:      string,
+  visible:   bool, // node's own visibility state
 }
 
 // What update derives per node, beside the Node.
 @(private)
 Node_Cache :: struct {
-  is_dirty:       bool, // the transform or visibility changed since the last update
-  parent_visible: bool, // visibility inherited from parent chain
-  local_matrix:   matrix[4, 4]f32,
-  world_matrix:   matrix[4, 4]f32,
+  is_dirty:     bool, // the transform changed since the last update
+  visible:      bool, // own visibility and every ancestor's
+  local_matrix: matrix[4, 4]f32,
+  world_matrix: matrix[4, 4]f32,
 }
 
 @(private)
 NODE_CACHE_INIT :: Node_Cache {
-  parent_visible = true,
-  local_matrix   = linalg.MATRIX4F32_IDENTITY,
-  world_matrix   = linalg.MATRIX4F32_IDENTITY,
+  visible      = true,
+  local_matrix = linalg.MATRIX4F32_IDENTITY,
+  world_matrix = linalg.MATRIX4F32_IDENTITY,
 }
 
 // A node whose world transform or effective visibility changed, or that was
@@ -60,6 +59,8 @@ World_State :: struct {
   topo:            [dynamic]u32,
   // spawned since the last build_tree
   tree_stale:      bool,
+  // a node was spawned, moved or shown/hidden since the last update
+  changed:         bool,
   // what the last `update` changed, removals first; the next update replaces it
   feed:            [dynamic]NodeChange,
   // removals made between updates; published by update
@@ -67,7 +68,7 @@ World_State :: struct {
 }
 
 // node returns a copy of the node behind `handle`; false when stale. Change it with translate,
-// rotate, scale, set_local, set_visible, tag and set_name.
+// rotate, scale, set_local, set_visible and set_name.
 node :: proc(self: ^World, handle: NodeHandle) -> (n: Node, ok: bool) #optional_ok {
   p := lookup(self, handle) or_return
   return p^, true
@@ -84,6 +85,15 @@ set_name :: proc(self: ^World, handle: NodeHandle, name: string) {
 lookup :: #force_inline proc(self: ^World, handle: NodeHandle) -> (^Node, bool) #optional_ok {
   if !containers.slots_valid(&self.slots, handle) do return nil, false
   return &self.nodes[handle.index], true
+}
+
+// edit is lookup for a change to the node's transform: update recomputes it.
+@(private)
+edit :: #force_inline proc(self: ^World, handle: NodeHandle) -> ^Node {
+  if !containers.slots_valid(&self.slots, handle) do return nil
+  self.cache[handle.index].is_dirty = true
+  self.changed = true
+  return &self.nodes[handle.index]
 }
 
 // children lists a node's children, valid until the next node_create; nil when `handle` is stale.
@@ -158,28 +168,6 @@ node_count :: proc(self: ^World) -> int {
   return int(self.slots.count)
 }
 
-// tag sets user tag bits on a node; false if the node is not found.
-tag :: proc(self: ^World, handle: NodeHandle, bits: u32) -> bool {
-  node := lookup(self, handle) or_return
-  node.tags |= bits
-  return true
-}
-
-// untag clears user tag bits on a node; false if the node is not found.
-untag :: proc(self: ^World, handle: NodeHandle, bits: u32) -> bool {
-  node := lookup(self, handle) or_return
-  node.tags &~= bits
-  return true
-}
-
-@(private)
-node_init :: proc(self: ^Node, name: string = "") {
-  self.transform = TRANSFORM_IDENTITY
-  self.name = name
-  self.visible = true
-  self.tags = 0
-}
-
 spawn :: node_create
 
 // node_create (or its alias spawn) creates a node under `parent`, the world root by default;
@@ -196,10 +184,9 @@ node_create :: proc(
   parent := parent if parent != {} else self.root
   if !containers.slots_valid(&self.slots, parent) do return
   handle = alloc_node(self, name) or_return
-  node := &self.nodes[handle.index]
+  node := edit(self, handle)
   node.parent = parent
   node.transform.position = position
-  self.cache[handle.index].is_dirty = true
   self.tree_stale = true
   return handle, true
 }
@@ -207,7 +194,7 @@ node_create :: proc(
 @(private = "file")
 alloc_node :: proc(self: ^World, name: string) -> (handle: NodeHandle, ok: bool) {
   index := containers.slots_alloc(&self.slots) or_return
-  node_init(&self.nodes[index], name)
+  self.nodes[index] = {transform = TRANSFORM_IDENTITY, name = name, visible = true}
   self.cache[index] = NODE_CACHE_INIT
   return NodeHandle(containers.slots_handle(&self.slots, index)), true
 }
@@ -232,7 +219,8 @@ update :: proc(self: ^World) {
   for index in self.pending_removed do append(&self.feed, NodeChange{index = index, removed = true})
   clear(&self.pending_removed)
   for r in containers.slots_tick(&self.slots) do self.nodes[r.index], self.cache[r.index] = {}, {}
-  traverse(self)
+  if self.changed do traverse(self)
+  self.changed = false
 }
 
 // changes lists what the last update changed: nodes despawned since the update
@@ -299,10 +287,11 @@ traverse :: proc(self: ^World) {
       p := current_node.parent.index
       parent = &self.cache[p]
       parent_moved = moved[p]
-      parent_visible = parent.parent_visible && self.nodes[p].visible
+      parent_visible = parent.visible
     }
-    visibility_changed := c.parent_visible != parent_visible
-    c.parent_visible = parent_visible
+    visible := parent_visible && current_node.visible
+    visibility_changed := c.visible != visible
+    c.visible = visible
     is_dirty := c.is_dirty
     if is_dirty {
       t := current_node.transform
@@ -319,7 +308,7 @@ traverse :: proc(self: ^World) {
         NodeChange {
           index = i,
           world_matrix = c.world_matrix,
-          visible = parent_visible && current_node.visible,
+          visible = visible,
         },
       )
     }
@@ -334,10 +323,9 @@ set_world_pose :: proc(
   position: [3]f32,
   rotation: quaternion128,
 ) {
-  node := lookup(self, handle)
+  node := edit(self, handle)
   if node == nil do return
-  _, has_parent := lookup(self, node.parent)
-  if !has_parent || node.parent == self.root || node.parent == handle {
+  if handle == self.root {
     node.transform.position = position
     node.transform.rotation = rotation
   } else {
@@ -347,7 +335,6 @@ set_world_pose :: proc(
     parent_rotation := linalg.quaternion_from_matrix4_f32(parent_world)
     node.transform.rotation = linalg.normalize(linalg.quaternion_inverse(parent_rotation) * rotation)
   }
-  self.cache[handle.index].is_dirty = true
 }
 
 // set_world_poses is set_world_pose for every pose of `poses`: any struct with
@@ -375,7 +362,7 @@ set_visible :: proc(self: ^World, handle: NodeHandle, visible: bool) {
   if node == nil do return
   if node.visible == visible do return
   node.visible = visible
-  self.cache[handle.index].is_dirty = true
+  self.changed = true
 }
 
 // destroy removes a node, as node_destroy does.

@@ -23,22 +23,22 @@ WALL_THICK :: f32(0.5)
 NO_SELECTION :: -1
 
 Shape :: enum {
-  Sphere,
-  Box,
-  Cylinder,
+  SPHERE,
+  BOX,
+  CYLINDER,
 }
 
 Kind :: enum {
-  Static,
-  DynamicStill,
-  DynamicCircle,
+  STATIC,
+  DYNAMIC_STILL,
+  DYNAMIC_CIRCLE,
 }
 
 Body :: struct {
   kind:          Kind,
   shape:         Shape,
-  size:          [3]f32, // Sphere: x=radius; Box: half extents; Cylinder: x=radius y=half height
-  position:      [3]f32, // DynamicCircle: the orbit center
+  size:          [3]f32,
+  position:      [3]f32,
   euler_deg:     [3]f32,
   mass:          f32,
   node:          world.NodeHandle,
@@ -66,9 +66,9 @@ App :: struct {
 
 default_bodies :: proc() -> [3]Body {
   return {
-    {kind = .Static, shape = .Box, size = {1.5, 1.5, 1.5}, position = {0, 1.5, -4.5}, mass = 1},
-    {kind = .DynamicStill, shape = .Sphere, size = {1.2, 1.2, 1.2}, position = {0, 1.2, 4.5}, mass = 5},
-    {kind = .DynamicCircle, shape = .Sphere, size = {1.0, 1.0, 1.0}, position = {0, 1.5, 0}, mass = 3},
+    {kind = .STATIC, shape = .BOX, size = {1.5, 1.5, 1.5}, position = {0, 1.5, -4.5}, mass = 1},
+    {kind = .DYNAMIC_STILL, shape = .SPHERE, size = {1.2, 1.2, 1.2}, position = {0, 1.2, 4.5}, mass = 5},
+    {kind = .DYNAMIC_CIRCLE, shape = .SPHERE, size = {1.0, 1.0, 1.0}, position = {0, 1.5, 0}, mass = 3},
   }
 }
 
@@ -111,7 +111,7 @@ frame :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {1100, 760}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.setup(&app.renderer)
   app.orbit = render.make_orbit({16, 14, 16}, {0, 1.5, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
@@ -136,7 +136,7 @@ spawn_scene :: proc(app: ^App) {
     b.visual = world.spawn(&app.scene, parent = b.node)
     render.attach(&app.renderer, render.SlotHandle(b.visual.index), render.primitive(&app.renderer, body_mesh(b.shape), body_color(b.kind)))
     world.scale(&app.scene, b.visual, body_visual_scale(&b))
-    if b.kind == .Static {
+    if b.kind == .STATIC {
       b.handle = physics.body_create(&app.phys, b.position, body_rotation(&b), body_collider(&b))
     } else {
       b.handle = physics.body_create(&app.phys, b.position, body_rotation(&b), body_collider(&b), b.mass, user = world.Handle(b.node))
@@ -154,20 +154,20 @@ spawn_scenery_box :: proc(app: ^App, center, half_extents: [3]f32) {
 
 body_collider :: proc(b: ^Body) -> physics.Collider {
   switch b.shape {
-  case .Sphere:   return physics.SphereCollider{radius = b.size.x}
-  case .Box:      return physics.BoxCollider{half_extents = b.size}
-  case .Cylinder: return physics.CylinderCollider{radius = b.size.x, half_height = b.size.y}
+  case .SPHERE:   return physics.SphereCollider{radius = b.size.x}
+  case .BOX:      return physics.BoxCollider{half_extents = b.size}
+  case .CYLINDER: return physics.CylinderCollider{radius = b.size.x, half_height = b.size.y}
   }
   return nil
 }
 
 body_visual_scale :: proc(b: ^Body) -> [3]f32 {
   switch b.shape {
-  case .Sphere:
+  case .SPHERE:
     return b.size.x
-  case .Box:
+  case .BOX:
     return b.size
-  case .Cylinder:
+  case .CYLINDER:
     return {b.size.x, b.size.y, b.size.x}
   }
   return 1
@@ -175,18 +175,18 @@ body_visual_scale :: proc(b: ^Body) -> [3]f32 {
 
 body_mesh :: proc(shape: Shape) -> render.Primitive {
   switch shape {
-  case .Sphere:   return .SPHERE
-  case .Box:      return .CUBE
-  case .Cylinder: return .CYLINDER
+  case .SPHERE:   return .SPHERE
+  case .BOX:      return .CUBE
+  case .CYLINDER: return .CYLINDER
   }
   return .SPHERE
 }
 
 body_color :: proc(kind: Kind) -> render.Color {
   switch kind {
-  case .Static:        return .BLUE
-  case .DynamicStill:  return .CYAN
-  case .DynamicCircle: return .MAGENTA
+  case .STATIC:        return .BLUE
+  case .DYNAMIC_STILL:  return .CYAN
+  case .DYNAMIC_CIRCLE: return .MAGENTA
   }
   return .WHITE
 }
@@ -204,7 +204,7 @@ apply_shape :: proc(app: ^App, b: ^Body) {
 
 apply_pose :: proc(app: ^App, b: ^Body) {
   physics.set_pose(&app.phys, b.handle, b.position, body_rotation(b))
-  if b.kind == .Static {
+  if b.kind == .STATIC {
     world.translate(&app.scene, b.node, b.position)
     world.rotate(&app.scene, b.node, body_rotation(b))
     return
@@ -244,9 +244,9 @@ update :: proc(app: ^App, dt: f32) {
   for &b in app.bodies {
     if b.shape_changed do apply_shape(app, &b)
     if b.mass_changed do physics.set_mass(&app.phys, b.handle, b.mass)
-    if b.pose_changed && b.kind != .DynamicCircle do apply_pose(app, &b)
+    if b.pose_changed && b.kind != .DYNAMIC_CIRCLE do apply_pose(app, &b)
     b.shape_changed, b.mass_changed, b.pose_changed = false, false, false
-    if b.kind == .DynamicCircle && !app.paused do drive_circle(app, &b)
+    if b.kind == .DYNAMIC_CIRCLE && !app.paused do drive_circle(app, &b)
   }
 
   handle_picking(app)
@@ -297,11 +297,11 @@ draw_selection :: proc(app: ^App) {
   render.debug_axes(&app.renderer, pos, rot, 1.8, 0, true)
   green := [4]f32{0.2, 1, 0.3, 1}
   switch b.shape {
-  case .Sphere:
+  case .SPHERE:
     render.debug_sphere(&app.renderer, pos, b.size.x, green, 0, true)
-  case .Box:
+  case .BOX:
     render.debug_cube(&app.renderer, pos, rot, b.size, green, 0, true)
-  case .Cylinder:
+  case .CYLINDER:
     axis := linalg.quaternion_mul_vector3(rot, [3]f32{0, 1, 0})
     render.debug_circle(&app.renderer, pos + axis * b.size.y, axis, b.size.x, green, 0, true)
     render.debug_circle(&app.renderer, pos - axis * b.size.y, axis, b.size.x, green, 0, true)
@@ -323,21 +323,21 @@ inspector :: proc(ctx: ^mu.Context, b: ^Body) {
 
   mu.layout_row(ctx, {-1}, 0)
   switch b.shape {
-  case .Sphere:
+  case .SPHERE:
     mu.label(ctx, "Radius")
     b.shape_changed |= slider_changed(ctx, &b.size.x, 0.2, 4.0)
-  case .Box:
+  case .BOX:
     mu.label(ctx, "Half extents X / Y / Z")
     b.shape_changed |= slider_changed(ctx, &b.size.x, 0.2, 4.0)
     b.shape_changed |= slider_changed(ctx, &b.size.y, 0.2, 4.0)
     b.shape_changed |= slider_changed(ctx, &b.size.z, 0.2, 4.0)
-  case .Cylinder:
+  case .CYLINDER:
     mu.label(ctx, "Radius / Half height")
     b.shape_changed |= slider_changed(ctx, &b.size.x, 0.2, 4.0)
     b.shape_changed |= slider_changed(ctx, &b.size.y, 0.2, 3.0)
   }
 
-  mu.label(ctx, "Orbit center X / Y / Z" if b.kind == .DynamicCircle else "Position X / Y / Z")
+  mu.label(ctx, "Orbit center X / Y / Z" if b.kind == .DYNAMIC_CIRCLE else "Position X / Y / Z")
   b.pose_changed |= slider_changed(ctx, &b.position.x, -12, 12)
   b.pose_changed |= slider_changed(ctx, &b.position.y, 0, 12)
   b.pose_changed |= slider_changed(ctx, &b.position.z, -12, 12)
@@ -347,7 +347,7 @@ inspector :: proc(ctx: ^mu.Context, b: ^Body) {
   b.pose_changed |= slider_changed(ctx, &b.euler_deg.y, -180, 180)
   b.pose_changed |= slider_changed(ctx, &b.euler_deg.z, -180, 180)
 
-  if b.kind != .Static {
+  if b.kind != .STATIC {
     mu.label(ctx, "Mass")
     b.mass_changed |= slider_changed(ctx, &b.mass, 0.5, 50)
   }

@@ -33,6 +33,8 @@ static const uint NODE_FLAG_VISIBLE = 1;
 static const uint NODE_FLAG_CASTS_SHADOW = 2;
 // the node holds a bone range; only set on a skinned mesh
 static const uint NODE_FLAG_SKINNED = 4;
+// a light, emitter or force field is attached (render's alone)
+static const uint NODE_FLAG_PLACED = 8;
 
 static const uint SAMPLER_NEAREST_CLAMP = 0;
 static const uint SAMPLER_LINEAR_CLAMP = 1;

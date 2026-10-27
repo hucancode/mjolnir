@@ -26,14 +26,9 @@ skin_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   if count == 0 do return
   barrier(self, cmd, .DRAW_TO_SKIN)
   dev.cmd_begin_compute(&self.gpu, cmd)
-  push := SkinPush{count}
-  pipeline_bind(self, cmd, self.skin_pipeline, .SKIN, f, &push, .NONE)
+  vertex_count := count
+  pipeline_bind(self, cmd, self.skin_pipeline, .SKIN, f, &vertex_count, .NONE)
   dev.cmd_dispatch(&self.gpu, cmd, (count + SKIN_GROUP_SIZE - 1) / SKIN_GROUP_SIZE, 1, 1)
   dev.cmd_end_compute(&self.gpu, cmd)
   barrier(self, cmd, .SKIN_TO_DRAW)
-}
-
-@(private = "file")
-SkinPush :: struct {
-  vertex_count: u32,
 }

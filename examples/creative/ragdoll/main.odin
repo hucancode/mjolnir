@@ -107,7 +107,7 @@ frame :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {1024, 720}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   ground := world.spawn(&app.scene, {0, -0.05, 0})
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))

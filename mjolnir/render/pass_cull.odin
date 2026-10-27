@@ -49,7 +49,6 @@ PULLED_TYPES :: bit_set[MaterialType]{.WIREFRAME, .RANDOM_COLOR}
 @(private)
 GpuDrawList :: struct {
   buffer:                                   rhi.Buffer,
-  lists:                                    u32,
   capacity:                                 u32,
   bytes:                                    int,
   draws_base, draws_stride, instances_base: u32,
@@ -138,15 +137,16 @@ pyramid_shape :: proc(extent: [2]u32) -> (half: [2]u32, mips: u32) {
 pyramids_bind :: proc(self: ^Renderer, f: u32) {
   when !BINDLESS do return
   c: u32
-  for i in containers.slots_next(&self.camera_slots, &c) {
+  for i in containers.slots_next(&self.slots[.CAMERAS], &c) {
+    targets := &self.camera_targets[i]
+    if targets.pyramid_bound[f] do continue
+    targets.pyramid_bound[f] = true
     slot := camera_slot(i) + f
-    if self.pyramid_bound[slot] do continue
-    self.pyramid_bound[slot] = true
-    _, mips := pyramid_shape(self.camera_targets[i].extent)
+    _, mips := pyramid_shape(targets.extent)
     for mip in 0 ..< mips {
-      dev.bindless_write(&self.gpu, .STORAGE_IMAGES, slot * MAX_DEPTH_MIPS + mip, rhi.TextureView{self.pyramids[slot], i32(mip)})
+      dev.bindless_write(&self.gpu, .STORAGE_IMAGES, slot * MAX_DEPTH_MIPS + mip, rhi.TextureView{targets.pyramid[f], i32(mip)})
     }
-    dev.bindless_write(&self.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + slot, rhi.TextureView{self.camera_targets[i].images[.FINAL_IMAGE][f], 0})
+    dev.bindless_write(&self.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + slot, rhi.TextureView{targets.images[.FINAL_IMAGE][f], 0})
   }
 }
 
@@ -159,12 +159,21 @@ cull_groups_clear :: proc(self: ^Renderer) {
   clear(&self.reduce_groups)
 }
 
-// draw_list_create makes draw-list slot `slot`: `lists` lists with room for `capacity` draws
-// (compacted) or instances (batched), see draw_list_shape.
+// draw_list_create makes draw-list slot `slot`, a camera's or the shadow views'. Compacted by
+// multi-draw: a camera DRAW_LISTS lists, one per material_list key, of CAMERA_LIST_CAPACITY
+// draws, the shadow views one list. Batched: one list per view (the shadow slot has a view per
+// shadow map face), each of room for every node's instance.
 @(private)
-draw_list_create :: proc(self: ^Renderer, slot, lists, capacity: u32) -> bool {
+draw_list_create :: proc(self: ^Renderer, slot: u32, shadow: bool) -> bool {
+  when BINDLESS {
+    lists: u32 = 1 if shadow else DRAW_LISTS
+    capacity: u32 = SHADOW_LIST_CAPACITY if shadow else CAMERA_LIST_CAPACITY
+  } else {
+    lists: u32 = MAX_SHADOW_VIEWS if shadow else 1
+    capacity: u32 = MAX_SLOTS
+  }
   draw_list_destroy(self, slot)
-  dl := GpuDrawList{lists = lists, capacity = capacity}
+  dl := GpuDrawList{capacity = capacity}
   words: u32
   when BINDLESS {
     dl.draws_base, dl.draws_stride = DRAW_LIST_HEADER, capacity
@@ -214,14 +223,14 @@ draw_lists_clear :: proc(self: ^Renderer, cmd: rhi.CommandList, slot: u32) {
 @(private)
 cull_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   c: u32
-  for i in containers.slots_next(&self.camera_slots, &c) do draw_lists_clear(self, cmd, camera_next_slot(i, f))
+  for i in containers.slots_next(&self.slots[.CAMERAS], &c) do draw_lists_clear(self, cmd, camera_next_slot(i, f))
   when !BINDLESS do if self.shadow_view_count > 0 do draw_lists_clear(self, cmd, SHADOW_DRAW_SLOT_BASE + f)
   dev.cmd_begin_compute(&self.gpu, cmd)
   defer dev.cmd_end_compute(&self.gpu, cmd)
   when BINDLESS {
     bound := false
     c = 0
-    for i in containers.slots_next(&self.camera_slots, &c) {
+    for i in containers.slots_next(&self.slots[.CAMERAS], &c) {
       if !camera_ready(self, i) do continue
       if !bound {
         dev.cmd_bind_pipeline(&self.gpu, cmd, self.reduce_pipeline)
@@ -231,14 +240,14 @@ cull_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
       pyramid_build_bindless(self, cmd, i, f)
     }
     barrier(self, cmd, .FILL_TO_COMPUTE)
-    cull_compacted(self, cmd, f, CAMERA_VIEW_BASE + 1, self.camera_slots.high_water - 1)
+    cull_compacted(self, cmd, f, CAMERA_VIEW_BASE + 1, self.slots[.CAMERAS].high_water - 1)
   } else {
     c = 0
-    for i in containers.slots_next(&self.camera_slots, &c) do if camera_ready(self, i) do pyramid_build_groups(self, cmd, i, f)
+    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do if camera_ready(self, i) do pyramid_build_groups(self, cmd, i, f)
     if self.batch_high == 0 do return
     c = 0
-    for i in containers.slots_next(&self.camera_slots, &c) {
-      cull_batched(self, cmd, camera_next_slot(i, f), CAMERA_VIEW_BASE + i, 1, self.pyramids[camera_slot(i) + f])
+    for i in containers.slots_next(&self.slots[.CAMERAS], &c) {
+      cull_batched(self, cmd, camera_next_slot(i, f), CAMERA_VIEW_BASE + i, 1, self.camera_targets[i].pyramid[f])
     }
     if self.shadow_view_count > 0 do cull_batched(self, cmd, SHADOW_DRAW_SLOT_BASE + f, SHADOW_VIEW_BASE, self.shadow_view_count, 0)
   }
@@ -258,7 +267,7 @@ cull_compacted :: proc(self: ^Renderer, cmd: rhi.CommandList, f, first_view, vie
 @(private = "file")
 pyramid_build_bindless :: proc(self: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
   slot := camera_slot(c) + f
-  if !self.pyramid_bound[slot] do return
+  if !self.camera_targets[c].pyramid_bound[f] do return
   extent, mips := pyramid_shape(self.camera_targets[c].extent)
   prev_depth := self.camera_targets[c].images[.DEPTH][(f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT]
   groups := [2]u32{(extent.x + PYRAMID_TILE - 1) / PYRAMID_TILE, (extent.y + PYRAMID_TILE - 1) / PYRAMID_TILE}
@@ -271,7 +280,7 @@ pyramid_build_bindless :: proc(self: ^Renderer, cmd: rhi.CommandList, c, f: u32)
 @(private = "file")
 pyramid_build_groups :: proc(self: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
   slot := camera_slot(c) + f
-  pyramid := self.pyramids[slot]
+  pyramid := self.camera_targets[c].pyramid[f]
   prev_depth := self.camera_targets[c].images[.DEPTH][(f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT]
   extent, mips := pyramid_shape(self.camera_targets[c].extent)
   for mip in 0 ..< mips {

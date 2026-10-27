@@ -166,7 +166,7 @@ update :: proc(app: ^App, dt: f32) {
   if orbiting && !app.pressed do app.orbit.yaw += dt * 0.04
   camera := render.main_camera(r)
   render.camera_orbit(camera, app.orbit)
-  eye, _ := render.camera_pose(camera)
+  eye := camera.position
 
   lights := advance(&app.storm, min(dt, 0.05), eye)
   for sample, i in lights {

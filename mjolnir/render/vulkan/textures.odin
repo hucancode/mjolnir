@@ -1,3 +1,4 @@
+#+private
 package vulkan_backend
 
 import rhi "../rhi"
@@ -10,12 +11,8 @@ import vk "vendor:vulkan"
 
 
 
-// Depth pyramids and draw lists live in slots render assigns: a pyramid per camera and frame
-// in flight, a draw-list slot per camera and frame in flight plus one per frame for the shadow
-// views. Storage image slots follow: the pyramids' mips, then the IBL precompute targets, then
-// the cameras' lit images, one per pyramid slot.
-MAX_PYRAMID_SLOTS :: rhi.MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
-MAX_DRAW_LIST_SLOTS :: (rhi.MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
+// Storage image slots: the pyramids' mips (MAX_PYRAMID_SLOTS), then the IBL precompute targets,
+// then the cameras' lit images, one per pyramid slot.
 // mips a depth pyramid may have
 @(private)
 MAX_DEPTH_MIPS_LEVEL :: 16
@@ -30,7 +27,7 @@ SCENE_STAGES :: vk.ShaderStageFlags{.VERTEX, .FRAGMENT, .COMPUTE}
 @(private)
 BINDING_TEXTURES :: 0 // [MAX_TEXTURES] sampled images, 2D and cube
 @(private)
-BINDING_SAMPLERS :: 1 // one sampler per SamplerType
+BINDING_SAMPLERS :: 1 // one sampler per rhi.SamplerType
 @(private)
 BINDING_STORAGE_IMAGES :: 2 // [MAX_STORAGE_IMAGES] depth pyramid mips, IBL precompute targets, lit images
 @(private)
@@ -40,25 +37,14 @@ BINDING_PYRAMID_COUNTERS :: 4 // one u32 per depth pyramid
 @(private)
 BINDLESS_BINDINGS := [?]DescriptorBinding {
   BINDING_TEXTURES         = {.SAMPLED_IMAGE, rhi.MAX_TEXTURES, SCENE_STAGES},
-  BINDING_SAMPLERS         = {.SAMPLER, len(SamplerType), SCENE_STAGES},
+  BINDING_SAMPLERS         = {.SAMPLER, len(rhi.SamplerType), SCENE_STAGES},
   BINDING_STORAGE_IMAGES   = {.STORAGE_IMAGE, MAX_STORAGE_IMAGES, {.COMPUTE}},
   BINDING_DRAW_LISTS       = {.STORAGE_BUFFER, MAX_DRAW_LIST_SLOTS, {.COMPUTE}},
   BINDING_PYRAMID_COUNTERS = {.STORAGE_BUFFER, 1, {.COMPUTE}},
 }
 
-// The bindless samplers; shaders index them with these values as literals.
-@(private)
-SamplerType :: enum u32 {
-  NEAREST_CLAMP  = 0,
-  LINEAR_CLAMP   = 1,
-  NEAREST_REPEAT = 2,
-  LINEAR_REPEAT  = 3,
-  // bilinear depth comparison (2x2 PCF) for shadow maps
-  SHADOW_COMPARE = 4,
-}
-
 @(private = "file")
-SAMPLERS := [SamplerType]struct {
+SAMPLERS := [rhi.SamplerType]struct {
   filter:    vk.Filter,
   address:   vk.SamplerAddressMode,
   mipmap:    vk.SamplerMipmapMode,
@@ -113,7 +99,13 @@ bindless_init :: proc(b: ^Backend) -> vk.Result {
     }
     vk.CreateSampler(gctx.device, &info, nil, &sampler) or_return
   }
-  allocate_descriptor_set(gctx, &b.bindless_set, &b.bindless_layout) or_return
+  alloc_info := vk.DescriptorSetAllocateInfo {
+    sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+    descriptorPool     = gctx.descriptor_pool,
+    descriptorSetCount = 1,
+    pSetLayouts        = &b.bindless_layout,
+  }
+  vk.AllocateDescriptorSets(gctx.device, &alloc_info, &b.bindless_set) or_return
   for sampler, type in b.samplers {
     write_descriptor(gctx, b.bindless_set, BINDING_SAMPLERS, u32(type), .SAMPLER, vk.DescriptorImageInfo{sampler = sampler})
   }

@@ -41,7 +41,7 @@ material_shader_create :: proc(
   desc := rhi.GraphicsPipelineDesc {
     shader        = source,
     layout        = pipeline_layout(self, .MESH, .MATERIAL),
-    vertex        = mesh_vertex_streams(self),
+    vertex        = mesh_vertex_streams(),
     cull          = cull,
     color_formats = material_pass_formats(.FORWARD),
     blend         = blend,

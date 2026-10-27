@@ -1,3 +1,4 @@
+#+private
 package vulkan_backend
 
 import "core:log"

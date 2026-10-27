@@ -85,7 +85,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({6, 5, 10}, {0, 1.0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   ok: bool

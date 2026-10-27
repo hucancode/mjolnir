@@ -71,7 +71,7 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {1280, 800}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.renderer.skybox_intensity = 0
   app.orbit = render.make_orbit({0, 5, 10}, {0, 2, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)

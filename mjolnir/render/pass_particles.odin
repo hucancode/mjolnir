@@ -66,12 +66,14 @@ particles_init :: proc(self: ^Renderer) -> bool {
       depth = material_pass_depth(.FORWARD),
     },
   ) or_return
-  return particles_gpu_reset(self)
+  return particles_reset(self)
 }
 
 // Kills every particle before the next frame.
 @(private)
-particles_gpu_reset :: proc(self: ^Renderer) -> bool {
+particles_reset :: proc(self: ^Renderer) -> bool {
+  self.particle_params.emit_cursor = 0
+  self.particle_params.emit_total = 0
   dev.buffer_write(&self.gpu, self.buffers[.PARTICLES][0], 0, make([]u8, MAX_PARTICLES * size_of(Particle), context.temp_allocator)) or_return
   header := [PARTICLE_ALIVE_HEADER]u32{0, 1, 0, 0} if BINDLESS else {6, 0, 0, 0}
   return dev.buffer_write(&self.gpu, self.buffers[.PARTICLE_ALIVE][0], 0, ([^]u8)(&header)[:size_of(header)])
@@ -105,7 +107,7 @@ particles_draw :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, camera_ind
   textures: [MAX_PARTICLE_TEXTURES]TextureHandle
   when !BINDLESS {
     n := 0
-    emitters := write_table(self, .EMITTERS, Emitter)[:self.emitter_slots.high_water]
+    emitters := write_table(self, .EMITTERS, Emitter)[:self.slots[.EMITTERS].high_water]
     outer: for &em in emitters {
       if em.texture == 0 || n == MAX_PARTICLE_TEXTURES do continue
       for t in textures[:n] do if t == em.texture do continue outer

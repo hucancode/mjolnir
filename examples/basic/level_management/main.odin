@@ -82,7 +82,7 @@ frame :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {1100, 760}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.setup(&app.renderer)
   app.current = -1
   app.requested = -1

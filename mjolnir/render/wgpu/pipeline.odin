@@ -1,4 +1,7 @@
+#+private
 package wgpu_backend
+
+import rhi "../rhi"
 
 import wgpu "vendor:wgpu"
 
@@ -16,7 +19,7 @@ frame_group_init :: proc(b: ^Backend) {
   all_stages := wgpu.ShaderStageFlags{.Vertex, .Fragment, .Compute}
   layout_entries := make([dynamic]wgpu.BindGroupLayoutEntry, context.temp_allocator)
   append(&layout_entries, wgpu.BindGroupLayoutEntry{binding = 0, visibility = all_stages, buffer = {type = .Uniform, hasDynamicOffset = true, minBindingSize = UNIFORM_ALIGNMENT}})
-  for type in SamplerType {
+  for type in rhi.SamplerType {
     kind: wgpu.SamplerBindingType = .Comparison if type == .SHADOW_COMPARE else .Filtering
     append(&layout_entries, wgpu.BindGroupLayoutEntry{binding = 1 + u32(type), visibility = all_stages, sampler = {type = kind}})
   }

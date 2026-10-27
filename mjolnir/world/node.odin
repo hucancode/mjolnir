@@ -32,15 +32,6 @@ rotate :: proc {
   rotate_angle,
 }
 
-// translate_by moves a node by `v` in its parent's space, on top of its local position
-// (translate sets it, as rotate sets and rotate_by composes).
-translate_by :: proc(self: ^World, handle: NodeHandle, v: [3]f32) {
-  node := lookup(self, handle)
-  if node == nil do return
-  node.transform.position += v
-  self.cache[handle.index].is_dirty = true
-}
-
 // rotate_by composes a rotation onto a node's local rotation:
 //   rotate_by(w, node, q: quaternion128)
 //   rotate_by(w, node, angle: f32, axis: [3]f32 = Y) (radians)
@@ -66,18 +57,16 @@ translate_xyz :: proc(self: ^World, handle: NodeHandle, x: f32 = 0, y: f32 = 0, 
 
 @(private = "file")
 translate_vec :: proc(self: ^World, handle: NodeHandle, v: [3]f32) {
-  node := lookup(self, handle)
+  node := edit(self, handle)
   if node == nil do return
   node.transform.position = v
-  self.cache[handle.index].is_dirty = true
 }
 
 @(private = "file")
 rotate_quaternion :: proc(self: ^World, handle: NodeHandle, q: quaternion128) {
-  node := lookup(self, handle)
+  node := edit(self, handle)
   if node == nil do return
   node.transform.rotation = q
-  self.cache[handle.index].is_dirty = true
 }
 
 @(private = "file")
@@ -92,10 +81,9 @@ rotate_angle :: proc(
 
 @(private = "file")
 rotate_by_quaternion :: proc(self: ^World, handle: NodeHandle, q: quaternion128) {
-  node := lookup(self, handle)
+  node := edit(self, handle)
   if node == nil do return
   node.transform.rotation *= q
-  self.cache[handle.index].is_dirty = true
 }
 
 @(private = "file")
@@ -115,10 +103,9 @@ scale_uniform :: proc(self: ^World, handle: NodeHandle, s: f32) {
 
 @(private = "file")
 scale_vec :: proc(self: ^World, handle: NodeHandle, v: [3]f32) {
-  node := lookup(self, handle)
+  node := edit(self, handle)
   if node == nil do return
   node.transform.scale = v
-  self.cache[handle.index].is_dirty = true
 }
 
 @(private = "file")
@@ -134,10 +121,9 @@ set_local :: proc(
   rotation: quaternion128 = linalg.QUATERNIONF32_IDENTITY,
   scale: [3]f32 = {1, 1, 1},
 ) {
-  node := lookup(self, handle)
+  node := edit(self, handle)
   if node == nil do return
   node.transform.position = position
   node.transform.rotation = rotation
   node.transform.scale = scale
-  self.cache[handle.index].is_dirty = true
 }

@@ -98,8 +98,8 @@ clear_entry :: proc(self: ^Renderer, t: Table, index: u32, count: u32 = 1) {
 mark_dirty :: proc(self: ^Renderer, t: Table, index: int, count := 1) {
   if count == 0 do return
   stride := TABLES[t].stride
-  region := (len(self.tables[t]) + TABLE_REGIONS - 1) / TABLE_REGIONS
-  first := index * stride / region
-  last := min(((index + count) * stride - 1) / region, TABLE_REGIONS - 1)
-  for r in first ..= last do self.dirty[t] |= 1 << u64(r)
+  bits := self.dirty[t]
+  for r in index * stride / TABLE_REGION_BYTES ..= ((index + count) * stride - 1) / TABLE_REGION_BYTES {
+    bits[r / 64] |= 1 << u64(r % 64)
+  }
 }

@@ -35,6 +35,46 @@ matrix4_almost_equal :: proc(
 }
 
 @(test)
+test_set_world_pose_under_moved_root :: proc(t: ^testing.T) {
+  w: World
+  init(&w)
+  defer shutdown(&w)
+  translate(&w, w.root, 10, 0, 0)
+  child, ok := node_create(&w)
+  testing.expect(t, ok)
+  update(&w)
+  set_world_pose(&w, child, {1, 2, 3}, linalg.QUATERNIONF32_IDENTITY)
+  update(&w)
+  m := world_matrix(&w, child)
+  testing.expectf(t, linalg.length(m[3].xyz - [3]f32{1, 2, 3}) < 1e-4, "child at %v", m[3].xyz)
+}
+
+@(test)
+test_set_visible_reports_subtree :: proc(t: ^testing.T) {
+  w: World
+  init(&w)
+  defer shutdown(&w)
+  parent, _ := node_create(&w)
+  child, _ := node_create(&w, parent = parent)
+  update(&w)
+  update(&w)
+  testing.expect_value(t, len(changes(&w)), 0)
+  set_visible(&w, parent, false)
+  update(&w)
+  feed := changes(&w)
+  testing.expect_value(t, len(feed), 2)
+  for c in feed do testing.expect(t, !c.visible)
+  set_visible(&w, child, false)
+  update(&w)
+  testing.expect_value(t, len(changes(&w)), 0)
+  set_visible(&w, parent, true)
+  update(&w)
+  feed = changes(&w)
+  testing.expect_value(t, len(feed), 1)
+  testing.expect(t, feed[0].index == parent.index && feed[0].visible)
+}
+
+@(test)
 test_node_translate :: proc(t: ^testing.T) {
   w: World
   init(&w)
@@ -175,7 +215,7 @@ create_scene :: proc(self: ^World, max_node: int, max_depth: int) {
   entry := QueueEntry{self.root, 0}
   append(&queue, entry)
   n := 0
-  count := node_count(self) // tracked locally: node_count is O(n)
+  count := node_count(self)
   for len(queue) > 0 && count < target_nodes {
     current := pop_front(&queue)
     if current.depth < max_depth {

@@ -11,4 +11,4 @@ package navigation
 // other; its internals (path corridor, path queue, local boundary, proximity grid, velocity
 // sampling) are package-private in the sibling files. Sub-packages: bake (baking) and the
 // low-level Detour and Recast ports, detour and recast.
-// Recast, Detour and DetourCrowd are Copyright (c) 2009 Mikko Mononen memon@inside.org; (originally written in C++, ported to Odin and adapt by hucancode@gmail.com)
+// Recast, Detour and DetourCrowd are Copyright (c) 2009 Mikko Mononen memon@inside.org; (originally written in C++, ported to Odin and adapted by hucancode@gmail.com)

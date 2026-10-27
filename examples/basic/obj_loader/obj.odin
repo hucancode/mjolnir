@@ -4,8 +4,6 @@ import "core:log"
 import "core:strconv"
 import "core:strings"
 
-// Triangle mesh read from a Wavefront OBJ file: positions and triangulated
-// faces only.
 ObjMesh :: struct {
   positions: [][3]f32,
   indices:   []u32,
@@ -17,8 +15,6 @@ obj_mesh_destroy :: proc(self: ^ObjMesh) {
   self^ = {}
 }
 
-// Load the vertex positions and faces (fan-triangulated) of OBJ text,
-// scaled by `scale`.
 load_obj :: proc(
   data: []u8,
   scale: f32 = 1.0,
@@ -61,18 +57,14 @@ load_obj :: proc(
         if vertex_idx, ok := strconv.parse_i64(vertex_str); ok {
           idx := i32(vertex_idx)
           if idx < 0 {
-            // Negative indices count from the end
             idx = i32(len(positions)) + idx + 1
           }
-          // Convert from 1-based to 0-based index
           idx -= 1
-          // Validate index range
           if idx >= 0 && idx < i32(len(positions)) {
             append(&face_indices, idx)
           }
         }
       }
-      // Triangulate the face
       for i := 2; i < len(face_indices); i += 1 {
         a := face_indices[0]
         b := face_indices[i - 1]

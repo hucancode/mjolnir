@@ -1,16 +1,10 @@
 package render
 
-import "core:sync"
 import "rhi"
 
 // Debug lines are drawn over the main camera's image after post-processing. The shader pulls
 // each segment's two vertices from the debug line table and skips a segment past its expiry;
 // ring 0 is depth-tested against the camera's depth, ring 1 drawn over everything.
-
-@(private = "file")
-DebugLinePush :: struct {
-  camera_index: u32,
-}
 
 @(private)
 debug_line_init :: proc(self: ^Renderer) -> bool {
@@ -38,10 +32,8 @@ debug_line_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u3
   colors := [1]rhi.ColorTarget{{texture = BACKBUFFER, load = .LOAD}}
   dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:], depth = rhi.DepthTarget{texture = self.camera_targets[cam].images[.DEPTH][f], load = .LOAD, read_only = true}})
   // the shader skips segments past their expiry
-  sync.mutex_lock(&self.debug_mutex)
-  push := DebugLinePush{cam}
-  sync.mutex_unlock(&self.debug_mutex)
-  pipeline_bind(self, cmd, self.debug_line_pipelines[0], .DEBUG_LINE, f, &push, .NONE)
+  camera_index := cam
+  pipeline_bind(self, cmd, self.debug_line_pipelines[0], .DEBUG_LINE, f, &camera_index, .NONE)
   for count, ring in counts {
     if count == 0 do continue
     dev.cmd_bind_pipeline(&self.gpu, cmd, self.debug_line_pipelines[ring])

@@ -42,8 +42,7 @@ App :: struct {
   orbit:       render.Orbit,
   model:       gltf.Model,
   leg:         gltf.Instance,
-  rig:         ^animation.Rig,
-  animator:    ^animation.Animator,
+  rig:         gltf.RigHandle,
   ik:          animation.LayerHandle,
   bones:       []u32,
   root:        [3]f32,
@@ -87,7 +86,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {800, 600}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   ground := world.spawn(&app.scene)
   render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))
@@ -98,10 +97,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.model = gltf.model_create(&app.renderer, #load("assets/spider_leg.glb"))
   app.leg = gltf.instance_create(&app.model, &app.scene, &app.renderer)
   if len(app.leg.skinned) == 0 do return .FAIL
-  rig := app.leg.skinned[0].rig
-  app.rig = &app.model.rigs[rig]
-  app.animator = &app.leg.animators[rig]
-  skel := &app.rig.skeleton
+  app.rig = app.leg.skinned[0].rig
+  rig := &app.model.rigs[app.rig]
+  skel := &rig.skeleton
   app.bones, _ = animation.bone_chain(skel, "root", "leg_tip")
   if len(app.bones) < 3 do return .FAIL
   base, _ := animation.rest_position(skel, "root")
@@ -113,7 +111,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     base = p
   }
   ik := animation.IKParams{target = tip, pole = app.root + {0, 0, app.reach}, pole_weight = 1, space = .WORLD}
-  app.ik = animation.layer_create(app.animator, app.rig, ik, app.bones)
+  app.ik = animation.layer_create(&app.leg.animators[app.rig], rig, ik, app.bones)
 
   focus := app.root + {0, app.reach * 0.5, 0}
   app.orbit = render.make_orbit(focus + {0, app.reach * 0.6, app.reach * 2.2}, focus)
@@ -147,7 +145,6 @@ update :: proc(app: ^App, dt: f32) {
   render.update(&app.renderer, dt)
 }
 
-// solve aims the IK layer for the chosen scenario, all positions in world space.
 solve :: proc(app: ^App, dt: f32) {
   if !app.paused do app.time += dt
   t := app.time
@@ -171,15 +168,16 @@ solve :: proc(app: ^App, dt: f32) {
   app.was_paused = app.paused
   if app.paused do target = app.manual
   target.y = max(target.y, 0.1)
-  limits := animation.bone_limits(app.animator)
+  animator := &app.leg.animators[app.rig]
+  limits := animation.bone_limits(animator)
   limit := app.limit_deg * math.RAD_PER_DEG
   for b in app.bones[1:] do limits[b] = animation.JointLimit{{limit, limit, limit}}
-  if ik, ok := animation.layer_params(app.animator, app.ik, animation.IKParams); ok {
+  if ik, ok := animation.layer_params(animator, app.ik, animation.IKParams); ok {
     ik.target, ik.pole = target, pole
     ik.pole_weight = app.pole_weight
     ik.iterations = int(app.iterations)
   }
-  animation.layer_fade(app.animator, app.ik, app.ik_weight)
+  animation.layer_fade(animator, app.ik, app.ik_weight)
   r := &app.renderer
   reachable := linalg.length(target - app.root) <= reach
   render.debug_sphere(r, app.root, reach, DIM)

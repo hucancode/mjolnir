@@ -26,8 +26,7 @@ App :: struct {
   time:           f32,
   fox_model:      gltf.Model,
   fox:            gltf.Instance,
-  rig:            ^animation.Rig,
-  animator:       ^animation.Animator,
+  rig:            gltf.RigHandle,
   target_cube:    world.NodeHandle,
   walk_layer:     animation.LayerHandle,
   run_layer:      animation.LayerHandle,
@@ -35,7 +34,6 @@ App :: struct {
   ik_layer:       animation.LayerHandle,
   walk_run_blend: f32,
   auto_mix:       bool,
-  blend_dir:      f32,
   survey_weight:  f32,
   ik_weight:      f32,
   target:         [3]f32,
@@ -46,7 +44,6 @@ main :: proc() {
   app := new(App)
   app.walk_run_blend = 0.5
   app.auto_mix = true
-  app.blend_dir = 1
   app.target = {0, 4, 5}
   if !platform.init(&app.platform, 800, 600, "Animation Layering") do return
   if !render.init(&app.renderer, app.platform.window) do return
@@ -79,7 +76,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {800, 600}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({3, 2, 3}, {0, 1, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
@@ -93,23 +90,23 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     log.error("Fox2.glb has no skinned mesh")
     return .FAIL
   }
-  rig := app.fox.skinned[0].rig
-  app.rig = &app.fox_model.rigs[rig]
-  app.animator = &app.fox.animators[rig]
+  app.rig = app.fox.skinned[0].rig
+  rig, animator := &app.fox_model.rigs[app.rig], &app.fox.animators[app.rig]
   app.walk_layer = clip_layer(app, "Walk", 1, weight = 1)
   app.run_layer = clip_layer(app, "Run", 1)
-  app.survey_layer = clip_layer(app, "Survey", 0.5, animation.bone_subtree(&app.rig.skeleton, "b_Spine01_02", context.temp_allocator))
-  if neck, ok := animation.bones_find(&app.rig.skeleton, {"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}, context.temp_allocator); ok {
+  app.survey_layer = clip_layer(app, "Survey", 0.5, animation.bone_subtree(&rig.skeleton, "b_Spine01_02", context.temp_allocator))
+  if neck, ok := animation.bones_find(&rig.skeleton, {"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}, context.temp_allocator); ok {
     ik := animation.IKParams{target = app.target, pole = IK_POLE, pole_weight = 1, space = .WORLD}
-    app.ik_layer = animation.layer_create(app.animator, app.rig, ik, neck, weight = 0)
+    app.ik_layer = animation.layer_create(animator, rig, ik, neck, weight = 0)
   }
   return .READY
 }
 
 clip_layer :: proc(app: ^App, name: string, speed: f32, bones: []u32 = nil, weight: f32 = 0) -> animation.LayerHandle {
-  clip, found := animation.clip_find(app.rig, name)
+  rig := &app.fox_model.rigs[app.rig]
+  clip, found := animation.clip_find(rig, name)
   if !found do return {}
-  return animation.layer_create(app.animator, app.rig, animation.ClipParams{clip = clip, speed = speed}, bones, weight)
+  return animation.layer_create(&app.fox.animators[app.rig], rig, animation.ClipParams{clip = clip, speed = speed}, bones, weight)
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -142,16 +139,18 @@ blend_layers :: proc(app: ^App) {
     app.survey_weight = 0.5 + 0.5 * math.sin(app.time * 0.7)
     app.ik_weight = 0.5 + 0.5 * math.sin(app.time * 0.45 + 2)
   }
-  animation.layer_fade(app.animator, app.survey_layer, app.survey_weight)
-  animation.layer_fade(app.animator, app.ik_layer, app.ik_weight)
-  if ik, ok := animation.layer_params(app.animator, app.ik_layer, animation.IKParams); ok {
+  animator := &app.fox.animators[app.rig]
+  animation.layer_fade(animator, app.survey_layer, app.survey_weight)
+  animation.layer_fade(animator, app.ik_layer, app.ik_weight)
+  if ik, ok := animation.layer_params(animator, app.ik_layer, animation.IKParams); ok {
     ik.target, ik.pole = app.target, IK_POLE
   }
 }
 
 set_walk_run :: proc(app: ^App) {
-  animation.layer_fade(app.animator, app.walk_layer, 1 - app.walk_run_blend)
-  animation.layer_fade(app.animator, app.run_layer, app.walk_run_blend)
+  animator := &app.fox.animators[app.rig]
+  animation.layer_fade(animator, app.walk_layer, 1 - app.walk_run_blend)
+  animation.layer_fade(animator, app.run_layer, app.walk_run_blend)
 }
 
 debug_ui :: proc(app: ^App) {

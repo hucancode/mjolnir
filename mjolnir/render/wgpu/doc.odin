@@ -4,9 +4,7 @@ package wgpu_backend
 
 // Layer 1: foundation
 
-// wgpu_backend is the WebGPU backend of render, on the desktop (wgpu-native, a GLFW
-// window) and on the web (the browser's WebGPU, a canvas) alike: it uses core WebGPU and WGSL
-// only. It changes when WebGPU does; it never imports render or platform and decides nothing.
+// It changes when WebGPU does; it never imports render or platform and decides nothing.
 // It is the graphics API behind rhi: rhi.odin is its half of rhi's contract (PROCS), the rest is
 // what that needs (PROCS, lifecycle included). Beside PROCS render takes only the names it
 // aliases in backend_glue.odin: Backend, FRAMES_IN_FLIGHT, RETIRE_GRACE and the slot counts that

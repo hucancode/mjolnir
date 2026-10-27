@@ -48,7 +48,7 @@ batch_join :: proc(self: ^Renderer, slot, mesh, material: u32) {
     self.batch_ids[key] = id
     write_table(self, .BATCHES, Batch)[id] = {mesh_id = mesh, material_id = material}
   }
-  self.batch_members[id] += 1
+  write_table(self, .BATCHES, Batch)[id].capacity += 1
   self.batch_stale = true
   write_table(self, .NODE_BATCH, u32)[slot] = id
   mark_dirty(self, .NODE_BATCH, int(slot))
@@ -63,10 +63,10 @@ batch_leave :: proc(self: ^Renderer, slot: u32) {
   if id == 0 do return
   node_batch[slot] = 0
   mark_dirty(self, .NODE_BATCH, int(slot))
-  self.batch_members[id] -= 1
-  self.batch_stale = true
-  if self.batch_members[id] > 0 do return
   entry := &write_table(self, .BATCHES, Batch)[id]
+  entry.capacity -= 1
+  self.batch_stale = true
+  if entry.capacity > 0 do return
   delete_key(&self.batch_ids, batch_key(entry.mesh_id, entry.material_id))
   entry^ = {}
   append(&self.batch_free, id)
@@ -77,7 +77,6 @@ batch_leave :: proc(self: ^Renderer, slot: u32) {
 batches_reset :: proc(self: ^Renderer) {
   clear(&self.batch_ids)
   clear(&self.batch_free)
-  self.batch_members = {}
   self.batch_high = 0
   self.batch_stale = false
   clear_entry(self, .BATCHES, 0, MAX_BATCHES)
@@ -93,8 +92,7 @@ batches_flush :: proc(self: ^Renderer) {
   first: u32
   for id in 1 ..< self.batch_high {
     entries[id].first_instance = first
-    entries[id].capacity = self.batch_members[id]
-    first += self.batch_members[id]
+    first += entries[id].capacity
   }
   mark_dirty(self, .BATCHES, 0, int(self.batch_high))
 }

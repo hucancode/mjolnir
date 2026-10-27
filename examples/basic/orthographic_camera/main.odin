@@ -57,7 +57,7 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   spawn_primitive(app, .CUBE,     .RED,    {-2.5, 0.5, 0})
   spawn_primitive(app, .SPHERE,   .GREEN,  {2.5, 0.5, 0},  0.7)
   spawn_primitive(app, .CYLINDER, .BLUE,   {0, 1.0, 2.5},  0.5)

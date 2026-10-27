@@ -1,6 +1,6 @@
 package render
 
-import "./rhi"
+import "rhi"
 
 // Shaders are compiled from one Slang source per shader (shader/*.slang) to the backend's form:
 // shader/<name>.spv (Vulkan) or shader/<name>.wgsl (wgpu); a build embeds only its own.

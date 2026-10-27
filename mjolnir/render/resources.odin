@@ -1,6 +1,7 @@
 package render
 
 import "core:log"
+import "core:slice"
 import "rhi"
 
 // The GPU resources render owns, all made through rhi: the table and mesh buffers the scene
@@ -122,7 +123,6 @@ SCENE_PASSES := [ScenePass]struct {
 @(private)
 TextureSlot :: enum {
   FLOAT,
-  UNFILTERABLE,
   DEPTH,
   CUBE,
   // the shadow atlas, whatever the key holds
@@ -228,7 +228,6 @@ resources_bind :: proc(self: ^Renderer) -> bool {
 @(private = "file")
 TEXTURE_SLOT_KINDS := [TextureSlot]rhi.BindKind {
   .FLOAT        = .TEXTURE_FLOAT,
-  .UNFILTERABLE = .TEXTURE_UNFILTERABLE,
   .DEPTH        = .TEXTURE_DEPTH,
   .CUBE         = .TEXTURE_CUBE,
   // bind groups are WebGPU's, whose atlas is one 2D texture of tiles (pass_shadow.odin)
@@ -264,25 +263,27 @@ scene_group_make :: proc(self: ^Renderer, f: int) -> bool {
 @(private)
 tables_sync :: proc(self: ^Renderer, f: u32) {
   for t in Table {
-    for &s in self.table_stale[t] do s |= self.dirty[t]
-    stale := &self.table_stale[t][f]
-    if stale^ == 0 do continue
+    for frame in self.table_stale[t] do for w, i in self.dirty[t] do frame[i] |= w
+    stale := self.table_stale[t][f]
     src := self.tables[t]
-    size := (len(src) + TABLE_REGIONS - 1) / TABLE_REGIONS
+    regions := (len(src) + TABLE_REGION_BYTES - 1) / TABLE_REGION_BYTES
     region := 0
-    for region < TABLE_REGIONS {
-      if stale^ & (1 << u64(region)) == 0 {
+    for region < regions {
+      if stale[region / 64] == 0 {
+        region = (region / 64 + 1) * 64
+        continue
+      }
+      if stale[region / 64] & (1 << u64(region % 64)) == 0 {
         region += 1
         continue
       }
       first := region
-      for region < TABLE_REGIONS && stale^ & (1 << u64(region)) != 0 do region += 1
-      // buffer writes take 4-byte multiples
-      lo := min(first * size, len(src)) &~ 3
-      hi := min((min(region * size, len(src)) + 3) &~ 3, len(src))
-      if hi > lo do dev.buffer_write(&self.gpu, self.buffers[SceneBuffer(t)][f], lo, src[lo:hi])
+      for region < regions && stale[region / 64] & (1 << u64(region % 64)) != 0 do region += 1
+      // a run of stale regions in one write; the table's end is a 4-byte multiple
+      lo, hi := first * TABLE_REGION_BYTES, min(region * TABLE_REGION_BYTES, len(src))
+      dev.buffer_write(&self.gpu, self.buffers[SceneBuffer(t)][f], lo, src[lo:hi])
     }
-    stale^ = 0
+    slice.zero(stale)
   }
 }
 
@@ -312,7 +313,7 @@ texture_bind :: proc(self: ^Renderer, cmd: rhi.CommandList, layout: TextureLayou
     for slot, i in slots {
       texture := key.textures[i]
       switch slot {
-      case .FLOAT, .UNFILTERABLE, .DEPTH:
+      case .FLOAT, .DEPTH:
         if texture == 0 do texture = self.white
       case .CUBE:
         if texture == 0 do texture = self.black_cube
@@ -352,17 +353,18 @@ groups_clear :: proc(self: ^Renderer) {
   clear(&self.lighting_output_groups)
 }
 
-// The layouts of a pipeline of `pass`: the scene set, then on a device without bindless the
-// textures (set 1) and the push group (set 2) and `extra`. The shaders' set numbers.
+// The layouts of a pipeline of `pass`: the scene set, then `user` (set 1, a shader of yours,
+// gpu.odin), else on a device without bindless the textures (set 1); there, the push group
+// (set 2) and `extra` follow. The shaders' set numbers.
 @(private)
-pipeline_layout :: proc(self: ^Renderer, pass: ScenePass, textures: TextureLayout = .NONE, extra: rhi.BindLayout = 0) -> rhi.PipelineLayoutDesc {
+pipeline_layout :: proc(self: ^Renderer, pass: ScenePass, textures: TextureLayout = .NONE, extra: rhi.BindLayout = 0, user: rhi.BindLayout = 0) -> rhi.PipelineLayoutDesc {
+  layouts := make([dynamic]rhi.BindLayout, context.temp_allocator)
   when BINDLESS {
-    layouts := make([]rhi.BindLayout, 1, context.temp_allocator)
-    layouts[0] = self.scene_layouts[.NONE]
-    return {layouts = layouts, push_size = PUSH_SIZE, bindless = true}
+    append(&layouts, self.scene_layouts[.NONE])
+    if user != 0 do append(&layouts, user)
+    return {layouts = layouts[:], push_size = PUSH_SIZE, bindless = true}
   } else {
-    layouts := make([dynamic]rhi.BindLayout, context.temp_allocator)
-    append(&layouts, self.scene_layouts[pass], self.texture_layouts[textures], rhi.PUSH_GROUP)
+    append(&layouts, self.scene_layouts[pass], user if user != 0 else self.texture_layouts[textures], rhi.PUSH_GROUP)
     if extra != 0 do append(&layouts, extra)
     return {layouts = layouts[:], push_size = PUSH_SIZE}
   }

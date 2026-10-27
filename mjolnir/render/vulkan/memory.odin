@@ -1,3 +1,4 @@
+#+private
 package vulkan_backend
 
 import vk "vendor:vulkan"
@@ -50,11 +51,6 @@ buffer_create :: proc(
   if buffer.memory.block == 0 do buffer.memory = memory_alloc(gctx, mem_reqs, properties, linear = true) or_return
   vk.BindBufferMemory(gctx.device, buffer.buffer, allocation_memory(gctx, buffer.memory), buffer.memory.offset) or_return
   return buffer, .SUCCESS
-}
-
-// buffer_info returns descriptor info covering the whole buffer.
-buffer_info :: proc(buffer: ^Buffer) -> vk.DescriptorBufferInfo {
-  return {buffer = buffer.buffer, range = buffer.size}
 }
 
 // buffer_destroy frees buffer and its memory immediately.

@@ -1,4 +1,5 @@
 // Skinned glTF playback.
+// Model: CesiumMan by Cesium (CC BY 4.0).
 package main
 
 import "core:log"

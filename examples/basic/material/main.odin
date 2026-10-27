@@ -53,7 +53,7 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {1000, 700}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   half := f32(GRID - 1) * 0.5 * SPACING
   app.orbit = render.make_orbit({0, 0, half * 2.4}, {0, 0, 0})

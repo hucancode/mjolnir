@@ -63,7 +63,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, r, {1000, 700}) do return .FAIL
   app.orbit = render.make_orbit({0, 3.5, 6.5}, {0, 1.4, 0})
   render.camera_orbit(render.main_camera(r), app.orbit)
-  // r.skybox_intensity = 0
 
   ring_shader, ring_ok := render.material_shader_create(r, #load("ring." + render.SHADER_EXT))
   field_shader, field_ok := render.material_shader_create(r, #load("field." + render.SHADER_EXT), blend = .NONE, cull = .NONE)

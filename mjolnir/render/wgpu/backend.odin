@@ -46,7 +46,7 @@ Backend :: struct {
   up, failed:                 bool,
   context_:                   runtime.Context,
   textures:                   []Texture,
-  samplers:                   [SamplerType]wgpu.Sampler,
+  samplers:                   [rhi.SamplerType]wgpu.Sampler,
   // the push group (pipeline.odin): its layout, group and the uniform ring
   frame_layout:               wgpu.BindGroupLayout,
   frame_group:                wgpu.BindGroup,

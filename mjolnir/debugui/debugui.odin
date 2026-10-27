@@ -7,7 +7,7 @@ import "core:math"
 import mu "vendor:microui"
 
 // Context is the debug UI: build widgets on its microui context (mu) between begin and end.
-// Widgets sit in a reference frame (1024x768 by default) that feed fits to the window.
+// Widgets sit in a reference frame (the window at init by default) that feed fits to the window.
 Context :: struct {
   mu:      mu.Context,
   using _: Context_State,
@@ -31,11 +31,12 @@ Context_State :: struct {
   commands: [dynamic]render.RenderCommand,
 }
 
-// init prepares the debug UI, laid out in a `reference` frame, and uploads its atlas to r. Call
-// it once render.ready, before render.setup if the application tears maps down, so the atlas
-// outlives render.teardown.
-init :: proc(self: ^Context, r: ^render.Renderer, reference := [2]f32{1024, 768}) -> bool {
+// init prepares the debug UI, laid out in a `reference` frame (the window's size by default,
+// render.window_size), and uploads its atlas to r. Call it once render.ready, before
+// render.setup if the application tears maps down, so the atlas outlives render.teardown.
+init :: proc(self: ^Context, r: ^render.Renderer, reference := [2]f32{}) -> bool {
   mu.init(&self.mu)
+  reference := reference if reference != {} else render.window_size(r)
   self.reference = reference
   self.frame = anchor.frame(reference, reference)
   self.mu.text_width = mu.default_atlas_text_width

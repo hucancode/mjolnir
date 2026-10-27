@@ -299,8 +299,6 @@ ColorTarget :: struct {
 
 DepthTarget :: struct {
   texture:   TextureHandle,
-  // first layer of a layered texture; PassDesc.layer_count layers from it
-  layer:     u32,
   load:      LoadOp,
   clear:     f32,
   store:     bool,
@@ -323,12 +321,6 @@ BindlessArray :: enum {
   DRAW_LISTS,
   // one u32 per depth pyramid slot: its groups done
   PYRAMID_COUNTERS,
-}
-
-// Frame is one frame slot: `index` picks the copy of per-frame resources (below the backend's
-// frames in flight).
-Frame :: struct {
-  index: u32,
 }
 
 // Procs is what a backend provides, over its device and window types. Each backend declares
@@ -376,7 +368,7 @@ Procs :: struct($Device: typeid, $Window: typeid) {
 
   // frame pacing: wait for the frame slot (its previous submissions are done, its per-frame
   // resources may be rewritten), acquire, record, submit, present
-  frame_wait:                    proc(d: ^Device) -> (Frame, bool),
+  frame_wait:                    proc(d: ^Device) -> bool,
   frame_begin:                   proc(d: ^Device, framebuffer_size: [2]u32) -> FrameStatus,
   submit:                        proc(d: ^Device, desc: SubmitDesc) -> SyncPoint,
   frame_present:                 proc(d: ^Device) -> FrameStatus,

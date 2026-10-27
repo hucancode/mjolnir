@@ -97,10 +97,10 @@ mesh_create :: proc(
 ) #optional_ok {
   defer geometry_destroy(geometry_data)
   guard(self)
-  handle = MeshHandle(containers.slots_alloc(&self.mesh_slots) or_return)
+  handle = MeshHandle(containers.slots_alloc(&self.slots[.MESHES]) or_return)
   if !upload_mesh(self, u32(handle), geometry_data) {
     log.errorf("Mesh %d upload failed", handle)
-    containers.slots_free(&self.mesh_slots, u32(handle))
+    containers.slots_free(&self.slots[.MESHES], u32(handle))
     return 0, false
   }
   return handle, true
@@ -110,7 +110,7 @@ mesh_create :: proc(
 // draw it.
 mesh_destroy :: proc(self: ^Renderer, handle: MeshHandle) {
   guard(self)
-  containers.slots_free(&self.mesh_slots, u32(handle))
+  containers.slots_free(&self.slots[.MESHES], u32(handle))
 }
 
 @(private)

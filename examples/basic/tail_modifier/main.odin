@@ -27,8 +27,7 @@ App :: struct {
   snake_model:     gltf.Model,
   snake:           gltf.Instance,
   snake_node:      world.NodeHandle,
-  rig:             ^animation.Rig,
-  animator:        ^animation.Animator,
+  rig:             gltf.RigHandle,
   tail:            animation.LayerHandle,
   head_bone:       u32,
   time:            f32,
@@ -82,7 +81,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer, {900, 700}) do return .FAIL
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 4, -4}, {0, 1, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   ground := world.spawn(&app.scene, {0, GROUND_Y, 0})
@@ -92,12 +91,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.snake = gltf.instance_create(&app.snake_model, &app.scene, &app.renderer)
   if len(app.snake.skinned) == 0 do return .FAIL
   app.snake_node = app.snake.skinned[0].node
-  rig := app.snake.skinned[0].rig
-  app.rig = &app.snake_model.rigs[rig]
-  app.animator = &app.snake.animators[rig]
-  skel := &app.rig.skeleton
+  app.rig = app.snake.skinned[0].rig
+  rig := &app.snake_model.rigs[app.rig]
+  skel := &rig.skeleton
   whole_body, _ := animation.bone_chain_down(skel, HEAD_BONE, u32(animation.bone_count(skel)), context.temp_allocator)
-  app.tail = animation.layer_create(app.animator, app.rig, tail_params(app), whole_body)
+  app.tail = animation.layer_create(&app.snake.animators[app.rig], rig, tail_params(app), whole_body)
   app.head_bone = animation.bone_find(skel, HEAD_BONE)
   return .READY
 }
@@ -131,7 +129,7 @@ move_snake :: proc(app: ^App, dt: f32) {
   } else {
     drag_head(app)
   }
-  if tail, ok := animation.layer_params(app.animator, app.tail, animation.TailParams); ok do tail^ = tail_params(app)
+  if tail, ok := animation.layer_params(&app.snake.animators[app.rig], app.tail, animation.TailParams); ok do tail^ = tail_params(app)
 }
 
 cursor_on_ground :: proc(app: ^App) -> (hit: [3]f32, ok: bool) {
@@ -144,7 +142,7 @@ cursor_on_ground :: proc(app: ^App) -> (hit: [3]f32, ok: bool) {
 drag_head :: proc(app: ^App) {
   if input.mouse_pressed(&app.input, .RIGHT) && !app.input.mouse_captured {
     node_world := world.world_matrix(&app.scene, app.snake_node)
-    head_world := node_world * animation.bone_matrix(app.animator, app.head_bone)
+    head_world := node_world * animation.bone_matrix(&app.snake.animators[app.rig], app.head_bone)
     app.dragging = true
     app.drag_height = world.node(&app.scene, app.snake_node).transform.position.y
     app.head_offset = head_world[3].xyz - node_world[3].xyz

@@ -9,6 +9,18 @@ PREFILTER_MIPS :: 5
 
 MAX_TEXTURES :: 1000
 
+// SamplerType names the samplers every device makes; shaders index them with these values as
+// literals (shader/common.slang).
+SamplerType :: enum u32 {
+  NEAREST_CLAMP,
+  LINEAR_CLAMP,
+  NEAREST_REPEAT,
+  LINEAR_REPEAT,
+  // bilinear depth comparison (2x2 PCF) for shadow maps: lit where the reference depth is at or
+  // in front of the stored one
+  SHADOW_COMPARE,
+}
+
 // A handle is the index of its texture in the bindless texture array; 0 is none.
 TextureHandle :: distinct u32
 

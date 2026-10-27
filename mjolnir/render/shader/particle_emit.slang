@@ -47,6 +47,7 @@ struct EmitterPlacement {
     uint emitter;
     uint node;
     uint emit_first;
+    uint burst;
 }
 
 SCENE_BUFFER(Node, nodes, 1, 0)

@@ -6,7 +6,7 @@ import "core:testing"
 
 // Casters with descending scores, owners 1..n.
 make_casters :: proc(n: int) -> (casters: [MAX_LIGHTS]Caster) {
-	for i in 0 ..< n do casters[i] = {light = i, owner = u32(i) + 1, score = f32(n - i)}
+	for i in 0 ..< n do casters[i] = {owner = u32(i) + 1, score = f32(n - i)}
 	return
 }
 
@@ -78,8 +78,8 @@ test_shadow_selection_grace_limited :: proc(t: ^testing.T) {
 	select_shadow_casters(casters[:12], &maps, 100)
 	// 12 brighter lights (owners 21..32) push owners 1..12 to ranks 13..24
 	next: [24]Caster
-	for i in 0 ..< 12 do next[i] = {light = i, owner = u32(i + 21), score = 100}
-	for i in 0 ..< 12 do next[12 + i] = {light = 12 + i, owner = u32(i) + 1, score = f32(12 - i)}
+	for i in 0 ..< 12 do next[i] = {owner = u32(i + 21), score = 100}
+	for i in 0 ..< 12 do next[12 + i] = {owner = u32(i) + 1, score = f32(12 - i)}
 	count := select_shadow_casters(next[:], &maps, 101)
 	testing.expect_value(t, count, MAX_SHADOW_MAPS)
 	grace := 0

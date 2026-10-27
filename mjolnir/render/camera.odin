@@ -52,18 +52,6 @@ CAMERA_LIST_CAPACITY :: MAX_SLOTS
 @(private)
 SHADOW_LIST_CAPACITY :: 4096 * MAX_SHADOW_VIEWS
 
-// What a draw-list slot holds. Compacted by multi-draw: a camera DRAW_LISTS lists, one per
-// material_list key, of CAMERA_LIST_CAPACITY draws, the shadow views one list. Batched: one list per view
-// (the shadow slot has a view per shadow map face), each of room for every node's instance.
-@(private)
-draw_list_shape :: proc(self: ^Renderer, shadow: bool) -> (lists, capacity: u32) {
-  when BINDLESS {
-    return 1 if shadow else DRAW_LISTS, SHADOW_LIST_CAPACITY if shadow else CAMERA_LIST_CAPACITY
-  } else {
-    return MAX_SHADOW_VIEWS if shadow else 1, MAX_SLOTS
-  }
-}
-
 // Camera is a view into the scene: pose and projection. Its images are camera_image's,
 // its size camera_resize's.
 Camera :: struct {
@@ -77,10 +65,13 @@ Camera :: struct {
 // What render keeps per camera beside the Camera: the images it renders into, at extent.
 @(private)
 CameraTargets :: struct {
-  extent:       [2]u32, // width, height
-  images:       [CameraImage][FRAMES_IN_FLIGHT]TextureHandle,
+  extent:        [2]u32, // width, height
+  images:        [CameraImage][FRAMES_IN_FLIGHT]TextureHandle,
+  // the depth pyramid of each frame, and whether its storage views are in the bindless array
+  pyramid:       [FRAMES_IN_FLIGHT]TextureHandle,
+  pyramid_bound: [FRAMES_IN_FLIGHT]bool,
   // first serial whose compute work may read depth and pyramids; until then no occlusion, no lists
-  ready_serial: u64,
+  ready_serial:  u64,
 }
 
 @(private)
@@ -182,11 +173,6 @@ camera_orbit :: proc(self: ^Camera, orbit: Orbit) {
   camera_look_at(self, position, orbit.target, {-sp * cy, cp, -sp * sy})
 }
 
-// camera_pose returns the camera's world position and rotation.
-camera_pose :: proc(self: ^Camera) -> (position: [3]f32, rotation: quaternion128) {
-  return self.position, self.rotation
-}
-
 // camera_forward returns the camera's world-space forward (-Z) axis.
 camera_forward :: proc(self: ^Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(self.rotation, [3]f32{0, 0, -1})
@@ -281,7 +267,7 @@ world_to_screen :: proc(self: ^Renderer, position: [3]f32) -> (point: [2]f32, ok
 
 // camera returns the camera of handle, or false if it is not live.
 camera :: proc(self: ^Renderer, handle: CameraHandle) -> (^Camera, bool) #optional_ok {
-  if !containers.slots_live(&self.camera_slots, u32(handle)) do return nil, false
+  if !containers.slots_live(&self.slots[.CAMERAS], u32(handle)) do return nil, false
   return &self.cameras[handle], true
 }
 
@@ -305,16 +291,15 @@ camera_create :: proc(
   handle: CameraHandle,
   ok: bool,
 ) #optional_ok {
-  handle = CameraHandle(containers.slots_alloc(&self.camera_slots) or_return)
+  handle = CameraHandle(containers.slots_alloc(&self.slots[.CAMERAS]) or_return)
   cam := &self.cameras[handle]
   cam^ = {}
   self.camera_targets[handle] = {extent = {width, height}}
   camera_set_perspective(cam, fov, near, far)
   camera_look_at(cam, position, target)
   // the lists' size does not depend on the camera's extent
-  lists, capacity := draw_list_shape(self, shadow = false)
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    if !draw_list_create(self, camera_slot(u32(handle)) + frame, lists, capacity) {
+    if !draw_list_create(self, camera_slot(u32(handle)) + frame, shadow = false) {
       camera_destroy(self, handle)
       return 0, false
     }
@@ -332,7 +317,7 @@ camera_destroy :: proc(self: ^Renderer, handle: CameraHandle) {
   if cam == nil do return
   destroy_targets(self, u32(handle))
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) do draw_list_destroy(self, camera_slot(u32(handle)) + frame)
-  containers.slots_free(&self.camera_slots, u32(handle))
+  containers.slots_free(&self.slots[.CAMERAS], u32(handle))
   if handle == self.main_camera do self.main_camera = 0
 }
 
@@ -431,12 +416,9 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
     mip_levels = mips,
     shared     = true,
   }
-  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    slot := camera_slot(index) + frame
-    self.pyramids[slot] = allocate_texture(self, pyramid, target = true) or_return
-    // its storage views enter the bindless array at the slot's next frame (pyramids_bind)
-    self.pyramid_bound[slot] = false
-  }
+  // its storage views enter the bindless array at the slot's next frame (pyramids_bind)
+  targets.pyramid_bound = {}
+  for &p in targets.pyramid do p = allocate_texture(self, pyramid, target = true) or_return
   targets.ready_serial = dev.frame_serial(&self.gpu) + 1
   return true
 }
@@ -445,13 +427,8 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
 destroy_targets :: proc(self: ^Renderer, index: u32) {
   targets := &self.camera_targets[index]
   for frames in targets.images do for handle in frames do texture_destroy(self, handle)
-  targets.images = {}
+  for handle in targets.pyramid do texture_destroy(self, handle)
+  targets.images, targets.pyramid, targets.pyramid_bound = {}, {}, {}
   cull_groups_clear(self)
-  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    slot := camera_slot(index) + frame
-    self.pyramid_bound[slot] = false
-    texture_destroy(self, self.pyramids[slot])
-    self.pyramids[slot] = 0
-  }
 }
 

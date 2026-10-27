@@ -24,11 +24,6 @@ MATERIAL_PASS_TYPES := [MaterialPass][2]MaterialType {
   .FORWARD = {FIRST_FORWARD_TYPE, .CUSTOM},
 }
 
-// the draw list keys (material_list) of the built-in types and then the custom shaders
-@(private = "file")
-MATERIAL_LISTS := [DRAW_LISTS]u32{0, 1, 2, 3, 4, 5, 6, 7}
-#assert(DRAW_LISTS == 8)
-
 // The formats a material pass draws into, for the pipelines of anything drawn in it.
 @(private)
 material_pass_formats :: proc(pass: MaterialPass) -> []TextureFormat {
@@ -50,7 +45,7 @@ material_pass_depth :: proc(pass: MaterialPass, opaque := false) -> rhi.DepthSta
 // The vertex stream of mesh draws: the vertex, then on a device that cannot tag draws with a
 // first instance (WebGPU) the node index of the draw, one per instance, from a draw list.
 @(private)
-mesh_vertex_streams :: proc(self: ^Renderer, position_only := false) -> []rhi.VertexBuffer {
+mesh_vertex_streams :: proc(position_only := false) -> []rhi.VertexBuffer {
   @(static) all := [?]rhi.VertexAttribute {
     {location = 0, format = .F32X3, offset = u32(offset_of(Vertex, position))},
     {location = 1, format = .F32X3, offset = u32(offset_of(Vertex, normal))},
@@ -82,7 +77,7 @@ material_init :: proc(self: ^Renderer) -> bool {
       desc := rhi.GraphicsPipelineDesc {
         shader        = sources[type],
         layout        = pipeline_layout(self, .MESH, .MATERIAL),
-        vertex        = mesh_vertex_streams(self),
+        vertex        = mesh_vertex_streams(),
         topology      = .LINE_LIST if type == .WIREFRAME && !BINDLESS else .TRIANGLE_LIST,
         cull          = cull[type],
         color_formats = material_pass_formats(pass),
@@ -114,17 +109,19 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
   types := MATERIAL_PASS_TYPES[pass]
   keys := make([dynamic]u32, context.temp_allocator)
   pipelines := make([dynamic]rhi.Pipeline, context.temp_allocator)
-  append(&keys, ..MATERIAL_LISTS[types[0]:types[1]])
+  // a type's draw list key (material_list) is the type; custom shader i's is CUSTOM + i
+  for t in types[0] ..< types[1] do append(&keys, u32(t))
   append(&pipelines, ..self.material_pipelines[pass][int(types[0]):int(types[1])])
   if pass == .FORWARD {
     for p, i in self.custom_material_pipelines {
       if p == 0 do continue
-      append(&keys, MATERIAL_LISTS[int(MaterialType.CUSTOM) + i])
+      append(&keys, u32(MaterialType.CUSTOM) + u32(i))
       append(&pipelines, p)
     }
   }
-  push := MeshPush{cam}
-  pipeline_bind(self, cmd, pipelines[0], .MESH, f, &push, .MATERIAL)
+  // every mesh draw reads the camera it draws for
+  camera_index := cam
+  pipeline_bind(self, cmd, pipelines[0], .MESH, f, &camera_index, .MATERIAL)
   when BINDLESS {
     ready, slot := camera_ready(self, cam), camera_slot(cam) + f
   } else {
@@ -135,10 +132,4 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
     draw_list_draw(self, cmd, slot, 0, keys[:], pipelines[:], f)
   }
   dev.cmd_end_pass(&self.gpu, cmd)
-}
-
-// What every mesh draw reads besides the scene: the camera it draws for.
-@(private = "file")
-MeshPush :: struct {
-  camera_index: u32,
 }

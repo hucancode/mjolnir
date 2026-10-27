@@ -1,3 +1,4 @@
+#+private
 package wgpu_backend
 
 import rhi "../rhi"
@@ -46,19 +47,8 @@ USAGES := [rhi.TextureUsage]wgpu.TextureUsageFlags {
   .STORAGE      = {.StorageBinding},
 }
 
-// Shaders name the samplers by these (shader/common.slang binds them in group 2).
-@(private)
-SamplerType :: enum u32 {
-  NEAREST_CLAMP,
-  LINEAR_CLAMP,
-  NEAREST_REPEAT,
-  LINEAR_REPEAT,
-  // bilinear depth comparison (2x2 PCF) for shadow maps
-  SHADOW_COMPARE,
-}
-
 @(private = "file")
-SAMPLERS := [SamplerType]struct {
+SAMPLERS := [rhi.SamplerType]struct {
   filter:  wgpu.FilterMode,
   address: wgpu.AddressMode,
   compare: wgpu.CompareFunction,

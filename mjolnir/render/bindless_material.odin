@@ -1,6 +1,5 @@
 package render
 
-import "../containers"
 
 // bit t set for every G-buffer type t; views mask material types in a u32
 #assert(len(MaterialType) <= 32)
@@ -46,9 +45,7 @@ Material :: struct {
 // material returns the material of `handle`, to edit in place; the pointer is valid for
 // this tick: getting it marks the data for upload, so get it again next tick.
 material :: proc(self: ^Renderer, handle: MaterialHandle) -> (^Material, bool) #optional_ok {
-  if !containers.slots_live(&self.material_slots, u32(handle)) do return nil, false
-  mark_dirty(self, .MATERIALS, int(handle))
-  return &write_table(self, .MATERIALS, Material)[handle], true
+  return resource(self, .MATERIALS, Material, u32(handle))
 }
 
 // make_material returns a Material for material_create. type picks how it draws: .SPRITE
@@ -93,12 +90,9 @@ make_material :: proc(
 // material_create stores `m` (make_material fills one); it lives until material_destroy or
 // teardown. A sprite sheet of 0 columns or rows counts as 1.
 material_create :: proc(self: ^Renderer, m: Material) -> (handle: MaterialHandle, ok: bool) #optional_ok {
-  guard(self)
-  handle = MaterialHandle(containers.slots_alloc(&self.material_slots) or_return)
-  material(self, handle)^ = m
-  material(self, handle).frame_columns = max(m.frame_columns, 1)
-  material(self, handle).frame_rows = max(m.frame_rows, 1)
-  return handle, true
+  m := m
+  m.frame_columns, m.frame_rows = max(m.frame_columns, 1), max(m.frame_rows, 1)
+  return MaterialHandle(resource_create(self, .MATERIALS, m) or_return), true
 }
 
 // set_sprite_frame shows cell `frame` (row-major, wrapped to the sheet size) of a sprite
@@ -112,8 +106,7 @@ set_sprite_frame :: proc(self: ^Renderer, handle: MaterialHandle, frame: u32) ->
 
 // material_destroy frees the material; a stale handle is ignored.
 material_destroy :: proc(self: ^Renderer, handle: MaterialHandle) {
-  guard(self)
-  if containers.slots_free(&self.material_slots, u32(handle)) do clear_entry(self, .MATERIALS, u32(handle))
+  resource_destroy(self, .MATERIALS, u32(handle))
 }
 
 // primitive returns a builtin mesh (builtin_meshes) ready to attach, drawn with either

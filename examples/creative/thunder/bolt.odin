@@ -76,9 +76,9 @@ BoltInstance :: struct {
 }
 
 Phase :: enum {
-  Anticipation,
-  Main,
-  Overshoot,
+  ANTICIPATION,
+  MAIN,
+  OVERSHOOT,
 }
 
 Queued :: struct {
@@ -220,13 +220,13 @@ rage_begin :: proc(s: ^Storm) {
   main_at := s.time + (ANTICIPATION_PERIOD if antic > 0 else 0)
   for i in 0 ..< antic {
     f := f32(i) / f32(max(antic - 1, 1)) if antic > 1 else 0
-    append(&s.queue, Queued{s.time + math.pow(f, 1.737) * ANTICIPATION_PERIOD, .Anticipation})
+    append(&s.queue, Queued{s.time + math.pow(f, 1.737) * ANTICIPATION_PERIOD, .ANTICIPATION})
   }
-  append(&s.queue, Queued{main_at, .Main})
+  append(&s.queue, Queued{main_at, .MAIN})
   start := main_at + RAGE_OVERSHOOT_GAP
   for i in 0 ..< over {
     f := f32(i) / f32(max(over - 1, 1)) if over > 1 else 0
-    append(&s.queue, Queued{start + f * OVERSHOOT_PERIOD, .Overshoot})
+    append(&s.queue, Queued{start + f * OVERSHOOT_PERIOD, .OVERSHOOT})
   }
   s.rage_end = start + (OVERSHOOT_PERIOD if over > 0 else 0) + RAGE_AFTERGLOW
 }
@@ -235,11 +235,11 @@ rage_strike :: proc(s: ^Storm, phase: Phase) {
   a := rand.float32() * math.TAU
   at := [3]f32{math.sin(a) * 2, 0, math.cos(a) * 2}
   switch phase {
-  case .Anticipation:
+  case .ANTICIPATION:
     strike(s, at, 0.7 * RAGE_SMALL_FACTOR, true, false, RAGE_SMALL_FACTOR, RAGE_SMALL_RESTRIKE_FACTOR)
-  case .Main:
+  case .MAIN:
     strike(s, at, 8, true, true)
-  case .Overshoot:
+  case .OVERSHOOT:
     strike(s, at, 0.7 + rand.float32() * 0.7, true)
   }
 }

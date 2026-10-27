@@ -38,10 +38,6 @@ struct LightingPush {
     float ibl_intensity;
     // view of the sun's first shadow cascade, 0 for none
     uint sun_shadow_map;
-    uint _pad0;
-    // color * intensity, 0 when off, and the direction towards the sun
-    float4 sun_radiance;
-    float4 sun_direction;
 }
 PUSH_BLOCK(LightingPush, lighting_push)
 
@@ -368,9 +364,10 @@ float3 direct_light(LightPlacement placed, Surface s)
 // The sun, shadowed.
 float3 sun_light(Surface s)
 {
-    float3 l = lighting_push.sun_direction.xyz;
+    View camera = views[lighting_push.camera_index];
+    float3 l = camera.sun_direction.xyz;
     if (dot(s.normal, l) <= 0.0) return float3(0.0);
-    return brdf(l, lighting_push.sun_radiance.rgb, s) * sun_shadow(s.position, s.geometric, l);
+    return brdf(l, camera.sun_radiance.rgb, s) * sun_shadow(s.position, s.geometric, l);
 }
 
 float prefilter_max_lod()
@@ -527,7 +524,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 group : SV_GroupID, uint local 
     float3 color = camera_image(camera, IMAGE_EMISSIVE, pixel).rgb;
     color += ambient_light(lighting_push.ibl_intensity, raw_normal, s, mr.g);
     s.roughness = clamp(mr.g, 0.08, 1.0);
-    if (any(lighting_push.sun_radiance.rgb > float3(0.0))) color += sun_light(s);
+    if (any(camera.sun_radiance.rgb > float3(0.0))) color += sun_light(s);
     uint listed = tile_light_count.load();
     for (uint i = 0; i < listed; i++) {
         color += direct_light(placements[tile_lights[i]], s);

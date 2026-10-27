@@ -1,46 +1,45 @@
+#+private
 package vulkan_backend
+
+import rhi "../rhi"
 
 import vk "vendor:vulkan"
 
-// BLEND_OVERRIDE writes color with no blending.
-BLEND_OVERRIDE := vk.PipelineColorBlendAttachmentState {
-  colorWriteMask = {.R, .G, .B, .A},
-}
-
-// BLEND_ALPHA is standard source-alpha blending.
-BLEND_ALPHA := vk.PipelineColorBlendAttachmentState {
-  blendEnable         = true,
-  srcColorBlendFactor = .SRC_ALPHA,
-  dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
-  colorBlendOp        = .ADD,
-  srcAlphaBlendFactor = .SRC_ALPHA,
-  dstAlphaBlendFactor = .ONE_MINUS_SRC_ALPHA,
-  alphaBlendOp        = .ADD,
-  colorWriteMask      = {.R, .G, .B, .A},
-}
-
-// BLEND_ADDITIVE adds source color to the target.
-BLEND_ADDITIVE := vk.PipelineColorBlendAttachmentState {
-  blendEnable         = true,
-  srcColorBlendFactor = .ONE,
-  dstColorBlendFactor = .ONE,
-  colorBlendOp        = .ADD,
-  srcAlphaBlendFactor = .ONE,
-  dstAlphaBlendFactor = .ONE,
-  alphaBlendOp        = .ADD,
-  colorWriteMask      = {.R, .G, .B, .A},
-}
-
-// BLEND_MAX keeps the brighter of the source and the target per channel.
-BLEND_MAX := vk.PipelineColorBlendAttachmentState {
-  blendEnable         = true,
-  srcColorBlendFactor = .ONE,
-  dstColorBlendFactor = .ONE,
-  colorBlendOp        = .MAX,
-  srcAlphaBlendFactor = .ONE,
-  dstAlphaBlendFactor = .ONE,
-  alphaBlendOp        = .MAX,
-  colorWriteMask      = {.R, .G, .B, .A},
+// The color blend of each rhi.BlendMode. MAX keeps the brighter of the source and the target
+// per channel.
+@(private)
+BLENDS := [rhi.BlendMode]vk.PipelineColorBlendAttachmentState {
+  .NONE     = {colorWriteMask = {.R, .G, .B, .A}},
+  .ALPHA    = {
+    blendEnable         = true,
+    srcColorBlendFactor = .SRC_ALPHA,
+    dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
+    colorBlendOp        = .ADD,
+    srcAlphaBlendFactor = .SRC_ALPHA,
+    dstAlphaBlendFactor = .ONE_MINUS_SRC_ALPHA,
+    alphaBlendOp        = .ADD,
+    colorWriteMask      = {.R, .G, .B, .A},
+  },
+  .ADDITIVE = {
+    blendEnable         = true,
+    srcColorBlendFactor = .ONE,
+    dstColorBlendFactor = .ONE,
+    colorBlendOp        = .ADD,
+    srcAlphaBlendFactor = .ONE,
+    dstAlphaBlendFactor = .ONE,
+    alphaBlendOp        = .ADD,
+    colorWriteMask      = {.R, .G, .B, .A},
+  },
+  .MAX      = {
+    blendEnable         = true,
+    srcColorBlendFactor = .ONE,
+    dstColorBlendFactor = .ONE,
+    colorBlendOp        = .MAX,
+    srcAlphaBlendFactor = .ONE,
+    dstAlphaBlendFactor = .ONE,
+    alphaBlendOp        = .MAX,
+    colorWriteMask      = {.R, .G, .B, .A},
+  },
 }
 
 // begin_record begins command_buffer, fresh or of a pool reset since, one-time submit by default.
@@ -51,42 +50,6 @@ begin_record :: proc(
   return vk.BeginCommandBuffer(
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = flags},
-  )
-}
-
-// allocate_descriptor_set allocates one set of layout from the context pool.
-allocate_descriptor_set :: proc(
-  gctx: ^GPUContext,
-  ret: ^vk.DescriptorSet,
-  layout: ^vk.DescriptorSetLayout,
-) -> vk.Result {
-  return vk.AllocateDescriptorSets(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = layout,
-    },
-    ret,
-  )
-}
-
-// allocate_command_buffer allocates primary command buffers from pool.
-allocate_command_buffer :: proc(
-  gctx: ^GPUContext,
-  out_commands: []vk.CommandBuffer,
-  pool: vk.CommandPool,
-) -> vk.Result {
-  return vk.AllocateCommandBuffers(
-    gctx.device,
-    &vk.CommandBufferAllocateInfo {
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = pool,
-      level = .PRIMARY,
-      commandBufferCount = u32(len(out_commands)),
-    },
-    raw_data(out_commands),
   )
 }
 
@@ -180,14 +143,6 @@ ImageDiscard :: struct {
   stage:  vk.PipelineStageFlags2,
 }
 
-// attachment_discard returns the ImageDiscard of an image about to be written whole: a color one
-// as an attachment or a storage image (compute), a depth one as an attachment.
-attachment_discard :: proc(img: ^Image) -> ImageDiscard {
-  aspect := infer_aspect_mask(img.format)
-  if .COLOR in aspect do return {img.image, aspect, {.COLOR_ATTACHMENT_WRITE, .SHADER_STORAGE_WRITE}, {.COLOR_ATTACHMENT_OUTPUT, .COMPUTE_SHADER}}
-  return {img.image, aspect, {.DEPTH_STENCIL_ATTACHMENT_WRITE}, {.EARLY_FRAGMENT_TESTS}}
-}
-
 // image_discard_barrier records every discard in one dependency.
 image_discard_barrier :: proc(command_buffer: vk.CommandBuffer, discards: ..ImageDiscard) {
   dep := vk.DependencyInfo{sType = .DEPENDENCY_INFO}
@@ -221,29 +176,6 @@ image_discards_fill :: proc(dep: ^vk.DependencyInfo, discards: []ImageDiscard) {
   dep.pImageMemoryBarriers = raw_data(barriers)
 }
 
-// present_barrier moves a swapchain image from GENERAL to PRESENT_SRC, the one layout
-// transition unified image layouts do not cover.
-present_barrier :: proc(command_buffer: vk.CommandBuffer, image: vk.Image) {
-  barrier := vk.ImageMemoryBarrier2 {
-    sType = .IMAGE_MEMORY_BARRIER_2,
-    srcStageMask = {.COLOR_ATTACHMENT_OUTPUT},
-    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-    dstStageMask = {.BOTTOM_OF_PIPE},
-    oldLayout = .GENERAL,
-    newLayout = .PRESENT_SRC_KHR,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = image,
-    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
-  }
-  dep := vk.DependencyInfo {
-    sType                   = .DEPENDENCY_INFO,
-    imageMemoryBarrierCount = 1,
-    pImageMemoryBarriers    = &barrier,
-  }
-  vk.CmdPipelineBarrier2(command_buffer, &dep)
-}
-
 // memory_barrier records a global memory dependency between the given stages and accesses.
 memory_barrier :: proc(
   command_buffer: vk.CommandBuffer,
@@ -265,61 +197,4 @@ memory_barrier :: proc(
     pMemoryBarriers    = &barrier,
   }
   vk.CmdPipelineBarrier2(command_buffer, &dep)
-}
-
-// create_color_attachment describes a color attachment for begin_rendering.
-create_color_attachment :: proc(
-  view: vk.ImageView,
-  load_op: vk.AttachmentLoadOp = .CLEAR,
-  store_op: vk.AttachmentStoreOp = .STORE,
-  clear_color: [4]f32 = {0.0, 0.0, 0.0, 1.0},
-) -> vk.RenderingAttachmentInfo {
-  return vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = view,
-    imageLayout = .GENERAL,
-    loadOp = load_op,
-    storeOp = store_op,
-    clearValue = {color = {float32 = clear_color}},
-  }
-}
-
-// create_depth_attachment describes a depth attachment for begin_rendering.
-create_depth_attachment :: proc(
-  view: vk.ImageView,
-  load_op: vk.AttachmentLoadOp = .CLEAR,
-  store_op: vk.AttachmentStoreOp = .STORE,
-  clear_depth: f32 = 1.0,
-) -> vk.RenderingAttachmentInfo {
-  return vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = view,
-    imageLayout = .GENERAL,
-    loadOp = load_op,
-    storeOp = store_op,
-    clearValue = {depthStencil = {depth = clear_depth}},
-  }
-}
-
-// begin_rendering begins a dynamic rendering scope over extent, with viewport and scissor covering it.
-begin_rendering :: proc(
-  command_buffer: vk.CommandBuffer,
-  extent: vk.Extent2D,
-  depth_attachment: Maybe(vk.RenderingAttachmentInfo),
-  color_attachments: ..vk.RenderingAttachmentInfo,
-  layer_count: u32 = 1,
-) {
-  depth, has_depth := depth_attachment.?
-  render_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = extent},
-    layerCount = layer_count,
-    pDepthAttachment = &depth if has_depth else nil,
-    colorAttachmentCount = u32(len(color_attachments)),
-    pColorAttachments = raw_data(color_attachments),
-  }
-  vk.CmdBeginRendering(command_buffer, &render_info)
-  viewport := vk.Viewport{width = f32(extent.width), height = f32(extent.height), maxDepth = 1}
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &render_info.renderArea)
 }

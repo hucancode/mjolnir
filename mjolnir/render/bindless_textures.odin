@@ -16,7 +16,7 @@ MAX_RENDER_TARGETS :: 256
 
 @(private)
 texture_pool :: proc(self: ^Renderer, handle: TextureHandle) -> ^containers.Slots {
-  return &self.target_slots if handle < MAX_RENDER_TARGETS else &self.texture_slots
+  return &self.slots[.TARGETS] if handle < MAX_RENDER_TARGETS else &self.slots[.TEXTURES]
 }
 
 @(private)
@@ -29,7 +29,7 @@ calculate_mip_levels :: proc(width, height: u32) -> u32 {
 @(private)
 allocate_texture :: proc(self: ^Renderer, desc: TextureDesc, data: []u8 = nil, target := false) -> (handle: TextureHandle, ok: bool) {
   guard(self)
-  pool := &self.target_slots if target else &self.texture_slots
+  pool := &self.slots[.TARGETS] if target else &self.slots[.TEXTURES]
   h := containers.slots_alloc(pool) or_return
   if !dev.texture_create(&self.gpu, TextureHandle(h), desc, data) {
     containers.slots_free(pool, h)
@@ -43,6 +43,7 @@ allocate_texture :: proc(self: ^Renderer, desc: TextureDesc, data: []u8 = nil, t
 texture_destroy :: proc(self: ^Renderer, handle: TextureHandle) {
   guard(self)
   containers.slots_free(texture_pool(self, handle), u32(handle))
+  delete_key(&self.storage_formats, handle)
 }
 
 // NO_TEXTURE is the TextureHandle of none, as materials, emitters and draw2d commands hold it.

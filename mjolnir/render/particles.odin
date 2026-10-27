@@ -6,13 +6,6 @@ MAX_EMITTERS :: 64
 @(private)
 MAX_FORCE_FIELDS :: 32
 
-@(private)
-particles_reset :: proc(self: ^Renderer) -> bool {
-  self.particle_params.emit_cursor = 0
-  self.particle_params.emit_total = 0
-  return particles_gpu_reset(self)
-}
-
 // Emitter spawns particles from every slot it is attached to: emission_rate per second (0
 // pauses it), each living particle_lifetime seconds and blending from the *_start values to the
 // *_end ones. size_* is a particle's side in pixels seen from 1 unit away, shrinking with
@@ -51,13 +44,15 @@ Burst :: struct {
   row:     u32,
 }
 
-// Where an emitter is attached. The emit pass reads the frame's new particles in placement
-// order: placement i takes [emit_first, the next placement's emit_first).
+// Where an emitter is attached, or a burst's row for one frame (`burst` particles, 0 for an
+// attachment). The emit pass reads the frame's new particles in placement order: placement i
+// takes [emit_first, the next placement's emit_first).
 @(private)
 EmitterPlacement :: struct {
   emitter:    EmitterHandle,
   node:       u32,
   emit_first: u32,
+  burst:      u32,
 }
 
 // ForceField pulls particles toward every slot it is attached to (push them with a negative
@@ -79,7 +74,7 @@ ForceFieldPlacement :: struct {
 
 // emitter_create stores `e`; attach places it at slots. It lives until emitter_destroy or teardown.
 emitter_create :: proc(self: ^Renderer, e: Emitter) -> (handle: EmitterHandle, ok: bool) #optional_ok {
-  i := resource_create(self, &self.emitter_slots, .EMITTERS, e) or_return
+  i := resource_create(self, .EMITTERS, e) or_return
   return EmitterHandle(i), true
 }
 
@@ -87,37 +82,38 @@ emitter_create :: proc(self: ^Renderer, e: Emitter) -> (handle: EmitterHandle, o
 // follows. The pointer is valid for this tick: getting it marks the data for upload, so get
 // it again next tick.
 emitter :: proc(self: ^Renderer, handle: EmitterHandle) -> (^Emitter, bool) #optional_ok {
-  return resource(self, &self.emitter_slots, .EMITTERS, Emitter, u32(handle))
+  return resource(self, .EMITTERS, Emitter, u32(handle))
 }
 
 // emit spawns count particles of emitter once, from slot's transform, on the next frame,
 // whatever its emission_rate (an emitter whose rate is 0 only bursts). A slot removed before
 // then emits nothing.
 emit :: proc(self: ^Renderer, emitter: EmitterHandle, slot: SlotHandle, count: u32) {
+  if count == 0 do return
   guard(self)
   append(&self.bursts, Burst{emitter = emitter, slot = u32(slot), count = count})
 }
 
 // emitter_destroy frees the emitter; slots it stays attached to emit nothing.
 emitter_destroy :: proc(self: ^Renderer, handle: EmitterHandle) {
-  resource_destroy(self, &self.emitter_slots, .EMITTERS, u32(handle))
+  resource_destroy(self, .EMITTERS, u32(handle))
 }
 
 // force_field_create stores `f`; attach places it at slots. It lives until force_field_destroy or teardown.
 force_field_create :: proc(self: ^Renderer, f: ForceField) -> (handle: ForceFieldHandle, ok: bool) #optional_ok {
-  i := resource_create(self, &self.force_field_slots, .FORCE_FIELDS, f) or_return
+  i := resource_create(self, .FORCE_FIELDS, f) or_return
   return ForceFieldHandle(i), true
 }
 
 // force_field returns the force field of `handle`, to edit in place; the pointer is valid for
 // this tick: getting it marks the data for upload, so get it again next tick.
 force_field :: proc(self: ^Renderer, handle: ForceFieldHandle) -> (^ForceField, bool) #optional_ok {
-  return resource(self, &self.force_field_slots, .FORCE_FIELDS, ForceField, u32(handle))
+  return resource(self, .FORCE_FIELDS, ForceField, u32(handle))
 }
 
 // force_field_destroy frees the force field; slots it stays attached to pull nothing.
 force_field_destroy :: proc(self: ^Renderer, handle: ForceFieldHandle) {
-  resource_destroy(self, &self.force_field_slots, .FORCE_FIELDS, u32(handle))
+  resource_destroy(self, .FORCE_FIELDS, u32(handle))
 }
 
 // make_emitter returns an Emitter for emitter_create.

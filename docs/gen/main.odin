@@ -35,10 +35,10 @@ Pkg :: struct {
 Example :: struct {
 	name:     string,
 	category: string, // the examples/<category> folder it lives in
-	desc:   string,
-	source: string,
-	video:  bool,
-	wasm:   bool, // a WebGPU build exists at live/<name>.wasm
+	desc:     string,
+	source:   string,
+	video:    bool,
+	wasm:     bool, // a WebGPU build exists at live/<name>.wasm
 }
 
 // raw symbol straight out of `odin doc`, its doc still in lines
@@ -119,18 +119,24 @@ parse_doc :: proc(text: string) -> (doc: [dynamic]string, sections: [dynamic]Raw
 	return
 }
 
+// Every directory under mjolnir holding .odin files.
 package_dirs :: proc() -> []string {
-	seen: map[string]struct{}
 	dirs: [dynamic]string
-	for f in strings.split_lines(run("git", "ls-files", "mjolnir")) {
-		if !strings.has_suffix(f, ".odin") {continue}
-		d, _ := filepath.split(f)
-		d = strings.trim_right(d, "/")
-		if d not_in seen {
-			seen[d] = {}
-			append(&dirs, d)
+	walk :: proc(dir: string, dirs: ^[dynamic]string) {
+		infos, err := os.read_all_directory_by_path(dir, context.allocator)
+		if err != nil {die("cannot list %s: %v", dir, err)}
+		has_source := false
+		for fi in infos {
+			if fi.type == .Directory {
+				sub, _ := filepath.join({dir, fi.name})
+				walk(sub, dirs)
+			} else if strings.has_suffix(fi.name, ".odin") {
+				has_source = true
+			}
 		}
+		if has_source {append(dirs, dir)}
 	}
+	walk("mjolnir", &dirs)
 	slice.sort(dirs[:])
 	return dirs[:]
 }
@@ -143,7 +149,7 @@ drop_private_using :: proc(sig: string) -> string {
 		start := strings.index(sig, "using _: ")
 		if start < 0 do return sig
 		end := start + len("using _: ")
-		for end < len(sig) && (sig[end] == '_' || (sig[end] >= '0' && sig[end] <= '9') || (sig[end] | 0x20 >= 'a' && sig[end] | 0x20 <= 'z')) {end += 1}
+		for end < len(sig) && is_ident(sig[end:end + 1]) {end += 1}
 		if strings.has_prefix(sig[end:], ", ") {
 			end += 2
 		} else if start >= 2 && sig[start - 2:start] == ", " {
@@ -302,48 +308,43 @@ expand_reexport :: proc(sig: string) -> string {
 	return strings.concatenate({sig[:end], definition})
 }
 
-// The examples with their web builds, `<name>.wasm` in wasm_dir.
+// The examples with their web builds, `<name>.wasm` in wasm_dir: basic, creative, interactive,
+// cube first as the hello world, the rest alphabetical.
 load_examples :: proc(wasm_dir: string) -> []Example {
 	categories, err := os.read_all_directory_by_path("examples", context.allocator)
 	if err != nil {die("cannot list examples: %v", err)}
 	out: [dynamic]Example
 	for category in categories {
-	if category.type != .Directory {continue}
-	infos, err := os.read_all_directory_by_path(category.fullpath, context.allocator)
-	if err != nil {die("cannot list %s: %v", category.name, err)}
-	for fi in infos {
-		main_path, _ := filepath.join({"examples", category.name, fi.name, "main.odin"})
-		if fi.type != .Directory || !os.exists(main_path) {continue}
-		source := read(main_path)
-		// description = the leading block of `//` comment lines
-		desc: [dynamic]string
-		lines := source
-		for line in strings.split_lines_iterator(&lines) {
-			if !strings.has_prefix(line, "//") {break}
-			append(&desc, strings.trim_left_space(line[2:]))
+		if category.type != .Directory {continue}
+		infos, err := os.read_all_directory_by_path(category.fullpath, context.allocator)
+		if err != nil {die("cannot list %s: %v", category.name, err)}
+		for fi in infos {
+			main_path, _ := filepath.join({"examples", category.name, fi.name, "main.odin"})
+			if fi.type != .Directory || !os.exists(main_path) {continue}
+			source := read(main_path)
+			// description = the leading `//` lines up to the first sentence's end; credits follow
+			desc: [dynamic]string
+			lines := source
+			for line in strings.split_lines_iterator(&lines) {
+				if !strings.has_prefix(line, "//") {break}
+				text := strings.trim_space(line[2:])
+				append(&desc, text)
+				if strings.has_suffix(text, ".") || strings.has_suffix(text, "!") {break}
+			}
+			video_path, _ := filepath.join({"docs", "site", "videos", fmt.tprintf("%s.mp4", fi.name)})
+			wasm_path, _ := filepath.join({wasm_dir, fmt.tprintf("%s.wasm", fi.name)})
+			append(&out, Example {
+				name     = fi.name,
+				category = category.name,
+				desc     = strings.join(desc[:], " "),
+				source   = source,
+				video    = os.exists(video_path),
+				wasm     = os.exists(wasm_path),
+			})
 		}
-		video_path, _ := filepath.join({"docs", "site", "videos", fmt.tprintf("%s.mp4", fi.name)})
-		wasm_path, _ := filepath.join({wasm_dir, fmt.tprintf("%s.wasm", fi.name)})
-		append(&out, Example{
-			name = fi.name,
-			category = category.name,
-			desc = strings.join(desc[:], " "),
-			source = source,
-			video = os.exists(video_path),
-			wasm = os.exists(wasm_path),
-		})
-	}
-	}
-	// basic, creative, interactive; cube first as the hello world, the rest alphabetical
-	rank :: proc(category: string) -> int {
-		switch category {
-		case "basic": return 0
-		case "creative": return 1
-		}
-		return 2
 	}
 	slice.sort_by(out[:], proc(a, b: Example) -> bool {
-		if a.category != b.category {return rank(a.category) < rank(b.category)}
+		if a.category != b.category {return a.category < b.category}
 		if (a.name == "cube") != (b.name == "cube") {return a.name == "cube"}
 		return a.name < b.name
 	})

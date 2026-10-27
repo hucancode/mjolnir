@@ -14,8 +14,6 @@ import "core:math"
 import "core:math/linalg"
 import b2 "vendor:box2d"
 
-// Art: Pixel Platformer by Kenney (CC0)
-
 LEVEL := [?]string {
   "..........................................................................",
   "..........................................................................",

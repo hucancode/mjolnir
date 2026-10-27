@@ -1,4 +1,4 @@
-// Simple third-person adventure game
+// Simple third-person adventure game.
 // Characters and props: KayKit Character Pack Adventurers 1.0 and Skeletons 1.0 by Kay Lousberg (www.kaylousberg.com)
 // Particle textures: Kenney Particle Pack (www.kenney.nl)
 package main
@@ -239,7 +239,7 @@ Actor :: struct {
   model:    world.NodeHandle,
   chest:    world.NodeHandle,
   instance: gltf.Instance,
-  animator: ^animation.Animator,
+  rig:      gltf.RigHandle,
   layers:   [Clip]animation.LayerHandle,
   clip:     Clip,
 }
@@ -638,12 +638,12 @@ actor_create :: proc(app: ^App, model: ^gltf.Model, attack: string, position: [3
   a.instance = gltf.instance_create(model, &app.scene, &app.renderer, parent = a.model)
   a.chest = world.find(&app.scene, "chest", a.model) or_else a.model
   if len(a.instance.skinned) == 0 do return
-  rig := &model.rigs[a.instance.skinned[0].rig]
-  a.animator = &a.instance.animators[a.instance.skinned[0].rig]
+  a.rig = a.instance.skinned[0].rig
+  rig := &model.rigs[a.rig]
   for name, clip in CLIPS {
     mode: animation.PlayMode = .LOOP if clip == .IDLE || clip == .RUN else .ONCE
     clip_params := animation.ClipParams{clip = animation.clip_find(rig, attack if clip == .ATTACK else name), speed = 1, mode = mode}
-    a.layers[clip] = animation.layer_create(a.animator, rig, clip_params, weight = 1 if clip == .IDLE else 0)
+    a.layers[clip] = animation.layer_create(&a.instance.animators[a.rig], rig, clip_params, weight = 1 if clip == .IDLE else 0)
   }
   return
 }
@@ -665,15 +665,16 @@ show_props :: proc(app: ^App, a: Actor, keep: []string) {
 
 actor_play :: proc(a: ^Actor, clip: Clip) {
   if clip == a.clip && (clip == .IDLE || clip == .RUN) do return
-  animation.layer_fade(a.animator, a.layers[a.clip], 0, CROSS_FADE)
-  animation.layer_fade(a.animator, a.layers[clip], 1, CROSS_FADE)
-  animation.clip_seek(a.animator, a.layers[clip], 0)
+  animator := &a.instance.animators[a.rig]
+  animation.layer_fade(animator, a.layers[a.clip], 0, CROSS_FADE)
+  animation.layer_fade(animator, a.layers[clip], 1, CROSS_FADE)
+  animation.clip_seek(animator, a.layers[clip], 0)
   a.clip = clip
 }
 
 actor_busy :: proc(a: ^Actor) -> bool {
   if a.clip == .IDLE || a.clip == .RUN do return false
-  return a.clip == .DEATH || !animation.clip_done(a.animator, a.layers[a.clip])
+  return a.clip == .DEATH || !animation.clip_done(&a.instance.animators[a.rig], a.layers[a.clip])
 }
 
 actor_move :: proc(a: ^Actor, moving: bool) {

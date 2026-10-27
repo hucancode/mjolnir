@@ -1,6 +1,7 @@
 package render
 
 import "core:math/linalg"
+import "core:slice"
 import "rhi"
 
 // The overlay draws render's 2D batches (UIBatch) into the backbuffer after post-processing,
@@ -13,7 +14,10 @@ OverlayPush :: struct {
 }
 
 @(private)
-overlay_init_pass :: proc(self: ^Renderer) -> bool {
+overlay_init :: proc(self: ^Renderer) -> bool {
+  self.ui_batches = make([dynamic]UIBatch, 0, 64)
+  self.ui_vertices = make([dynamic]Vertex2D, 0, UI_MAX_VERTICES)
+  self.ui_indices = make([dynamic]u32, 0, UI_MAX_INDICES)
   attributes := [?]rhi.VertexAttribute {
     {location = 0, format = .F32X2, offset = u32(offset_of(Vertex2D, pos))},
     {location = 1, format = .F32X2, offset = u32(offset_of(Vertex2D, uv))},
@@ -35,14 +39,14 @@ overlay_init_pass :: proc(self: ^Renderer) -> bool {
 // Writes the frame's 2D vertices and indices into its buffers.
 @(private)
 overlay_upload :: proc(self: ^Renderer, f: u32) {
-  if self.ui_index_count == 0 do return
-  dev.buffer_write(&self.gpu, self.ui_vertex_buffers[f], 0, ([^]u8)(raw_data(self.ui_vertices))[:int(self.ui_vertex_count) * size_of(Vertex2D)])
-  dev.buffer_write(&self.gpu, self.ui_index_buffers[f], 0, ([^]u8)(raw_data(self.ui_indices))[:int(self.ui_index_count) * size_of(u32)])
+  if len(self.ui_indices) == 0 do return
+  dev.buffer_write(&self.gpu, self.ui_vertex_buffers[f], 0, slice.to_bytes(self.ui_vertices[:]))
+  dev.buffer_write(&self.gpu, self.ui_index_buffers[f], 0, slice.to_bytes(self.ui_indices[:]))
 }
 
 @(private)
 overlay_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
-  if self.ui_index_count == 0 do return
+  if len(self.ui_indices) == 0 do return
   colors := [1]rhi.ColorTarget{{texture = BACKBUFFER, load = .LOAD}}
   dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:]})
   dev.cmd_bind_pipeline(&self.gpu, cmd, self.overlay_pipeline)

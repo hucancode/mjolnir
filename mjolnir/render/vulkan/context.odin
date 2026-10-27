@@ -1,3 +1,4 @@
+#+private
 package vulkan_backend
 
 import "base:runtime"
@@ -53,7 +54,7 @@ GPUContext :: struct {
   compute_family:       u32, // equals graphics_family without a dedicated compute queue
   compute_queue:        vk.Queue,
   descriptor_pool:      vk.DescriptorPool,
-  // one-off command buffers (begin_single_time_command); rhi's lists have pools of their own
+  // one-off command buffers (submit_uploads); rhi's lists have pools of their own
   command_pool:         vk.CommandPool,
   // every pipeline is created through it
   pipeline_cache:       vk.PipelineCache,
@@ -537,22 +538,6 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   return .SUCCESS
 }
 
-// descriptor_pool_init creates the shared pool allocate_descriptor_set draws from, sized by the
-// caller. Sets live as long as the pool.
-descriptor_pool_init :: proc(
-  self: ^GPUContext,
-  pool_sizes: []vk.DescriptorPoolSize,
-  max_sets: u32,
-) -> vk.Result {
-  pool_info := vk.DescriptorPoolCreateInfo {
-    sType         = .DESCRIPTOR_POOL_CREATE_INFO,
-    poolSizeCount = u32(len(pool_sizes)),
-    pPoolSizes    = raw_data(pool_sizes),
-    maxSets       = max_sets,
-  }
-  return vk.CreateDescriptorPool(self.device, &pool_info, nil, &self.descriptor_pool)
-}
-
 @(private = "file")
 command_pool_init :: proc(self: ^GPUContext) -> vk.Result {
   pool_info := vk.CommandPoolCreateInfo {
@@ -583,47 +568,6 @@ create_shader_module :: proc(
   vk.CreateShaderModule(device, &create_info, nil, &module) or_return
   res = .SUCCESS
   return
-}
-
-// begin_single_time_command returns a one-off command buffer, submitted and waited for by
-// end_single_time_command. It starts with every queued upload.
-begin_single_time_command :: proc(
-  self: ^GPUContext,
-) -> (
-  cmd_buffer: vk.CommandBuffer,
-  res: vk.Result,
-) {
-  alloc_info := vk.CommandBufferAllocateInfo {
-    sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-    level              = .PRIMARY,
-    commandPool        = self.command_pool,
-    commandBufferCount = 1,
-  }
-  vk.AllocateCommandBuffers(self.device, &alloc_info, &cmd_buffer) or_return
-  begin_record(cmd_buffer) or_return
-  record_uploads(self, cmd_buffer)
-  return cmd_buffer, .SUCCESS
-}
-
-// end_single_time_command submits a command buffer from begin_single_time_command and waits for it.
-end_single_time_command :: proc(
-  self: ^GPUContext,
-  cmd_buffer: ^vk.CommandBuffer,
-) -> vk.Result {
-  vk.EndCommandBuffer(cmd_buffer^) or_return
-  cmd_info := vk.CommandBufferSubmitInfo {
-    sType         = .COMMAND_BUFFER_SUBMIT_INFO,
-    commandBuffer = cmd_buffer^,
-  }
-  submit_info := vk.SubmitInfo2 {
-    sType                  = .SUBMIT_INFO_2,
-    commandBufferInfoCount = 1,
-    pCommandBufferInfos    = &cmd_info,
-  }
-  vk.QueueSubmit2(self.graphics_queue, 1, &submit_info, 0) or_return
-  vk.QueueWaitIdle(self.graphics_queue) or_return
-  vk.FreeCommandBuffers(self.device, self.command_pool, 1, cmd_buffer)
-  return .SUCCESS
 }
 
 // The first memory type of type_filter with `properties`, from the properties allocator_init read.
