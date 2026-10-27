@@ -1,4 +1,4 @@
-// Orbit, free-fly and follow cameras built from render camera primitives (orbit, look_at, lerp).
+// Orbit, free-fly, follow and orthographic top-down cameras built from render camera primitives (orbit, look_at, lerp).
 package main
 
 import "mjolnir"
@@ -13,7 +13,7 @@ import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
 
-CameraMode :: enum {ORBIT, FREE, FOLLOW}
+CameraMode :: enum {ORBIT, FREE, FOLLOW, TOP}
 
 App :: struct {
   platform:   platform.Platform,
@@ -36,6 +36,8 @@ free_speed:         f32 = 5.0
 follow_offset_y:    f32 = 3.0
 follow_offset_back: f32 = 6.0
 follow_lerp:        f32 = 5.0
+top_view_height:    f32 = 16.0
+top_yaw:            f32 = 0.0
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -113,6 +115,7 @@ update :: proc(app: ^App, dt: f32) {
     case .ORBIT:  orbit_camera(app, cam)
     case .FREE:   free_camera(app, cam, dt)
     case .FOLLOW: follow_camera(app, cam, dt)
+    case .TOP:    top_camera(app, cam, dt)
     }
   }
   world.update(&app.scene)
@@ -129,8 +132,8 @@ debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
   if debugui.window(&app.debug, "Cameras", {680, 20, 300, 260}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.label(ctx, "Controller:")
-    mu.layout_row(ctx, {90, 90, 90}, 0)
-    names := [CameraMode]string{.ORBIT = "Orbit", .FREE = "Free", .FOLLOW = "Follow"}
+    mu.layout_row(ctx, {66, 66, 66, 66}, 0)
+    names := [CameraMode]string{.ORBIT = "Orbit", .FREE = "Free", .FOLLOW = "Follow", .TOP = "Top"}
     for name, mode in names {
       if .SUBMIT in mu.button(ctx, fmt.tprintf("%s%s", "> " if app.mode == mode else "", name)) do switch_mode(app, mode)
     }
@@ -145,12 +148,17 @@ debug_ui :: proc(app: ^App) {
       mu.label(ctx, "Height offset:"); mu.slider(ctx, &follow_offset_y, 0.5, 10.0)
       mu.label(ctx, "Back offset:"); mu.slider(ctx, &follow_offset_back, 1.0, 15.0)
       mu.label(ctx, "Lerp speed:"); mu.slider(ctx, &follow_lerp, 0.5, 20.0)
+    case .TOP:
+      mu.label(ctx, "View height:"); mu.slider(ctx, &top_view_height, 4.0, 40.0)
+      mu.label(ctx, "Yaw (rad):"); mu.slider(ctx, &top_yaw, -math.PI, math.PI)
     }
   }
 }
 
 switch_mode :: proc(app: ^App, mode: CameraMode) {
   if app.mode == mode do return
+  cam := render.main_camera(&app.renderer)
+  if app.mode == .TOP do render.camera_set_perspective(cam)
   app.mode = mode
   if mode == .ORBIT {
     app.orbit = render.make_orbit(render.main_camera(&app.renderer).position, app.orbit.target)
@@ -177,4 +185,12 @@ free_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
   d := s.mouse_delta * 0.002
   cam.rotation = linalg.quaternion_angle_axis(-d.x, linalg.VECTOR3F32_Y_AXIS) * cam.rotation
   cam.rotation = linalg.quaternion_angle_axis(-d.y, render.camera_right(cam)) * cam.rotation
+}
+
+top_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
+  size := platform.framebuffer_size(&app.platform)
+  aspect := f32(size.x) / f32(max(size.y, 1))
+  render.camera_set_orthographic(cam, top_view_height * aspect, top_view_height)
+  up := [3]f32{math.sin(top_yaw), 0, -math.cos(top_yaw)}
+  render.camera_lerp_look_at(cam, {0, 30, 0}, {0, 0, 0}, 1 - math.exp(-follow_lerp * dt), up)
 }

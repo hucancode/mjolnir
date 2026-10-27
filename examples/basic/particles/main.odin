@@ -21,7 +21,6 @@ App :: struct {
   emitter:       render.EmitterHandle,
   textures:      [len(TEXTURE_FILES)]render.TextureHandle,
   emission_rate: f32,
-  enabled:       bool,
 }
 
 TEXTURE_FILES := [?]struct {
@@ -36,15 +35,6 @@ TEXTURE_FILES := [?]struct {
   {"light_01",  #load("assets/particles/light_01.png")},
   {"light_02",  #load("assets/particles/light_02.png")},
   {"light_03",  #load("assets/particles/light_03.png")},
-  {"scorch_01", #load("assets/particles/scorch_01.png")},
-  {"scorch_02", #load("assets/particles/scorch_02.png")},
-  {"scorch_03", #load("assets/particles/scorch_03.png")},
-  {"smoke_01",  #load("assets/particles/smoke_01.png")},
-  {"smoke_02",  #load("assets/particles/smoke_02.png")},
-  {"smoke_03",  #load("assets/particles/smoke_03.png")},
-  {"star_01",   #load("assets/particles/star_01.png")},
-  {"star_02",   #load("assets/particles/star_02.png")},
-  {"star_03",   #load("assets/particles/star_03.png")},
   {"symbol_01", #load("assets/particles/symbol_01.png")},
   {"symbol_02", #load("assets/particles/symbol_02.png")},
 }
@@ -53,7 +43,6 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   app.emission_rate = 200
-  app.enabled = true
   if !platform.init(&app.platform, 1280, 800, "Particles") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
@@ -73,7 +62,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.renderer.skybox_intensity = 0
-  app.orbit = render.make_orbit({0, 5, 10}, {0, 2, 0})
+  app.orbit = render.make_orbit({0, 5, 7}, {0, 2, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   for file, i in TEXTURE_FILES do app.textures[i] = render.texture_create(&app.renderer, file.data)
@@ -133,39 +122,38 @@ debug_ui :: proc(app: ^App) {
   em := render.emitter(&app.renderer, app.emitter)
   if em == nil do return
 
-  if debugui.window(&app.debug, "Texture", {20, 20, 220, 760}, {}, {.NO_CLOSE}) {
-    mu.layout_row(ctx, {-1}, 0)
-    mu.checkbox(ctx, "Enabled", &app.enabled)
+  if debugui.window(&app.debug, "Particles", {940, 20, 320, 570}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+    half := (mu.get_current_container(ctx).body.w - 3 * ctx.style.spacing) / 2
+    mu.layout_row(ctx, {half, -1}, 0)
     for file, i in TEXTURE_FILES {
       prefix := "> " if em.texture == app.textures[i] else "  "
       if .SUBMIT in mu.button(ctx, fmt.tprintf("%s%s", prefix, file.name)) do em.texture = app.textures[i]
     }
-  }
-
-  if debugui.window(&app.debug, "Emission & Lifetime", {900, 20, 320, 600}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Emission rate")
     mu.slider(ctx, &app.emission_rate, 1, 300)
     mu.label(ctx, "Lifetime")
     mu.slider(ctx, &em.particle_lifetime, 0.1, 10)
-    mu.label(ctx, "Size start (px at 1 unit)")
+    mu.label(ctx, "Size start / end")
+    mu.layout_row(ctx, {half, -1}, 0)
     mu.slider(ctx, &em.size_start, 1, 1000)
-    mu.label(ctx, "Size end (px at 1 unit)")
     mu.slider(ctx, &em.size_end, 1, 1000)
+    mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Weight")
     mu.slider(ctx, &em.weight, -2, 5)
     mu.label(ctx, "Weight spread")
     mu.slider(ctx, &em.weight_spread, 0, 2)
-    mu.label(ctx, "Velocity X")
+    mu.label(ctx, "Velocity X / Y / Z")
+    third := (mu.get_current_container(ctx).body.w - 4 * ctx.style.spacing) / 3
+    mu.layout_row(ctx, {third, third, -1}, 0)
     mu.slider(ctx, &em.initial_velocity.x, -8, 8)
-    mu.label(ctx, "Velocity Y")
     mu.slider(ctx, &em.initial_velocity.y, -8, 12)
-    mu.label(ctx, "Velocity Z")
     mu.slider(ctx, &em.initial_velocity.z, -8, 8)
+    mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Velocity spread")
     mu.slider(ctx, &em.velocity_spread, 0, 8)
     mu.label(ctx, "Position spread")
     mu.slider(ctx, &em.position_spread, 0, 4)
   }
-  em.emission_rate = app.emission_rate if app.enabled else 0
+  em.emission_rate = app.emission_rate
 }

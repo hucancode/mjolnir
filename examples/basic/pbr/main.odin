@@ -1,4 +1,4 @@
-// IBL + physically based rendering showcase.
+// IBL + physically based rendering showcase: glTF models lit by a choice of HDR environment maps.
 package main
 
 import "core:log"
@@ -22,7 +22,11 @@ MODELS := [?]Model{
   {"Suzanne",        #load("assets/Suzanne.glb")},
   {"Duck",           #load("assets/Duck.glb")},
   {"Damaged Helmet", #load("assets/DamagedHelmet.glb")},
-  {"SciFi Helmet",   #load("assets/SciFiHelmet.glb")},
+}
+
+ENVIRONMENTS := [?]Model{
+  {"Default",  #load("mjolnir/render/assets/environment2.hdr")},
+  {"Overcast", #load("mjolnir/render/assets/environment.hdr")},
 }
 
 dir_intensity: f32 = 1.0
@@ -44,6 +48,7 @@ App :: struct {
   model:       gltf.Model,
   instance:    gltf.Instance,
   model_index: int,
+  environment: int,
 }
 
 main :: proc() {
@@ -77,6 +82,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.mount = world.spawn(&app.scene, parent = app.turntable)
   world.translate(&app.scene, app.mount, 0, -1, 0)
   show_model(app, 0)
+  show_environment(app, 0)
   return .READY
 }
 
@@ -101,6 +107,10 @@ show_model :: proc(app: ^App, index: int) {
   m := MODELS[index]
   app.model = gltf.model_create(&app.renderer, m.data)
   app.instance = gltf.instance_create(&app.model, &app.scene, &app.renderer, parent = app.mount)
+}
+
+show_environment :: proc(app: ^App, index: int) {
+  if render.environment_map_load(&app.renderer, ENVIRONMENTS[index].data) do app.environment = index
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -129,7 +139,8 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "PBR Lighting", {550, 20, 220, 400}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "PBR Lighting", {560, 20, 220, 440}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+	mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Sun intensity")
     mu.slider(ctx, &dir_intensity, 0.0, 20.0)
     mu.label(ctx, "IBL intensity")
@@ -142,6 +153,10 @@ debug_ui :: proc(app: ^App) {
     mu.layout_row(ctx, {-1}, 0)
     for m, i in MODELS {
       if .SUBMIT in mu.button(ctx, m.label) && i != app.model_index do show_model(app, i)
+    }
+    mu.label(ctx, "Environment:")
+    for e, i in ENVIRONMENTS {
+      if .SUBMIT in mu.button(ctx, e.label) && i != app.environment do show_environment(app, i)
     }
   }
 }

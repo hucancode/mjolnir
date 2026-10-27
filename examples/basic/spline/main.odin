@@ -1,4 +1,4 @@
-// Spline evaluation and visualization.
+// Spline evaluation: the curve and its control points, and cubes travelling it at uniform speed.
 package main
 
 import "mjolnir"
@@ -11,7 +11,7 @@ import "core:log"
 import "core:math"
 import "core:math/ease"
 
-CUBE_COUNT :: 50
+CUBE_COUNT :: 16
 ANIMATION_DURATION :: 8.0
 
 App :: struct {
@@ -57,7 +57,7 @@ should_close :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  app.orbit = render.make_orbit({0, 10, 0}, {0, 0, 0})
+  app.orbit = render.make_orbit({0, 7, 5.5}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   CONTROL_POINTS :: 10
@@ -97,6 +97,7 @@ update :: proc(app: ^App, dt: f32) {
     eased := ease.ease(.Quadratic_In_Out, distance / total_length) * total_length
     world.translate(&app.scene, cube, animation.spline_sample_uniform(app.spline, eased))
   }
+  draw_spline(app)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   render.update(&app.renderer, dt)
@@ -105,4 +106,16 @@ update :: proc(app: ^App, dt: f32) {
 frame :: proc(app: ^App) -> bool {
   platform.poll_events(&app.platform)
   return render.frame(&app.renderer)
+}
+
+draw_spline :: proc(app: ^App) {
+  CURVE_SEGMENTS :: 200
+  duration := animation.spline_duration(app.spline)
+  prev := animation.spline_sample(app.spline, 0)
+  for i in 1 ..= CURVE_SEGMENTS {
+    next := animation.spline_sample(app.spline, f32(i) / CURVE_SEGMENTS * duration)
+    render.debug_segment(&app.renderer, prev, next, render.DEBUG_WHITE)
+    prev = next
+  }
+  for p in app.spline.points do render.debug_point(&app.renderer, p, size = 0.5, color = render.DEBUG_YELLOW)
 }

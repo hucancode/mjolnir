@@ -1,4 +1,4 @@
-// Spawning + despawning at scale.
+// Spawning + despawning at scale, with the GPU time of each render pass.
 package main
 
 import "mjolnir"
@@ -110,6 +110,15 @@ debug_ui :: proc(app: ^App) {
     mu.label(ctx, fmt.tprintf("Cubes: %d / %d", len(app.cubes), app.size * app.size))
     for n in GRID_SIZES {
       if .SUBMIT in mu.button(ctx, fmt.tprintf("%dx%d", n, n)) && n != app.size do select_size(app, n)
+    }
+  }
+  if debugui.window(&app.debug, "GPU", {20, 20, 240, 250}, {}, {.NO_CLOSE}) {
+    timings := render.gpu_timings(&app.renderer)
+    if len(timings) == 0 do mu.label(ctx, "No GPU timers on this device")
+    mu.layout_row(ctx, {150, -1}, 0)
+    for t in timings {
+      mu.label(ctx, fmt.tprintf("%*s%s", int(t.depth) * 2, "", t.name))
+      mu.label(ctx, fmt.tprintf("%.3f ms", t.ms))
     }
   }
 }

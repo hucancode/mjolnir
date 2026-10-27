@@ -1,4 +1,4 @@
-// Wavefront OBJ import.
+// Wavefront OBJ import, shown solid or as a wireframe of its triangles.
 package main
 
 import "mjolnir"
@@ -23,16 +23,18 @@ Model :: struct {
 }
 
 App :: struct {
-  platform: platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  debug:    debugui.Context,
-  input:    input.State,
-  orbit:    render.Orbit,
-  models:   [3]Model,
-  material: render.MaterialHandle,
-  display:  world.NodeHandle,
-  current:  int,
+  platform:  platform.Platform,
+  scene:     world.World,
+  renderer:  render.Renderer,
+  debug:     debugui.Context,
+  input:     input.State,
+  orbit:     render.Orbit,
+  models:    [3]Model,
+  material:  render.MaterialHandle,
+  wire:      render.MaterialHandle,
+  wireframe: bool,
+  display:   world.NodeHandle,
+  current:   int,
 }
 
 main :: proc() {
@@ -58,6 +60,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   app.material = render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1}))
+  app.wire = render.material_create(&app.renderer, render.make_material(.WIREFRAME))
 
   scales := OBJ_SCALES
   labels := OBJ_LABELS
@@ -111,7 +114,7 @@ show_model :: proc(app: ^App, index: int) {
   center := (model.bounds.min + model.bounds.max) * 0.5
   radius := max(linalg.length(model.bounds.max - model.bounds.min) * 0.5, 1)
 
-  render.attach(&app.renderer, render.SlotHandle(app.display.index), render.MeshAttachment{mesh = model.mesh, material = app.material, cast_shadow = true})
+  attach_model(app)
   world.translate(&app.scene, app.display, -center)
 
   cam_dist := radius
@@ -126,6 +129,12 @@ frame :: proc(app: ^App) -> bool {
   return render.frame(&app.renderer)
 }
 
+attach_model :: proc(app: ^App) {
+  material := app.wire if app.wireframe else app.material
+  look := render.MeshAttachment{mesh = app.models[app.current].mesh, material = material, cast_shadow = !app.wireframe}
+  render.attach(&app.renderer, render.SlotHandle(app.display.index), look)
+}
+
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
   if debugui.window(&app.debug, "OBJ Loader", {720, 20, 260, 200}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
@@ -136,5 +145,6 @@ debug_ui :: proc(app: ^App) {
     for label, i in labels {
       if .SUBMIT in mu.button(ctx, label) && i != app.current do show_model(app, i)
     }
+    if .CHANGE in mu.checkbox(ctx, "Wireframe", &app.wireframe) do attach_model(app)
   }
 }

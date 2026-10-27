@@ -1,4 +1,4 @@
-// Line-strip primitives and debug bone overlay.
+// Debug line primitives: segments, boxes, spheres, circles, arrows, axes; timed and depth-bypassing lines.
 package main
 
 import "mjolnir"
