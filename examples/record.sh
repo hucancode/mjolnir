@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build and run each example with -define:FRAME_DUMP, which makes the engine write every
 # presented frame as a PNG (no window capture, no virtual display), then encode the frames into
-# docs/site/videos/<example>.mp4; one frame is copied to docs/site/screenshots/<example>.png.
+# docs/site/videos/<example>.mp4; one frame becomes its poster, docs/site/posters/<example>.jpg.
 # The frames are encoded with ffmpeg.
 #
 # Usage:
@@ -11,18 +11,18 @@
 #   --frames N    total frames to render        (default 300)
 #   --fps N       render cadence + mp4 framerate (default 30)
 #   --start N     first frame in the video       (default 0; skips early garbage)
-#   --shot N      frame saved as the screenshot  (default: the last recorded frame)
+#   --shot N      frame saved as the poster      (default: 40% into the video)
 #   --crf N       x264 CRF quality               (default 23)
 #   --timeout N   seconds to wait for the run    (default 120)
 #
-# Environment: OUT_DIR (videos), SHOT_DIR (screenshots), LOG_DIR, BIN_DIR, TMP_ROOT.
+# Environment: OUT_DIR (videos), POSTER_DIR (posters), LOG_DIR, BIN_DIR, TMP_ROOT.
 set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 OUT_DIR="${OUT_DIR:-docs/site/videos}"
-SHOT_DIR="${SHOT_DIR:-docs/site/screenshots}"
+POSTER_DIR="${POSTER_DIR:-docs/site/posters}"
 LOG_DIR="${LOG_DIR:-artifacts/record}"
 BIN_DIR="${BIN_DIR:-bin}"
 TMP_ROOT="${TMP_ROOT:-artifacts/record/frames}"
@@ -51,7 +51,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-mkdir -p "$OUT_DIR" "$SHOT_DIR" "$LOG_DIR" "$BIN_DIR" "$TMP_ROOT"
+mkdir -p "$OUT_DIR" "$POSTER_DIR" "$LOG_DIR" "$BIN_DIR" "$TMP_ROOT"
 
 command -v ffmpeg >/dev/null || { echo "missing tool: ffmpeg" >&2; exit 2; }
 
@@ -61,20 +61,19 @@ record_one() {
     example_dir=$(ls -d examples/*/"$example" 2>/dev/null | head -1)
     [[ -f "$example_dir/main.odin" ]] || { echo "skip $example (no main.odin)"; return 0; }
 
-    local shot_frame="${shot:-$((frame_limit - 1))}"
-
     local count=$((frame_limit - start))
     if (( count <= 0 )); then
         echo "  $example: start=$start >= frame_limit=$frame_limit; nothing to capture" >&2
         return 1
     fi
+    local shot_frame="${shot:-$((start + count * 2 / 5))}"
 
     local bin="$BIN_DIR/record_${example}"
     local build_log="$LOG_DIR/${example}.build.log"
     local run_log="$LOG_DIR/${example}.run.log"
     local ffm_log="$LOG_DIR/${example}.ffmpeg.log"
     local out_file="$OUT_DIR/${example}.mp4"
-    local shot_file="$SHOT_DIR/${example}.png"
+    local poster_file="$POSTER_DIR/${example}.jpg"
     local frame_dir="$TMP_ROOT/$example"
 
     rm -rf "$frame_dir"
@@ -112,10 +111,9 @@ record_one() {
     local shot_src
     shot_src="$frame_dir/$(printf '%05d' "$shot_frame").png"
     if [[ ! -f "$shot_src" ]]; then
-        echo "  screenshot FAILED (no frame $shot_frame) — see $run_log" >&2
+        echo "  poster FAILED (no frame $shot_frame) — see $run_log" >&2
         return 1
     fi
-    cp "$shot_src" "$shot_file"
 
     local rc=0
     ffmpeg -hide_banner -nostdin -y \
@@ -131,6 +129,11 @@ record_one() {
     fi
     if [[ ! -s "$out_file" ]]; then
         echo "  empty mp4 — see $ffm_log" >&2
+        return 1
+    fi
+    # a small still shown until the video plays
+    if ! ffmpeg -hide_banner -nostdin -y -i "$shot_src" -vf "scale=480:-2" -q:v 4 "$poster_file" >> "$ffm_log" 2>&1; then
+        echo "  poster FAILED — see $ffm_log" >&2
         return 1
     fi
 

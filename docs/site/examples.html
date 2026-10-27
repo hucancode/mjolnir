@@ -68,14 +68,11 @@ const code = dialog.querySelector('code'), pre = dialog.querySelector('pre'), di
 const closeBtn = dialog.querySelector('button');
 const logPre = logDialog.querySelector('pre'), logCloseBtn = logDialog.querySelector('button');
 
-// picker: section headers, optional video-frame thumbnails
+// picker: section headers, optional poster thumbnails
 let thumbs = true;
 const setThumbs = () => {
   nav.classList.toggle('thumbs', thumbs);
   thumbBtn.textContent = thumbs ? 'Hide thumbnails' : 'Show thumbnails';
-  for (const v of nav.querySelectorAll('video')) {
-    if (thumbs && !v.src) v.src = v.dataset.src;
-  }
 };
 thumbBtn.addEventListener('click', () => { thumbs = !thumbs; setThumbs(); });
 let category;
@@ -86,11 +83,8 @@ for (const e of list) {
   }
   const link = el('a', { href: '#' + e.name }, el('span', { textContent: e.name }));
   if (e.video) {
-    // a still frame of the clip; the source is attached lazily, only while thumbnails are shown
-    const v = el('video', { muted: true, preload: 'metadata', playsInline: true, tabIndex: -1 });
-    v.muted = true;
-    v.dataset.src = `videos/${e.name}.mp4#t=1`;
-    link.prepend(v);
+    // lazy images are only fetched once shown, so hidden thumbnails cost nothing
+    link.prepend(el('img', { src: `posters/${e.name}.jpg`, alt: '', loading: 'lazy' }));
   } else {
     link.prepend(el('div', { className: 'no-thumb' }));
   }
@@ -116,7 +110,7 @@ function mount() {
     const f = el('iframe', { src: `data/index.html?example=${encodeURIComponent(e.name)}`, title: e.name, allow: 'fullscreen; gamepad' });
     stage.replaceChildren(f); // the loader goes on its 'ready' message (see below)
   } else if (e.video) {
-    const v = el('video', { src: `videos/${e.name}.mp4`, autoplay: true, muted: true, loop: true, playsInline: true, controls: true });
+    const v = el('video', { src: `videos/${e.name}.mp4`, poster: `posters/${e.name}.jpg`, autoplay: true, muted: true, loop: true, playsInline: true, controls: true });
     v.addEventListener('loadeddata', ready);
     v.muted = true; // the muted attribute must be set for autoplay to be allowed
     stage.replaceChildren(v);

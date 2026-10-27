@@ -77,7 +77,7 @@ doc: shader
 	done
 	odin run docs/gen -- $(WEB_OUT)
 
-# docs/site/videos/<example>.mp4 and docs/site/screenshots/<example>.png (see examples/record.sh).
+# docs/site/videos/<example>.mp4 and docs/site/posters/<example>.jpg (see examples/record.sh).
 record: shader
 	./examples/record.sh $(RECORD_ARGS) $(EXAMPLE)
 
