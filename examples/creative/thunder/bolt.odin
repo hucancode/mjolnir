@@ -145,10 +145,6 @@ sharpness: f32 = 0.6
 color_a := [3]f32{0.3, 0.3, 0.7}
 color_b := [3]f32{1, 1, 1}
 
-gauss :: proc() -> f32 {
-  return rand.float32() + rand.float32() + rand.float32() - 1.5
-}
-
 shape :: proc() -> (joints: [JOINTS]Joint) {
   seed := i64(rand.uint32())
   knots: [JAGGED_CELLS + 1][3]f32
@@ -212,8 +208,6 @@ brush :: proc(joints: ^[JOINTS]Joint) {
   }
 }
 
-// Raging thunder: a few small flickers, the big strike, then a couple of normal strikes after it.
-// Offsets are spread over `period`, bunched early for the first few, evenly for the rest.
 rage_begin :: proc(s: ^Storm) {
   antic := ANTICIPATION_COUNT
   over := OVERSHOOT_COUNT
@@ -250,7 +244,7 @@ raging :: proc(s: ^Storm) -> bool {
 
 strike :: proc(s: ^Storm, to: [3]f32, power: f32, to_hammer: bool, furious := false, size := f32(1), restrike_scale := f32(1)) {
   end := HAMMER_TIP if to_hammer else to
-  start := [3]f32{end.x + gauss() * 6, SKY_Y - rand.float32() * 1.5, end.z + gauss() * 6}
+  start := [3]f32{end.x + f32(rand.norm_float64()) * 3, SKY_Y - rand.float32() * 1.5, end.z + f32(rand.norm_float64()) * 3}
   axis := linalg.normalize0(start - end)
   right := linalg.normalize0(linalg.cross(axis, linalg.normalize0(s.eye - end)))
   if right == {} do right = {1, 0, 0}

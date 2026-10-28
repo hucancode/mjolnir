@@ -240,7 +240,7 @@ test_obstacle_avoidance_query_capacity :: proc(t: ^testing.T) {
 // test_plane.navmesh is a 20x20 walkable plane centered at the origin, baked by navigation/bake
 build_test_navmesh :: proc(t: ^testing.T) -> (^NavMesh, bool) {
 	nav := new(NavMesh)
-	if !init(nav, #load("test_plane.navmesh")) do testing.fail_now(t, "loading the plane fixture failed")
+	if !navmesh_init(nav, #load("test_plane.navmesh")) do testing.fail_now(t, "loading the plane fixture failed")
 	return nav, true
 }
 
@@ -270,7 +270,7 @@ test_crowd_lifecycle_add_remove :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	testing.expect(t, crowd_init(c, 8, 0.6, nav), "init")
-	defer crowd_shutdown(c)
+	defer crowd_destroy(c)
 
 	params := default_agent_params()
 	a0, _ := agent_create(c, {0, 0, 0}, params)
@@ -298,7 +298,7 @@ test_crowd_add_agent_off_navmesh_fails :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	crowd_init(c, 4, 0.6, nav)
-	defer crowd_shutdown(c)
+	defer crowd_destroy(c)
 
 	params := default_agent_params()
 	_, added := agent_create(c, {1000, 0, 1000}, params)
@@ -313,7 +313,7 @@ test_crowd_request_move_target_state :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	crowd_init(c, 4, 0.6, nav)
-	defer crowd_shutdown(c)
+	defer crowd_destroy(c)
 	params := default_agent_params()
 	idx, _ := agent_create(c, {0, 0, 0}, params)
 	testing.expect(t, idx != {}, "agent add")
@@ -342,7 +342,7 @@ test_crowd_update_advances_agent :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	crowd_init(c, 4, 0.6, nav)
-	defer crowd_shutdown(c)
+	defer crowd_destroy(c)
 
 	params := default_agent_params()
 	idx, _ := agent_create(c, {-5, 0, -5}, params)
@@ -463,7 +463,7 @@ bench_crowd_update :: proc(t: ^testing.T) {
 		},
 		teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_crowd_state)opts.user_data
-			crowd_shutdown(s.crowd)
+			crowd_destroy(s.crowd)
 			free(s.crowd)
 			destroy_test_navmesh(s.nav)
 			return .Okay
@@ -484,7 +484,7 @@ test_crowd_move_to_reaches_goal :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	crowd_init(c, 4, 0.6, nav)
-	defer crowd_shutdown(c)
+	defer crowd_destroy(c)
 	params := default_agent_params()
 	idx, _ := agent_create(c, {0, 0, 0}, params)
 	testing.expect(t, move_to(c, idx, {5, 0, 5}), "move_to on the mesh must succeed")
@@ -501,7 +501,7 @@ test_crowd_stop_halts_agent :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	crowd_init(c, 4, 0.6, nav)
-	defer crowd_shutdown(c)
+	defer crowd_destroy(c)
 	idx, _ := agent_create(c, {-5, 0, 0}, default_agent_params())
 	move_to(c, idx, {5, 0, 0})
 	for _ in 0 ..< 10 do crowd_update(c, 0.1)
@@ -522,15 +522,69 @@ test_crowd_agent_poses_links_users :: proc(t: ^testing.T) {
 	cv: Crowd
 	c := &cv
 	crowd_init(c, 4, 0.6, nav)
-	defer crowd_shutdown(c)
+	defer crowd_destroy(c)
 	linked, _ := agent_create(c, {0, 0, 0}, default_agent_params(), user = {index = 7, generation = 1})
-	agent_create(c, {3, 0, 3}, default_agent_params())
+	unlinked, _ := agent_create(c, {3, 0, 3}, default_agent_params())
 	move_to(c, linked, {0, 0, 5})
 	for _ in 0 ..< 10 do crowd_update(c, 0.1)
 	poses := agent_poses(c)
-	testing.expect_value(t, len(poses), 1)
+	testing.expect_value(t, len(poses), 2)
 	testing.expect_value(t, poses[0].user, Handle{index = 7, generation = 1})
+	testing.expect(t, poses[0].agent == linked && poses[1].agent == unlinked, "every agent has a pose, by handle")
 	testing.expect_value(t, poses[0].position, c.agents[linked.index].position)
 	forward := linalg.quaternion_mul_vector3(poses[0].rotation, [3]f32{0, 0, 1})
 	testing.expectf(t, forward.z > 0.9, "heading should turn +Z towards +Z travel, got %v", forward)
+}
+
+// Neighbours are active-list entries: once a destroyed agent leaves a hole in the slots, the
+// survivors must still separate from each other, not from the dead slot.
+@(test)
+test_crowd_separation_after_destroy :: proc(t: ^testing.T) {
+	nav, ok := build_test_navmesh(t)
+	if !ok do return
+	defer destroy_test_navmesh(nav)
+	cv: Crowd
+	c := &cv
+	testing.expect(t, crowd_init(c, 4, 0.6, nav), "init")
+	defer crowd_destroy(c)
+	params := default_agent_params()
+	params.update_flags = {.SEPARATION}
+	dead, _ := agent_create(c, {-8, 0, 0}, params)
+	a, _ := agent_create(c, {2, 0, 0}, params)
+	b, _ := agent_create(c, {2.3, 0, 0}, params)
+	agent_destroy(c, dead)
+	for _ in 0 ..< 30 do crowd_update(c, 1.0 / 30)
+	pa, _ := agent(c, a)
+	pb, _ := agent(c, b)
+	testing.expectf(t, pb.position.x - pa.position.x > 0.4, "the two live agents must push apart, got %v and %v", pa.position, pb.position)
+}
+
+@(test)
+test_crowd_place_and_steer :: proc(t: ^testing.T) {
+	nav, ok := build_test_navmesh(t)
+	if !ok do return
+	defer destroy_test_navmesh(nav)
+	cv: Crowd
+	c := &cv
+	crowd_init(c, 4, 0.6, nav)
+	defer crowd_destroy(c)
+	a, _ := agent_create(c, {0, 0, 0}, default_agent_params())
+	testing.expect(t, agent_place(c, a, {5, 0, 5}), "teleport on the mesh")
+	testing.expect(t, linalg.distance(agent(c, a).position.xz, [2]f32{5, 5}) < 0.1, "placed where asked")
+	testing.expect(t, agent_steer(c, a, {0, 0, -2}), "steer")
+	for _ in 0 ..< 10 do crowd_update(c, 0.1)
+	testing.expectf(t, agent(c, a).position.z < 4, "a steered agent moves along its velocity, at %v", agent(c, a).position)
+}
+
+// Area costs live on the NavMesh: a filter that blocks every area finds no path.
+@(test)
+test_navmesh_filters_decide_paths :: proc(t: ^testing.T) {
+	nav, ok := build_test_navmesh(t)
+	if !ok do return
+	defer destroy_test_navmesh(nav)
+	path := find_path(nav, {-8, 0, -8}, {8, 0, 8}, allocator = context.temp_allocator)
+	testing.expect(t, len(path) > 0, "filter 0 walks the plane")
+	nav.filters[1].include_flags = 0
+	blocked := find_path(nav, {-8, 0, -8}, {8, 0, 8}, filter = 1, allocator = context.temp_allocator)
+	testing.expect(t, len(blocked) == 0, "a filter excluding every polygon finds nothing")
 }

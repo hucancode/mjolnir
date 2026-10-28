@@ -61,7 +61,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.destroy(&app.fox, &app.scene)
+  gltf.destroy(&app.fox, &app.scene, &app.renderer)
   gltf.destroy(&app.fox_model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
@@ -80,9 +80,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({3, 2, 3}, {0, 1, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  app.target_cube = world.spawn(&app.scene, app.target)
-  render.attach(&app.renderer, render.SlotHandle(app.target_cube.index), render.primitive(&app.renderer, .CUBE, .RED, cast_shadow = false))
-  world.scale(&app.scene, app.target_cube, 0.25)
+  app.target_cube = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .RED, cast_shadow = false), app.target, scale = 0.25)
 
   app.fox_model = gltf.model_create(&app.renderer, #load("assets/Fox2.glb"))
   app.fox = gltf.instance_create(&app.fox_model, &app.scene, &app.renderer)
@@ -99,6 +97,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     ik := animation.IKParams{target = app.target, pole = IK_POLE, pole_weight = 1, space = .WORLD}
     app.ik_layer = animation.layer_create(animator, rig, ik, neck, weight = 0)
   }
+  set_walk_run(app)
   return .READY
 }
 
@@ -117,8 +116,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   t := app.time
   app.target = {math.cos(t) * TARGET_RADIUS, 4 + math.sin(t * 2), math.sin(t) * TARGET_RADIUS}
   world.translate(&app.scene, app.target_cube, app.target)
@@ -130,8 +128,7 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 blend_layers :: proc(app: ^App) {

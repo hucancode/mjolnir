@@ -39,13 +39,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({6, 3, 6}, {0, 1, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
-  world.scale(&app.scene, ground, 6.0)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 6.0)
 
   red := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.95, 0.15, 0.15, 1}, roughness_value = 0.4))
   sphere_behind_glass := world.spawn(&app.scene, {0, 1, -2})
-  render.attach(&app.renderer, render.SlotHandle(sphere_behind_glass.index), render.primitive(&app.renderer, .SPHERE, red))
+  render.attach(&app.renderer, sphere_behind_glass, render.primitive(&app.renderer, .SPHERE, red))
 
   glass_colors := [4][4]f32{
     {0.2, 0.7, 1.0, 0.20},
@@ -55,9 +53,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   for color, i in glass_colors {
     glass := render.material_create(&app.renderer, render.make_material(.TRANSPARENT, base_color_factor = color))
-    slab := world.spawn(&app.scene, {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4})
-    render.attach(&app.renderer, render.SlotHandle(slab.index), render.primitive(&app.renderer, .CUBE, glass, cast_shadow = false))
-    world.scale(&app.scene, slab, 0.8)
+    mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, glass, cast_shadow = false), {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4}, scale = 0.8)
   }
 
   return .READY
@@ -78,14 +74,10 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }

@@ -26,9 +26,26 @@ test_glyphs_follow_origin_and_atlas :: proc(t: ^testing.T) {
 	glyphs(&f, "Hi", {100, 50}, 20, &out)
 	testing.expect_value(t, len(out), 2)
 	testing.expect(t, out[0].p0.x >= 100 && out[0].p0.y >= 50, "glyphs start at the origin")
-	pixels, size, changed := atlas(&f)
-	testing.expect(t, changed && len(pixels) == int(size.x * size.y), "rasterized glyphs change the atlas")
+	before := f.version
+	pixels, size, version := atlas(&f)
+	testing.expect(t, version != before && len(pixels) == int(size.x * size.y), "rasterized glyphs change the atlas")
 	for g in out do testing.expect(t, g.uv1.x <= f32(size.x) && g.uv1.y <= f32(size.y), "uvs in texels")
 	_, _, again := atlas(&f)
-	testing.expect(t, !again, "no change without new glyphs")
+	testing.expect(t, again == version, "no change without new glyphs")
+}
+
+// Two fonts never share an atlas version, so a renderer holding one font's atlas re-uploads for
+// the other, and reading one font's atlas does not hide another's changes.
+@(test)
+test_atlas_versions_differ_across_fonts :: proc(t: ^testing.T) {
+	a, b: Font
+	testing.expect(t, init(&a, TEST_FONT, {}))
+	defer destroy(&a)
+	testing.expect(t, init(&b, TEST_FONT, {}))
+	defer destroy(&b)
+	_, _, va := atlas(&a)
+	_, _, vb := atlas(&b)
+	testing.expect(t, va != vb, "two fonts have different versions")
+	_, _, va2 := atlas(&a)
+	testing.expect(t, va2 == va, "an unchanged font keeps its version")
 }

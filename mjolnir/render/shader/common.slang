@@ -85,7 +85,8 @@ struct Node {
     uint flags;
     // first of the node's skinned vertices when skinned
     uint skin_vertex_base;
-    uint _node_pad0;
+    // the palette attachment_data_index is the first bone of
+    uint bones;
     uint _node_pad1;
     uint _node_pad2;
 }

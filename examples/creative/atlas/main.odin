@@ -271,8 +271,6 @@ ORB_COLORS := [?][3]f32{{1, 0.35, 0.4}, {1, 0.65, 0.3}, {0.45, 1, 0.55}, {0.35, 
 ORB_SIZE :: 0.1
 
 App :: struct {
-  orbs:      [len(ORB_COLORS)]Orb,
-  elapsed:   f32,
   platform:  platform.Platform,
   scene:     world.World,
   renderer:  render.Renderer,
@@ -281,7 +279,6 @@ App :: struct {
   orbit:     render.Orbit,
   bones:     [dynamic]Bone,
   poses:     [dynamic]BonePose,
-  origin:    [3]f32,
   meshes:    [Mesh]render.MeshHandle,
   materials: [len(PALETTE)]render.MaterialHandle,
   pieces:    [dynamic]Piece,
@@ -299,6 +296,8 @@ App :: struct {
   choreo:    Choreo,
   dancing:   bool,
   tempo:     f32,
+  orbs:      [len(ORB_COLORS)]Orb,
+  elapsed:   f32,
 }
 
 chan :: proc(c: Channel, side := Side.L) -> int {
@@ -347,28 +346,25 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
-  if !debugui.init(&app.debug, r, {1024, 720}) do return .FAIL
+  if !debugui.init(&app.debug, r) do return .FAIL
 
-  ground := world.spawn(&app.scene, {0, -0.05, 0})
-  render.attach(r, render.SlotHandle(ground.index), render.primitive(r, .CUBE, .GRAY))
-  world.scale(&app.scene, ground, [3]f32{20, 0.05, 20})
+  mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .CUBE, .GRAY), {0, -0.05, 0}, scale = {20, 0.05, 20})
 
-  disc_r := math.hypot(jaw_width(SHOULDER) + 2 * SHOULDER.lug_t, SHOULDER.lug_d) / 2
+  disc_r := shoulder_disc_radius()
   app.meshes = {
-    .BOX           = render.mesh_create(r, render.make_cube()),
-    .CYLINDER      = render.mesh_create(r, render.make_cylinder(segments = 24, height = 1)),
-    .HALF_CYLINDER = render.mesh_create(r, render.make_cylinder(segments = 16, height = 1, arc = math.PI)),
-    .SHOULDER_CONE = render.mesh_create(r, render.make_cone(segments = 24, height = 1, top_radius = disc_r / (disc_r + 0.07))),
-    .SPHERE        = render.mesh_create(r, render.make_sphere()),
-    .FOOT_SLOPE    = render.mesh_create(r, render.make_wedge(0.55)),
-    .HEEL_SLOPE    = render.mesh_create(r, render.make_wedge(0.7)),
+    .BOX           = render.mesh_create(r, geometry.make_cube()),
+    .CYLINDER      = render.mesh_create(r, geometry.make_cylinder(segments = 24, height = 1)),
+    .HALF_CYLINDER = render.mesh_create(r, geometry.make_cylinder(segments = 16, height = 1, arc = math.PI)),
+    .SHOULDER_CONE = render.mesh_create(r, geometry.make_cone(segments = 24, height = 1, top_radius = disc_r / (disc_r + 0.07))),
+    .SPHERE        = render.mesh_create(r, geometry.make_sphere()),
+    .FOOT_SLOPE    = render.mesh_create(r, geometry.make_wedge(0.55)),
+    .HEEL_SLOPE    = render.mesh_create(r, geometry.make_wedge(0.7)),
   }
   for color, i in PALETTE {
     app.materials[i] = render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, metallic_value = 0.2, roughness_value = 0.45))
@@ -388,10 +384,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
       phase  = f * math.TAU / len(ORB_COLORS),
     }
     orb.node = world.spawn(&app.scene, orb_position(orb^, 0))
-    render.attach(r, render.SlotHandle(orb.node.index), light)
+    render.attach(r, orb.node, light)
     marker := world.spawn(&app.scene, parent = orb.node)
     material := render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, emissive_value = 5))
-    render.attach(r, render.SlotHandle(marker.index), render.MeshAttachment{mesh = app.meshes[.SPHERE], material = material})
+    render.attach(r, marker, render.MeshAttachment{mesh = app.meshes[.SPHERE], material = material})
     world.scale(&app.scene, marker, ORB_SIZE)
   }
 
@@ -419,8 +415,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   panel(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
 
   if app.dancing do choreo_step(&app.choreo, dt * app.tempo * PERIOD / 60, &app.pose)
   step := MAX_JOINT_SPEED * dt
@@ -428,9 +423,7 @@ update :: proc(app: ^App, dt: f32) {
   pose(app)
   app.elapsed += dt
   for orb in app.orbs do world.translate(&app.scene, orb.node, orb_position(orb, app.elapsed))
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 orb_position :: proc(o: Orb, t: f32) -> [3]f32 {
@@ -455,8 +448,7 @@ pose :: proc(app: ^App) {
     solved[hip], solved[knee] = a, b
     if y >= floor - 1e-6 do solved[ankle] = -(a + b)
   }
-  app.origin = {0, app.root_y - drop, 0}
-  world.set_world_poses(&app.scene, solve(app, solved[:]))
+  world.set_world_poses(&app.scene, solve(app, solved[:], {0, app.root_y - drop, 0}))
 }
 
 hip_drop :: proc(app: ^App, level: f32) -> f32 {
@@ -478,7 +470,7 @@ stand :: proc(app: ^App) {
 recolor :: proc(app: ^App) {
   for p in app.pieces {
     material := app.materials[(p.key ~ app.seed) % len(PALETTE)]
-    render.attach(&app.renderer, render.SlotHandle(p.node.index), render.MeshAttachment{mesh = app.meshes[p.mesh], material = material, cast_shadow = true})
+    render.attach(&app.renderer, p.node, render.MeshAttachment{mesh = app.meshes[p.mesh], material = material, cast_shadow = true})
   }
 }
 
@@ -550,7 +542,7 @@ piece :: proc(app: ^App, f: Frame, mesh: Mesh, scale: [3]f32, position: [3]f32 =
   append(&app.pieces, Piece{node, mesh, hash.fnv32a(transmute([]u8)key)})
   if next do app.count += 1
   material := app.materials[(app.pieces[len(app.pieces) - 1].key ~ app.seed) % len(PALETTE)]
-  render.attach(&app.renderer, render.SlotHandle(node.index), render.MeshAttachment{mesh = app.meshes[mesh], material = material, cast_shadow = true})
+  render.attach(&app.renderer, node, render.MeshAttachment{mesh = app.meshes[mesh], material = material, cast_shadow = true})
 }
 
 box :: proc(app: ^App, f: Frame, size, position: [3]f32, rotation := linalg.QUATERNIONF32_IDENTITY, mesh := Mesh.BOX) {
@@ -567,10 +559,10 @@ bone :: proc(app: ^App, parent: int, offset: [3]f32 = {}, rest := linalg.QUATERN
   return len(app.bones) - 1
 }
 
-solve :: proc(app: ^App, channels: []f32) -> []BonePose {
+solve :: proc(app: ^App, channels: []f32, origin: [3]f32 = {}) -> []BonePose {
   resize(&app.poses, len(app.bones))
   for b, i in app.bones {
-    position, rotation := app.origin, linalg.QUATERNIONF32_IDENTITY
+    position, rotation := origin, linalg.QUATERNIONF32_IDENTITY
     if b.parent >= 0 do position, rotation = app.poses[b.parent].position, app.poses[b.parent].rotation
     position += linalg.quaternion128_mul_vector3(rotation, b.offset)
     axis: [3]f32
@@ -719,7 +711,7 @@ build :: proc(app: ^App) {
   for s in ([2]f32{1, -1}) do cylinder(app, torso, FLANK_R, CHEST_H - 0.002, {s * cw / 2, CHEST_Y + 0.001, 0}, turn(s * math.PI / 2, Y), .HALF_CYLINDER)
   box(app, torso, {cw * 0.85, CHEST_H * 0.72, 0.06}, {0, CHEST_Y + CHEST_H * 0.56, FLANK_R + 0.01})
   cylinder(app, torso, 0.17, 0.1, {0, CHEST_TOP, 0})
-  disc_r := math.hypot(jaw_width(SHOULDER) + 2 * SHOULDER.lug_t, SHOULDER.lug_d) / 2
+  disc_r := shoulder_disc_radius()
   for s in ([2]f32{1, -1}) do cylinder(app, torso, disc_r + 0.07, CONE_LEN, {s * (CHEST_W / 2 - CONE_LEN), SHOULDER_Y, 0}, turn(-s * math.PI / 2, Z), .SHOULDER_CONE)
 
   head, _ := joint(app, torso, {{0, NECK_Y, 0}, Y, Z}, NECK, {{chan(.HEAD_PITCH), 1}, {chan(.HEAD_YAW), 1}, {}}, {{}, NEG_Y, Z})
@@ -794,4 +786,8 @@ limbs :: proc(app: ^App, pelvis, torso: Frame, side: Side) {
   box(app, foot, {FOOT_W * 0.92, toe_h, TOE_D}, {0, SOLE_Y - FOOT_H + toe_h / 2, z0 + run + TOE_D / 2})
   box(app, foot, {FOOT_W, FOOT_H, HEEL_D}, {0, mid, -z0 - HEEL_D / 2})
   box(app, foot, {FOOT_W, FOOT_H, HEEL_CAP_D}, {0, mid, -z0 - HEEL_D - HEEL_CAP_D / 2}, turn(math.PI, Y), .HEEL_SLOPE)
+}
+
+shoulder_disc_radius :: proc() -> f32 {
+  return math.hypot(jaw_width(SHOULDER) + 2 * SHOULDER.lug_t, SHOULDER.lug_d) / 2
 }

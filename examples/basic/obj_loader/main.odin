@@ -70,9 +70,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
       log.errorf("failed to load %s", labels[i])
       continue
     }
-    geom := render.make_geometry_from_triangles(obj.positions, obj.indices)
+    geom := geometry.make_mesh_from_triangles(obj.positions, obj.indices)
     obj_mesh_destroy(&obj)
-    bounds := render.aabb_from_vertices(geom.vertices)
+    bounds := geometry.aabb_from_vertices(geom.vertices)
     log.infof("%s: %d verts, %d tris, aabb %v..%v", labels[i], len(geom.vertices), len(geom.indices) / 3, bounds.min, bounds.max)
     app.models[i] = {mesh = render.mesh_create(&app.renderer, geom), bounds = bounds}
   }
@@ -101,11 +101,8 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 show_model :: proc(app: ^App, index: int) {
@@ -125,14 +122,13 @@ show_model :: proc(app: ^App, index: int) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 attach_model :: proc(app: ^App) {
   material := app.wire if app.wireframe else app.material
   look := render.MeshAttachment{mesh = app.models[app.current].mesh, material = material, cast_shadow = !app.wireframe}
-  render.attach(&app.renderer, render.SlotHandle(app.display.index), look)
+  render.attach(&app.renderer, app.display, look)
 }
 
 debug_ui :: proc(app: ^App) {

@@ -15,6 +15,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 import mu "vendor:microui"
+import "mjolnir/geometry"
 
 AGENT_COUNT :: 20
 AGENT_RADIUS :: f32(0.45)
@@ -97,7 +98,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 shutdown :: proc(app: ^App) {
-  nav.crowd_shutdown(&app.crowd)
+  nav.crowd_destroy(&app.crowd)
   nav.destroy(&app.navmesh)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
@@ -114,28 +115,24 @@ build_level :: proc(app: ^App) -> bool {
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
   ground_material := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8))
-  ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, ground_material, cast_shadow = false))
-  world.scale(&app.scene, ground, WORLD_HALF * 2)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, ground_material, cast_shadow = false), scale = WORLD_HALF * 2)
   bake.append_box(&builder, {0, -0.5, 0}, {WORLD_HALF * 2, 0.5, WORLD_HALF * 2})
   obstacle_material := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6))
   for box in OBSTACLES {
-    obstacle := world.spawn(&app.scene, box.center)
-    render.attach(&app.renderer, render.SlotHandle(obstacle.index), render.primitive(&app.renderer, .CUBE, obstacle_material))
-    world.scale(&app.scene, obstacle, box.half_extents)
-    bake.append_box(&builder, box.center, box.half_extents, is_obstacle = true)
+    mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, obstacle_material), box.center, scale = box.half_extents)
+    bake.append_box(&builder, box.center, box.half_extents, area = bake.AREA_BLOCKED)
   }
   data := bake.build(&builder, allocator = context.temp_allocator) or_return
-  return nav.init(&app.navmesh, data)
+  return nav.navmesh_init(&app.navmesh, data)
 }
 
 
 show_navmesh :: proc(app: ^App) {
   positions, indices := nav.debug_triangles(&app.navmesh, context.temp_allocator)
-  mesh := render.mesh_create(&app.renderer, render.make_geometry_from_triangles(positions, indices))
+  mesh := render.mesh_create(&app.renderer, geometry.make_mesh_from_triangles(positions, indices))
   material := render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7}))
   overlay := world.spawn(&app.scene, {0, NAVMESH_OVERLAY_LIFT, 0})
-  render.attach(&app.renderer, render.SlotHandle(overlay.index), render.MeshAttachment{mesh = mesh, material = material})
+  render.attach(&app.renderer, overlay, render.MeshAttachment{mesh = mesh, material = material})
 }
 
 spawn_agents :: proc(app: ^App) {
@@ -143,7 +140,7 @@ spawn_agents :: proc(app: ^App) {
   params.radius = AGENT_RADIUS
   params.height = AGENT_HEIGHT
   params.max_speed = AGENT_SPEED
-  capsule := render.mesh_create(&app.renderer, render.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS))
+  capsule := render.mesh_create(&app.renderer, geometry.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS))
   materials: [len(PALETTE)]render.MaterialHandle
   for color, i in PALETTE {
     materials[i] = render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = color, emissive_value = 0.4))
@@ -153,7 +150,7 @@ spawn_agents :: proc(app: ^App) {
     position := (SPAWN_RADIUS - 4) * [3]f32{math.cos(angle), 0, math.sin(angle)}
     node := world.spawn(&app.scene, position)
     body := world.spawn(&app.scene, {0, AGENT_HEIGHT * 0.5, 0}, parent = node)
-    render.attach(&app.renderer, render.SlotHandle(body.index), render.MeshAttachment{mesh = capsule, material = materials[i % len(PALETTE)], cast_shadow = true})
+    render.attach(&app.renderer, body, render.MeshAttachment{mesh = capsule, material = materials[i % len(PALETTE)], cast_shadow = true})
     a.handle, a.placed = nav.agent_create(&app.crowd, position, params, user = world.Handle(node))
     a.color = PALETTE[i % len(PALETTE)]
   }
@@ -197,19 +194,16 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if !app.input.mouse_captured && input.mouse_pressed(&app.input, .RIGHT) {
     ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
     if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do send_all_to(app, goal)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   if app.wander do reassign_arrived(app)
   nav.crowd_update(&app.crowd, dt)
   world.set_world_poses(&app.scene, nav.agent_poses(&app.crowd))
   for a in app.agents do if a.placed do draw_corners(app, nav.agent(&app.crowd, a.handle), a.color)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 draw_corners :: proc(app: ^App, ag: nav.Agent, color: [4]f32) {
@@ -223,8 +217,7 @@ draw_corners :: proc(app: ^App, ag: nav.Agent, color: [4]f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

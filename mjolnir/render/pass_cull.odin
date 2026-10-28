@@ -1,6 +1,7 @@
 package render
 
 import "../containers"
+import "core:slice"
 import "rhi"
 
 // Culling decides what each view draws and writes it as indirect draws.
@@ -16,9 +17,6 @@ import "rhi"
 // counts it into its batch's draw and writes its index into the batch's range of the list's
 // instance array, so the CPU issues one indirect draw per batch.
 
-// mips a depth pyramid may have
-@(private)
-MAX_DEPTH_MIPS :: 16
 // counts at the head of a compacted draw list buffer, one per list; commands follow
 @(private)
 DRAW_LIST_HEADER :: 8
@@ -283,6 +281,8 @@ pyramid_build_groups :: proc(self: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
   pyramid := self.camera_targets[c].pyramid[f]
   prev_depth := self.camera_targets[c].images[.DEPTH][(f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT]
   extent, mips := pyramid_shape(self.camera_targets[c].extent)
+  zero: u32
+  pipeline_bind(self, cmd, self.reduce_pipeline, .NONE, 0, &zero, .NONE)
   for mip in 0 ..< mips {
     key := ReduceKey{slot, mip, prev_depth if mip == 0 else 0}
     group, cached := self.reduce_groups[key]
@@ -294,8 +294,6 @@ pyramid_build_groups :: proc(self: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
       if !ok do return
       self.reduce_groups[key] = group
     }
-    zero: u32
-    pipeline_bind(self, cmd, self.reduce_pipeline, .NONE, 0, &zero, .NONE)
     dev.cmd_bind_group(&self.gpu, cmd, 3, group)
     size := [2]u32{max(extent.x >> mip, 1), max(extent.y >> mip, 1)}
     dev.cmd_dispatch(&self.gpu, cmd, (size.x + 7) / 8, (size.y + 7) / 8, 1)
@@ -333,8 +331,8 @@ cull_batched :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, first_view, vi
   dev.cmd_bind_group(&self.gpu, cmd, 3, group)
   dev.cmd_dispatch(&self.gpu, cmd, (self.batch_high + 63) / 64, views, 1)
   if self.node_count == 0 do return
-  pipeline_bind(self, cmd, self.cull_pipeline, .CULL, 0, &push, .NONE)
-  dev.cmd_bind_group(&self.gpu, cmd, 3, group)
+  // same layout and push: the groups stay bound
+  dev.cmd_bind_pipeline(&self.gpu, cmd, self.cull_pipeline)
   dev.cmd_dispatch(&self.gpu, cmd, (self.node_count + 63) / 64, views, 1)
 }
 
@@ -374,31 +372,28 @@ draw_list_draw :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, k
 }
 
 // The batched draw loop: an indirect draw per batch, its nodes the instance stream at the
-// batch's range. Where a draw's first instance places the stream (Caps.indirect_first_instance)
-// the stream is bound once and a run of batches that draw alike, the empty ones among them
-// drawing nothing, is one multi-draw.
+// batch's range, walking each key's batches in batch_order. Where a draw's first instance places
+// the stream (Caps.indirect_first_instance) the stream is bound once and a run of consecutive
+// batch ids that draw alike is one multi-draw.
 @(private = "file")
 draw_batches :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, keys: []u32, pipelines: []rhi.Pipeline, materials: bool) {
-  if self.batch_high == 0 do return
-  batches := write_table(self, .BATCHES, Batch)[:self.batch_high]
+  order := self.batch_order[:]
+  if len(order) == 0 do return
+  batches := write_table(self, .BATCHES, Batch)
   material_table := write_table(self, .MATERIALS, Material)
   dl := &self.draw_lists[slot]
   first_instance := dev.caps(&self.gpu).indirect_first_instance
   if first_instance do dev.cmd_bind_vertex(&self.gpu, cmd, 1, dl.buffer, 0)
-  bound: u32
   for key, t in keys {
-    pipeline_set := false
-    for id := 0; id < len(batches); {
+    // this key's entries
+    lo, _ := slice.binary_search_by(order, u64(key) << 44, proc(e, k: u64) -> slice.Ordering {return slice.cmp(e, k)})
+    hi, _ := slice.binary_search_by(order, u64(key + 1) << 44, proc(e, k: u64) -> slice.Ordering {return slice.cmp(e, k)})
+    if lo >= hi do continue
+    dev.cmd_bind_pipeline(&self.gpu, cmd, pipelines[t])
+    bound: u32
+    for k := lo; k < hi; {
+      id := u32(order[k] & 0xFFFFF)
       batch := batches[id]
-      if batch.capacity == 0 || material_list(material_table[batch.material_id]) != key {
-        id += 1
-        continue
-      }
-      if !pipeline_set {
-        dev.cmd_bind_pipeline(&self.gpu, cmd, pipelines[t])
-        pipeline_set = true
-        bound = 0
-      }
       if materials && batch.material_id != bound {
         bound = batch.material_id
         m := &material_table[bound]
@@ -406,24 +401,23 @@ draw_batches :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, key
       }
       run := 1
       if first_instance {
-        // up to the last batch that draws alike
-        for next := id + 1; next < len(batches); next += 1 {
-          b := batches[next]
-          if b.capacity == 0 do continue
-          if material_list(material_table[b.material_id]) != key || (materials && b.material_id != bound) do break
-          run = next - id + 1
+        // consecutive ids of this key drawing alike
+        for k + run < hi {
+          next := u32(order[k + run] & 0xFFFFF)
+          if next != id + u32(run) || (materials && batches[next].material_id != bound) do break
+          run += 1
         }
       } else {
         instances := int(dl.instances_base + list * dl.capacity + batch.first_instance) * size_of(u32)
         dev.cmd_bind_vertex(&self.gpu, cmd, 1, dl.buffer, instances)
       }
-      draw := int(dl.draws_base + (list * dl.draws_stride + u32(id)) * DRAW_WORDS) * size_of(u32)
+      draw := int(dl.draws_base + (list * dl.draws_stride + id) * DRAW_WORDS) * size_of(u32)
       if material_table[batch.material_id].type in PULLED_TYPES {
         dev.cmd_draw_indirect(&self.gpu, cmd, dl.buffer, draw, u32(run), DRAW_BYTES)
       } else {
         dev.cmd_draw_indexed_indirect(&self.gpu, cmd, dl.buffer, draw, u32(run), DRAW_BYTES)
       }
-      id += run
+      k += run
     }
   }
 }

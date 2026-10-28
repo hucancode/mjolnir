@@ -78,7 +78,7 @@ fill_grid :: proc(app: ^App) {
   for len(app.cubes) < n * n {
     x, z := len(app.cubes) % n, len(app.cubes) / n
     cube := world.spawn(&app.scene, {(f32(x) - half) * 4, 0, (f32(z) - half) * 4}) or_break
-    render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, color))
+    render.attach(&app.renderer, cube, render.primitive(&app.renderer, .CUBE, color))
     append(&app.cubes, cube)
   }
 }
@@ -90,17 +90,13 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   fill_grid(app)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

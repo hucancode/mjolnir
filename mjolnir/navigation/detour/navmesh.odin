@@ -371,6 +371,8 @@ nav_mesh_add_tile :: proc(
 ) {
   header, parse_status := parse_mesh_header(data)
   if !status_succeeded(parse_status) do return INVALID_TILE_REF, parse_status
+  // a poly ref has poly_bits for the polygon index: more polygons would alias other refs
+  if u64(header.poly_count) > u64(1) << nav_mesh.poly_bits do return INVALID_TILE_REF, {.Invalid_Param}
   tile: ^Mesh_Tile
   if last_ref != INVALID_TILE_REF {
     tile_index := decode_tile_ref(nav_mesh, last_ref)

@@ -8,8 +8,6 @@ Handle :: containers.Handle
 // NodeHandle identifies a node; stale after node_destroy.
 NodeHandle :: distinct Handle
 
-@(private)
-MAX_NODES_IN_SCENE :: 65536
 // RETIRE_GRACE is how many updates a despawned slot stays reserved, so index-keyed consumers see the removal.
 @(private)
 RETIRE_GRACE :: 3

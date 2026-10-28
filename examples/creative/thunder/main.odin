@@ -36,6 +36,7 @@ App :: struct {
   hammer:   gltf.Instance,
   bolts:    render.BufferHandle,
   bolt:     render.DrawShader,
+  rod:      render.MeshHandle,
   impacts_buffer: render.BufferHandle,
   sparks:   [2]render.EmitterHandle,
   spark_nodes: [SPARK_SLOTS]world.NodeHandle,
@@ -73,7 +74,7 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
-  if !debugui.init(&app.debug, r, {1100, 720}) do return .FAIL
+  if !debugui.init(&app.debug, r) do return .FAIL
   app.orbit = render.make_orbit({12, 10, 12}, {0, 1.6, 0})
   render.camera_orbit(render.main_camera(r), app.orbit)
   render.camera_set_perspective(render.main_camera(r), math.to_radians(f32(50)), 0.3, 600)
@@ -84,23 +85,22 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   world.translate(&app.scene, app.hammer.roots[0], {0, 0.106, 0})
 
   floor_material := render.material_create(r, render.make_material(base_color_factor = {0.02, 0.02, 0.035, 1}, roughness_value = 0.35))
-  floor := world.spawn(&app.scene)
-  render.attach(r, render.SlotHandle(floor.index), render.primitive(r, .QUAD_XZ, floor_material, cast_shadow = false))
-  world.scale(&app.scene, floor, 400)
+  mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .QUAD_XZ, floor_material, cast_shadow = false), scale = 400)
 
   for i in 0 ..< MAX_LIGHTS {
     app.lamps[i] = world.spawn(&app.scene)
     app.lights[i] = render.light_create(r, render.make_point_light(color = color_a, intensity = 0, radius = 40, cast_shadow = false))
-    render.attach(r, render.SlotHandle(app.lamps[i].index), app.lights[i])
+    render.attach(r, app.lamps[i], app.lights[i])
   }
 
   fill := world.spawn(&app.scene)
   world.translate(&app.scene, fill, FILL_POSITION)
-  render.attach(r, render.SlotHandle(fill.index), render.light_create(r, render.make_point_light(color = FILL_COLOR, intensity = FILL_INTENSITY, radius = 30)))
+  render.attach(r, fill, render.light_create(r, render.make_point_light(color = FILL_COLOR, intensity = FILL_INTENSITY, radius = 30)))
 
-  if !rod_create(r) do return .FAIL
-  app.bolts = render.buffer_create(r, make([]BoltInstance, MAX_BOLTS, context.temp_allocator))
   ok: bool
+  app.rod, ok = rod_create(r)
+  if !ok do return .FAIL
+  app.bolts = render.buffer_create(r, make([]BoltInstance, MAX_BOLTS, context.temp_allocator))
   app.bolt, ok = render.draw_shader_create(
     r,
     #load("bolt." + render.SHADER_EXT),
@@ -139,8 +139,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
 shutdown :: proc(app: ^App) {
   storm_destroy(&app.storm)
-  rod_destroy(&app.renderer)
-  gltf.destroy(&app.hammer, &app.scene)
+  render.mesh_destroy(&app.renderer, app.rod)
+  gltf.destroy(&app.hammer, &app.scene, &app.renderer)
   gltf.destroy(&app.model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
@@ -162,10 +162,9 @@ update :: proc(app: ^App, dt: f32) {
   debug_ui(app)
   render.stage_overlay(r, debugui.end(&app.debug))
   click_to_strike(app)
-  render.orbit_drag(&app.orbit, &app.input)
   if orbiting && !app.pressed do app.orbit.yaw += dt * 0.04
   camera := render.main_camera(r)
-  render.camera_orbit(camera, app.orbit)
+  render.orbit_drag(&app.orbit, camera, &app.input)
   eye := camera.position
 
   lights := advance(&app.storm, min(dt, 0.05), eye)
@@ -182,9 +181,7 @@ update :: proc(app: ^App, dt: f32) {
   stage_bolts(app)
   stage_impacts(app)
 
-  world.update(&app.scene)
-  render.stage_transforms(r, world.changes(&app.scene))
-  render.update(r, dt)
+  mjolnir.update(&app.scene, r, dt)
 }
 
 BoltParams :: struct {
@@ -203,7 +200,7 @@ stage_bolts :: proc(app: ^App) {
   }
   if bolts == 0 do return
   render.buffer_write(r, app.bolts, app.instances[:bolts])
-  render.stage_draw(r, app.bolt, rod, u32(bolts), BoltParams{})
+  render.stage_draw(r, app.bolt, app.rod, u32(bolts), BoltParams{})
 }
 
 stage_impacts :: proc(app: ^App) {
@@ -213,7 +210,7 @@ stage_impacts :: proc(app: ^App) {
     node := app.spark_nodes[app.next_spark]
     app.next_spark = (app.next_spark + 1) % SPARK_SLOTS
     world.translate(&app.scene, node, i.position)
-    render.emit(r, app.sparks[1 if i.furious else 0], render.SlotHandle(node.index), u32(SPARKS * i.power))
+    render.emit(r, app.sparks[1 if i.furious else 0], node, u32(SPARKS * i.power))
   }
   n := min(len(app.storm.impacts), MAX_IMPACTS)
   if n == 0 do return
@@ -261,8 +258,7 @@ hits_hammer :: proc(ray: geometry.Ray, hit: [3]f32) -> bool {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

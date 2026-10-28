@@ -27,7 +27,7 @@ LEG_CHAINS := [LEG_COUNT]struct {
 }
 HIP_LIMIT :: animation.JointLimit{{math.PI / 6, math.PI / 2, math.PI / 6}}
 JOINT_LIMIT :: animation.JointLimit{{math.PI / 2, math.PI / 2, math.PI / 2}}
-STRIDE :: 4.5 // distance the body covers per step cycle
+STRIDE :: 4.5
 MIN_PERIOD :: 0.3
 MAX_PERIOD :: 3.0
 GROUND_TOP :: 0.1
@@ -62,7 +62,6 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   app.autopilot = true
-  app.lift_period = 1.5
   app.lift_height = 0.5
   app.lap_time = 2
   app.body_speed_max = 5
@@ -84,7 +83,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.destroy(&app.spider, &app.scene)
+  gltf.destroy(&app.spider, &app.scene, &app.renderer)
   gltf.destroy(&app.spider_model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
@@ -103,11 +102,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({0, 20, 20}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))
-  world.scale(&app.scene, ground, [3]f32{GROUND_SIZE, 0.2, GROUND_SIZE})
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), scale = {GROUND_SIZE, 0.2, GROUND_SIZE})
   light := world.spawn(&app.scene, {0, 8, 0})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light(intensity = 1200, radius = 80)))
+  render.attach(&app.renderer, light, render.light_create(&app.renderer, render.make_point_light(intensity = 1200, radius = 80)))
 
   app.spider_model = gltf.model_create(&app.renderer, #load("assets/spider.glb"))
   app.spider = gltf.instance_create(&app.spider_model, &app.scene, &app.renderer)
@@ -143,8 +140,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   walk(app, dt)
   world.update(&app.scene)
   if app.grounded do pose_legs(app, dt)
@@ -207,8 +203,7 @@ move_body :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

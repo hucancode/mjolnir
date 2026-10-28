@@ -224,20 +224,22 @@ test_button_label_clicks_button :: proc(t: ^testing.T) {
 	label := node_create(&f.ui, {parent = button, text = "Click", font_size = 16})
 	background := node_create(&f.ui, {size = fixed(800, 600), z = -1})
 	layout(&f.ui, VIEWPORT, &f.font)
-	s: input.State
-	s.cursor = {5, 5}
-	s.buttons = {.LEFT}
-	s.buttons_pressed = {.LEFT}
+	s, acc: input.State
+	input.cursor_event(&acc, {5, 5})
+	input.button_event(&acc, .LEFT, .PRESS)
+	input.drain(&acc, &s)
 	update_input(&f.ui, &s)
 	testing.expect_value(t, f.ui.hovered, label)
 	testing.expect(t, hovered(&f.ui, button) && pressed(&f.ui, button) && focused(&f.ui, button), "label acts for the button")
 	testing.expect(t, s.mouse_captured && s.keyboard_captured, "the UI holds the devices")
-	s = {cursor = {5, 5}, buttons_released = {.LEFT}}
+	input.button_event(&acc, .LEFT, .RELEASE)
+	input.drain(&acc, &s)
 	update_input(&f.ui, &s)
 	testing.expect(t, clicked(&f.ui, button), "released over the pressed button")
 	testing.expect_value(t, f.ui.pressed, NodeHandle{})
 	// a background that is not interactive lets the mouse through
-	s = {cursor = {500, 500}}
+	input.cursor_event(&acc, {500, 500})
+	input.drain(&acc, &s)
 	update_input(&f.ui, &s)
 	testing.expect(t, !hovered(&f.ui, background) && !s.mouse_captured, "background passes the mouse")
 }
@@ -249,9 +251,14 @@ test_release_elsewhere_does_not_click :: proc(t: ^testing.T) {
 	defer teardown(&f)
 	button := node_create(&f.ui, {size = fixed(100, 100), interactive = true})
 	layout(&f.ui, VIEWPORT, &f.font)
-	s := input.State{cursor = {5, 5}, buttons = {.LEFT}, buttons_pressed = {.LEFT}}
+	s, acc: input.State
+	input.cursor_event(&acc, {5, 5})
+	input.button_event(&acc, .LEFT, .PRESS)
+	input.drain(&acc, &s)
 	update_input(&f.ui, &s)
-	s = {cursor = {500, 500}, buttons_released = {.LEFT}}
+	input.cursor_event(&acc, {500, 500})
+	input.button_event(&acc, .LEFT, .RELEASE)
+	input.drain(&acc, &s)
 	update_input(&f.ui, &s)
 	testing.expect(t, !clicked(&f.ui, button), "released away from the button")
 }
@@ -302,4 +309,17 @@ test_hit_test_in_scaled_window :: proc(t: ^testing.T) {
 	s = {cursor = {150, 150}}
 	update_input(&f.ui, &s)
 	testing.expect(t, !hovered(&f.ui, button), "inside the reference rect but outside the scaled one")
+}
+
+@(test)
+test_max_scroll_follows_overflow :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	list := node_create(&f.ui, {size = fixed(100, 50), direction = .COLUMN})
+	for _ in 0 ..< 4 do node_create(&f.ui, {parent = list, size = fixed(100, 30)})
+	layout(&f.ui, VIEWPORT, &f.font)
+	testing.expect_value(t, max_scroll(&f.ui, list), [2]f32{0, 70})
+	node_destroy(&f.ui, list)
+	testing.expect_value(t, f.ui.slots.count, 0)
 }

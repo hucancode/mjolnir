@@ -2,6 +2,7 @@ package font
 
 import "core:log"
 import "core:slice"
+import "core:sync"
 import fs "vendor:fontstash"
 
 // Font is one loaded font and its glyph atlas. Use it by pointer only.
@@ -11,8 +12,14 @@ Font :: struct {
 
 @(private)
 Font_State :: struct {
-  ctx: fs.FontContext,
+  ctx:     fs.FontContext,
+  // the atlas's current pixels, unique across every font (atlas)
+  version: u64,
 }
+
+// The last version handed out, by any font.
+@(private = "file")
+last_version: u64
 
 // Glyph is one glyph quad: corners in pixels, uvs in atlas texels so they stay valid
 // when the atlas grows.
@@ -40,6 +47,7 @@ init :: proc(self: ^Font, font_data: []u8, prewarm_sizes := DEFAULT_PREWARM_SIZE
     glyphs(self, PREWARM_TEXT, {}, size, &out)
     delete(out)
   }
+  self.version = sync.atomic_add(&last_version, 1) + 1
   return true
 }
 
@@ -82,10 +90,11 @@ glyphs :: proc(self: ^Font, text: string, origin: [2]f32, size: f32, out: ^[dyna
   }
 }
 
-// atlas returns the R8 atlas pixels (size.x by size.y); changed when glyphs were
-// rasterized or the atlas grew since the previous call.
-atlas :: proc(self: ^Font) -> (pixels: []u8, size: [2]u32, changed: bool) {
+// atlas returns the R8 atlas pixels (size.x by size.y) and their version: it changes when glyphs
+// were rasterized or the atlas grew, and no two fonts share one, so a renderer re-uploads the
+// atlas whenever the version differs from the one it holds.
+atlas :: proc(self: ^Font) -> (pixels: []u8, size: [2]u32, version: u64) {
   dirty: [4]f32
-  changed = fs.ValidateTexture(&self.ctx, &dirty)
-  return self.ctx.textureData, {u32(self.ctx.width), u32(self.ctx.height)}, changed
+  if fs.ValidateTexture(&self.ctx, &dirty) do self.version = sync.atomic_add(&last_version, 1) + 1
+  return self.ctx.textureData, {u32(self.ctx.width), u32(self.ctx.height)}, self.version
 }

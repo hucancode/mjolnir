@@ -37,7 +37,7 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   cube := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .RED))
+  render.attach(&app.renderer, cube, render.primitive(&app.renderer, .CUBE, .RED))
   app.orbit = render.make_orbit({3, 2, 3}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   return .READY
@@ -58,14 +58,10 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }

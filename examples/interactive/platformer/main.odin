@@ -230,9 +230,7 @@ sprite_look :: proc(app: ^App, sheet: Sheet, frame: u32) -> render.MaterialHandl
 }
 
 spawn_sprite :: proc(app: ^App, look: render.MaterialHandle, position: [3]f32, size: f32 = 1, parent: world.NodeHandle = {}) -> world.NodeHandle {
-  node := world.spawn(&app.scene, position, parent = parent)
-  render.attach(&app.renderer, render.SlotHandle(node.index), render.primitive(&app.renderer, .QUAD_XY, look, cast_shadow = false))
-  world.scale(&app.scene, node, size / 2)
+  node := mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, look, cast_shadow = false), position, parent = parent, scale = size / 2)
   return node
 }
 
@@ -532,14 +530,13 @@ follow_player :: proc(app: ^App) {
   }
   center = linalg.round(center * pixels_per_unit) / pixels_per_unit
   camera := render.main_camera(&app.renderer)
-  render.camera_set_orthographic(camera, view.x, view.y)
+  render.camera_set_orthographic(camera, view.y)
   render.camera_look_at(camera, {center.x, center.y, 10}, {center.x, center.y, 0}, {0, 1, 0})
   world.translate(&app.scene, app.backdrop, math.round(center.x * PARALLAX * pixels_per_unit) / pixels_per_unit, 0, Z_BACKGROUND)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 draw_hud :: proc(app: ^App) {

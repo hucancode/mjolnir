@@ -41,7 +41,6 @@ LIST_ITEMS :: 12
 LIST_ITEM_HEIGHT :: 28
 LIST_GAP :: 4
 LIST_HEIGHT :: 120
-LIST_MAX_SCROLL :: LIST_ITEMS * LIST_ITEM_HEIGHT + (LIST_ITEMS - 1) * LIST_GAP - LIST_HEIGHT
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -67,7 +66,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   ui.init(&app.gui, {900, 700})
   build_ui(app)
   cube := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .BLUE))
+  render.attach(&app.renderer, cube, render.primitive(&app.renderer, .CUBE, .BLUE))
   app.orbit = render.make_orbit({3, 2, 3}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   return .READY
@@ -141,10 +140,9 @@ update :: proc(app: ^App, dt: f32) {
   look.color = BUTTON_PRESSED if ui.pressed(&app.gui, app.button) else BUTTON_HOVER if ui.hovered(&app.gui, app.button) else BUTTON_COLOR
   if ui.hovered(&app.gui, app.list) {
     list := ui.node(&app.gui, app.list)
-    list.scroll.y = clamp(list.scroll.y - app.input.scroll.y * 20, 0, LIST_MAX_SCROLL)
+    list.scroll.y = clamp(list.scroll.y - app.input.scroll.y * 20, 0, ui.max_scroll(&app.gui, app.list).y)
   }
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
   draw_hud(app)
@@ -152,8 +150,7 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 draw_hud :: proc(app: ^App) {

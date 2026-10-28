@@ -1,5 +1,7 @@
 package render
 
+import "../geometry"
+
 import "rhi"
 
 // Each MaterialType's pipeline is built against the targets of its pass; .CUSTOM has a
@@ -47,15 +49,15 @@ material_pass_depth :: proc(pass: MaterialPass, opaque := false) -> rhi.DepthSta
 @(private)
 mesh_vertex_streams :: proc(position_only := false) -> []rhi.VertexBuffer {
   @(static) all := [?]rhi.VertexAttribute {
-    {location = 0, format = .F32X3, offset = u32(offset_of(Vertex, position))},
-    {location = 1, format = .F32X3, offset = u32(offset_of(Vertex, normal))},
-    {location = 2, format = .F32X4, offset = u32(offset_of(Vertex, color))},
-    {location = 3, format = .F32X2, offset = u32(offset_of(Vertex, uv))},
-    {location = 4, format = .F32X4, offset = u32(offset_of(Vertex, tangent))},
+    {location = 0, format = .F32X3, offset = u32(offset_of(geometry.Vertex, position))},
+    {location = 1, format = .F32X3, offset = u32(offset_of(geometry.Vertex, normal))},
+    {location = 2, format = .F32X4, offset = u32(offset_of(geometry.Vertex, color))},
+    {location = 3, format = .F32X2, offset = u32(offset_of(geometry.Vertex, uv))},
+    {location = 4, format = .F32X4, offset = u32(offset_of(geometry.Vertex, tangent))},
   }
   @(static) node := [?]rhi.VertexAttribute{{location = 5, format = .U32, offset = 0}}
   streams := make([dynamic]rhi.VertexBuffer, context.temp_allocator)
-  append(&streams, rhi.VertexBuffer{stride = size_of(Vertex), attributes = all[:1] if position_only else all[:]})
+  append(&streams, rhi.VertexBuffer{stride = size_of(geometry.Vertex), attributes = all[:1] if position_only else all[:]})
   when !BINDLESS do append(&streams, rhi.VertexBuffer{stride = size_of(u32), step = .INSTANCE, attributes = node[:]})
   return streams[:]
 }
@@ -107,16 +109,19 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
     particles_draw(self, cmd, f, cam)
   }
   types := MATERIAL_PASS_TYPES[pass]
-  keys := make([dynamic]u32, context.temp_allocator)
-  pipelines := make([dynamic]rhi.Pipeline, context.temp_allocator)
   // a type's draw list key (material_list) is the type; custom shader i's is CUSTOM + i
-  for t in types[0] ..< types[1] do append(&keys, u32(t))
-  append(&pipelines, ..self.material_pipelines[pass][int(types[0]):int(types[1])])
+  keys: [DRAW_LISTS]u32
+  pipelines: [DRAW_LISTS]rhi.Pipeline
+  count := 0
+  for t in types[0] ..< types[1] {
+    keys[count], pipelines[count] = u32(t), self.material_pipelines[pass][int(t)]
+    count += 1
+  }
   if pass == .FORWARD {
     for p, i in self.custom_material_pipelines {
       if p == 0 do continue
-      append(&keys, u32(MaterialType.CUSTOM) + u32(i))
-      append(&pipelines, p)
+      keys[count], pipelines[count] = u32(MaterialType.CUSTOM) + u32(i), p
+      count += 1
     }
   }
   // every mesh draw reads the camera it draws for
@@ -129,7 +134,7 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
   }
   if ready {
     mesh_buffers_bind(self, cmd)
-    draw_list_draw(self, cmd, slot, 0, keys[:], pipelines[:], f)
+    draw_list_draw(self, cmd, slot, 0, keys[:count], pipelines[:count], f)
   }
   dev.cmd_end_pass(&self.gpu, cmd)
 }

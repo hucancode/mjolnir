@@ -64,7 +64,6 @@ App :: struct {
   inst:      gltf.Instance,
   rag:       ragdoll.Ragdoll,
   blocks:    [PART_COUNT]ragdoll.Block,
-  palette:   []matrix[4, 4]f32,
   pins:      [dynamic]physics.JointHandle,
   grab:      Grab,
   mode:      Mode,
@@ -101,26 +100,22 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
-  ground := world.spawn(&app.scene, {0, -0.05, 0})
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))
-  world.scale(&app.scene, ground, [3]f32{40, 0.1, 40})
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), {0, -0.05, 0}, scale = {40, 0.1, 40})
   light := world.spawn(&app.scene, {2, 6, 4})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light(intensity = 200, radius = 25)))
+  render.attach(&app.renderer, light, render.light_create(&app.renderer, render.make_point_light(intensity = 200, radius = 25)))
   physics.body_create(&app.phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {20, 0.5, 20}})
 
   app.model = gltf.model_create(&app.renderer, #load("assets/CesiumMan.glb"))
   app.inst = gltf.instance_create(&app.model, &app.scene, &app.renderer)
   if len(app.inst.skinned) == 0 || len(app.inst.roots) == 0 do return .FAIL
   rig := app.inst.skinned[0].rig
-  app.palette = app.inst.animators[rig].palette
   app.blocks = BLOCKS
   if !ragdoll.init(&app.rag, &app.model.rigs[rig].skeleton, app.blocks[:]) do return .FAIL
   for i in 0 ..< PART_COUNT do app.blocks[i].size.y = ragdoll.fit_length(&app.rag, i)
@@ -134,7 +129,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 shutdown :: proc(app: ^App) {
   ragdoll.despawn(&app.rag, &app.phys)
   ragdoll.destroy(&app.rag)
-  gltf.destroy(&app.inst, &app.scene)
+  gltf.destroy(&app.inst, &app.scene, &app.renderer)
   gltf.destroy(&app.model, &app.renderer)
   delete(app.pins)
   physics.shutdown(&app.phys)
@@ -168,20 +163,19 @@ update :: proc(app: ^App, dt: f32) {
   if app.dirty do respawn(app)
   if app.mode == .EDIT do pick_part(app)
   else do drag_part(app)
-  if !app.grab.active do render.orbit_drag(&app.orbit, &app.input, {.RIGHT})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  if !app.grab.active do render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, {.RIGHT})
 
   if app.mode == .SIM do physics.step(&app.phys, dt)
-  if origin, ok := ragdoll.sync(&app.rag, &app.phys, app.palette); ok {
+  rig := app.inst.skinned[0].rig
+  palette := app.inst.animators[rig].palette
+  if origin, ok := ragdoll.sync(&app.rag, &app.phys, palette); ok {
     root := app.inst.roots[0]
     world.translate(&app.scene, root, origin)
     world.scale(&app.scene, root, app.rag.scale)
-    render.stage_bones(&app.renderer, render.SlotHandle(app.inst.skinned[0].node.index), app.palette)
+    render.stage_bones(&app.renderer, app.inst.bones[rig], palette)
   }
   if app.show do draw_blocks(app)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 part_at_cursor :: proc(app: ^App) -> (part: int, hit: physics.RayHit, ok: bool) {
@@ -213,9 +207,7 @@ drag_part :: proc(app: ^App) {
     ray, ok := render.cursor_ray(&app.renderer, app.input.cursor)
     if !ok do return
     normal := -render.camera_forward(render.main_camera(&app.renderer))
-    if hit, t := geometry.ray_plane_intersection(ray, g.point, normal, 100); hit {
-      physics.joint_anchor(&app.phys, g.joint, ray.origin + ray.direction * t)
-    }
+    if at, hit := geometry.ray_plane_intersection(ray, g.point, normal, 100); hit do physics.joint_anchor(&app.phys, g.joint, at)
     return
   }
   if app.pin_drops do append(&app.pins, g.joint)

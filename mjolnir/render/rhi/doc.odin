@@ -13,7 +13,7 @@ package rhi
 // with `present`, frame_present, frame_timings). Nothing happens implicitly: uploads land where
 // the caller flushes them, the swapchain is touched only by the submission marked present.
 // Caps says what the device can do (indirect count, async compute, first-instance indirect
-// draws, timestamps, backbuffer copy) and render branches on it; a backend never emulates a capability behind the caller's back.
+// draws, timestamps, backbuffer copy and its byte order) and render branches on it; a backend never emulates a capability behind the caller's back.
 // Each backend declares PROCS :: rhi.Procs(Backend, WindowHandle), whose assignment is the
 // conformance check, and render calls those procs directly, so none of it costs a dispatch.
 // pool.odin is the handle storage both backends keep their objects in.

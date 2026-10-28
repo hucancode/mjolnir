@@ -76,8 +76,7 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -100,7 +99,9 @@ build_level :: proc(app: ^App, index: int) -> bool {
   app.orbit = render.make_orbit(l.target + {l.distance, l.distance * 0.1, 0}, l.target)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.renderer.sun = render.DEFAULT_SUN
-  app.renderer.sun.enabled = l.sun != nil
+  toward_sun, has_sun := l.sun.?
+  app.renderer.sun.enabled = has_sun
+  if has_sun do app.renderer.sun.direction = -toward_sun
   app.renderer.sun.shadow_distance = l.shadow
   for handle in app.model.lights {
     light := render.light(&app.renderer, handle) or_continue
@@ -115,7 +116,7 @@ build_level :: proc(app: ^App, index: int) -> bool {
 }
 
 destroy_level :: proc(app: ^App) {
-  gltf.destroy(&app.level, &app.scene)
+  gltf.destroy(&app.level, &app.scene, &app.renderer)
   gltf.destroy(&app.model, &app.renderer)
   world.teardown(&app.scene)
   render.teardown(&app.renderer)
@@ -138,7 +139,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.countdown -= dt
   if app.auto_switch && app.countdown <= 0 && app.requested < 0 do app.requested = (app.current + 1) % len(LEVELS)
   if app.requested >= 0 {
@@ -148,11 +149,8 @@ update :: proc(app: ^App, dt: f32) {
     app.countdown = LEVEL_SECONDS
     if index < len(LEVELS) do build_level(app, index)
   }
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   when AUTOMATED_TEST do run_test_step(app)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 run_test_step :: proc(app: ^App) {

@@ -1,5 +1,6 @@
 package animation
 
+import "../geometry"
 import "core:math/ease"
 import "core:math/linalg"
 import "core:mem"
@@ -222,6 +223,17 @@ bone_matrix :: proc(self: ^Animator, bone: u32) -> matrix[4, 4]f32 {
   if int(bone) >= len(self.positions) do return linalg.MATRIX4F32_IDENTITY
   return linalg.matrix4_from_trs(self.positions[bone], self.rotations[bone], self.scales[bone])
 }
+
+// bone_locals writes each bone's transform after every layer relative to its parent bone (what
+// the palette shows, as a scene node under the parent's would hold it) into out.
+bone_locals :: proc(self: ^Animator, skel: ^Skeleton, out: []TRS) {
+  for i in 0 ..< min(len(out), len(self.positions), len(skel.parents)) {
+    m := bone_matrix(self, u32(i))
+    if p := skel.parents[i]; p >= 0 do m = linalg.inverse(bone_matrix(self, u32(p))) * m
+    out[i].position, out[i].rotation, out[i].scale = geometry.decompose_matrix(m)
+  }
+}
+
 
 // bone_limits returns the joint limits IK and leg layers keep each bone within, indexed by
 // bone; edit them in place. Every bone starts JOINT_FREE.

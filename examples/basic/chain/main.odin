@@ -96,9 +96,9 @@ yaw :: proc(direction: [2]f32) -> f32 {
   return math.atan2(-direction.y, direction.x)
 }
 
-add_box :: proc(vertices: ^[dynamic]render.Vertex, indices: ^[dynamic]u32, center, half: [3]f32, color: [4]f32) {
-  cube := render.make_cube(color)
-  defer render.geometry_destroy(cube)
+add_box :: proc(vertices: ^[dynamic]geometry.Vertex, indices: ^[dynamic]u32, center, half: [3]f32, color: [4]f32) {
+  cube := geometry.make_cube(color)
+  defer geometry.mesh_destroy(cube)
   first := u32(len(vertices))
   for v in cube.vertices {
     moved := v
@@ -108,8 +108,8 @@ add_box :: proc(vertices: ^[dynamic]render.Vertex, indices: ^[dynamic]u32, cente
   for i in cube.indices do append(indices, first + i)
 }
 
-build_head :: proc() -> render.Geometry {
-  vertices: [dynamic]render.Vertex
+build_head :: proc() -> geometry.Mesh {
+  vertices: [dynamic]geometry.Vertex
   indices: [dynamic]u32
   ink := [4]f32{0.07, 0.08, 0.1, 1}
   jade := [4]f32{0.12, 0.3, 0.28, 1}
@@ -127,25 +127,21 @@ build_head :: proc() -> render.Geometry {
     add_box(&vertices, &indices, {-0.5, 0.95, side * 0.3}, {0.1, 0.18, 0.08}, gold)
     add_box(&vertices, &indices, {0.95, -0.15, side * 0.2}, {0.05, 0.1, 0.04}, white)
   }
-  return render.make_geometry(vertices[:], indices[:])
+  return geometry.make_mesh(vertices[:], indices[:])
 }
 
 spawn_box :: proc(app: ^App, mesh: render.MeshHandle, material: render.MaterialHandle) -> world.NodeHandle {
-  n := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(n.index), render.MeshAttachment{mesh = mesh, material = material, cast_shadow = true})
-  return n
+  return mjolnir.spawn_mesh(&app.scene, &app.renderer, render.MeshAttachment{mesh = mesh, material = material, cast_shadow = true})
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
-  if !debugui.init(&app.debug, r, {1000, 700}) do return .FAIL
+  if !debugui.init(&app.debug, r) do return .FAIL
 
-  ground := world.spawn(&app.scene, {0, -0.01, 0})
-  render.attach(r, render.SlotHandle(ground.index), render.primitive(r, .QUAD_XZ, .GRAY))
-  world.scale(&app.scene, ground, 20)
+  mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -0.01, 0}, scale = 20)
 
-  cube := render.mesh_create(r, render.make_cube())
+  cube := render.mesh_create(r, geometry.make_cube())
   head := render.mesh_create(r, build_head())
   ink := render.material_create(r, render.make_material(base_color_factor = {0.08, 0.1, 0.12, 1}, roughness_value = 0.6))
   gold := render.material_create(r, render.make_material(base_color_factor = {0.95, 0.75, 0.2, 1}, metallic_value = 0.6, roughness_value = 0.3))
@@ -236,9 +232,7 @@ approach :: proc(from, to: [2]f32, distance: f32) -> [2]f32 {
 }
 
 ground_hit :: proc(ray: geometry.Ray) -> (at: [2]f32, ok: bool) {
-  hit, t := geometry.ray_plane_intersection(ray, {0, PLANE_Y, 0}, {0, 1, 0})
-  if !hit do return
-  p := ray.origin + ray.direction * t
+  p := geometry.ray_plane_intersection(ray, {0, PLANE_Y, 0}, {0, 1, 0}) or_return
   return {p.x, p.z}, true
 }
 
@@ -272,8 +266,7 @@ update :: proc(app: ^App, dt: f32) {
     }
   }
   if !input.mouse_down(&app.input, .LEFT) do app.grabbed = false
-  if !app.grabbed do render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(r), app.orbit)
+  if !app.grabbed do render.orbit_drag(&app.orbit, render.main_camera(r), &app.input)
 
   heading := linalg.normalize0(app.chain.head - app.chain.points[0])
   if heading == {} do heading = {1, 0}
@@ -304,9 +297,7 @@ update :: proc(app: ^App, dt: f32) {
   }
   pose(app, heading)
 
-  world.update(&app.scene)
-  render.stage_transforms(r, world.changes(&app.scene))
-  render.update(r, dt)
+  mjolnir.update(&app.scene, r, dt)
 }
 
 size :: proc(t: f32) -> f32 {
@@ -351,6 +342,5 @@ pose :: proc(app: ^App, heading: [2]f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }

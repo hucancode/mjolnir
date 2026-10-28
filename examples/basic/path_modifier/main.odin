@@ -63,7 +63,7 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   animation.destroy(&app.spline)
-  gltf.destroy(&app.snake, &app.scene)
+  gltf.destroy(&app.snake, &app.scene, &app.renderer)
   gltf.destroy(&app.snake_model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
@@ -81,9 +81,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({5, 3, 5}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  ground := world.spawn(&app.scene, {0, -3, 0})
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
-  world.scale(&app.scene, ground, 30.0)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -3, 0}, scale = 30.0)
 
   app.snake_model = gltf.model_create(&app.renderer, #load("assets/stuffed_snake_rigged.glb"))
   app.snake = gltf.instance_create(&app.snake_model, &app.scene, &app.renderer)
@@ -117,8 +115,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   path_length := animation.spline_arc_length(app.spline)
   if app.auto_play && path_length > 0 {
     app.offset = math.mod_f32(app.offset + app.speed * dt, path_length)
@@ -143,8 +140,7 @@ draw_path :: proc(app: ^App) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

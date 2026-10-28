@@ -44,13 +44,9 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
 
-  ground := world.spawn(&app.scene, {0, -1, 0})
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY))
-  world.scale(&app.scene, ground, 20.0)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -1, 0}, scale = 20.0)
 
-  occluder := world.spawn(&app.scene, {-6, 0, 0})
-  render.attach(&app.renderer, render.SlotHandle(occluder.index), render.primitive(&app.renderer, .CUBE, .BLUE))
-  world.scale(&app.scene, occluder, 0.8)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .BLUE), {-6, 0, 0}, scale = 0.8)
 
   app.orbit = render.make_orbit({12, 8, 14}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
@@ -72,11 +68,10 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.time += dt
   t := app.time
-  white := render.DEBUG_WHITE
+  white := render.COLOR_RGB[.WHITE]
 
   render.debug_axes(&app.renderer, {0, 0, 0}, scale = 2)
 
@@ -85,37 +80,34 @@ update :: proc(app: ^App, dt: f32) {
   render.debug_segment(&app.renderer, {8, 0, -8}, {8, 6, -8}, white)
   render.debug_segment(&app.renderer, {-8, 6, -8}, {8, 6, -8}, white)
 
-  render.debug_aabb(&app.renderer, {-7, -1, -1}, {-5, 1, 1}, render.DEBUG_GREEN)
+  render.debug_aabb(&app.renderer, {-7, -1, -1}, {-5, 1, 1}, render.COLOR_RGB[.GREEN])
 
   rot := linalg.quaternion_angle_axis_f32(t, {0, 1, 0})
-  render.debug_cube(&app.renderer, {-2, 1, 0}, rotation = rot, half_extents = 0.75, color = render.DEBUG_MAGENTA)
+  render.debug_cube(&app.renderer, {-2, 1, 0}, rotation = rot, half_extents = 0.75, color = render.COLOR_RGB[.MAGENTA])
 
   r := 1.0 + 0.3 * math.sin(t * 2)
-  render.debug_sphere(&app.renderer, {2, 1, 0}, radius = r, color = render.DEBUG_CYAN)
+  render.debug_sphere(&app.renderer, {2, 1, 0}, radius = r, color = render.COLOR_RGB[.CYAN])
 
-  render.debug_circle(&app.renderer, {6, 0.01, 0}, normal = {0, 1, 0}, radius = 1.5, color = render.DEBUG_YELLOW)
-  render.debug_circle(&app.renderer, {6, 2, 0}, normal = linalg.normalize([3]f32{1, 1, 0}), radius = 1.0, color = render.DEBUG_ORANGE)
+  render.debug_circle(&app.renderer, {6, 0.01, 0}, normal = {0, 1, 0}, radius = 1.5, color = render.COLOR_RGB[.YELLOW])
+  render.debug_circle(&app.renderer, {6, 2, 0}, normal = linalg.normalize([3]f32{1, 1, 0}), radius = 1.0, color = render.COLOR_RGB[.ORANGE])
 
   target := [3]f32{4 * math.cos(t), 3, 4 * math.sin(t)}
-  render.debug_arrow(&app.renderer, {0, 3, 0}, target, render.DEBUG_RED)
+  render.debug_arrow(&app.renderer, {0, 3, 0}, target, render.COLOR_RGB[.RED])
   render.debug_point(&app.renderer, target, size = 0.3, color = white)
 
   if t >= app.next_trail {
     app.next_trail += TRAIL_PERIOD
     angle := t * 1.5
-    render.debug_sphere(&app.renderer, {5 * math.cos(angle), 0.5, 5 * math.sin(angle)}, 0.25, render.DEBUG_GREEN, life = TRAIL_LIFE)
+    render.debug_sphere(&app.renderer, {5 * math.cos(angle), 0.5, 5 * math.sin(angle)}, 0.25, render.COLOR_RGB[.GREEN], life = TRAIL_LIFE)
   }
 
-  render.debug_sphere(&app.renderer, {0, 5, 0}, 0.4, render.DEBUG_CYAN)
-  render.debug_sphere(&app.renderer, {0, 6, 0}, 0.4, render.DEBUG_MAGENTA)
+  render.debug_sphere(&app.renderer, {0, 5, 0}, 0.4, render.COLOR_RGB[.CYAN])
+  render.debug_sphere(&app.renderer, {0, 6, 0}, 0.4, render.COLOR_RGB[.MAGENTA])
   render.debug_arrow(&app.renderer, {0, 5, 0}, {0, 6, 0}, white)
   render.debug_axes(&app.renderer, {-6, 0, 0}, scale = 1.5, bypass_depth = true)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }

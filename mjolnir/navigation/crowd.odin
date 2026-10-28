@@ -11,8 +11,6 @@ DT_CROWDAGENT_MAX_NEIGHBOURS :: 6
 MAX_CORNERS :: 4
 @(private = "file")
 DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS :: 8
-@(private = "file")
-DT_CROWD_MAX_QUERY_FILTER_TYPE :: 16
 
 @(private = "file")
 MAX_ITERS_PER_UPDATE :: 100
@@ -29,7 +27,6 @@ Neighbour :: struct {
 AgentState :: enum u8 {
 	INVALID,
 	WALKING,
-	OFFMESH,
 }
 
 // AgentParams holds an agent's size, speed limits, query ranges and behavior flags.
@@ -43,6 +40,7 @@ AgentParams :: struct {
 	separation_weight:        f32,
 	update_flags:             UpdateFlagSet,
 	obstacle_avoidance_type:  u8,
+	// the NavMesh.filters entry its paths and queries use
 	query_filter_type:        u8,
 }
 
@@ -101,9 +99,10 @@ Agent :: struct {
 	using _: Agent_Internal,
 }
 
-// AgentPose is an agent's position on the mesh and its heading, turning +Z (glTF's forward)
-// towards where it last moved, together with its user link.
+// AgentPose is an agent's position on the mesh and its heading, turning +Z towards where it
+// last moved, together with its handle and user link.
 AgentPose :: struct {
+	agent:    AgentHandle,
 	user:     Handle,
 	position: [3]f32,
 	rotation: quaternion128,
@@ -153,7 +152,8 @@ Crowd_State :: struct {
 	path_result:               []detour.Poly_Ref,
 	max_path_result:           int,
 	agent_placement_half_extents: [3]f32,
-	filters:                   [DT_CROWD_MAX_QUERY_FILTER_TYPE]detour.Query_Filter,
+	// the mesh the crowd walks, which outlives it: its filters
+	navmesh:                   ^NavMesh,
 	max_agent_radius:          f32,
 	velocity_sample_count:     int,
 	nav_query:                 detour.Nav_Mesh_Query,
@@ -162,12 +162,13 @@ Crowd_State :: struct {
 }
 
 // crowd_init prepares the crowd for up to max_agents agents on navmesh, which must outlive the
-// crowd. The crowd must not move after crowd_init; free it with crowd_shutdown.
+// crowd. The crowd must not move after crowd_init; free it with crowd_destroy.
 crowd_init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh: ^NavMesh,
              allocator := context.allocator) -> bool {
 	context.allocator = allocator
 	nav := &navmesh.detour_mesh
 	self^ = {}
+	self.navmesh = navmesh
 
 	self.max_agents = max_agents
 	self.max_agent_radius = max_agent_radius
@@ -176,7 +177,7 @@ crowd_init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh
 	obstacle_avoidance_query_init(&self.obstacle_query, 6, 8)
 	if !proximity_grid_init(&self.grid, max_agents*4, max_agent_radius*3) ||
 	   !path_queue_init(&self.path_queue, detour.DEFAULT_MAX_PATH, MAX_PATHQUEUE_NODES, nav) {
-		crowd_shutdown(self)
+		crowd_destroy(self)
 		return false
 	}
 
@@ -189,10 +190,6 @@ crowd_init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh
 
 	self.max_path_result = 256
 	self.path_result = make([]detour.Poly_Ref, self.max_path_result)
-
-	for i in 0..<DT_CROWD_MAX_QUERY_FILTER_TYPE {
-		detour.query_filter_init(&self.filters[i])
-	}
 
 	params := Obstacle_Avoidance_Params{
 		vel_bias = 0.4,
@@ -212,15 +209,15 @@ crowd_init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh
 
 	status := detour.nav_mesh_query_init(&self.nav_query, nav, MAX_PATHQUEUE_NODES)
 	if detour.status_failed(status) {
-		crowd_shutdown(self)
+		crowd_destroy(self)
 		return false
 	}
 
 	return true
 }
 
-// crowd_shutdown frees all agent state.
-crowd_shutdown :: proc(self: ^Crowd) {
+// crowd_destroy frees all agent state.
+crowd_destroy :: proc(self: ^Crowd) {
 	delete(self.agents)
 	delete(self.corridor_paths)
 	delete(self.path_result)
@@ -246,32 +243,54 @@ agent_create :: proc(self: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS, 
 	if idx == -1 do return {}, false
 
 	ag := &self.agents[idx]
-	ag.state = .WALKING
 	ag.params = params
 	ag.user = user
 	ag.heading = 0
+	ag.topology_opt_time = 0
+	if !snap(self, ag, pos) do return {}, false
+	ag.state = .WALKING
+	return {u32(idx), ag.generation + 1}, true
+}
 
-	nearest_status, nearest_ref, nearest_pt := detour.find_nearest_poly(&self.nav_query, pos,
-	                                                                      self.agent_placement_half_extents,
-	                                                                      &self.filters[ag.params.query_filter_type])
-	if detour.status_failed(nearest_status) || nearest_ref == detour.INVALID_POLY_REF {
-		ag.state = .INVALID
-		return {}, false
-	}
-
-	path_corridor_reset(&ag.corridor, nearest_ref, nearest_pt)
+// Puts the agent at the mesh point nearest pos, at rest and without a goal; false when pos is
+// off the mesh.
+@(private = "file")
+snap :: proc(self: ^Crowd, ag: ^Agent, pos: [3]f32) -> bool {
+	status, ref, point := detour.find_nearest_poly(&self.nav_query, pos, self.agent_placement_half_extents, agent_filter(self, ag))
+	if detour.status_failed(status) || ref == detour.INVALID_POLY_REF do return false
+	path_corridor_reset(&ag.corridor, ref, point)
 	ag.boundary.center = {math.F32_MAX, math.F32_MAX, math.F32_MAX}
 	ag.boundary.nsegs = 0
-
-	ag.topology_opt_time = 0
 	ag.target_state = .None
-
-	ag.position = nearest_pt
+	ag.position = point
 	ag.desired_speed = 0
 	ag.nvel = {0, 0, 0}
 	ag.velocity = {0, 0, 0}
+	return true
+}
 
-	return {u32(idx), ag.generation + 1}, true
+// agent_place teleports the agent to the mesh point nearest pos, at rest and without a goal;
+// false when the handle is stale or pos is off the mesh.
+agent_place :: proc(self: ^Crowd, handle: AgentHandle, pos: [3]f32) -> bool {
+	idx := agent_index(self, handle) or_return
+	return snap(self, &self.agents[idx], pos)
+}
+
+// agent_steer drives the agent at `velocity` instead of along a path, still kept on the mesh,
+// away from walls and from the others, until the next move_to or stop.
+agent_steer :: proc(self: ^Crowd, handle: AgentHandle, velocity: [3]f32) -> bool {
+	idx := agent_index(self, handle) or_return
+	ag := &self.agents[idx]
+	ag.target = velocity
+	ag.target_pathq_ref = PATHQ_INVALID
+	ag.target_state = .Velocity
+	ag.target_replan = false
+	return true
+}
+
+@(private = "file")
+agent_filter :: #force_inline proc(self: ^Crowd, ag: ^Agent) -> ^detour.Query_Filter {
+	return &self.navmesh.filters[ag.params.query_filter_type % MAX_FILTERS]
 }
 
 // The live agent behind handle; false when the handle is stale.
@@ -311,7 +330,7 @@ request_move_target :: proc(self: ^Crowd, idx: int, ref: detour.Poly_Ref, pos: [
 // move_to snaps pos to the mesh within extents and sets it as the agent's goal.
 move_to :: proc(self: ^Crowd, handle: AgentHandle, pos: [3]f32, extents: [3]f32 = {2, 4, 2}) -> bool {
 	idx := agent_index(self, handle) or_return
-	filter := &self.filters[self.agents[idx].params.query_filter_type]
+	filter := agent_filter(self, &self.agents[idx])
 	status, ref, snapped := detour.find_nearest_poly(&self.nav_query, pos, extents, filter)
 	if detour.status_failed(status) do return false
 	return request_move_target(self, idx, ref, snapped)
@@ -341,6 +360,7 @@ crowd_update :: proc(self: ^Crowd, dt: f32) {
 		nactive += 1
 	}
 
+	check_path_validity(self, active_agents[:nactive])
 	update_move_request(self, dt)
 	update_topology_optimization(self, active_agents[:nactive], dt)
 
@@ -370,11 +390,18 @@ crowd_update :: proc(self: ^Crowd, dt: f32) {
 			ag.desired_speed = 0
 			continue
 		}
+		// steered (agent_steer): the velocity is the goal
+		if ag.target_state == .Velocity {
+			ag.corner_count = 0
+			ag.dvel = ag.target
+			ag.desired_speed = linalg.length(ag.target)
+			continue
+		}
 
 		ag.corner_count = path_corridor_find_corners(&ag.corridor, ag.corners[:], ag.corner_flags[:],
 		                                          ag.corner_polys[:], MAX_CORNERS,
 		                                          &self.nav_query,
-		                                          &self.filters[ag.params.query_filter_type])
+		                                          agent_filter(self, ag))
 
 		if .ANTICIPATE_TURNS in ag.params.update_flags {
 			calc_smooth_steer_direction(ag, &ag.dvel)
@@ -407,7 +434,7 @@ crowd_update :: proc(self: ^Crowd, dt: f32) {
 			n_sep := 0
 
 			for j in 0..<ag.nneis {
-				nei := &self.agents[ag.neis[j].idx]
+				nei := active_agents[ag.neis[j].idx]
 				diff := ag.position - nei.position
 				diff.y = 0
 
@@ -439,7 +466,7 @@ crowd_update :: proc(self: ^Crowd, dt: f32) {
 			obstacle_avoidance_query_reset(&self.obstacle_query)
 
 			for j in 0..<ag.nneis {
-				nei := &self.agents[ag.neis[j].idx]
+				nei := active_agents[ag.neis[j].idx]
 				obstacle_avoidance_query_add_circle(&self.obstacle_query, nei.position,
 				                                    nei.params.radius, nei.velocity, nei.dvel)
 			}
@@ -467,8 +494,9 @@ crowd_update :: proc(self: ^Crowd, dt: f32) {
 		if ag.state != .WALKING do continue
 
 		integrate(ag, dt)
+		if linalg.length2(ag.velocity.xz) > 0.01 do ag.heading = math.atan2(ag.velocity.x, ag.velocity.z)
 
-		filter := &self.filters[ag.params.query_filter_type]
+		filter := agent_filter(self, ag)
 		path_corridor_move_position(&ag.corridor, ag.position, &self.nav_query, filter)
 
 		ag.corner_count = path_corridor_find_corners(&ag.corridor, ag.corners[:], ag.corner_flags[:],
@@ -490,6 +518,32 @@ crowd_update :: proc(self: ^Crowd, dt: f32) {
 	path_queue_update(&self.path_queue, MAX_ITERS_PER_UPDATE)
 }
 
+// After the mesh changed under the crowd (navmesh_init again), agents off the new polygons snap
+// back onto it and paths through stale polygons are planned again.
+@(private = "file")
+check_path_validity :: proc(self: ^Crowd, agents: []^Agent) {
+	CHECK_LOOKAHEAD :: 10
+	for ag in agents {
+		target, state := ag.target, ag.target_state
+		snapped := !detour.is_valid_poly_ref(self.nav_query.nav_mesh, path_corridor_get_first_poly(&ag.corridor))
+		if snapped {
+			if !snap(self, ag, ag.position) do continue
+			ag.target, ag.target_state = target, state
+		}
+		if state == .None || state == .Velocity || state == .Failed do continue
+		if !snapped && path_corridor_is_valid(&ag.corridor, CHECK_LOOKAHEAD, &self.nav_query, agent_filter(self, ag)) do continue
+		status, ref, goal := detour.find_nearest_poly(&self.nav_query, ag.target, self.agent_placement_half_extents, agent_filter(self, ag))
+		if detour.status_failed(status) || ref == detour.INVALID_POLY_REF {
+			ag.target_state = .Failed
+			continue
+		}
+		path_corridor_reset(&ag.corridor, path_corridor_get_first_poly(&ag.corridor), ag.position)
+		ag.target_ref, ag.target = ref, goal
+		ag.target_pathq_ref = PATHQ_INVALID
+		ag.target_state = .Requesting
+	}
+}
+
 @(private = "file")
 update_move_request :: proc(self: ^Crowd, dt: f32) {
 	PATH_MAX_AGENTS :: 8
@@ -502,7 +556,7 @@ update_move_request :: proc(self: ^Crowd, dt: f32) {
 		if ag.target_state == .None || ag.target_state == .Velocity do continue
 
 		if ag.target_state == .Requesting {
-			filter := &self.filters[ag.params.query_filter_type]
+			filter := agent_filter(self, ag)
 			ag.target_pathq_ref = path_queue_request(&self.path_queue,
 			                                         path_corridor_get_last_poly(&ag.corridor),
 			                                         ag.target_ref,
@@ -567,7 +621,7 @@ update_topology_optimization :: proc(self: ^Crowd, agents: []^Agent, dt: f32) {
 		ag := queue[i]
 		ag.topology_opt_time = 0
 
-		filter := &self.filters[ag.params.query_filter_type]
+		filter := agent_filter(self, ag)
 		path_corridor_optimize_path_topology(&ag.corridor, &self.nav_query, filter)
 	}
 }
@@ -713,14 +767,14 @@ agent :: proc(self: ^Crowd, handle: AgentHandle) -> (ag: Agent, ok: bool) #optio
 	return self.agents[idx], true
 }
 
-// agent_poses returns the pose of every active agent that has a `user` link, for copying onto
-// what it moves (world.set_world_poses); valid until the next call.
+// agent_poses returns the pose of every active agent, for copying onto what it moves; valid
+// until the next call.
 agent_poses :: proc(self: ^Crowd) -> []AgentPose {
 	clear(&self.poses)
-	for &ag in self.agents {
-		if ag.state == .INVALID || ag.user == {} do continue
-		if linalg.length2(ag.velocity.xz) > 0.01 do ag.heading = math.atan2(ag.velocity.x, ag.velocity.z)
-		append(&self.poses, AgentPose{ag.user, ag.position, linalg.quaternion_angle_axis_f32(ag.heading, {0, 1, 0})})
+	for ag, i in self.agents {
+		if ag.state == .INVALID do continue
+		pose := AgentPose{AgentHandle{u32(i), ag.generation + 1}, ag.user, ag.position, linalg.quaternion_angle_axis_f32(ag.heading, {0, 1, 0})}
+		append(&self.poses, pose)
 	}
 	return self.poses[:]
 }
@@ -731,11 +785,6 @@ agent_params :: proc(self: ^Crowd, handle: AgentHandle) -> (params: ^AgentParams
 	return &self.agents[idx].params, true
 }
 
-// filter returns the query filter agents use for query_filter_type i; false if out of range.
-filter :: proc(self: ^Crowd, i: int) -> (^detour.Query_Filter, bool) #optional_ok {
-	if i < 0 || i >= DT_CROWD_MAX_QUERY_FILTER_TYPE do return nil, false
-	return &self.filters[i], true
-}
 
 // destroy frees an agent, as agent_destroy does.
 

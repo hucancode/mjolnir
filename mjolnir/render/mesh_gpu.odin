@@ -1,5 +1,7 @@
 package render
 
+import "../geometry"
+
 import "../containers"
 import "core:log"
 
@@ -31,7 +33,7 @@ MESH_STREAMS := [MeshStream]struct {
   slab:      containers.SlabConfig,
   elem_size: int,
 } {
-  .VERTEX = {VERTEX_SLAB_CONFIG, size_of(Vertex)},
+  .VERTEX = {VERTEX_SLAB_CONFIG, size_of(geometry.Vertex)},
   .INDEX = {
     {
       {block_size = 128, block_count = 2048},
@@ -45,7 +47,7 @@ MESH_STREAMS := [MeshStream]struct {
     },
     size_of(u32),
   },
-  .SKINNING = {VERTEX_SLAB_CONFIG, size_of(SkinningData)},
+  .SKINNING = {VERTEX_SLAB_CONFIG, size_of(geometry.SkinningData)},
 }
 
 // Returns the first element index; empty data takes no range.
@@ -68,9 +70,9 @@ free_mesh :: proc(self: ^Renderer, m: MeshData) {
 
 // Fills entry `index` of the mesh table. On failure the ranges taken so far are freed.
 @(private)
-upload_mesh :: proc(self: ^Renderer, index: u32, g: Geometry) -> (ok: bool) {
+upload_mesh :: proc(self: ^Renderer, index: u32, g: geometry.Mesh) -> (ok: bool) {
   m := &write_table(self, .MESHES, MeshData)[index]
-  aabb := aabb_from_vertices(g.vertices)
+  aabb := geometry.aabb_from_vertices(g.vertices)
   m^ = {aabb_min = aabb.min, aabb_max = aabb.max}
   defer if !ok {
     free_mesh(self, m^)
@@ -86,19 +88,19 @@ upload_mesh :: proc(self: ^Renderer, index: u32, g: Geometry) -> (ok: bool) {
   return true
 }
 
-// mesh_create uploads geometry_data to the GPU; it lives until mesh_destroy or teardown.
-// Ownership of the geometry transfers: it is deleted.
-mesh_create :: proc(
-  self: ^Renderer,
-  geometry_data: Geometry,
-) -> (
-  handle: MeshHandle,
-  ok: bool,
-) #optional_ok {
-  defer geometry_destroy(geometry_data)
+// mesh_create uploads a CPU mesh (geometry.make_cube, ...) to the GPU; it lives until
+// mesh_destroy or teardown. Ownership of `mesh` transfers: it is deleted.
+mesh_create :: proc(self: ^Renderer, mesh: geometry.Mesh) -> (handle: MeshHandle, ok: bool) #optional_ok {
+  defer geometry.mesh_destroy(mesh)
+  return mesh_upload(self, mesh)
+}
+
+// mesh_create without taking the mesh.
+@(private)
+mesh_upload :: proc(self: ^Renderer, mesh: geometry.Mesh) -> (handle: MeshHandle, ok: bool) {
   guard(self)
   handle = MeshHandle(containers.slots_alloc(&self.slots[.MESHES]) or_return)
-  if !upload_mesh(self, u32(handle), geometry_data) {
+  if !upload_mesh(self, u32(handle), mesh) {
     log.errorf("Mesh %d upload failed", handle)
     containers.slots_free(&self.slots[.MESHES], u32(handle))
     return 0, false
@@ -115,10 +117,10 @@ mesh_destroy :: proc(self: ^Renderer, handle: MeshHandle) {
 
 @(private)
 init_builtin_meshes :: proc(self: ^Renderer) {
-  self.builtin_meshes[.CUBE] = mesh_create(self, make_cube())
-  self.builtin_meshes[.SPHERE] = mesh_create(self, make_sphere())
-  self.builtin_meshes[.QUAD_XZ] = mesh_create(self, make_quad())
-  self.builtin_meshes[.QUAD_XY] = mesh_create(self, make_billboard_quad())
-  self.builtin_meshes[.CONE] = mesh_create(self, make_cone())
-  self.builtin_meshes[.CYLINDER] = mesh_create(self, make_cylinder())
+  self.builtin_meshes[.CUBE] = mesh_create(self, geometry.make_cube())
+  self.builtin_meshes[.SPHERE] = mesh_create(self, geometry.make_sphere())
+  self.builtin_meshes[.QUAD_XZ] = mesh_create(self, geometry.make_quad())
+  self.builtin_meshes[.QUAD_XY] = mesh_create(self, geometry.make_billboard_quad())
+  self.builtin_meshes[.CONE] = mesh_create(self, geometry.make_cone())
+  self.builtin_meshes[.CYLINDER] = mesh_create(self, geometry.make_cylinder())
 }

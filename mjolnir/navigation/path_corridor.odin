@@ -203,7 +203,7 @@ path_corridor_set_corridor :: proc(corridor: ^Path_Corridor, target: [3]f32,
 	corridor.npath = n
 }
 
-@(private = "file")
+@(private)
 path_corridor_is_valid :: proc(corridor: ^Path_Corridor, max_look_ahead: int,
                                 query: ^detour.Nav_Mesh_Query,
                                 filter: ^detour.Query_Filter) -> bool {

@@ -1,6 +1,7 @@
 package render
 
 import "core:log"
+import "core:slice"
 
 // Where draws are not compacted by multi-draw (WebGPU), nodes are grouped into batches: the
 // nodes drawing one mesh with one material. The GPU cull counts visible nodes per batch and
@@ -83,16 +84,30 @@ batches_reset :: proc(self: ^Renderer) {
   clear_entry(self, .NODE_BATCH, 0, MAX_SLOTS)
 }
 
-// Before a frame: lays the batches' instance ranges end to end when membership changed.
+// Before a frame: lays the batches' instance ranges end to end when membership changed, and
+// sorts the live batches by draw list key (material_list), then material, then id, for the
+// draw loop (materials may change their type or shader any tick).
 @(private)
 batches_flush :: proc(self: ^Renderer) {
-  if !self.batch_stale do return
-  self.batch_stale = false
+  when BINDLESS do return
   entries := write_table(self, .BATCHES, Batch)
-  first: u32
-  for id in 1 ..< self.batch_high {
-    entries[id].first_instance = first
-    first += entries[id].capacity
+  if self.batch_stale {
+    self.batch_stale = false
+    first: u32
+    for id in 1 ..< self.batch_high {
+      entries[id].first_instance = first
+      first += entries[id].capacity
+    }
+    mark_dirty(self, .BATCHES, 0, int(self.batch_high))
   }
-  mark_dirty(self, .BATCHES, 0, int(self.batch_high))
+  materials := write_table(self, .MATERIALS, Material)
+  clear(&self.batch_order)
+  #assert(MAX_MATERIALS <= 1 << 24 && MAX_BATCHES <= 1 << 20)
+  for id in 1 ..< self.batch_high do if entries[id].capacity > 0 {
+    key := material_list(materials[entries[id].material_id])
+    // a custom material without a shader is drawn by no one
+    if key == NO_DRAW_LIST do continue
+    append(&self.batch_order, u64(key) << 44 | u64(entries[id].material_id) << 20 | u64(id))
+  }
+  slice.sort(self.batch_order[:])
 }

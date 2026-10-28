@@ -1,0 +1,121 @@
+package geometry
+
+import "core:math/linalg"
+import "core:slice"
+
+// SkinningData holds the four joint indices and weights that deform one vertex.
+SkinningData :: struct {
+  joints:  [4]u32,
+  weights: [4]f32,
+}
+#assert(size_of(SkinningData) == 32)
+
+// Vertex is a mesh vertex, as renderers upload it.
+Vertex :: struct {
+  position: [3]f32,
+  normal:   [3]f32,
+  color:    [4]f32,
+  uv:       [2]f32,
+  tangent:  [4]f32, // xyz = tangent, w = handedness (for bitangent reconstruction)
+}
+
+// Mesh is a CPU triangle mesh; skinnings is empty or parallel to vertices.
+Mesh :: struct {
+  vertices:  []Vertex,
+  skinnings: []SkinningData,
+  indices:   []u32,
+}
+
+// make_mesh wraps vertices and indices into a Mesh, giving every vertex without a tangent (all
+// zero) one aligned with its triangles' UVs.
+make_mesh :: proc(vertices: []Vertex, indices: []u32, skinnings: []SkinningData = nil) -> Mesh {
+  missing := make([]bool, len(vertices), context.temp_allocator)
+  any_missing := false
+  for v, i in vertices do if v.tangent == {} {
+    missing[i] = true
+    any_missing = true
+  }
+  if !any_missing do return {vertices = vertices, skinnings = skinnings, indices = indices}
+  for t := 0; t + 2 < len(indices); t += 3 {
+    tri := [3]u32{indices[t], indices[t + 1], indices[t + 2]}
+    a, b, c := vertices[tri[0]], vertices[tri[1]], vertices[tri[2]]
+    e1, e2 := b.position - a.position, c.position - a.position
+    d1, d2 := b.uv - a.uv, c.uv - a.uv
+    det := linalg.cross(d1, d2)
+    // degenerate UVs contribute no tangent
+    if abs(det) < 1e-12 do continue
+    tangent := (d2.y * e1 - d1.y * e2) / det
+    for k in tri do if missing[k] do vertices[k].tangent.xyz += tangent
+  }
+  // vertices touching only degenerate triangles (poles, cone tip) get any vector perpendicular
+  // to the normal
+  for &v, i in vertices do if missing[i] {
+    tangent := v.tangent.xyz
+    if linalg.length2(tangent) < 1e-12 {
+      axis := linalg.VECTOR3F32_X_AXIS if abs(v.normal.x) < 0.9 else linalg.VECTOR3F32_Z_AXIS
+      tangent = linalg.cross(v.normal, axis)
+      if linalg.length2(tangent) < 1e-12 do tangent = linalg.VECTOR3F32_X_AXIS
+    }
+    v.tangent = {0, 0, 0, 1}
+    v.tangent.xyz = linalg.normalize(tangent)
+  }
+  return {vertices = vertices, skinnings = skinnings, indices = indices}
+}
+
+// mesh_destroy frees the arrays of a Mesh.
+mesh_destroy :: proc(mesh: Mesh) {
+  delete(mesh.vertices)
+  delete(mesh.skinnings)
+  delete(mesh.indices)
+}
+
+// flat axes are widened so culling never sees a zero-thickness box
+@(private)
+AABB_MIN_EXTENT :: 0.1
+
+// aabb_from_vertices returns the bounding box of the vertex positions, flat axes widened to AABB_MIN_EXTENT.
+aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: Aabb) {
+  if len(vertices) == 0 {
+    return
+  }
+  ret = AABB_UNDEFINED
+  for vertex in vertices {
+    ret.min = linalg.min(ret.min, vertex.position)
+    ret.max = linalg.max(ret.max, vertex.position)
+  }
+  pad := linalg.max(AABB_MIN_EXTENT - (ret.max - ret.min), [3]f32{}) * 0.5
+  ret.min -= pad
+  ret.max += pad
+  return ret
+}
+
+// positions returns the vertex positions, allocated with allocator.
+positions :: proc(self: Mesh, allocator := context.allocator) -> [][3]f32 {
+  out := make([][3]f32, len(self.vertices), allocator)
+  for v, i in self.vertices do out[i] = v.position
+  return out
+}
+
+// make_mesh_from_triangles builds a Mesh from bare triangles: smooth normals, white color and
+// planar xz UVs. The input arrays are copied.
+make_mesh_from_triangles :: proc(positions: [][3]f32, indices: []u32) -> Mesh {
+  n := len(positions)
+  vertices := make([]Vertex, n)
+  normals := make([][3]f32, n, context.temp_allocator)
+  for i := 0; i + 2 < len(indices); i += 3 {
+    i0, i1, i2 := indices[i], indices[i + 1], indices[i + 2]
+    p0, p1, p2 := positions[i0], positions[i1], positions[i2]
+    face := linalg.normalize0(linalg.cross(p1 - p0, p2 - p0))
+    normals[i0] += face
+    normals[i1] += face
+    normals[i2] += face
+  }
+  for &v, i in vertices {
+    v.position = positions[i]
+    v.normal = linalg.normalize0(normals[i])
+    if v.normal == {} do v.normal = linalg.VECTOR3F32_Y_AXIS
+    v.color = {1, 1, 1, 1}
+    v.uv = v.position.xz * 0.1
+  }
+  return make_mesh(vertices, slice.clone(indices))
+}

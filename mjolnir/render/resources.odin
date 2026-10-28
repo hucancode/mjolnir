@@ -182,7 +182,7 @@ resources_init :: proc(self: ^Renderer) -> bool {
     size := int(self.mesh_slabs[stream].capacity) * MESH_STREAMS[stream].elem_size
     self.buffers[SceneBuffer(int(SceneBuffer.VERTICES) + int(stream))][0] = dev.buffer_create(&self.gpu, {size = size, usage = stream_usage[stream]}) or_return
   }
-  self.buffers[.SKINNED_VERTICES][0] = dev.buffer_create(&self.gpu, {size = SKIN_CAPACITY * size_of(SkinnedVertex), usage = {.STORAGE}}) or_return
+  self.buffers[.SKINNED_VERTICES][0] = dev.buffer_create(&self.gpu, {size = MAX_SKINNED_VERTICES * size_of(SkinnedVertex), usage = {.STORAGE}}) or_return
   self.buffers[.PARTICLE_ALIVE][0] = dev.buffer_create(&self.gpu, {size = (PARTICLE_ALIVE_HEADER + MAX_PARTICLES) * size_of(u32), usage = {.STORAGE, .INDIRECT}}) or_return
   self.buffers[.PARTICLES][0] = dev.buffer_create(&self.gpu, {size = MAX_PARTICLES * size_of(Particle), usage = {.STORAGE}}) or_return
   for f in 0 ..< FRAMES_IN_FLIGHT {

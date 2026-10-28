@@ -20,7 +20,7 @@
   <a href="index.html">Home</a>
   <a href="examples.html">Examples</a>
   <a href="api.html">API</a>
-  <a href="https://github.com/hucancode/mjolnir">GitHub</a>
+  <a id="repo" href="https://github.com/hucancode/mjolnir">GitHub</a>
 </nav>
 <main>
 <div>
@@ -38,17 +38,20 @@ const el = (tag, props = {}, ...kids) => {
   return e;
 };
 
-const pkgs = await (await fetch("data/api.json")).json();
+const api = await (await fetch("data/api.json")).json();
+const pkgs = api.packages;
+document.querySelector('#repo').href = api.url;
 const nav = document.querySelector('search nav');
 const search = document.querySelector('search input');
 const content = document.querySelector('article');
 
-const short = (path) => path.replace(/^mjolnir\/?/, '') || 'mjolnir';
+const short = (path) => path.slice(api.root.length).replace(/^\//, '') || api.root;
 const link = (p) => el('a', { href: '#' + p.path, textContent: short(p.path) });
 
 // layers top (glue) to bottom (core), each with its packages
 const layers = [];
-for (const p of pkgs) (layers[p.layer] ??= { n: p.layer, name: p.layer_name, pkgs: [] }).pkgs.push(p);
+// a project without layers lists every package under one heading
+for (const p of pkgs) (layers[Math.max(p.layer, 0)] ??= { n: p.layer, name: p.layer < 0 ? 'packages' : p.layer_name, pkgs: [] }).pkgs.push(p);
 layers.reverse();
 for (const l of layers) nav.append(el('h2', { textContent: l.name.toUpperCase() }), ...l.pkgs.map(link));
 
@@ -94,9 +97,9 @@ function diagram(current) {
 function show() {
   const path = decodeURIComponent(location.hash.slice(1)) || pkgs[0].path;
   const pkg = pkgs.find((p) => p.path === path) ?? pkgs[0];
-  document.title = pkg.path + ' - Mjolnir';
+  document.title = pkg.path + ' - ' + api.project;
   for (const a of nav.querySelectorAll('a')) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + pkg.path);
-  content.replaceChildren(el('h1', { textContent: pkg.path }), el('small', { textContent: `LAYER ${pkg.layer}: ${pkg.layer_name.toUpperCase()}` }));
+  content.replaceChildren(el('h1', { textContent: pkg.path }), el('small', { textContent: pkg.layer < 0 ? '' : `LAYER ${pkg.layer}: ${pkg.layer_name.toUpperCase()}` }));
   if (pkg.doc) content.append(...prose(pkg.doc));
   content.append(diagram(pkg));
   if (pkg.notes) content.append(el('h2', { textContent: 'Architecture' }), ...prose(pkg.notes));

@@ -8,11 +8,12 @@ package vulkan_backend
 // imports render or platform and decides nothing. It is the graphics API behind rhi: rhi.odin
 // is its half of rhi's contract (PROCS, lifecycle included), the rest is what that needs. Beside
 // PROCS render takes only the names it aliases in backend_glue.odin: Backend, FRAMES_IN_FLIGHT,
-// RETIRE_GRACE and the slot counts that follow from them (MAX_PYRAMID_SLOTS, MAX_DRAW_LIST_SLOTS).
-// Vulkan is bindless (the global arrays of textures.odin, written through rhi's bindless_write),
-// takes push constants, draws with indirect count, renders layers together, runs compute on its
-// own queue where the device has one and leaves every hazard to the caller's barriers: those
-// are Caps. Staged uploads land where the caller records cmd_flush_uploads, and only the
+// RETIRE_GRACE, BINDLESS, LAYERED_RENDERING and the slot counts that follow from them
+// (MAX_PYRAMID_SLOTS, MAX_DRAW_LIST_SLOTS).
+// Vulkan is bindless (the global arrays of textures.odin, written through rhi's bindless_write)
+// and renders layers together, both BINDLESS and LAYERED_RENDERING; it takes push constants,
+// draws with indirect count, runs compute on its own queue where the device has one and leaves
+// every hazard to the caller's barriers, which are Caps. Staged uploads land where the caller records cmd_flush_uploads, and only the
 // submission the caller marks present touches the swapchain. Pipelines of one interface share a
 // pipeline layout, so a command list binds a set once for all of them, and UPLOAD buffers sit
 // in mappable device memory where there is room. Command lists come from a transient pool per

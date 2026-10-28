@@ -1,45 +1,44 @@
-package render
+package geometry
 
-import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
 // make_cube builds a 2x2x2 cube centered at the origin with per-face normals.
 make_cube :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-) -> Geometry {
+) -> Mesh {
   vertices := make([]Vertex, 24)
   indices := make([]u32, 36)
-  vertices[0] = {{-1, -1, 1}, geometry.VEC_FORWARD, color, {0, 1}, {}}
-  vertices[1] = {{1, -1, 1}, geometry.VEC_FORWARD, color, {1, 1}, {}}
-  vertices[2] = {{1, 1, 1}, geometry.VEC_FORWARD, color, {1, 0}, {}}
-  vertices[3] = {{-1, 1, 1}, geometry.VEC_FORWARD, color, {0, 0}, {}}
-  vertices[4] = {{-1, 1, -1}, geometry.VEC_BACKWARD, color, {1, 1}, {}}
-  vertices[5] = {{1, 1, -1}, geometry.VEC_BACKWARD, color, {0, 1}, {}}
-  vertices[6] = {{1, -1, -1}, geometry.VEC_BACKWARD, color, {0, 0}, {}}
-  vertices[7] = {{-1, -1, -1}, geometry.VEC_BACKWARD, color, {1, 0}, {}}
-  vertices[8] = {{1, 1, -1}, geometry.VEC_UP, color, {0, 1}, {}}
-  vertices[9] = {{-1, 1, -1}, geometry.VEC_UP, color, {1, 1}, {}}
-  vertices[10] = {{-1, 1, 1}, geometry.VEC_UP, color, {1, 0}, {}}
-  vertices[11] = {{1, 1, 1}, geometry.VEC_UP, color, {0, 0}, {}}
-  vertices[12] = {{1, -1, 1}, geometry.VEC_DOWN, color, {0, 1}, {}}
-  vertices[13] = {{-1, -1, 1}, geometry.VEC_DOWN, color, {1, 1}, {}}
-  vertices[14] = {{-1, -1, -1}, geometry.VEC_DOWN, color, {1, 0}, {}}
-  vertices[15] = {{1, -1, -1}, geometry.VEC_DOWN, color, {0, 0}, {}}
-  vertices[16] = {{1, -1, -1}, geometry.VEC_RIGHT, color, {0, 1}, {}}
-  vertices[17] = {{1, 1, -1}, geometry.VEC_RIGHT, color, {1, 1}, {}}
-  vertices[18] = {{1, 1, 1}, geometry.VEC_RIGHT, color, {1, 0}, {}}
-  vertices[19] = {{1, -1, 1}, geometry.VEC_RIGHT, color, {0, 0}, {}}
-  vertices[20] = {{-1, -1, 1}, geometry.VEC_LEFT, color, {0, 1}, {}}
-  vertices[21] = {{-1, 1, 1}, geometry.VEC_LEFT, color, {1, 1}, {}}
-  vertices[22] = {{-1, 1, -1}, geometry.VEC_LEFT, color, {1, 0}, {}}
-  vertices[23] = {{-1, -1, -1}, geometry.VEC_LEFT, color, {0, 0}, {}}
+  vertices[0] = {{-1, -1, 1}, VEC_FORWARD, color, {0, 1}, {}}
+  vertices[1] = {{1, -1, 1}, VEC_FORWARD, color, {1, 1}, {}}
+  vertices[2] = {{1, 1, 1}, VEC_FORWARD, color, {1, 0}, {}}
+  vertices[3] = {{-1, 1, 1}, VEC_FORWARD, color, {0, 0}, {}}
+  vertices[4] = {{-1, 1, -1}, VEC_BACKWARD, color, {1, 1}, {}}
+  vertices[5] = {{1, 1, -1}, VEC_BACKWARD, color, {0, 1}, {}}
+  vertices[6] = {{1, -1, -1}, VEC_BACKWARD, color, {0, 0}, {}}
+  vertices[7] = {{-1, -1, -1}, VEC_BACKWARD, color, {1, 0}, {}}
+  vertices[8] = {{1, 1, -1}, VEC_UP, color, {0, 1}, {}}
+  vertices[9] = {{-1, 1, -1}, VEC_UP, color, {1, 1}, {}}
+  vertices[10] = {{-1, 1, 1}, VEC_UP, color, {1, 0}, {}}
+  vertices[11] = {{1, 1, 1}, VEC_UP, color, {0, 0}, {}}
+  vertices[12] = {{1, -1, 1}, VEC_DOWN, color, {0, 1}, {}}
+  vertices[13] = {{-1, -1, 1}, VEC_DOWN, color, {1, 1}, {}}
+  vertices[14] = {{-1, -1, -1}, VEC_DOWN, color, {1, 0}, {}}
+  vertices[15] = {{1, -1, -1}, VEC_DOWN, color, {0, 0}, {}}
+  vertices[16] = {{1, -1, -1}, VEC_RIGHT, color, {0, 1}, {}}
+  vertices[17] = {{1, 1, -1}, VEC_RIGHT, color, {1, 1}, {}}
+  vertices[18] = {{1, 1, 1}, VEC_RIGHT, color, {1, 0}, {}}
+  vertices[19] = {{1, -1, 1}, VEC_RIGHT, color, {0, 0}, {}}
+  vertices[20] = {{-1, -1, 1}, VEC_LEFT, color, {0, 1}, {}}
+  vertices[21] = {{-1, 1, 1}, VEC_LEFT, color, {1, 1}, {}}
+  vertices[22] = {{-1, 1, -1}, VEC_LEFT, color, {1, 0}, {}}
+  vertices[23] = {{-1, -1, -1}, VEC_LEFT, color, {0, 0}, {}}
   #unroll for face in 0 ..< 6 {
     i := u32(face * 4)
     p := indices[face * 6:]
     p[0], p[1], p[2], p[3], p[4], p[5] = i, i + 1, i + 2, i + 2, i + 3, i
   }
-  return make_geometry(vertices, indices)
+  return make_mesh(vertices, indices)
 }
 
 // make_wedge builds make_cube's 2x2x2 box with its top sloping down toward +Z: the front top
@@ -47,19 +46,19 @@ make_cube :: proc(
 make_wedge :: proc(
   taper: f32 = 1,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-) -> Geometry {
+) -> Mesh {
   front := 1 - 2 * clamp(taper, 0, 1)
   slope := linalg.normalize([3]f32{0, 1, taper})
   faces := [6]struct {
     normal:  [3]f32,
     corners: [4][3]f32,
   } {
-    {geometry.VEC_FORWARD, {{-1, -1, 1}, {1, -1, 1}, {1, front, 1}, {-1, front, 1}}},
-    {geometry.VEC_BACKWARD, {{-1, 1, -1}, {1, 1, -1}, {1, -1, -1}, {-1, -1, -1}}},
+    {VEC_FORWARD, {{-1, -1, 1}, {1, -1, 1}, {1, front, 1}, {-1, front, 1}}},
+    {VEC_BACKWARD, {{-1, 1, -1}, {1, 1, -1}, {1, -1, -1}, {-1, -1, -1}}},
     {slope, {{1, 1, -1}, {-1, 1, -1}, {-1, front, 1}, {1, front, 1}}},
-    {geometry.VEC_DOWN, {{1, -1, 1}, {-1, -1, 1}, {-1, -1, -1}, {1, -1, -1}}},
-    {geometry.VEC_RIGHT, {{1, -1, -1}, {1, 1, -1}, {1, front, 1}, {1, -1, 1}}},
-    {geometry.VEC_LEFT, {{-1, -1, 1}, {-1, front, 1}, {-1, 1, -1}, {-1, -1, -1}}},
+    {VEC_DOWN, {{1, -1, 1}, {-1, -1, 1}, {-1, -1, -1}, {1, -1, -1}}},
+    {VEC_RIGHT, {{1, -1, -1}, {1, 1, -1}, {1, front, 1}, {1, -1, 1}}},
+    {VEC_LEFT, {{-1, -1, 1}, {-1, front, 1}, {-1, 1, -1}, {-1, -1, -1}}},
   }
   uvs := [4][2]f32{{0, 1}, {1, 1}, {1, 0}, {0, 0}}
   vertices := make([]Vertex, 24)
@@ -70,37 +69,37 @@ make_wedge :: proc(
     p := indices[f * 6:]
     p[0], p[1], p[2], p[3], p[4], p[5] = i, i + 1, i + 2, i + 2, i + 3, i
   }
-  return make_geometry(vertices, indices)
+  return make_mesh(vertices, indices)
 }
 
 // make_quad builds a quad on the XZ plane facing +Y.
 make_quad :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-) -> Geometry {
+) -> Mesh {
   vertices := make([]Vertex, 4)
   indices := make([]u32, 6)
-  vertices[0] = {{-1, 0, -1}, geometry.VEC_UP, color, {0, 0}, {}}
-  vertices[1] = {{-1, 0, 1}, geometry.VEC_UP, color, {0, 1}, {}}
-  vertices[2] = {{1, 0, 1}, geometry.VEC_UP, color, {1, 1}, {}}
-  vertices[3] = {{1, 0, -1}, geometry.VEC_UP, color, {1, 0}, {}}
+  vertices[0] = {{-1, 0, -1}, VEC_UP, color, {0, 0}, {}}
+  vertices[1] = {{-1, 0, 1}, VEC_UP, color, {0, 1}, {}}
+  vertices[2] = {{1, 0, 1}, VEC_UP, color, {1, 1}, {}}
+  vertices[3] = {{1, 0, -1}, VEC_UP, color, {1, 0}, {}}
   indices[0], indices[1], indices[2] = 0, 1, 2
   indices[3], indices[4], indices[5] = 2, 3, 0
-  return make_geometry(vertices, indices)
+  return make_mesh(vertices, indices)
 }
 
 // make_billboard_quad builds a quad on the XY plane facing +Z, for camera-facing sprites.
 make_billboard_quad :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-) -> Geometry {
+) -> Mesh {
   vertices := make([]Vertex, 4)
   indices := make([]u32, 6)
-  vertices[0] = {{-1, -1, 0}, geometry.VEC_FORWARD, color, {0, 1}, {}}
-  vertices[1] = {{1, -1, 0}, geometry.VEC_FORWARD, color, {1, 1}, {}}
-  vertices[2] = {{1, 1, 0}, geometry.VEC_FORWARD, color, {1, 0}, {}}
-  vertices[3] = {{-1, 1, 0}, geometry.VEC_FORWARD, color, {0, 0}, {}}
+  vertices[0] = {{-1, -1, 0}, VEC_FORWARD, color, {0, 1}, {}}
+  vertices[1] = {{1, -1, 0}, VEC_FORWARD, color, {1, 1}, {}}
+  vertices[2] = {{1, 1, 0}, VEC_FORWARD, color, {1, 0}, {}}
+  vertices[3] = {{-1, 1, 0}, VEC_FORWARD, color, {0, 0}, {}}
   indices[0], indices[1], indices[2] = 0, 1, 2
   indices[3], indices[4], indices[5] = 2, 3, 0
-  return make_geometry(vertices, indices)
+  return make_mesh(vertices, indices)
 }
 
 // make_sphere builds a UV sphere of the given radius centered at the origin. A faceted sphere
@@ -112,7 +111,7 @@ make_sphere :: proc(
   radius: f32 = 1.0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
   faceted := false,
-) -> Geometry {
+) -> Mesh {
   point :: proc(seg, ring: f32, segments, rings: u32) -> [3]f32 {
     phi := math.PI * ring / f32(rings)
     theta := 2.0 * math.PI * seg / f32(segments)
@@ -139,7 +138,7 @@ make_sphere :: proc(
         p[0], p[1], p[2], p[3], p[4], p[5] = a, a + 1, a + 2, a + 2, a + 1, a + 3
       }
     }
-    return make_geometry(vertices, indices)
+    return make_mesh(vertices, indices)
   }
   vert_count := (rings + 1) * (segments + 1)
   idx_count := rings * segments * 6
@@ -167,7 +166,7 @@ make_sphere :: proc(
       i += 6
     }
   }
-  return make_geometry(vertices, indices)
+  return make_mesh(vertices, indices)
 }
 
 // make_cone builds a cone along Y with a capped base and its tip at +height/2. A top_radius
@@ -178,7 +177,7 @@ make_cone :: proc(
   radius: f32 = 1.0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
   top_radius: f32 = 0,
-) -> Geometry {
+) -> Mesh {
   // side columns (top then bottom vertex), then the bottom cap's center and rim, then the top cap's
   ring := segments + 1
   bottom_center := 2 * ring
@@ -214,7 +213,7 @@ make_cone :: proc(
     p[0], p[1], p[2], p[3], p[4], p[5] = a + 1, c, c + 1, bottom_center, rim, rim + 1
     i += 6
   }
-  return make_geometry(vertices, indices)
+  return make_mesh(vertices, indices)
 }
 
 // make_capsule builds a capsule along Y: two hemispheres joined by a cylinder.
@@ -225,7 +224,7 @@ make_capsule :: proc(
   height: f32 = 2.0,
   radius: f32 = 0.5,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-) -> Geometry {
+) -> Mesh {
   half_cyl := height * 0.5 - radius
   hemi_verts := (rings + 1) * (segments + 1)
   vertices := make([]Vertex, 2 * hemi_verts + 2 * (segments + 1))
@@ -287,7 +286,7 @@ make_capsule :: proc(
     p[0], p[1], p[2], p[3], p[4], p[5] = a, c, b, b, c, d
     i += 6
   }
-  return make_geometry(vertices, indices)
+  return make_mesh(vertices, indices)
 }
 
 // make_torus builds a torus in the XY plane, around the Z axis.
@@ -297,7 +296,7 @@ make_torus :: proc(
   major_radius: f32 = 1.0,
   minor_radius: f32 = 0.3,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-) -> Geometry {
+) -> Mesh {
   vert_count := (segments + 1) * (sides + 1)
   idx_count := segments * sides * 6
   vertices := make([]Vertex, vert_count)
@@ -335,7 +334,7 @@ make_torus :: proc(
       i += 6
     }
   }
-  return make_geometry(vertices, indices)
+  return make_mesh(vertices, indices)
 }
 
 // make_cylinder builds a cylinder along Y centered at the origin, its side cut into `rings`
@@ -350,7 +349,7 @@ make_cylinder :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
   caps := true,
   arc: f32 = 2.0 * math.PI,
-) -> Geometry {
+) -> Mesh {
   // side columns top to bottom, then each cap's center and rim, then the two cut faces (axis top,
   // axis bottom, rim top, rim bottom); columns repeat the first for the UV seam
   ring := segments + 1
@@ -379,7 +378,7 @@ make_cylinder :: proc(
       p[0], p[1], p[2], p[3], p[4], p[5] = a, c, a + 1, a + 1, c, c + 1
     }
   }
-  if !caps do return make_geometry(vertices, indices)
+  if !caps do return make_mesh(vertices, indices)
   vertices[top_center] = {position = {0, half_h, 0}, normal = {0, 1, 0}, color = color, uv = {0.5, 0.5}}
   vertices[bottom_center] = {position = {0, -half_h, 0}, normal = {0, -1, 0}, color = color, uv = {0.5, 0.5}}
   for i in 0 ..< ring {
@@ -395,7 +394,7 @@ make_cylinder :: proc(
     p[0], p[1], p[2] = top_center, top_rim + 1, top_rim
     p[3], p[4], p[5] = bottom_center, bottom_rim, bottom_rim + 1
   }
-  if !cut do return make_geometry(vertices, indices)
+  if !cut do return make_mesh(vertices, indices)
   for face in 0 ..< u32(2) {
     theta := arc * f32(face)
     x, z := math.cos(theta), math.sin(theta)
@@ -408,12 +407,12 @@ make_cylinder :: proc(
     if face == 0 do p[0], p[1], p[2], p[3], p[4], p[5] = a, a + 2, a + 1, a + 1, a + 2, a + 3
     else do p[0], p[1], p[2], p[3], p[4], p[5] = a, a + 1, a + 2, a + 1, a + 3, a + 2
   }
-  return make_geometry(vertices, indices)
+  return make_mesh(vertices, indices)
 }
 
 // make_circle builds a disc in XZ facing +Y centered at the origin: a fan of `segments`
 // triangles, uv mapping the disc's square to [0, 1].
-make_circle :: proc(segments: u32 = 32, radius: f32 = 1.0, color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> Geometry {
+make_circle :: proc(segments: u32 = 32, radius: f32 = 1.0, color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> Mesh {
   vertices := make([]Vertex, segments + 2)
   indices := make([]u32, segments * 3)
   vertices[0] = {normal = {0, 1, 0}, color = color, uv = {0.5, 0.5}}
@@ -426,5 +425,5 @@ make_circle :: proc(segments: u32 = 32, radius: f32 = 1.0, color: [4]f32 = {1.0,
     p := indices[seg * 3:]
     p[0], p[1], p[2] = 0, seg + 2, seg + 1
   }
-  return make_geometry(vertices, indices)
+  return make_mesh(vertices, indices)
 }

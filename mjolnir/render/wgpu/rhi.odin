@@ -114,15 +114,21 @@ Pipeline :: struct {
   push_set: u32,
 }
 
-// One command list: an encoder and the pass open on it.
+// One command list: an encoder, the pass open on it, and the pipeline and groups bound in that
+// pass (a group stays bound across pipelines, so one already bound at its set is not bound again).
 @(private)
 Cmd :: struct {
   encoder:  wgpu.CommandEncoder,
   render:   wgpu.RenderPassEncoder,
   compute:  wgpu.ComputePassEncoder,
   finished: wgpu.CommandBuffer,
-  push_set: u32,
+  pipeline: rhi.Pipeline,
+  groups:   [MAX_GROUPS]rhi.BindGroup,
 }
+
+// sets a pipeline layout may have: scene, textures or yours, push, extra
+@(private = "file")
+MAX_GROUPS :: 4
 
 rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
   return {indirect_first_instance = b.indirect_first_instance}
@@ -592,6 +598,7 @@ rhi_cmd_begin_pass :: proc(b: ^Backend, cmd: rhi.CommandList, desc: rhi.PassDesc
     info.depthStencilAttachment = &depth
   }
   state.render = wgpu.CommandEncoderBeginRenderPass(state.encoder, &info)
+  state.pipeline, state.groups = 0, {}
 }
 
 rhi_cmd_end_pass :: proc(b: ^Backend, cmd: rhi.CommandList) {
@@ -604,6 +611,7 @@ rhi_cmd_end_pass :: proc(b: ^Backend, cmd: rhi.CommandList) {
 rhi_cmd_begin_compute :: proc(b: ^Backend, cmd: rhi.CommandList) {
   state := &b.cmds[cmd]
   state.compute = wgpu.CommandEncoderBeginComputePass(state.encoder)
+  state.pipeline, state.groups = 0, {}
 }
 
 rhi_cmd_end_compute :: proc(b: ^Backend, cmd: rhi.CommandList) {
@@ -615,8 +623,9 @@ rhi_cmd_end_compute :: proc(b: ^Backend, cmd: rhi.CommandList) {
 
 rhi_cmd_bind_pipeline :: proc(b: ^Backend, cmd: rhi.CommandList, pipeline: rhi.Pipeline) {
   state := &b.cmds[cmd]
+  if state.pipeline == pipeline do return
+  state.pipeline = pipeline
   p := &b.pipelines.items[pipeline]
-  state.push_set = p.push_set
   if state.render != nil {
     wgpu.RenderPassEncoderSetPipeline(state.render, p.render)
   } else {
@@ -626,6 +635,8 @@ rhi_cmd_bind_pipeline :: proc(b: ^Backend, cmd: rhi.CommandList, pipeline: rhi.P
 
 rhi_cmd_bind_group :: proc(b: ^Backend, cmd: rhi.CommandList, set: u32, group: rhi.BindGroup) {
   state := &b.cmds[cmd]
+  if state.groups[set] == group do return
+  state.groups[set] = group
   g := b.groups.items[group].group
   if state.render != nil {
     wgpu.RenderPassEncoderSetBindGroup(state.render, set, g)
@@ -668,10 +679,12 @@ rhi_cmd_push :: proc(b: ^Backend, cmd: rhi.CommandList, data: rawptr, size: u32)
   assert(offset + UNIFORM_ALIGNMENT <= UNIFORM_CAPACITY, "uniform ring full")
   if size > 0 do mem.copy(&b.uniforms[offset], data, int(size))
   b.uniform_cursor += UNIFORM_ALIGNMENT
+  push_set := b.pipelines.items[state.pipeline].push_set
+  state.groups[push_set] = 0
   if state.render != nil {
-    wgpu.RenderPassEncoderSetBindGroup(state.render, state.push_set, b.frame_group, {u32(offset)})
+    wgpu.RenderPassEncoderSetBindGroup(state.render, push_set, b.frame_group, {u32(offset)})
   } else {
-    wgpu.ComputePassEncoderSetBindGroup(state.compute, state.push_set, b.frame_group, {u32(offset)})
+    wgpu.ComputePassEncoderSetBindGroup(state.compute, push_set, b.frame_group, {u32(offset)})
   }
 }
 

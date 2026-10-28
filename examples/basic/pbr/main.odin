@@ -87,7 +87,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.destroy(&app.instance, &app.scene)
+  gltf.destroy(&app.instance, &app.scene, &app.renderer)
   gltf.destroy(&app.model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
@@ -101,7 +101,7 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 show_model :: proc(app: ^App, index: int) {
-  gltf.destroy(&app.instance, &app.scene)
+  gltf.destroy(&app.instance, &app.scene, &app.renderer)
   gltf.destroy(&app.model, &app.renderer)
   app.model_index = index
   m := MODELS[index]
@@ -120,21 +120,17 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.renderer.sun.intensity = dir_intensity
   app.renderer.ibl_intensity = ibl_intensity
   app.renderer.skybox_intensity = skybox_on ? 1 : 0
   app.renderer.skybox_blur = skybox_blur
   if spinning do world.rotate_by(&app.scene, app.turntable, dt * rotate_speed, linalg.VECTOR3F32_Y_AXIS)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

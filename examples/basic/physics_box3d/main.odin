@@ -10,6 +10,7 @@ import "core:log"
 import "core:math"
 import "core:math/rand"
 import b3 "vendor:box3d"
+import "mjolnir/geometry"
 
 NX :: #config(NX, 4)
 NY :: #config(NY, 3)
@@ -73,12 +74,6 @@ shutdown :: proc(app: ^App) {
   free(app)
 }
 
-spawn_visual :: proc(app: ^App, body_node: world.NodeHandle, look: render.MeshAttachment) -> world.NodeHandle {
-  visual := world.spawn(&app.scene, parent = body_node)
-  render.attach(&app.renderer, render.SlotHandle(visual.index), look)
-  return visual
-}
-
 shape_def :: proc(density: f32) -> b3.ShapeDef {
   def := b3.DefaultShapeDef()
   def.density = density
@@ -97,8 +92,8 @@ body_create :: proc(app: ^App, type: b3.BodyType, position: [3]f32) -> b3.BodyId
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   app.renderer.skybox_intensity = 0
-  rand_sphere := render.make_sphere()
-  rand_cylinder := render.make_cylinder()
+  rand_sphere := geometry.make_sphere()
+  rand_cylinder := geometry.make_cylinder()
   for &v in rand_sphere.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   for &v in rand_cylinder.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   rand_sphere_mesh := render.mesh_create(&app.renderer, rand_sphere)
@@ -111,13 +106,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   ground_body := body_create(app, .staticBody, {0, -0.5, 0})
   ground_hull := b3.MakeBoxHull(PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   _ = b3.CreateHullShape(ground_body, shape_def(0), &ground_hull.base)
-  ground_visual := spawn_visual(app, ground, render.primitive(&app.renderer, .CUBE, .GRAY))
-  world.scale(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), parent = ground, scale = {PLANE_WIDTH, 0.5, PLANE_HEIGHT})
   ball := world.spawn(&app.scene, {2.5, SPHERE_RADIUS, 0})
   ball_body := body_create(app, .staticBody, {2.5, SPHERE_RADIUS, 0})
   _ = b3.CreateSphereShape(ball_body, shape_def(0), &b3.Sphere{radius = SPHERE_RADIUS})
-  ball_visual := spawn_visual(app, ball, render.primitive(&app.renderer, .SPHERE, .MAGENTA))
-  world.scale(&app.scene, ball_visual, SPHERE_RADIUS)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .MAGENTA), parent = ball, scale = SPHERE_RADIUS)
 
   box_hull := b3.MakeBoxHull(1, 1, 1)
   centered_y_offset: f32 = -CYLINDER_HEIGHT / 2.0
@@ -139,7 +132,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
       look = sphere_look
     }
     node := world.spawn(&app.scene, pos)
-    spawn_visual(app, node, look)
+    mjolnir.spawn_mesh(&app.scene, &app.renderer, look, parent = node)
     append(&app.pieces, Piece{body, node})
   }
   log.infof("Created %d Box3D bodies", PIECE_COUNT)
@@ -156,8 +149,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   b3.World_Step(app.phys, dt, BOX3D_SUBSTEPS)
   for i := len(app.pieces) - 1; i >= 0; i -= 1 {
     p := app.pieces[i]
@@ -171,12 +163,9 @@ update :: proc(app: ^App, dt: f32) {
     }
     world.set_world_pose(&app.scene, p.node, pos, b3.Body_GetRotation(p.body))
   }
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }

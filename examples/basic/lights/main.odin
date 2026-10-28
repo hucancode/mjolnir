@@ -89,9 +89,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.renderer.ibl_intensity = 0.3
 
-  ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
-  world.scale(&app.scene, ground, 10.0)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 10.0)
 
   for x in 0 ..< 3 do for z in 0 ..< 3 {
     color: render.Color
@@ -100,13 +98,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     case 1: color = .RED
     case 2: color = .CYAN
     }
-    sphere := world.spawn(&app.scene, {f32(x - 1) * 2.5, 0.7, f32(z - 1) * 2.5})
-    render.attach(&app.renderer, render.SlotHandle(sphere.index), render.primitive(&app.renderer, .SPHERE, color))
-    world.scale(&app.scene, sphere, 0.7)
+    mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, color), {f32(x - 1) * 2.5, 0.7, f32(z - 1) * 2.5}, scale = 0.7)
   }
-  cube := world.spawn(&app.scene, {0, 1.5, 0})
-  render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, .YELLOW))
-  world.scale(&app.scene, cube, 0.6)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .YELLOW), {0, 1.5, 0}, scale = 0.6)
 
   app.renderer.sun.direction = {-6, -10, -6}
   app.renderer.sun.shadow_distance = 12
@@ -144,10 +138,8 @@ spawn_light :: proc(app: ^App, kind: LightKind) {
   l.light, ok = render.light_create(&app.renderer, light_settings(l))
   if !ok do return
   l.node = world.spawn(&app.scene, light_position(l, app.elapsed))
-  render.attach(&app.renderer, render.SlotHandle(l.node.index), l.light)
-  marker := world.spawn(&app.scene, parent = l.node)
-  render.attach(&app.renderer, render.SlotHandle(marker.index), render.primitive(&app.renderer, .CUBE, app.marker_material, cast_shadow = false))
-  world.scale(&app.scene, marker, MARKER_SCALE)
+  render.attach(&app.renderer, l.node, l.light)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, app.marker_material, cast_shadow = false), parent = l.node, scale = MARKER_SCALE)
   append(&app.lights, l)
 }
 
@@ -202,8 +194,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if input.key_pressed(&app.input, .P) do spawn_light(app, .POINT)
   if input.key_pressed(&app.input, .O) do spawn_light(app, .SPOT)
   if input.key_pressed(&app.input, .DELETE) do remove_random_light(app)
@@ -218,14 +209,11 @@ update :: proc(app: ^App, dt: f32) {
     }
   }
   apply_light_settings(app)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

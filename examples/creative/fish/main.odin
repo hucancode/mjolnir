@@ -99,7 +99,7 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
-  if !debugui.init(&app.debug, r, {1100, 720}) do return .FAIL
+  if !debugui.init(&app.debug, r) do return .FAIL
   app.orbit = render.make_orbit({0, 9, 22}, {0, 3, 0})
   render.camera_orbit(render.main_camera(r), app.orbit)
 
@@ -120,19 +120,13 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !ok do return .FAIL
 
   sand := render.material_create(r, render.make_material(base_color_factor = {0.76, 0.66, 0.45, 1}, roughness_value = 0.9))
-  ground := world.spawn(&app.scene)
-  render.attach(r, render.SlotHandle(ground.index), render.primitive(r, .QUAD_XZ, sand, cast_shadow = false))
-  world.scale(&app.scene, ground, 40)
+  mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .QUAD_XZ, sand, cast_shadow = false), scale = 40)
   rock := render.material_create(r, render.make_material(base_color_factor = {0.35, 0.38, 0.4, 1}, roughness_value = 0.8))
   for i in 0 ..< 7 {
     angle := f32(i) / 7 * math.TAU
-    stone := world.spawn(&app.scene, {math.cos(angle) * 9, 0, math.sin(angle) * 9})
-    render.attach(r, render.SlotHandle(stone.index), render.primitive(r, .SPHERE, rock))
-    world.scale(&app.scene, stone, [3]f32{1.6, 1.1 + f32(i % 3) * 0.6, 1.4})
+    mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .SPHERE, rock), {math.cos(angle) * 9, 0, math.sin(angle) * 9}, scale = {1.6, 1.1 + f32(i % 3) * 0.6, 1.4})
   }
-  app.shark = world.spawn(&app.scene)
-  render.attach(r, render.SlotHandle(app.shark.index), render.primitive(r, .SPHERE, .RED))
-  world.scale(&app.scene, app.shark, 0.6)
+  app.shark = mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .SPHERE, .RED), scale = 0.6)
 
   sun := &r.sun
   sun.color = {0.75, 0.9, 1}
@@ -161,9 +155,8 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input, {.RIGHT})
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, {.RIGHT})
   if !app.input.mouse_captured && input.mouse_pressed(&app.input, .LEFT) do drop_food(app)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.time += dt
   app.feeding = max(app.feeding - dt, 0)
   shark := [3]f32{math.cos(app.time * 0.4) * 8, 3 + math.sin(app.time * 0.9) * 1.5, math.sin(app.time * 0.4) * 8}
@@ -171,17 +164,15 @@ update :: proc(app: ^App, dt: f32) {
   world.set_visible(&app.scene, app.shark, shark_on)
   simulate(app, dt, shark)
   render.buffer_read(&app.renderer, app.counters, app.stats[:])
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 drop_food :: proc(app: ^App) {
   ray, ok := render.cursor_ray(&app.renderer, app.input.cursor)
   if !ok do return
-  hit, t := geometry.ray_plane_intersection(ray, 0, {0, 1, 0})
+  at, hit := geometry.ray_plane_intersection(ray, 0, {0, 1, 0})
   if !hit do return
-  app.food = ray.origin + ray.direction * t + {0, 2, 0}
+  app.food = at + {0, 2, 0}
   app.feeding = 8
 }
 
@@ -206,8 +197,7 @@ simulate :: proc(app: ^App, dt: f32, shark: [3]f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

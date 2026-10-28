@@ -18,14 +18,12 @@ Node :: struct {
 Node_Cache :: struct {
   is_dirty:     bool, // the transform changed since the last update
   visible:      bool, // own visibility and every ancestor's
-  local_matrix: matrix[4, 4]f32,
   world_matrix: matrix[4, 4]f32,
 }
 
 @(private)
 NODE_CACHE_INIT :: Node_Cache {
   visible      = true,
-  local_matrix = linalg.MATRIX4F32_IDENTITY,
   world_matrix = linalg.MATRIX4F32_IDENTITY,
 }
 
@@ -51,16 +49,19 @@ World_State :: struct {
   nodes:           []Node,
   cache:           []Node_Cache,
   slots:           containers.Slots,
-  // the tree derived from Node.parent, rebuilt by build_tree: CSR child lists indexed
-  // by node index, and every reachable node with parents before children
+  // the tree derived from Node.parent, rebuilt by build_tree: CSR child lists (node i's
+  // children are children[child_first[i]:child_first[i + 1]]), and every reachable node with
+  // parents before children
   children:        [dynamic]NodeHandle,
   child_first:     [dynamic]u32,
-  child_count:     [dynamic]u32,
   topo:            [dynamic]u32,
+  // per node index: where it sits in topo and where its subtree ends there
+  topo_first:      [dynamic]u32,
+  topo_end:        [dynamic]u32,
   // spawned since the last build_tree
   tree_stale:      bool,
-  // a node was spawned, moved or shown/hidden since the last update
-  changed:         bool,
+  // nodes spawned, moved or shown/hidden since the last update: update walks their subtrees
+  touched:         [dynamic]u32,
   // what the last `update` changed, removals first; the next update replaces it
   feed:            [dynamic]NodeChange,
   // removals made between updates; published by update
@@ -68,7 +69,8 @@ World_State :: struct {
 }
 
 // node returns a copy of the node behind `handle`; false when stale. Change it with translate,
-// rotate, scale, set_local, set_visible and set_name.
+// rotate, rotate_by, scale, set_local, set_local_matrix, set_world_pose, set_parent,
+// set_visible and set_name.
 node :: proc(self: ^World, handle: NodeHandle) -> (n: Node, ok: bool) #optional_ok {
   p := lookup(self, handle) or_return
   return p^, true
@@ -91,12 +93,14 @@ lookup :: #force_inline proc(self: ^World, handle: NodeHandle) -> (^Node, bool) 
 @(private)
 edit :: #force_inline proc(self: ^World, handle: NodeHandle) -> ^Node {
   if !containers.slots_valid(&self.slots, handle) do return nil
-  self.cache[handle.index].is_dirty = true
-  self.changed = true
+  c := &self.cache[handle.index]
+  if !c.is_dirty do append(&self.touched, handle.index)
+  c.is_dirty = true
   return &self.nodes[handle.index]
 }
 
-// children lists a node's children, valid until the next node_create; nil when `handle` is stale.
+// children lists a node's children, valid until the tree next changes (node_create, set_parent,
+// update after a node_destroy, teardown); nil when `handle` is stale.
 // Children despawned since the last update may still be listed, as stale handles (node
 // rejects them).
 children :: proc(self: ^World, handle: NodeHandle) -> []NodeHandle {
@@ -121,34 +125,31 @@ find :: proc(self: ^World, name: string, root: NodeHandle = {}) -> (handle: Node
 
 @(private)
 children_of :: #force_inline proc(self: ^World, i: u32) -> []NodeHandle {
-  return self.children[self.child_first[i]:][:self.child_count[i]]
+  return self.children[self.child_first[i]:self.child_first[i + 1]]
 }
 
 // Rebuild the child lists and topo order from every live node's parent.
 @(private)
 build_tree :: proc(self: ^World) {
   n := int(self.slots.high_water)
-  resize(&self.child_first, n)
-  resize(&self.child_count, n)
-  slice.zero(self.child_count[:])
+  // counts at i + 1, summed into the start of each list, then each child placed at its parent's
+  // next free entry, which leaves child_first[i + 1] at the start of list i + 1
+  resize(&self.child_first, n + 1)
+  slice.zero(self.child_first[:])
   for i in 0 ..< u32(n) {
     if i == self.root.index || !containers.slots_live(&self.slots, i) do continue
     p := self.nodes[i].parent
-    if containers.slots_valid(&self.slots, p) do self.child_count[p.index] += 1
+    if containers.slots_valid(&self.slots, p) do self.child_first[p.index + 1] += 1
   }
-  total: u32
-  for count, i in self.child_count {
-    self.child_first[i] = total
-    total += count
-  }
-  resize(&self.children, int(total))
-  fill := make([]u32, n, context.temp_allocator)
+  for i in 1 ..= n do self.child_first[i] += self.child_first[i - 1]
+  resize(&self.children, int(self.child_first[n]))
+  next := slice.clone(self.child_first[:n], context.temp_allocator)
   for i in 0 ..< u32(n) {
     if i == self.root.index || !containers.slots_live(&self.slots, i) do continue
     p := self.nodes[i].parent
     if !containers.slots_valid(&self.slots, p) do continue
-    self.children[self.child_first[p.index] + fill[p.index]] = NodeHandle(containers.slots_handle(&self.slots, i))
-    fill[p.index] += 1
+    self.children[next[p.index]] = NodeHandle(containers.slots_handle(&self.slots, i))
+    next[p.index] += 1
   }
   // depth first, so a subtree is contiguous
   clear(&self.topo)
@@ -159,19 +160,19 @@ build_tree :: proc(self: ^World) {
     append(&self.topo, i)
     for c in children_of(self, i) do append(&stack, c.index)
   }
+  // a subtree is its root and the subtrees after it: sizes summed leaves first
+  resize(&self.topo_first, n)
+  resize(&self.topo_end, n)
+  for i, k in self.topo do self.topo_first[i], self.topo_end[i] = u32(k), 1
+  #reverse for i in self.topo do if i != self.root.index do self.topo_end[self.nodes[i].parent.index] += self.topo_end[i]
+  for i in self.topo do self.topo_end[i] += self.topo_first[i]
   self.tree_stale = false
-}
-
-// Live nodes, root included.
-@(private)
-node_count :: proc(self: ^World) -> int {
-  return int(self.slots.count)
 }
 
 spawn :: node_create
 
 // node_create (or its alias spawn) creates a node under `parent`, the world root by default;
-// false when `parent` is stale or no slot is free.
+// `name` is borrowed, not copied. false when `parent` is stale or no slot is free.
 node_create :: proc(
   self: ^World,
   position: [3]f32 = {0, 0, 0},
@@ -194,16 +195,17 @@ node_create :: proc(
 @(private = "file")
 alloc_node :: proc(self: ^World, name: string) -> (handle: NodeHandle, ok: bool) {
   index := containers.slots_alloc(&self.slots) or_return
-  self.nodes[index] = {transform = TRANSFORM_IDENTITY, name = name, visible = true}
+  self.nodes[index] = {transform = geometry.TRANSFORM_IDENTITY, name = name, visible = true}
   self.cache[index] = NODE_CACHE_INIT
   return NodeHandle(containers.slots_handle(&self.slots, index)), true
 }
 
-// init prepares the world with its root node; false when no slot is free.
-init :: proc(self: ^World) -> bool {
-  containers.slots_init(&self.slots, MAX_NODES_IN_SCENE, RETIRE_GRACE)
-  self.nodes = make([]Node, MAX_NODES_IN_SCENE)
-  self.cache = make([]Node_Cache, MAX_NODES_IN_SCENE)
+// init prepares the world for max_nodes nodes, its root among them: node indices stay below
+// max_nodes. false when it is too small for the root.
+init :: proc(self: ^World, max_nodes: u32 = 65536) -> bool {
+  containers.slots_init(&self.slots, max_nodes, RETIRE_GRACE)
+  self.nodes = make([]Node, max_nodes)
+  self.cache = make([]Node_Cache, max_nodes)
   self.root = alloc_node(self, "root") or_return
   self.nodes[self.root.index].parent = self.root
   self.tree_stale = true
@@ -219,8 +221,7 @@ update :: proc(self: ^World) {
   for index in self.pending_removed do append(&self.feed, NodeChange{index = index, removed = true})
   clear(&self.pending_removed)
   for r in containers.slots_tick(&self.slots) do self.nodes[r.index], self.cache[r.index] = {}, {}
-  if self.changed do traverse(self)
-  self.changed = false
+  traverse(self)
 }
 
 // changes lists what the last update changed: nodes despawned since the update
@@ -237,15 +238,23 @@ shutdown :: proc(self: ^World) {
   delete(self.cache)
   delete(self.children)
   delete(self.child_first)
-  delete(self.child_count)
   delete(self.topo)
+  delete(self.topo_first)
+  delete(self.topo_end)
+  delete(self.touched)
   delete(self.feed)
   delete(self.pending_removed)
 }
 
-// teardown drops every node but the root at once. Removals are not reported:
-// index-keyed consumers (render.teardown) must reset their own slots, before the
-// next level spawns into the freed ones.
+// setup keeps every node made so far (and the root) through every later teardown: call it once
+// after making the nodes that outlive a level (a player, a camera rig).
+setup :: proc(self: ^World) {
+  containers.slots_mark(&self.slots)
+}
+
+// teardown drops every node made since setup (or init) at once, children of kept nodes among
+// them. Their indices are reused at once, so removals are not reported: a consumer keyed by
+// node index forgets every index it saw since setup itself, before the next level spawns.
 teardown :: proc(self: ^World) {
   slice.zero(self.nodes[self.slots.mark:self.slots.high_water])
   slice.zero(self.cache[self.slots.mark:self.slots.high_water])
@@ -253,6 +262,7 @@ teardown :: proc(self: ^World) {
   self.tree_stale = true
   clear(&self.pending_removed)
   clear(&self.feed)
+  clear(&self.touched)
 }
 
 // node_destroy removes a node and its descendants; changes reports them after the next update.
@@ -261,6 +271,23 @@ node_destroy :: proc(self: ^World, handle: NodeHandle) -> bool {
   // removals need no rebuild: the lists hold handles, and freed ones go stale
   if self.tree_stale do build_tree(self)
   despawn_subtree(self, handle)
+  return true
+}
+
+// set_parent moves a node and its subtree under `parent`. With keep_world it stays where it was
+// (as of the last update) by taking a new local transform; else its local transform now hangs
+// from the new parent. false for the root, a stale handle, or a parent inside the subtree.
+set_parent :: proc(self: ^World, handle, parent: NodeHandle, keep_world := false) -> bool {
+  if handle == self.root || !containers.slots_valid(&self.slots, handle) do return false
+  if !containers.slots_valid(&self.slots, parent) do return false
+  for p := parent; p != self.root; p = self.nodes[p.index].parent do if p == handle do return false
+  node := edit(self, handle)
+  if keep_world {
+    local := linalg.matrix4_inverse(self.cache[parent.index].world_matrix) * self.cache[handle.index].world_matrix
+    node.transform.position, node.transform.rotation, node.transform.scale = geometry.decompose_matrix(local)
+  }
+  node.parent = parent
+  self.tree_stale = true
   return true
 }
 
@@ -273,50 +300,62 @@ despawn_subtree :: proc(self: ^World, handle: NodeHandle) {
   containers.slots_free(&self.slots, handle.index)
 }
 
-// Recompute world transforms of dirty subtrees, parents first, and record every node
-// whose world transform or effective visibility changed.
+// Recompute world transforms of the touched nodes' subtrees, parents first, and record every
+// node whose world transform or effective visibility changed. A subtree is contiguous in topo,
+// so the touched nodes in topo order walk each range once.
 @(private)
 traverse :: proc(self: ^World) {
+  defer clear(&self.touched)
   // world transform changed this update, per node index
-  moved := make([]bool, len(self.child_first), context.temp_allocator)
-  for i in self.topo {
-    current_node, c := &self.nodes[i], &self.cache[i]
-    parent_moved, parent_visible := false, true
-    parent: ^Node_Cache
-    if i != self.root.index {
-      p := current_node.parent.index
-      parent = &self.cache[p]
-      parent_moved = moved[p]
-      parent_visible = parent.visible
-    }
-    visible := parent_visible && current_node.visible
-    visibility_changed := c.visible != visible
-    c.visible = visible
-    is_dirty := c.is_dirty
-    if is_dirty {
-      t := current_node.transform
-      c.local_matrix = linalg.matrix4_from_trs(t.position, t.rotation, t.scale)
-      c.is_dirty = false
-    }
-    if parent_moved || is_dirty {
-      c.world_matrix = parent.world_matrix * c.local_matrix if parent != nil else c.local_matrix
-    }
-    moved[i] = parent_moved || is_dirty
-    if visibility_changed || moved[i] {
-      append(
-        &self.feed,
-        NodeChange {
-          index = i,
-          world_matrix = c.world_matrix,
-          visible = visible,
-        },
-      )
-    }
+  moved := make([]bool, self.slots.high_water, context.temp_allocator)
+  // much of the tree touched: one walk beats sorting the roots
+  if len(self.touched) * 32 >= len(self.topo) {
+    for i in self.topo do refresh(self, i, moved)
+    return
+  }
+  // topo position above, node index below: sorted, the roots in topo order
+  roots := make([dynamic]u64, 0, len(self.touched), context.temp_allocator)
+  for i in self.touched do if containers.slots_live(&self.slots, i) do append(&roots, u64(self.topo_first[i]) << 32 | u64(i))
+  slice.sort(roots[:])
+  walked: u32
+  for key in roots {
+    r := u32(key)
+    if self.topo_first[r] < walked do continue
+    walked = self.topo_end[r]
+    for i in self.topo[self.topo_first[r]:walked] do refresh(self, i, moved)
   }
 }
 
-// set_world_pose places a node at a world (position, rotation) whatever its
-// parent; scale is kept.
+// One node of a walked range, whose parent is up to date.
+@(private = "file")
+refresh :: proc(self: ^World, i: u32, moved: []bool) {
+  current_node, c := &self.nodes[i], &self.cache[i]
+  parent_moved, parent_visible := false, true
+  parent: ^Node_Cache
+  if i != self.root.index {
+    p := current_node.parent.index
+    parent = &self.cache[p]
+    parent_moved = moved[p]
+    parent_visible = parent.visible
+  }
+  visible := parent_visible && current_node.visible
+  visibility_changed := c.visible != visible
+  c.visible = visible
+  is_dirty := c.is_dirty
+  c.is_dirty = false
+  if parent_moved || is_dirty {
+    t := current_node.transform
+    local := linalg.matrix4_from_trs(t.position, t.rotation, t.scale)
+    c.world_matrix = parent.world_matrix * local if parent != nil else local
+  }
+  moved[i] = parent_moved || is_dirty
+  if visibility_changed || moved[i] {
+    append(&self.feed, NodeChange{index = i, world_matrix = c.world_matrix, visible = visible})
+  }
+}
+
+// set_world_pose places a node at a world (position, rotation) whatever its parent, as the
+// parent was at the last update; scale is kept.
 set_world_pose :: proc(
   self: ^World,
   handle: NodeHandle,
@@ -332,7 +371,7 @@ set_world_pose :: proc(
     parent_world := self.cache[node.parent.index].world_matrix
     inv := linalg.matrix4_inverse(parent_world)
     node.transform.position = (inv * [4]f32{position.x, position.y, position.z, 1}).xyz
-    parent_rotation := linalg.quaternion_from_matrix4_f32(parent_world)
+    _, parent_rotation, _ := geometry.decompose_matrix(parent_world)
     node.transform.rotation = linalg.normalize(linalg.quaternion_inverse(parent_rotation) * rotation)
   }
 }
@@ -362,7 +401,7 @@ set_visible :: proc(self: ^World, handle: NodeHandle, visible: bool) {
   if node == nil do return
   if node.visible == visible do return
   node.visible = visible
-  self.changed = true
+  append(&self.touched, handle.index)
 }
 
 // destroy removes a node, as node_destroy does.

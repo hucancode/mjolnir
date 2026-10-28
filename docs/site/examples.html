@@ -20,7 +20,7 @@
   <a href="index.html">Home</a>
   <a href="examples.html">Examples</a>
   <a href="api.html">API</a>
-  <a href="https://github.com/hucancode/mjolnir">GitHub</a>
+  <a id="repo" href="https://github.com/hucancode/mjolnir">GitHub</a>
 </nav>
 <main>
 <div>
@@ -56,7 +56,9 @@ const el = (tag, props = {}, ...kids) => {
   return e;
 };
 
-const list = await (await fetch("data/examples.json")).json();
+const data = await (await fetch("data/examples.json")).json();
+const list = data.examples;
+document.querySelector('#repo').href = data.url;
 const hasGpu = !!navigator.gpu;
 const $ = (s) => document.querySelector(s);
 const nav = $('search nav'), thumbBtn = $('search button');
@@ -141,7 +143,7 @@ function show() {
   if (e === current) return;
   current = e;
   live = hasGpu && e.wasm; // fall back to the video without WebGPU or a wasm build
-  document.title = e.name + ' - Examples - Mjolnir';
+  document.title = e.name + ' - Examples - ' + data.project;
   for (const a of nav.querySelectorAll('a')) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + e.name);
   nav.querySelector('a[aria-current]')?.scrollIntoView({ block: 'nearest' });
   panel.hidden = true;

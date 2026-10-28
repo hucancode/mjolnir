@@ -78,7 +78,7 @@ spawn_field :: proc(
   f.pivot = world.spawn(&app.scene, {0, 2, 0})
   f.node = world.spawn(&app.scene, {orbit_radius, 0, 0}, parent = f.pivot)
   f.handle = render.force_field_create(&app.renderer, render.make_force_field(area_of_effect = area, strength = strength, tangent_strength = tangent))
-  render.attach(&app.renderer, render.SlotHandle(f.node.index), f.handle)
+  render.attach(&app.renderer, f.node, f.handle)
   return f
 }
 
@@ -105,7 +105,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
       weight_spread     = 0.0,
     )
     n := world.spawn(&app.scene, {0, 2, 0})
-    render.attach(&app.renderer, render.SlotHandle(n.index), render.emitter_create(&app.renderer, em))
+    render.attach(&app.renderer, n, render.emitter_create(&app.renderer, em))
   }
 
   app.repel = spawn_field(app, 2.5, -15.0, 8.0, 4.0, {0.1, 0.5, 1.0, 1}, 1.2, 1.0)
@@ -132,8 +132,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   for f in ([]^Field{&app.repel, &app.attract}) do world.rotate(&app.scene, f.pivot, app.time * f.spin_speed * f.spin_dir, linalg.VECTOR3F32_Y_AXIS)
   world.update(&app.scene)
   for f in ([]^Field{&app.repel, &app.attract}) do draw_field_marker(app, f)
@@ -142,8 +141,7 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 field_panel :: proc(app: ^App, ctx: ^mu.Context, name: string, f: ^Field) {

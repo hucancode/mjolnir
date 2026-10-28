@@ -1,5 +1,7 @@
 package render
 
+import "../geometry"
+
 import "../containers"
 import "core:log"
 import "rhi"
@@ -331,8 +333,8 @@ gpu_bindings :: proc(self: ^Renderer, bindings: []Binding, compute: bool) -> (la
       key.kinds[i] = .TEXTURE_FLOAT
       resources[i] = rhi.TextureView{texture = v, mip = -1}
     case StorageImage:
-      format, storage := self.storage_formats[TextureHandle(v)]
-      if !storage || !compute {
+      format := self.storage_formats[v] if u32(v) < MAX_TEXTURES else {}
+      if format == {} || !compute {
         log.errorf("Binding %d: a compute shader writes only textures made with texture_create(storage = true)", i)
         return
       }
@@ -444,7 +446,7 @@ gpu_draws_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32
     case MeshHandle:
       mesh := write_table(self, .MESHES, MeshData)[u32(source)]
       if mesh.index_count == 0 do continue
-      dev.cmd_bind_vertex(&self.gpu, cmd, 0, mesh_buffer(self, .VERTEX), int(mesh.vertex_offset) * size_of(Vertex))
+      dev.cmd_bind_vertex(&self.gpu, cmd, 0, mesh_buffer(self, .VERTEX), int(mesh.vertex_offset) * size_of(geometry.Vertex))
       dev.cmd_bind_index(&self.gpu, cmd, mesh_buffer(self, .INDEX), int(mesh.first_index) * size_of(u32))
       if args != nil {
         dev.cmd_draw_indexed_indirect(&self.gpu, cmd, args.buffer, draw.offset, 1, 5 * size_of(u32))
@@ -480,5 +482,4 @@ gpu_shutdown :: proc(self: ^Renderer) {
   delete(self.gpu_work)
   delete(self.gpu_draws)
   delete(self.gpu_layouts)
-  delete(self.storage_formats)
 }

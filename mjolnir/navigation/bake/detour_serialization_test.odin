@@ -225,8 +225,13 @@ test_bake_and_load_workflow :: proc(t: ^testing.T) {
     recast.destroy_poly_mesh(pmesh)
     recast.destroy_poly_mesh_detail(dmesh)
   }
-  baked, bake_ok := bake_navmesh(pmesh, dmesh, 2.0, 0.6, 0.9)
-  testing.expect(t, bake_ok, "Failed to bake navigation mesh")
+  params := Create_Nav_Mesh_Data_Params{poly_mesh = pmesh, poly_mesh_detail = dmesh, walkable_height = 2.0, walkable_radius = 0.6, walkable_climb = 0.9}
+  mesh, status := create_nav_mesh(&params)
+  testing.expect(t, detour.status_succeeded(status), "Failed to bake navigation mesh")
+  if mesh == nil do return
+  baked := detour.save_navmesh(mesh)
+  detour.nav_mesh_destroy(mesh)
+  free(mesh)
   defer delete(baked)
   nav_mesh, query, runtime_ok := detour.load_navmesh_for_runtime(baked)
   testing.expect(t, runtime_ok, "Failed to load navigation mesh for runtime")

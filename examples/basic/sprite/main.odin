@@ -120,7 +120,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !sprite_ok do return .FAIL
   node, node_ok := world.spawn(&app.scene, {0, 1.5, 0})
   if !node_ok do return .FAIL
-  render.attach(&app.renderer, render.SlotHandle(node.index), render.primitive(&app.renderer, .QUAD_XY, app.sprite, cast_shadow = false))
+  render.attach(&app.renderer, node, render.primitive(&app.renderer, .QUAD_XY, app.sprite, cast_shadow = false))
   world.scale(&app.scene, node, SPRITE_HEIGHT * CELL_ASPECT, SPRITE_HEIGHT, 1)
 
   return .READY
@@ -134,8 +134,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, &app.input, rotate_with = {})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {})
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
@@ -149,9 +148,7 @@ update :: proc(app: ^App, dt: f32) {
     step = 0
   }
   render.set_sprite_frame(&app.renderer, app.sprite, clip.first + step % clip.count)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 debug_ui :: proc(app: ^App) {
@@ -177,6 +174,5 @@ debug_ui :: proc(app: ^App) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }

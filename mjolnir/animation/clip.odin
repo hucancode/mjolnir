@@ -19,8 +19,9 @@ Channel :: struct {
   position, rotation, scale: TrackRange,
 }
 
-// Clip is a set of channels (one per animated bone, or any caller-defined target) sharing
-// one timeline. Fill it with clip_set_positions, clip_set_rotations and clip_set_scales.
+// Clip is a set of channels sharing one timeline: channel i animates bone i when an Animator
+// plays it (any caller-defined target with clip_sample). Fill it with clip_set_positions,
+// clip_set_rotations and clip_set_scales.
 Clip :: struct {
   name:     string,
   duration: f32,
@@ -144,6 +145,12 @@ clip_sample_trs :: proc(self: ^Clip, channel: int, t: f32, out: ^TRS) {
   if v, ok := p.?; ok do out.position = v
   if v, ok := r.?; ok do out.rotation = v
   if v, ok := s.?; ok do out.scale = v
+}
+
+// clip_sample writes the clip at time t into out (channel i into out[i]), keeping the components
+// a channel does not animate: fill out with the rest pose first to sample over it.
+clip_sample :: proc(self: ^Clip, t: f32, out: []TRS) {
+  for i in 0 ..< min(len(self.channels), len(out)) do clip_sample_trs(self, i, t, &out[i])
 }
 
 // clip_player_update advances `self` by `delta_time`, samples `channel` of `clip` over `rest`, and

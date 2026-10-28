@@ -18,8 +18,6 @@ IRRADIANCE_SAMPLE_DELTA :: f32(0.025)
 // array (Vulkan), after the depth pyramids' slots
 @(private)
 PRECOMPUTE_STORAGE_BASE :: MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS
-@(private)
-PRECOMPUTE_DISPATCHES :: 1 + PREFILTER_MIPS
 
 // `src` is the equirect map; `value` is the irradiance sample delta
 // or the prefilter roughness.
@@ -47,7 +45,7 @@ precompute_ibl :: proc(self: ^Renderer, equirect, irradiance_cube, prefilter_cub
     value:  f32,
     count:  u32,
   }
-  dispatches: [PRECOMPUTE_DISPATCHES]Dispatch
+  dispatches: [PRECOMPUTE_TARGETS]Dispatch
   dispatches[0] = {.IRRADIANCE, equirect, irradiance_cube, IRRADIANCE_SIZE, 0, IRRADIANCE_SAMPLE_DELTA, 0}
   for mip in 0 ..< u32(PREFILTER_MIPS) {
     roughness := f32(mip) / f32(PREFILTER_MIPS - 1)
@@ -59,7 +57,7 @@ precompute_ibl :: proc(self: ^Renderer, equirect, irradiance_cube, prefilter_cub
   }
   when !BINDLESS do layouts: [PrecomputeShader]rhi.BindLayout
   pipelines: [PrecomputeShader]rhi.Pipeline
-  groups: [PRECOMPUTE_DISPATCHES]rhi.BindGroup
+  groups: [PRECOMPUTE_TARGETS]rhi.BindGroup
   defer {
     for p in pipelines do dev.pipeline_retire(&self.gpu, p)
     for g in groups do dev.bind_group_retire(&self.gpu, g)

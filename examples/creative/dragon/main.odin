@@ -178,20 +178,17 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
-  if !debugui.init(&app.debug, r, {1024, 720}) do return .FAIL
+  if !debugui.init(&app.debug, r) do return .FAIL
 
-  ground := world.spawn(&app.scene, {0, -0.05, 0})
-  render.attach(r, render.SlotHandle(ground.index), render.primitive(r, .CUBE, .GRAY))
-  world.scale(&app.scene, ground, [3]f32{24, 0.05, 24})
+  mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .CUBE, .GRAY), {0, -0.05, 0}, scale = {24, 0.05, 24})
   lamp := world.spawn(&app.scene, {0, 4, 0})
-  render.attach(r, render.SlotHandle(lamp.index), render.light_create(r, render.make_point_light(color = {1, 0.95, 0.85}, intensity = 40, radius = 20)))
+  render.attach(r, lamp, render.light_create(r, render.make_point_light(color = {1, 0.95, 0.85}, intensity = 40, radius = 20)))
 
   for color, i in PALETTE {
     app.materials[i] = render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, metallic_value = 0.2, roughness_value = 0.45))
@@ -227,16 +224,13 @@ update :: proc(app: ^App, dt: f32) {
   panel(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   dragging := !app.input.mouse_captured && input.mouse_down(&app.input, .LEFT)
-  render.orbit_drag(&app.orbit, &app.input)
   if !dragging do app.orbit.yaw += app.spin * dt * 0.5
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
 
   if app.autoplay do app.pose.offset = math.mod(app.pose.offset + dt / LAP_SECONDS, 1)
   build_step(app, dt)
   place(app)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 place :: proc(app: ^App) {
@@ -297,20 +291,20 @@ angle_slider :: proc(ctx: ^mu.Context, label: string, value: ^f32, lo, hi: f32) 
 mesh :: proc(app: ^App, unit: Unit) -> render.MeshHandle {
   if handle, ok := app.meshes[unit]; ok do return handle
   r := &app.renderer
-  g: render.Geometry
+  g: geometry.Mesh
   switch unit.kind {
   case .BOX:
-    g = render.make_wedge(unit.param) if unit.param > 0 else render.make_cube()
+    g = geometry.make_wedge(unit.param) if unit.param > 0 else geometry.make_cube()
   case .CYLINDER:
-    g = render.make_cylinder(segments = 24, height = 1)
+    g = geometry.make_cylinder(segments = 24, height = 1)
   case .HALF_CYLINDER:
-    g = render.make_cylinder(segments = 16, height = 1, arc = math.PI)
+    g = geometry.make_cylinder(segments = 16, height = 1, arc = math.PI)
   case .QUARTER_CYLINDER:
-    g = render.make_cylinder(segments = 10, height = 1, arc = math.PI / 2)
+    g = geometry.make_cylinder(segments = 10, height = 1, arc = math.PI / 2)
   case .CONE:
-    g = render.make_cone(segments = 24, height = 1, top_radius = unit.param)
+    g = geometry.make_cone(segments = 24, height = 1, top_radius = unit.param)
   case .SPHERE:
-    g = render.make_sphere()
+    g = geometry.make_sphere()
   }
   handle := render.mesh_create(r, g)
   app.meshes[unit] = handle
@@ -319,7 +313,7 @@ mesh :: proc(app: ^App, unit: Unit) -> render.MeshHandle {
 
 attach :: proc(app: ^App, p: Piece) {
   material := app.materials[(p.key ~ app.seed) % len(PALETTE)]
-  render.attach(&app.renderer, render.SlotHandle(p.node.index), render.MeshAttachment{mesh = mesh(app, p.unit), material = material, cast_shadow = true})
+  render.attach(&app.renderer, p.node, render.MeshAttachment{mesh = mesh(app, p.unit), material = material, cast_shadow = true})
 }
 
 recolor :: proc(app: ^App) {

@@ -50,7 +50,7 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
   // edge bodies in the example (ground is 14x14, bodies start at up to ±48).
   on_ground := 0
   for handle, i in body_handles {
-    // Fell off the ground edge and was killed below KILL_Y
+    // Fell off the ground edge and was killed below kill_y
     body := lookup(&physics_world, handle) or_continue
     // Outside ground bounds — no ground underneath, expected to fall
     if body.position.x < -GROUND_HALF ||

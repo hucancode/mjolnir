@@ -15,7 +15,7 @@ LIGHTING_TILE :: 16
 
 // Storage image slots of the lit images, one per pyramid slot, after the IBL's (Vulkan).
 @(private)
-LIT_STORAGE_BASE :: PRECOMPUTE_STORAGE_BASE + PRECOMPUTE_DISPATCHES
+LIT_STORAGE_BASE :: PRECOMPUTE_STORAGE_BASE + PRECOMPUTE_TARGETS
 
 // Matches the push block of the lighting shaders (and, in WebGPU, their uniform struct).
 @(private = "file")

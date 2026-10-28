@@ -73,13 +73,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   colors := [?]render.Color{.RED, .GREEN, .BLUE, .YELLOW, .CYAN, .MAGENTA, .WHITE, .GRAY, .BLACK}
   for &cube, i in app.cubes {
-    cube = world.spawn(&app.scene)
-    render.attach(&app.renderer, render.SlotHandle(cube.index), render.primitive(&app.renderer, .CUBE, colors[i % len(colors)]))
-    world.scale(&app.scene, cube, 0.3)
+    cube = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, colors[i % len(colors)]), scale = 0.3)
   }
-  ground := world.spawn(&app.scene, {0, -2, 0})
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
-  world.scale(&app.scene, ground, 20.0)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -2, 0}, scale = 20.0)
   return .READY
 }
 
@@ -88,8 +84,7 @@ update :: proc(app: ^App, dt: f32) {
   defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   total_length := animation.spline_arc_length(app.spline)
   for cube, i in app.cubes {
     offset := f32(i) / f32(CUBE_COUNT) * total_length
@@ -98,14 +93,11 @@ update :: proc(app: ^App, dt: f32) {
     world.translate(&app.scene, cube, animation.spline_sample_uniform(app.spline, eased))
   }
   draw_spline(app)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 draw_spline :: proc(app: ^App) {
@@ -114,8 +106,8 @@ draw_spline :: proc(app: ^App) {
   prev := animation.spline_sample(app.spline, 0)
   for i in 1 ..= CURVE_SEGMENTS {
     next := animation.spline_sample(app.spline, f32(i) / CURVE_SEGMENTS * duration)
-    render.debug_segment(&app.renderer, prev, next, render.DEBUG_WHITE)
+    render.debug_segment(&app.renderer, prev, next, render.COLOR_RGB[.WHITE])
     prev = next
   }
-  for p in app.spline.points do render.debug_point(&app.renderer, p, size = 0.5, color = render.DEBUG_YELLOW)
+  for p in app.spline.points do render.debug_point(&app.renderer, p, size = 0.5, color = render.COLOR_RGB[.YELLOW])
 }

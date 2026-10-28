@@ -82,7 +82,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     weight_spread     = 0.1,
   ))
   emitter_node := world.spawn(&app.scene, {0, 2, 0})
-  render.attach(&app.renderer, render.SlotHandle(emitter_node.index), app.emitter)
+  render.attach(&app.renderer, emitter_node, app.emitter)
   return .READY
 }
 
@@ -105,16 +105,12 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

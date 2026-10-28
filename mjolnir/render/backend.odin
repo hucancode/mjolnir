@@ -14,12 +14,14 @@ RENDER_BACKEND :: #config(RENDER_BACKEND, "vulkan")
 when RENDER_BACKEND == "vulkan" {
   @(private)
   FRAMES_IN_FLIGHT :: vulkan.FRAMES_IN_FLIGHT
-  // WindowHandle is the window render draws into (platform.Platform.window).
+  // WindowHandle is the window render draws into: a GLFW window made after glfw.Init with
+  // CLIENT_API = NO_API; you poll its events.
   WindowHandle :: vulkan.WindowHandle
 } else when RENDER_BACKEND == "wgpu" {
   @(private)
   FRAMES_IN_FLIGHT :: wgpu.FRAMES_IN_FLIGHT
-  // WindowHandle is the window render draws into (platform.Platform.window).
+  // WindowHandle is the window render draws into: a GLFW window made after glfw.Init with
+  // CLIENT_API = NO_API, or on the web the CSS selector of a canvas; you poll its events.
   WindowHandle :: wgpu.WindowHandle
 }
 

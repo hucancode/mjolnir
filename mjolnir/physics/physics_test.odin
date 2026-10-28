@@ -772,8 +772,7 @@ test_disable_rotation_prevents_angular_velocity :: proc(t: ^testing.T) {
   defer shutdown(&world)
   handle := body_create(&world, collider = BoxCollider{half_extents = {1, 1, 1}}, mass = 1.0)
   body := lookup(&world, handle)
-  body.enable_rotation = false
-  update_world_inertia(body)
+  body_params(&world, handle).enable_rotation = false
   body.torque = {0, 10, 0}
   step(&world, 1.0 / 60.0)
   testing.expect(
@@ -1026,4 +1025,38 @@ test_physics_teardown_reuse :: proc(t: ^testing.T) {
   testing.expect_value(t, len(w.contacts), 0)
   body, ok := lookup(&w, next)
   testing.expect(t, ok && body.velocity.y < 0)
+}
+
+// enable_rotation is a BodyParams field the application edits any time: step follows it both ways.
+@(test)
+test_toggle_rotation_after_create :: proc(t: ^testing.T) {
+  world: World
+  init(&world, {0, 0, 0}, thread_count = 1)
+  defer shutdown(&world)
+  handle := body_create(&world, collider = BoxCollider{half_extents = {1, 1, 1}}, mass = 1.0)
+  body_params(&world, handle).enable_rotation = false
+  step(&world, 1.0 / 30.0)
+  // the solver's contact masses read it: no rotational term once rotation is off
+  testing.expect(t, lookup(&world, handle).inv_inertia_world == {}, "turning rotation off must drop the world inertia")
+  set_pose(&world, handle, {0, 0, 0}, 1)
+  body_params(&world, handle).enable_rotation = true
+  step(&world, 1.0 / 30.0)
+  apply_impulse_at(&world, handle, {0, 0, 10}, {1, 0, 0})
+  step(&world, 1.0 / 30.0)
+  w := body(&world, handle).angular_velocity
+  testing.expectf(t, abs(w.y) > 0.1, "an off-centre impulse must spin a body whose rotation was turned back on, got %v", w)
+}
+
+// A standalone user drives poses by body handle, without a user link, and picks the rate.
+@(test)
+test_poses_without_user_and_ungated_rate :: proc(t: ^testing.T) {
+  world: World
+  init(&world, thread_count = 1)
+  defer shutdown(&world)
+  world.rate = 0
+  ball := body_create(&world, {0, 5, 0}, collider = SphereCollider{radius = 0.5}, mass = 1)
+  testing.expect(t, step(&world, 1.0 / 240.0), "rate 0 steps every call")
+  poses := body_poses(&world)
+  testing.expect(t, len(poses) == 1 && poses[0].body == ball, "a body without a user link has a pose")
+  testing.expect_value(t, body(&world, ball).inv_mass, 1)
 }

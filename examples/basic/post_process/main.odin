@@ -91,36 +91,33 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   ok: bool
   app.vignette, ok = render.post_shader_create(&app.renderer, #load("vignette." + render.SHADER_EXT))
   if !ok do log.error("Failed to create the vignette shader")
-  ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
-  world.scale(&app.scene, ground, 30.0)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 30.0)
 
   magenta_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.1, 0.8, 1}, emissive_value = 4.0))
-  spawn_mesh(app, .SPHERE, magenta_emit, {-3.0, 1.2, 1.5})
+  spawn_primitive(app, .SPHERE, magenta_emit, {-3.0, 1.2, 1.5})
   cyan_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.1, 0.9, 1.0, 1}, emissive_value = 4.0))
-  spawn_mesh(app, .SPHERE, cyan_emit, {0.0, 1.2, 1.5})
+  spawn_primitive(app, .SPHERE, cyan_emit, {0.0, 1.2, 1.5})
   yellow_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.9, 0.2, 1}, emissive_value = 4.0))
-  spawn_mesh(app, .SPHERE, yellow_emit, {3.0, 1.2, 1.5})
+  spawn_primitive(app, .SPHERE, yellow_emit, {3.0, 1.2, 1.5})
 
   metal := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.9, 0.95, 1}, metallic_value = 1.0, roughness_value = 0.15))
-  spawn_mesh(app, .SPHERE, metal, {0.5, 1.0, -1.5})
+  spawn_primitive(app, .SPHERE, metal, {0.5, 1.0, -1.5})
   rough := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.2, 0.6, 0.8, 1}, metallic_value = 0.0, roughness_value = 0.8))
-  spawn_mesh(app, .CUBE, rough, {3.0, 1.0, -1.5})
+  spawn_primitive(app, .CUBE, rough, {3.0, 1.0, -1.5})
   orange := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.4, 0.1, 1}, emissive_value = 4.0))
-  spawn_mesh(app, .CUBE, orange, {-3.0, 1.0, -1.5})
+  spawn_primitive(app, .CUBE, orange, {-3.0, 1.0, -1.5})
   glass := render.material_create(&app.renderer, render.make_material(.TRANSPARENT, base_color_factor = {0.2, 0.9, 0.4, 0.4}))
-  spawn_mesh(app, .SPHERE, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
+  spawn_primitive(app, .SPHERE, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
 
-  for i in 0 ..< 5 do spawn_mesh(app, .CUBE, app.renderer.builtin_materials[.WHITE], {f32(i) * 4.0 - 8.0, 0.5, -7.0})
+  for i in 0 ..< 5 do spawn_primitive(app, .CUBE, app.renderer.builtin_materials[.WHITE], {f32(i) * 4.0 - 8.0, 0.5, -7.0})
 
   lamp := world.spawn(&app.scene, {0, 3, 0})
-  render.attach(&app.renderer, render.SlotHandle(lamp.index), render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2}, intensity = 200, radius = 8.0, cast_shadow = false)))
+  render.attach(&app.renderer, lamp, render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2}, intensity = 200, radius = 8.0, cast_shadow = false)))
   return .READY
 }
 
-spawn_mesh :: proc(app: ^App, shape: render.Primitive, material: render.MaterialHandle, position: [3]f32, cast_shadow := true) {
-  n := world.spawn(&app.scene, position)
-  render.attach(&app.renderer, render.SlotHandle(n.index), render.primitive(&app.renderer, shape, material, cast_shadow))
+spawn_primitive :: proc(app: ^App, shape: render.Primitive, material: render.MaterialHandle, position: [3]f32, cast_shadow := true) {
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, material, cast_shadow), position)
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -130,8 +127,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   clear(&app.renderer.effect_stack)
   if outline_on    do append(&app.renderer.effect_stack, render.OutlineEffect{thickness = outline_thickness})
   if fog_on        do append(&app.renderer.effect_stack, render.FogEffect{color = {0.55, 0.6, 0.7}, start = fog_start, end = fog_end})
@@ -145,14 +141,11 @@ update :: proc(app: ^App, dt: f32) {
     params := VignetteParams{color = {0.02, 0.0, 0.05}, radius = vignette_radius, softness = vignette_softness, strength = vignette_strength}
     append(&app.renderer.effect_stack, render.make_custom_effect(app.vignette, params))
   }
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

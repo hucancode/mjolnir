@@ -5,10 +5,10 @@ package wgpu_backend
 // Layer 1: foundation
 
 // It changes when WebGPU does; it never imports render or platform and decides nothing.
-// It is the graphics API behind rhi: rhi.odin is its half of rhi's contract (PROCS), the rest is
-// what that needs (PROCS, lifecycle included). Beside PROCS render takes only the names it
-// aliases in backend_glue.odin: Backend, FRAMES_IN_FLIGHT, RETIRE_GRACE and the slot counts that
-// follow from them.
+// It is the graphics API behind rhi: rhi.odin is its half of rhi's contract (PROCS, lifecycle
+// included), the rest is what that needs. Beside PROCS render takes only the names it
+// aliases in backend_glue.odin: Backend, FRAMES_IN_FLIGHT, RETIRE_GRACE, BINDLESS,
+// LAYERED_RENDERING and the slot counts that follow from them.
 // WebGPU has no bindless arrays, push constants, indirect count, layered rendering, async
 // compute or timestamps here, and syncs on its own: render binds textures through bind groups,
 // cmd_push becomes a dynamic offset into a ring of uniform entries (pipeline.odin), barriers and

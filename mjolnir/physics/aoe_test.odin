@@ -161,8 +161,8 @@ test_physics_kill_y :: proc(t: ^testing.T) {
   init(&phys, thread_count = 1)
   defer shutdown(&phys)
   user := containers.Handle{index = 7, generation = 1}
-  falling := body_create(&phys, {0, KILL_Y + 1, 0}, collider = SphereCollider{radius = 0.5}, mass = 1.0, user = user)
-  floor := body_create(&phys, {0, KILL_Y - 10, 0}, collider = BoxCollider{half_extents = {1, 1, 1}})
+  falling := body_create(&phys, {0, phys.kill_y + 1, 0}, collider = SphereCollider{radius = 0.5}, mass = 1.0, user = user)
+  floor := body_create(&phys, {0, phys.kill_y - 10, 0}, collider = BoxCollider{half_extents = {1, 1, 1}})
   kills := 0
   for _ in 0 ..< 120 {
     step(&phys, 1.0 / 60.0)
@@ -175,5 +175,5 @@ test_physics_kill_y :: proc(t: ^testing.T) {
   _, alive := lookup(&phys, falling)
   testing.expect(t, !alive, "Fallen body should be destroyed")
   _, floor_alive := lookup(&phys, floor)
-  testing.expect(t, floor_alive, "Static bodies below KILL_Y stay")
+  testing.expect(t, floor_alive, "Static bodies below kill_y stay")
 }

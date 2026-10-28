@@ -71,12 +71,12 @@ init :: proc(b: ^Backend, window: WindowHandle) -> bool {
   return check(init_vulkan(b), "Vulkan init")
 }
 
-// window_size measures the window: its framebuffer in pixels and its content scale. GLFW
-// answers on the main thread only.
+// window_size measures the window: its framebuffer in pixels and the pixels per window
+// coordinate (the cursor's unit). GLFW answers on the main thread only.
 window_size :: proc(b: ^Backend) -> (framebuffer_size: [2]u32, dpi_scale: f32) {
   w, h := glfw.GetFramebufferSize(b.window)
-  sx, _ := glfw.GetWindowContentScale(b.window)
-  return {u32(w), u32(h)}, sx
+  ww, _ := glfw.GetWindowSize(b.window)
+  return {u32(w), u32(h)}, f32(w) / f32(max(ww, 1)) if w > 0 else 1
 }
 
 // Logs a failed result; the bool is what render sees.

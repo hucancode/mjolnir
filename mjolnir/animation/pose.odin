@@ -4,10 +4,11 @@ import "../geometry"
 import "core:math/linalg"
 import "core:slice"
 
-// Pose is an Animator's pose during animator_update, as procedural layers see it: per bone,
-// the local transform (from the clip layers) and the skeleton-space transform, plus the
-// skeleton and the animator's joint limits. root_world places skeleton space in the world.
-// A view: valid inside a CustomApply call only.
+// Pose is a skeleton's pose as procedural code edits it: per bone, the local transform (from the
+// clip layers) and the skeleton-space transform, plus the skeleton and the joint limits.
+// root_world places skeleton space in the world. An Animator hands its own to each CustomApply
+// (a view valid for that call); fill one over arrays of your own to run ik_solve, aim_bone or
+// pose_blend on a pose you hold.
 Pose :: struct {
   local:      []TRS,
   positions:  [][3]f32,

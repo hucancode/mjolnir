@@ -5,8 +5,8 @@ import "../font"
 import "core:log"
 import "core:slice"
 
-// Positions and sizes are window coordinates, as input.State and ui report them; render
-// scales them by the DPI scale. A zero `clip` is the whole window.
+// Positions and sizes are window coordinates (window_size), as input.State reports the cursor;
+// render scales them by the DPI scale. A zero `clip` is the whole window.
 
 // DrawQuadCommand draws a solid or textured rectangle.
 DrawQuadCommand :: struct {
@@ -160,11 +160,12 @@ batch_commands :: proc(self: ^Renderer, commands: []RenderCommand, text_font: ^f
   }
 }
 
-// Uploads the font's atlas when glyphs were added to it since the last upload; returns its size.
+// Uploads the font's atlas unless the one uploaded is its current version; returns its size.
 @(private)
 sync_font_atlas :: proc(self: ^Renderer, text_font: ^font.Font) -> [2]f32 {
-  pixels, size, changed := font.atlas(text_font)
-  if changed || self.ui_font_atlas == 0 {
+  pixels, size, version := font.atlas(text_font)
+  if version != self.ui_font_version || self.ui_font_atlas == 0 {
+    self.ui_font_version = version
     texture_destroy(self, self.ui_font_atlas)
     ok: bool
     self.ui_font_atlas, ok = allocate_texture(self, {extent = size, format = .A8, usage = {.SAMPLED}}, pixels)

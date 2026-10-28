@@ -6,8 +6,15 @@ import "core:math/linalg"
 import "../geometry"
 import "detour"
 
-// NavMesh is a navigation mesh plus the query used for path and point lookups.
+// MAX_FILTERS is how many query filters a NavMesh holds.
+MAX_FILTERS :: 16
+
+// NavMesh is a navigation mesh plus the query used for path and point lookups. filters[i] is
+// what queries and agents of filter i may cross and at what cost per area (detour.Query_Filter:
+// area_cost by the area bake gave each polygon); navmesh_init resets every one to cost 1 for
+// every area. Edit them any time.
 NavMesh :: struct {
+  filters: [MAX_FILTERS]detour.Query_Filter,
   using _: NavMesh_State,
 }
 
@@ -15,24 +22,23 @@ NavMesh :: struct {
 NavMesh_State :: struct {
   detour_mesh: detour.Nav_Mesh,
   query:       detour.Nav_Mesh_Query,
-  filter:      detour.Query_Filter,
 }
 
 // navmesh_destroy frees the mesh, its query and the tile data.
 navmesh_destroy :: proc(self: ^NavMesh) {
   detour.nav_mesh_query_destroy(&self.query)
   detour.nav_mesh_destroy(&self.detour_mesh)
-  self^ = {}
+  self.detour_mesh, self.query = {}, {}
 }
 
-// save encodes the mesh tiles in the detour .navmesh format, in memory the caller frees
-// (platform.write_file stores it).
+// save encodes the mesh tiles in the detour .navmesh format, in memory the caller frees.
 save :: proc(self: ^NavMesh, allocator := context.allocator) -> []u8 {
   return detour.save_navmesh(&self.detour_mesh, allocator)
 }
 
-// init decodes a mesh encoded by save or baked by navigation/bake, replacing any previous mesh.
-init :: proc(self: ^NavMesh, data: []u8, max_query_nodes: i32 = 2048) -> bool {
+// navmesh_init decodes a mesh encoded by save or baked by bake, replacing any
+// previous mesh; a crowd on it follows on its next update.
+navmesh_init :: proc(self: ^NavMesh, data: []u8, max_query_nodes: i32 = 2048) -> bool {
   mesh := detour.load_navmesh(data) or_return
   navmesh_destroy(self)
   self.detour_mesh = mesh^
@@ -42,20 +48,21 @@ init :: proc(self: ^NavMesh, data: []u8, max_query_nodes: i32 = 2048) -> bool {
     navmesh_destroy(self)
     return false
   }
-  detour.query_filter_init(&self.filter)
+  for &f in self.filters do detour.query_filter_init(&f)
   return true
 }
 
-// nearest_point returns the closest mesh point within extents of position.
+// nearest_point returns the closest point within extents of position that filter allows.
 nearest_point :: proc(
   self: ^NavMesh,
   position: [3]f32,
   extents: [3]f32 = {2, 4, 2},
+  filter: u8 = 0,
 ) -> (
   point: [3]f32,
   ok: bool,
 ) {
-  status, ref, pos := detour.find_nearest_poly(&self.query, position, extents, &self.filter)
+  status, ref, pos := detour.find_nearest_poly(&self.query, position, extents, &self.filters[filter % MAX_FILTERS])
   if !detour.status_succeeded(status) || ref == detour.INVALID_POLY_REF do return {}, false
   return pos, true
 }
@@ -130,24 +137,28 @@ ray_triangle :: proc "contextless" (origin, dir, v0, v1, v2: [3]f32) -> (t: f32,
   return t, t > 0
 }
 
-// find_path returns straight-line waypoints from start to end; both ends snap to the mesh
-// within `extents`. The caller deletes the path.
+// find_path returns straight-line waypoints from start to end, the cheapest way filter allows;
+// both ends snap to the mesh within `extents`; nil when either end is off the mesh. partial when
+// end cannot be reached: the path then ends as near it as the mesh goes. The caller deletes the
+// path.
 find_path :: proc(
   self: ^NavMesh,
   start, end: [3]f32,
   max_path_length: i32 = 256,
   extents: [3]f32 = {2, 4, 2},
+  filter: u8 = 0,
   allocator := context.allocator,
 ) -> (
   path: [][3]f32,
-  ok: bool,
+  partial: bool,
 ) #optional_ok {
-  status, start_ref, start_pos := detour.find_nearest_poly(&self.query, start, extents, &self.filter)
-  if !detour.status_succeeded(status) || start_ref == detour.INVALID_POLY_REF do return nil, false
+  filter := &self.filters[filter % MAX_FILTERS]
+  status, start_ref, start_pos := detour.find_nearest_poly(&self.query, start, extents, filter)
+  if !detour.status_succeeded(status) || start_ref == detour.INVALID_POLY_REF do return
   end_ref: detour.Poly_Ref
   end_pos: [3]f32
-  status, end_ref, end_pos = detour.find_nearest_poly(&self.query, end, extents, &self.filter)
-  if !detour.status_succeeded(status) || end_ref == detour.INVALID_POLY_REF do return nil, false
+  status, end_ref, end_pos = detour.find_nearest_poly(&self.query, end, extents, filter)
+  if !detour.status_succeeded(status) || end_ref == detour.INVALID_POLY_REF do return
   polys := make([]detour.Poly_Ref, max_path_length, context.temp_allocator)
   path_status, poly_count := detour.find_path(
     &self.query,
@@ -155,11 +166,12 @@ find_path :: proc(
     end_ref,
     start_pos,
     end_pos,
-    &self.filter,
+    filter,
     polys,
     max_path_length,
   )
-  if !detour.status_succeeded(path_status) || poly_count == 0 do return nil, false
+  if !detour.status_succeeded(path_status) || poly_count == 0 do return
+  partial = .Partial_Result in path_status
   straight := make([]detour.Straight_Path_Point, max_path_length, context.temp_allocator)
   straight_status, count := detour.find_straight_path(
     &self.query,
@@ -176,7 +188,18 @@ find_path :: proc(
   if !detour.status_succeeded(straight_status) || count == 0 do return nil, false
   path = make([][3]f32, count, allocator)
   for &p, i in path do p = straight[i].pos
-  return path, true
+  return path, partial
+}
+
+// follow moves position up to `step` along path, from waypoint next on, skipping waypoints within
+// `reached` of it; false once it has reached the last one.
+follow :: proc(path: [][3]f32, next: ^int, position: ^[3]f32, step: f32, reached: f32 = 0.3) -> (moving: bool) {
+  for next^ < len(path) && linalg.length(path[next^] - position^) < reached do next^ += 1
+  if next^ >= len(path) do return false
+  to_waypoint := path[next^] - position^
+  distance := linalg.length(to_waypoint)
+  position^ += to_waypoint / distance * min(step, distance)
+  return true
 }
 
 // debug_triangles returns the triangulated mesh polygons for debug drawing. Caller deletes
@@ -205,8 +228,10 @@ debug_triangles :: proc(
   return verts[:], tris[:]
 }
 
-// destroy frees a NavMesh or a crowd agent, as navmesh_destroy and agent_destroy do.
+// destroy frees a NavMesh, a crowd or a crowd agent, as navmesh_destroy, crowd_destroy and
+// agent_destroy do.
 destroy :: proc {
   navmesh_destroy,
+  crowd_destroy,
   agent_destroy,
 }

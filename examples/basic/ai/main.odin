@@ -57,10 +57,10 @@ MODE_COLORS := [Mode]render.Color {
 }
 
 SIGHT_COLORS := [Mode][4]f32 {
-  .PATROL = render.DEBUG_GREEN,
-  .CHASE  = render.DEBUG_RED,
-  .SEARCH = render.DEBUG_YELLOW,
-  .RETURN = render.DEBUG_CYAN,
+  .PATROL = render.COLOR_RGB[.GREEN],
+  .CHASE  = render.COLOR_RGB[.RED],
+  .SEARCH = render.COLOR_RGB[.YELLOW],
+  .RETURN = render.COLOR_RGB[.CYAN],
 }
 
 MODES := [Mode]fsm.State(Guard, Mode) {
@@ -137,25 +137,19 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
-  ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
-  world.scale(&app.scene, ground, ARENA)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = ARENA)
   bake.append_box(&builder, {0, -0.5, 0}, {ARENA, 0.5, ARENA})
   for wall in WALLS {
-    node := world.spawn(&app.scene, wall.center)
-    render.attach(&app.renderer, render.SlotHandle(node.index), render.primitive(&app.renderer, .CUBE, .WHITE))
-    world.scale(&app.scene, node, wall.half_extents)
-    bake.append_box(&builder, wall.center, wall.half_extents, is_obstacle = true)
+    mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .WHITE), wall.center, scale = wall.half_extents)
+    bake.append_box(&builder, wall.center, wall.half_extents, area = bake.AREA_BLOCKED)
   }
   data, baked := bake.build(&builder, allocator = context.temp_allocator)
-  if !baked || !nav.init(&app.navmesh, data) {
+  if !baked || !nav.navmesh_init(&app.navmesh, data) {
     log.error("Failed to build navmesh")
     return .FAIL
   }
 
-  app.intruder.node = world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(app.intruder.node.index), render.primitive(&app.renderer, .SPHERE, .MAGENTA))
-  world.scale(&app.scene, app.intruder.node, 0.6)
+  app.intruder.node = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .MAGENTA), scale = 0.6)
 
   for &g, i in app.guards {
     g.app = app
@@ -187,8 +181,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if !app.input.mouse_captured && input.mouse_pressed(&app.input, .RIGHT) {
     ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
     if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do walk_to(app, &app.intruder, goal)
@@ -202,14 +195,11 @@ update :: proc(app: ^App, dt: f32) {
     if g.has_lead do render.debug_segment(&app.renderer, g.position + {0, 0.1, 0}, g.last_seen + {0, 0.1, 0}, color)
     if linalg.length(g.position - app.intruder.position) < CATCH do caught(app)
   }
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 caught :: proc(app: ^App) {
@@ -255,18 +245,14 @@ walk_to :: proc(app: ^App, w: ^Walker, goal: [3]f32) {
 }
 
 walk :: proc(app: ^App, w: ^Walker, speed, dt: f32, lift: f32 = HALF_HEIGHT) -> (moving: bool) {
-  for w.next < len(w.path) && linalg.length(w.path[w.next] - w.position) < WAYPOINT_REACHED do w.next += 1
-  if w.next >= len(w.path) do return false
-  to_waypoint := w.path[w.next] - w.position
-  distance := linalg.length(to_waypoint)
-  w.position += to_waypoint / distance * min(speed * dt, distance)
+  nav.follow(w.path, &w.next, &w.position, speed * dt, WAYPOINT_REACHED) or_return
   world.translate(&app.scene, w.node, w.position + {0, lift, 0})
   return true
 }
 
 paint :: proc(g: ^Guard, mode: Mode) {
   app := g.app
-  render.attach(&app.renderer, render.SlotHandle(g.node.index), render.primitive(&app.renderer, .CYLINDER, MODE_COLORS[mode]))
+  render.attach(&app.renderer, g.node, render.primitive(&app.renderer, .CYLINDER, MODE_COLORS[mode]))
 }
 
 sees_intruder :: proc(g: ^Guard) -> bool {

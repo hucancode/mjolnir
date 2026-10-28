@@ -108,15 +108,6 @@ LightType :: enum u32 {
   SPOT,
 }
 
-// Vertex is the mesh vertex format.
-Vertex :: struct {
-  position: [3]f32,
-  normal:   [3]f32,
-  color:    [4]f32,
-  uv:       [2]f32,
-  tangent:  [4]f32, // xyz = tangent, w = handedness (for bitangent reconstruction)
-}
-
 // Vertex2D is one vertex of the 2D overlay.
 Vertex2D :: struct {
   pos:        [2]f32,

@@ -32,7 +32,9 @@ update_input :: proc(self: ^UI, s: ^input.State) {
   self.clicked = {}
   if s.mouse_captured do return
   self.hovered = pick(self, s.cursor)
+  held := false
   for b in input.MouseButton {
+    held ||= input.mouse_down(s, b)
     if input.mouse_pressed(s, b) {
       if self.pressed == {} do self.pressed = self.hovered
       self.focused = {}
@@ -47,7 +49,7 @@ update_input :: proc(self: ^UI, s: ^input.State) {
     }
     if input.mouse_released(s, b) && within(self, self.hovered, self.pressed) do self.clicked = self.pressed
   }
-  if s.buttons == {} do self.pressed = {}
+  if !held do self.pressed = {}
   if _, ok := lookup(self, self.focused); !ok do self.focused = {}
   if self.hovered != {} || self.pressed != {} do s.mouse_captured = true
   if self.focused != {} do s.keyboard_captured = true

@@ -13,17 +13,13 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
+import "mjolnir/geometry"
 
 SNAKE_LENGTH :: f32(6)
-// the body hangs on this many points behind the neck, two halves to a param float
 SPINE_POINTS :: 8
-// the neck's path is remembered every CHAIN_STEP of travel
 CHAIN_STEP :: f32(0.05)
-// the tightest the snake can turn, as 1 / radius
 MAX_CURVATURE :: f32(1.2)
-// how far the head turns off its course toward where it is told to go
 LOOK :: f32(0.9)
-// the snake weaves WEAVE radians either side of its course, once every WAVELENGTH of travel
 WEAVE :: f32(0.6)
 WAVELENGTH :: f32(4)
 ARENA :: f32(14)
@@ -39,15 +35,15 @@ App :: struct {
   head:      world.NodeHandle,
   skin:      render.MaterialHandle,
   head_skin: render.MaterialHandle,
-  focus:     [2]f32, // what the camera looks at, follows the neck loosely so the weave doesn't shake it
+  focus:     [2]f32,
   heading:   f32,
   look:      f32,
   lean:      f32,
   speed:     f32,
   phase:     f32,
-  goal:      [2]f32, // where auto move is heading
+  goal:      [2]f32,
   goals:     int,
-  chain:     animation.Chain([2]f32), // the neck's path on the ground, (x, z)
+  chain:     animation.Chain([2]f32),
 }
 
 cruise_speed: f32 = 5.0
@@ -75,7 +71,7 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
-  if !debugui.init(&app.debug, r, {1000, 700}) do return .FAIL
+  if !debugui.init(&app.debug, r) do return .FAIL
   app.orbit = render.make_orbit({3, 6, 9}, {0, 0, 0})
   render.camera_orbit(render.main_camera(r), app.orbit)
 
@@ -84,31 +80,23 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !body_ok || !head_ok do return .FAIL
   app.skin = render.material_create(r, render.make_material(.CUSTOM, shader = body_shader))
   app.head_skin = render.material_create(r, render.make_material(.CUSTOM, shader = head_shader))
-  body := render.mesh_create(r, render.make_sphere(segments = 24, rings = 120, radius = SNAKE_LENGTH + 1))
-  head := render.mesh_create(r, render.make_sphere(segments = 32, rings = 32))
+  body := render.mesh_create(r, geometry.make_sphere(segments = 24, rings = 120, radius = SNAKE_LENGTH + 1))
+  head := render.mesh_create(r, geometry.make_sphere(segments = 32, rings = 32))
   app.body = world.spawn(&app.scene)
-  render.attach(r, render.SlotHandle(app.body.index), render.MeshAttachment{mesh = body, material = app.skin})
+  render.attach(r, app.body, render.MeshAttachment{mesh = body, material = app.skin})
   app.head = world.spawn(&app.scene)
-  render.attach(r, render.SlotHandle(app.head.index), render.MeshAttachment{mesh = head, material = app.head_skin})
+  render.attach(r, app.head, render.MeshAttachment{mesh = head, material = app.head_skin})
   for side in ([2]f32{-1, 1}) {
-    eye := world.spawn(&app.scene, {side * 0.27, 0.44, -0.92}, parent = app.head)
-    render.attach(r, render.SlotHandle(eye.index), render.primitive(r, .SPHERE, .WHITE))
-    world.scale(&app.scene, eye, 0.12)
-    pupil := world.spawn(&app.scene, {side * 0.42, 0.12, -0.39}, parent = eye)
-    render.attach(r, render.SlotHandle(pupil.index), render.primitive(r, .SPHERE, .BLACK))
-    world.scale(&app.scene, pupil, 0.5)
+    eye := mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .SPHERE, .WHITE), {side * 0.27, 0.44, -0.92}, parent = app.head, scale = 0.12)
+    mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .SPHERE, .BLACK), {side * 0.42, 0.12, -0.39}, parent = eye, scale = 0.5)
   }
   animation.chain_init(&app.chain, {0, 0}, {0, 1}, SNAKE_LENGTH, CHAIN_STEP)
 
   grass := render.material_create(r, render.make_material(base_color_factor = {0.45, 0.7, 0.35, 1}, roughness_value = 0.9))
-  ground := world.spawn(&app.scene)
-  render.attach(r, render.SlotHandle(ground.index), render.primitive(r, .QUAD_XZ, grass, cast_shadow = false))
-  world.scale(&app.scene, ground, ARENA + 4)
+  mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .QUAD_XZ, grass, cast_shadow = false), scale = ARENA + 4)
   for i in 0 ..< 6 {
     angle := f32(i) / 6 * math.TAU + 0.4
-    rock := world.spawn(&app.scene, {math.cos(angle) * 9, 0.4, math.sin(angle) * 9})
-    render.attach(r, render.SlotHandle(rock.index), render.primitive(r, .SPHERE, .GRAY))
-    world.scale(&app.scene, rock, 0.8)
+    mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .SPHERE, .GRAY), {math.cos(angle) * 9, 0.4, math.sin(angle) * 9}, scale = 0.8)
   }
   return .READY
 }
@@ -133,17 +121,12 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
   steer(app, dt)
   pose(app)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
-// Turns the head toward where the keys point, seen from the camera, and slithers the neck along
-// a course that weaves either side of the heading, recording where it went.
 steer :: proc(app: ^App, dt: f32) {
   move: [2]f32
   if input.key_down(&app.input, .UP) || input.key_down(&app.input, .W) do move.y += 1
@@ -181,7 +164,6 @@ steer :: proc(app: ^App, dt: f32) {
   app.focus += (neck - app.focus) * min(dt * 5, 1)
 }
 
-// Places the head and hangs the body behind the head along the neck's path.
 pose :: proc(app: ^App) {
   yaw := app.heading + app.look + 0.5 * WEAVE * math.sin(app.phase)
   neck := app.chain.head
@@ -202,7 +184,6 @@ pose :: proc(app: ^App) {
   skin.base_color_factor = head_skin.base_color_factor
   for i in 0 ..< SPINE_POINTS {
     p := animation.chain_sample(app.chain, f32(i + 1) * SNAKE_LENGTH / SPINE_POINTS) - neck
-    // the z half is the float's top; off zero it never makes a denormal
     p.y = math.copy_sign(max(abs(p.y), 1e-3), p.y)
     skin.params[i / 4][i % 4] = transmute(f32)[2]f16{f16(p.x), f16(p.y)}
   }
@@ -213,8 +194,7 @@ wrap :: proc(angle: f32) -> f32 {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

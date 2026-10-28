@@ -12,7 +12,7 @@ import "../input"
 import "vendor:glfw"
 
 // Platform is a GLFW window. Must not move after init (the window callbacks keep a pointer
-// to it). `window` is what render.init takes.
+// to it). `window` is the GLFW handle a renderer draws into.
 Platform :: struct {
   window:  glfw.WindowHandle,
   using _: Platform_State,
@@ -21,7 +21,7 @@ Platform :: struct {
 @(private)
 Platform_State :: struct {
   // device events since the last read_input
-  input:    Accumulator,
+  input:    input.State,
   // the framebuffer size and DPI scale as of the last poll_events
   size:     [2]u32,
   dpi:      f32,
@@ -51,7 +51,7 @@ init :: proc(self: ^Platform, width, height: u32, title: string) -> bool {
   glfw.SetScrollCallback(self.window, scroll_callback)
   glfw.SetCharCallback(self.window, char_callback)
   x, y := glfw.GetCursorPos(self.window)
-  acc_cursor(&self.input, f32(x), f32(y))
+  input.cursor_event(&self.input, {f32(x), f32(y)})
   query_window(self)
   return true
 }
@@ -78,7 +78,7 @@ poll_events :: proc(self: ^Platform) {
 // poll_events on another thread.
 read_input :: proc(self: ^Platform, s: ^input.State) {
   sync.guard(&self.mutex)
-  acc_drain(&self.input, s)
+  input.drain(&self.input, s)
 }
 
 // framebuffer_size returns the framebuffer size in pixels as of the last poll_events.
@@ -87,7 +87,8 @@ framebuffer_size :: proc(self: ^Platform) -> [2]u32 {
   return self.size
 }
 
-// dpi_scale returns the content scale (DPI factor) of the window as of the last poll_events.
+// dpi_scale returns the framebuffer pixels per window coordinate (the cursor's unit) as of the
+// last poll_events: the content scale where the OS scales windows (macOS), else 1.
 dpi_scale :: proc(self: ^Platform) -> f32 {
   sync.guard(&self.mutex)
   return self.dpi
@@ -98,9 +99,8 @@ dpi_scale :: proc(self: ^Platform) -> f32 {
 query_window :: proc(self: ^Platform) {
   w, h := glfw.GetFramebufferSize(self.window)
   self.size = {u32(w), u32(h)}
-  sw, sh := glfw.GetWindowContentScale(self.window)
-  if sw != sh && sw != self.dpi do log.warnf("DPI scale x (%v) and y (%v) not the same, using x", sw, sh)
-  self.dpi = sw
+  ww, _ := glfw.GetWindowSize(self.window)
+  self.dpi = f32(w) / f32(max(ww, 1)) if w > 0 else 1
 }
 
 // run calls step until it returns false, then returns.
@@ -148,7 +148,7 @@ platform_of :: proc "contextless" (window: glfw.WindowHandle) -> ^Platform {
 key_callback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
   self := platform_of(window)
   context = self.context_
-  acc_key(&self.input, input.Key(key), input.Action(action))
+  input.key_event(&self.input, input.Key(key), input.Action(action))
 }
 
 @(private = "file")
@@ -156,26 +156,26 @@ mouse_button_callback :: proc "c" (window: glfw.WindowHandle, button, action, mo
   self := platform_of(window)
   context = self.context_
   if button < 0 || button > i32(max(input.MouseButton)) do return
-  acc_button(&self.input, input.MouseButton(button), input.Action(action))
+  input.button_event(&self.input, input.MouseButton(button), input.Action(action))
 }
 
 @(private = "file")
 cursor_callback :: proc "c" (window: glfw.WindowHandle, x, y: f64) {
   self := platform_of(window)
   context = self.context_
-  acc_cursor(&self.input, f32(x), f32(y))
+  input.cursor_event(&self.input, {f32(x), f32(y)})
 }
 
 @(private = "file")
 scroll_callback :: proc "c" (window: glfw.WindowHandle, dx, dy: f64) {
   self := platform_of(window)
   context = self.context_
-  acc_scroll(&self.input, f32(dx), f32(dy))
+  input.scroll_event(&self.input, {f32(dx), f32(dy)})
 }
 
 @(private = "file")
 char_callback :: proc "c" (window: glfw.WindowHandle, ch: rune) {
   self := platform_of(window)
   context = self.context_
-  acc_char(&self.input, ch)
+  input.char_event(&self.input, ch)
 }

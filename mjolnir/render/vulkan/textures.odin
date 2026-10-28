@@ -13,11 +13,8 @@ import vk "vendor:vulkan"
 
 // Storage image slots: the pyramids' mips (MAX_PYRAMID_SLOTS), then the IBL precompute targets,
 // then the cameras' lit images, one per pyramid slot.
-// mips a depth pyramid may have
 @(private)
-MAX_DEPTH_MIPS_LEVEL :: 16
-@(private)
-MAX_STORAGE_IMAGES :: MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS_LEVEL + 2 + rhi.PREFILTER_MIPS + MAX_PYRAMID_SLOTS
+MAX_STORAGE_IMAGES :: MAX_PYRAMID_SLOTS * rhi.MAX_DEPTH_MIPS + rhi.PRECOMPUTE_TARGETS + MAX_PYRAMID_SLOTS
 
 @(private)
 SCENE_STAGES :: vk.ShaderStageFlags{.VERTEX, .FRAGMENT, .COMPUTE}

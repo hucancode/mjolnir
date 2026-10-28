@@ -17,6 +17,7 @@
   <div id="status">Loading…</div>
   <pre id="console"></pre>
   <script src="odin.js"></script>
+  <!-- the WebGPU bindings, for a renderer on WebGPU; the page runs without them too -->
   <script src="wgpu.js"></script>
   <script>
     const embedded = window.parent !== window;
@@ -55,7 +56,8 @@
       return URL.createObjectURL(new Blob(chunks, { type: "application/wasm" }));
     }
 
-    if (!navigator.gpu) {
+    const webgpu = typeof odin.WebGPUInterface === "function";
+    if (webgpu && !navigator.gpu) {
       fail("This browser has no WebGPU.");
     } else {
       // what the engine calls (platform.ready, platform.fail; its log has the details)
@@ -66,8 +68,9 @@
       download(`${example}.wasm`).then((url) => {
         statusElement.textContent = "Starting…";
         const mem = new odin.WasmMemoryInterface();
-        const wgpu = new odin.WebGPUInterface(mem);
-        return odin.runWasm(url, consoleElement, { wgpu: wgpu.getInterface(), mjolnir: page }, mem);
+        const imports = { mjolnir: page };
+        if (webgpu) imports.wgpu = new odin.WebGPUInterface(mem).getInterface();
+        return odin.runWasm(url, consoleElement, imports, mem);
       }).catch((e) => fail(String(e)));
     }
   </script>

@@ -263,3 +263,28 @@ test_slab_rewind :: proc(t: ^testing.T) {
   slab_rewind(&plain)
   testing.expect_value(t, slab_alloc(&plain, 4), first)
 }
+
+@(test)
+test_ranges_alloc_free_merge :: proc(t: ^testing.T) {
+  r: Ranges
+  ranges_init(&r, 100)
+  defer ranges_destroy(&r)
+  a := ranges_alloc(&r, 30)
+  b := ranges_alloc(&r, 30)
+  c := ranges_alloc(&r, 30)
+  testing.expect(t, a == 0 && b == 30 && c == 60, "first fit, exactly sized")
+  _, full := ranges_alloc(&r, 20)
+  testing.expect(t, !full, "only 10 left")
+  ranges_free(&r, b)
+  ranges_free(&r, a)
+  big, ok := ranges_alloc(&r, 60)
+  testing.expect(t, ok && big == 0, "neighbouring free runs merge")
+  testing.expect_value(t, ranges_size(&r, big), 60)
+  ranges_mark(&r)
+  ranges_free(&r, c)
+  later := ranges_alloc(&r, 5)
+  ranges_rewind(&r)
+  testing.expect(t, ranges_size(&r, later) == 0 && ranges_size(&r, big) == 60, "rewind frees what came after the mark")
+  rest, rest_ok := ranges_alloc(&r, 40)
+  testing.expect(t, rest_ok && rest == 60, "and its run merges back")
+}

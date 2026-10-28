@@ -171,13 +171,30 @@ node_create :: proc(self: ^UI, n: Node) -> (handle: NodeHandle, ok: bool) #optio
 
 // node_destroy removes a node and its subtree.
 node_destroy :: proc(self: ^UI, handle: NodeHandle) {
-  n, ok := lookup(self, handle)
-  if !ok do return
-  delete(n.text)
-  containers.slots_free(&self.slots, handle.index)
+  if _, ok := lookup(self, handle); !ok do return
+  // per index: 1 in the subtree, -1 not, 2 on the walk, 0 not known yet; a walk up the parents
+  // settles a chain (one met twice is a parent cycle, outside any subtree)
+  in_subtree := make([]i8, self.slots.high_water, context.temp_allocator)
+  in_subtree[handle.index] = 1
+  chain := make([dynamic]u32, context.temp_allocator)
   c: u32
   for i in containers.slots_next(&self.slots, &c) {
-    if self.nodes[i].parent == handle do node_destroy(self, NodeHandle(containers.slots_handle(&self.slots, i)))
+    clear(&chain)
+    j := i
+    for in_subtree[j] == 0 {
+      append(&chain, j)
+      in_subtree[j] = 2
+      parent := self.nodes[j].parent
+      if _, live := lookup(self, parent); !live do break
+      j = parent.index
+    }
+    // a walk ending on itself reached a root (or a cycle): outside the subtree
+    settled := in_subtree[j] if in_subtree[j] != 2 else -1
+    for k in chain do in_subtree[k] = settled
+  }
+  for doomed, i in in_subtree do if doomed == 1 {
+    delete(self.nodes[i].text)
+    containers.slots_free(&self.slots, u32(i))
   }
 }
 
@@ -213,6 +230,15 @@ rect :: proc(self: ^UI, handle: NodeHandle) -> Rect {
 clip :: proc(self: ^UI, handle: NodeHandle) -> Rect {
   if !laid_out(self, handle) do return {}
   return self.clips[handle.index]
+}
+
+// max_scroll returns how far a node's content scrolls (Node.scroll) before it runs out, per
+// axis, as of the last layout: how much the content outgrows the node, in reference units.
+max_scroll :: proc(self: ^UI, handle: NodeHandle) -> [2]f32 {
+  if !laid_out(self, handle) || self.frame.scale <= 0 do return {}
+  i := handle.index
+  overflow := self.fit[i] - self.rects[i].size / self.frame.scale
+  return {max(overflow.x, 0), max(overflow.y, 0)}
 }
 
 // lines returns the laid-out text lines of a node; none for a stale handle.

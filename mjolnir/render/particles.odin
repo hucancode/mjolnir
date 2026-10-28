@@ -88,10 +88,10 @@ emitter :: proc(self: ^Renderer, handle: EmitterHandle) -> (^Emitter, bool) #opt
 // emit spawns count particles of emitter once, from slot's transform, on the next frame,
 // whatever its emission_rate (an emitter whose rate is 0 only bursts). A slot removed before
 // then emits nothing.
-emit :: proc(self: ^Renderer, emitter: EmitterHandle, slot: SlotHandle, count: u32) {
+emit :: proc(self: ^Renderer, emitter: EmitterHandle, slot: $H, count: u32) {
   if count == 0 do return
   guard(self)
-  append(&self.bursts, Burst{emitter = emitter, slot = u32(slot), count = count})
+  append(&self.bursts, Burst{emitter = emitter, slot = slot_index(slot), count = count})
 }
 
 // emitter_destroy frees the emitter; slots it stays attached to emit nothing.

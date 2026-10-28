@@ -58,14 +58,12 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   for x in 0 ..< GRID_SIZE do for z in 0 ..< GRID_SIZE {
     position := [3]f32{(f32(x) - GRID_SIZE * 0.5) * GRID_SPACING, 0.5, (f32(z) - GRID_SIZE * 0.5) * GRID_SPACING}
     node := world.spawn(&app.scene, position) or_continue
-    render.attach(&app.renderer, render.SlotHandle(node.index), cube)
+    render.attach(&app.renderer, node, cube)
     world.scale(&app.scene, node, CUBE_HALF_EXTENT)
     physics.body_create(&app.phys, position, collider = physics.BoxCollider{half_extents = CUBE_HALF_EXTENT}, user = world.Handle(node))
   }
   effector_material := render.material_create(&app.renderer, render.make_material(emissive_value = 5.0))
-  app.effector = world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(app.effector.index), render.primitive(&app.renderer, .SPHERE, effector_material, cast_shadow = false))
-  world.scale(&app.scene, app.effector, 0.5)
+  app.effector = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, effector_material, cast_shadow = false), scale = 0.5)
   app.orbit = render.make_orbit({10, 30, 10}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   log.infof("AOE test setup complete: %d cubes", GRID_SIZE * GRID_SIZE)
@@ -93,8 +91,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
 
   if input.mouse_pressed(&app.input, .LEFT) && !app.input.mouse_captured {
     set_cube_half_extent(app, app.clicked, CUBE_HALF_EXTENT)
@@ -113,12 +110,9 @@ update :: proc(app: ^App, dt: f32) {
   for body in app.affected do set_cube_half_extent(app, body, AFFECTED_HALF_EXTENT)
   set_cube_half_extent(app, app.clicked, CLICKED_HALF_EXTENT)
 
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }

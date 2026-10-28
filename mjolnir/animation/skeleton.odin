@@ -6,14 +6,10 @@ import "core:slice"
 import "core:strings"
 
 // TRS is the local transform of one bone.
-TRS :: struct {
-  position: [3]f32,
-  rotation: quaternion128,
-  scale:    [3]f32,
-}
+TRS :: geometry.Transform
 
 // TRS_IDENTITY is the transform that leaves a bone unchanged.
-TRS_IDENTITY :: TRS{rotation = linalg.QUATERNIONF32_IDENTITY, scale = {1, 1, 1}}
+TRS_IDENTITY :: geometry.TRANSFORM_IDENTITY
 
 // trs_matrix returns t as a 4x4 matrix.
 trs_matrix :: #force_inline proc "contextless" (t: TRS) -> matrix[4, 4]f32 {
@@ -34,13 +30,15 @@ Skeleton :: struct {
   depths:       []u32, // root = 0
 }
 
-// skeleton_init builds a skeleton from parent indices and inverse bind matrices (copied).
-// Fails if the parent links contain a cycle or out-of-range index.
+// skeleton_init builds a skeleton from parent indices and inverse bind matrices (copied). `rest`
+// is each bone's local transform where no clip moves it; nil takes the bind pose. Fails if the
+// parent links contain a cycle or out-of-range index.
 skeleton_init :: proc(
   self: ^Skeleton,
   parents: []i32,
   inverse_bind: []matrix[4, 4]f32,
   names: []string = nil,
+  rest: []TRS = nil,
 ) -> bool {
   n := len(parents)
   if len(inverse_bind) != n do return false
@@ -80,8 +78,9 @@ skeleton_init :: proc(
       local = inverse_bind[p] * self.bind[i]
       self.lengths[i] = linalg.distance(self.bind[p][3].xyz, self.bind[i][3].xyz)
     }
-    rest := &self.rest[i]
-    rest.position, rest.rotation, rest.scale = geometry.decompose_matrix(local)
+    r := &self.rest[i]
+    r.position, r.rotation, r.scale = geometry.decompose_matrix(local)
+    if len(rest) == n do r^ = rest[i]
   }
   return true
 }

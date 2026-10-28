@@ -1,8 +1,5 @@
 package main
 
-import "core:math/rand"
-import "mjolnir/render"
-
 IMPACT_VERTICES :: 12
 IMPACT_LIFE :: f32(1.2)
 MAX_IMPACTS :: 64

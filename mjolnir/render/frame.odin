@@ -149,9 +149,9 @@ gpu_timings :: proc(self: ^Renderer) -> []Timing {
 }
 
 // Phase by phase across cameras (G-buffer, lighting, forward) so one barrier serves every
-// camera; render scopes cannot hold barriers.
+// camera; render scopes cannot hold barriers. `closing` ends them, as one barrier.
 @(private = "file")
-camera_passes :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
+camera_passes :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, closing: ..Barrier) {
   if self.slots[.CAMERAS].count == 0 do return
   discards := make([dynamic]TextureHandle, context.temp_allocator)
   c: u32
@@ -175,7 +175,7 @@ camera_passes :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
     c = 0
     for i in containers.slots_next(&self.slots[.CAMERAS], &c) do material_record(self, cmd, f, i, .FORWARD)
   }
-  barrier(self, cmd, .FORWARD_TO_COMPUTE)
+  barrier(self, cmd, ..closing)
 }
 
 // Without a main camera nothing else covers the presented image.
@@ -203,23 +203,15 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
   main := u32(self.main_camera)
   has_main := containers.slots_live(&self.slots[.CAMERAS], main)
 
-  // The staged uploads land first: on their own submission, which the compute list waits for
-  // and the graphics list follows on its queue, or at the head of the one list.
-  uploaded: rhi.SyncPoint
-  if async {
-    uploads := [1]rhi.CommandList{dev.cmd_begin(&self.gpu, .GRAPHICS, 0)}
-    {
-      scope(self, uploads[0], "uploads")
-      dev.cmd_flush_uploads(&self.gpu, uploads[0])
-    }
-    dev.cmd_end(&self.gpu, uploads[0])
-    uploaded = dev.submit(&self.gpu, {queue = .GRAPHICS, cmds = uploads[:]})
+  // The staged uploads land first, on a list of their own: their own submission, which the
+  // compute list waits for and the graphics list follows on its queue, or the head of the one.
+  uploads := dev.cmd_begin(&self.gpu, .GRAPHICS, 0)
+  {
+    scope(self, uploads, "uploads")
+    dev.cmd_flush_uploads(&self.gpu, uploads)
   }
+  dev.cmd_end(&self.gpu, uploads)
   cmd := dev.cmd_begin(&self.gpu, .GRAPHICS, 0)
-  if !async {
-    scope(self, cmd, "uploads")
-    dev.cmd_flush_uploads(&self.gpu, cmd)
-  }
   compute := dev.cmd_begin(&self.gpu, .COMPUTE, 0) if async else cmd
   {
     scope(self, cmd, "gpu work")
@@ -239,9 +231,8 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
     scope(self, cmd, "shadows")
     shadow_record(self, cmd, f)
   }
-  camera_passes(self, cmd, f)
   if has_main {
-    barrier(self, cmd, .CULL_TO_COPY)
+    camera_passes(self, cmd, f, .FORWARD_TO_COMPUTE, .CULL_TO_COPY)
     // the lists the main camera drew: culled last frame (Vulkan) or this one (WebGPU)
     draw_count_record(self, cmd, camera_slot(main) + f if BINDLESS else camera_next_slot(main, f), f)
     barrier(self, cmd, .COLOR_TO_SAMPLE)
@@ -251,6 +242,7 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
     }
     debug_line_record(self, cmd, f, main)
   } else {
+    camera_passes(self, cmd, f, .FORWARD_TO_COMPUTE)
     clear_backbuffer(self, cmd)
   }
   {
@@ -269,11 +261,13 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
   }}
   dump_record(self, cmd, f)
   dev.cmd_end(&self.gpu, cmd)
-  graphics_cmds := [1]rhi.CommandList{cmd}
   if !async {
-    dev.submit(&self.gpu, {queue = .GRAPHICS, cmds = graphics_cmds[:], present = true})
+    cmds := [2]rhi.CommandList{uploads, cmd}
+    dev.submit(&self.gpu, {queue = .GRAPHICS, cmds = cmds[:], present = true})
     return true, dev.frame_present(&self.gpu)
   }
+  upload_cmds := [1]rhi.CommandList{uploads}
+  uploaded := dev.submit(&self.gpu, {queue = .GRAPHICS, cmds = upload_cmds[:]})
   dev.cmd_end(&self.gpu, compute)
 
   // submissions chain across frames: compute n waits this frame's uploads, which follow
@@ -288,6 +282,7 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
     graphics_waits[0] = {self.last_compute.queue, self.last_compute.value, {.DRAW_INDIRECT, .EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS}}
     count = 1
   }
+  graphics_cmds := [1]rhi.CommandList{cmd}
   dev.submit(&self.gpu, {queue = .GRAPHICS, cmds = graphics_cmds[:], waits = graphics_waits[:count], present = true})
   self.last_compute = compute_done
   return true, dev.frame_present(&self.gpu)

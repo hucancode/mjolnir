@@ -56,26 +56,23 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     return .FAIL
   }
 
-  ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
-  world.scale(&app.scene, ground, 20.0)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 20.0)
 
   colors := [?][4]f32{{1.0, 0.45, 0.3, 1}, {0.35, 0.8, 0.45, 1}, {0.35, 0.55, 1.0, 1}, {1.0, 0.85, 0.3, 1}}
   shapes := [?]render.Primitive{.SPHERE, .CUBE, .SPHERE, .CUBE}
   for color, i in colors {
     mat := render.material_create(&app.renderer, render.make_material(.CUSTOM, base_color_factor = color, shader = app.toon))
     append(&app.materials, mat)
-    spawn_mesh(app, shapes[i], mat, {f32(i) * 2.5 - 3.75, 1.0, 0})
+    spawn_primitive(app, shapes[i], mat, {f32(i) * 2.5 - 3.75, 1.0, 0})
   }
   pbr := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.9, 0.95, 1}, roughness_value = 0.4))
-  spawn_mesh(app, .SPHERE, pbr, {0, 1.0, -3.0})
+  spawn_primitive(app, .SPHERE, pbr, {0, 1.0, -3.0})
 
   return .READY
 }
 
-spawn_mesh :: proc(app: ^App, shape: render.Primitive, material: render.MaterialHandle, position: [3]f32) {
-  n := world.spawn(&app.scene, position)
-  render.attach(&app.renderer, render.SlotHandle(n.index), render.primitive(&app.renderer, shape, material))
+spawn_primitive :: proc(app: ^App, shape: render.Primitive, material: render.MaterialHandle, position: [3]f32) {
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, material), position)
 }
 
 shutdown :: proc(app: ^App) {
@@ -98,20 +95,16 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   for h in app.materials {
     m := render.material(&app.renderer, h) or_continue
     m.params[0] = {bands, rim, shade, 0}
   }
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

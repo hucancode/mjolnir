@@ -80,9 +80,7 @@ should_close :: proc(app: ^App) -> bool {
 
 spawn_piece :: proc(app: ^App, position: [3]f32, collider: physics.Collider, look: render.MeshAttachment, size: [3]f32, mass: f32) -> physics.BodyHandle {
   node := world.spawn(&app.scene, position)
-  visual := world.spawn(&app.scene, parent = node)
-  render.attach(&app.renderer, render.SlotHandle(visual.index), look)
-  world.scale(&app.scene, visual, size)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, look, scale = size, parent = node)
   body := physics.body_create(&app.phys, position, collider = collider, mass = mass, user = world.Handle(node))
   if mass > 0 do append(&app.pieces, Piece{body, position, linalg.QUATERNIONF32_IDENTITY})
   return body
@@ -133,14 +131,13 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input, rotate_with = {.RIGHT})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {.RIGHT})
 
   if input.mouse_pressed(&app.input, .LEFT) && !app.input.mouse_captured {
     if ray, ok := render.cursor_ray(&app.renderer, app.input.cursor); ok {
       hit := physics.raycast(&app.phys, ray)
-      if b := physics.body(&app.phys, hit.body); hit.hit && b.inv_mass > 0 {
-        physics.apply_impulse_at(&app.phys, hit.body, ray.direction * PUSH_IMPULSE / b.inv_mass, hit.point)
+      if hit.hit {
+        if b := physics.body(&app.phys, hit.body); b.inv_mass > 0 do physics.apply_impulse_at(&app.phys, hit.body, ray.direction * PUSH_IMPULSE / b.inv_mass, hit.point)
       }
     }
   }
@@ -150,10 +147,8 @@ update :: proc(app: ^App, dt: f32) {
 
   physics.step(&app.phys, dt)
   world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
-  render.debug_segment(&app.renderer, PENDULUM_ANCHOR, physics.body(&app.phys, app.bob).position, render.DEBUG_WHITE)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  render.debug_segment(&app.renderer, PENDULUM_ANCHOR, physics.body(&app.phys, app.bob).position, render.COLOR_RGB[.WHITE])
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 debug_ui :: proc(app: ^App) {
@@ -169,6 +164,5 @@ debug_ui :: proc(app: ^App) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }

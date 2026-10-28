@@ -79,8 +79,7 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 draw_hud :: proc(app: ^App) {
@@ -93,7 +92,7 @@ draw_hud :: proc(app: ^App) {
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, pos: [3]f32 = {}) -> world.NodeHandle {
   n := world.spawn(&app.scene, pos)
-  render.attach(&app.renderer, render.SlotHandle(n.index), render.primitive(&app.renderer, shape, color))
+  render.attach(&app.renderer, n, render.primitive(&app.renderer, shape, color))
   return n
 }
 
@@ -190,8 +189,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, &app.input, rotate_with = {})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {})
   step_game(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))

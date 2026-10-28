@@ -52,10 +52,7 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, position: [3]f32, scale_factor: f32 = 1, cast_shadow := true) -> world.NodeHandle {
-  n := world.spawn(&app.scene, position)
-  render.attach(&app.renderer, render.SlotHandle(n.index), render.primitive(&app.renderer, shape, color, cast_shadow))
-  if scale_factor != 1 do world.scale(&app.scene, n, scale_factor)
-  return n
+  return mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, color, cast_shadow), position, scale = scale_factor)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -72,9 +69,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   app.top_down_camera = render.camera_create(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
   app.screen_material = render.material_create(&app.renderer, render.make_material())
-  screen := world.spawn(&app.scene, {0, 2.5, -3.5})
-  render.attach(&app.renderer, render.SlotHandle(screen.index), render.primitive(&app.renderer, .QUAD_XY, app.screen_material, cast_shadow = false))
-  world.scale(&app.scene, screen, 3.0)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, app.screen_material, cast_shadow = false), {0, 2.5, -3.5}, scale = 3.0)
   return .READY
 }
 
@@ -83,8 +78,7 @@ update :: proc(app: ^App, dt: f32) {
   defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   world.rotate(&app.scene, app.spinner, app.time, linalg.VECTOR3F32_Y_AXIS)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
@@ -94,6 +88,5 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }

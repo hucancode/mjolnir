@@ -60,11 +60,11 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.destroy(&app.fox, &app.scene)
+  gltf.destroy(&app.fox, &app.scene, &app.renderer)
   gltf.destroy(&app.fox_model, &app.renderer)
-  gltf.destroy(&app.man, &app.scene)
+  gltf.destroy(&app.man, &app.scene, &app.renderer)
   gltf.destroy(&app.man_model, &app.renderer)
-  gltf.destroy(&app.duck, &app.scene)
+  gltf.destroy(&app.duck, &app.scene, &app.renderer)
   gltf.destroy(&app.duck_model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
@@ -83,9 +83,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({0, 1.6, 3.6}, {0, 0.6, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
-  world.scale(&app.scene, ground, 6.0)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 6.0)
 
   app.duck_model = gltf.model_create(&app.renderer, #load("assets/Duck.glb"))
   duck_root := world.spawn(&app.scene, {-2, 0, 0})
@@ -127,8 +125,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
 
   for h in app.duck.roots do world.rotate_by(&app.scene, h, dt * math.PI * 0.25)
   app.since += dt
@@ -146,8 +143,7 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

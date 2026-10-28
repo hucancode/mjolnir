@@ -127,7 +127,8 @@ ClipParams :: struct {
 // CustomApply edits `pose` for a custom layer: `bones` are the layer's bones and `state` its
 // own floats (zero at creation, kept between updates). Edit the pose at full strength; the
 // animator blends the result by the layer's weight and moves the bones' descendants after.
-// `fresh` is true on the layer's first update.
+// `fresh` is true on the layer's first update. Outside data (terrain heights, ragdoll bodies)
+// reaches it through context.user_ptr, set around animator_update.
 CustomApply :: #type proc(pose: Pose, bones: []u32, state: []f32, values: [8]f32, delta_time: f32, fresh: bool)
 
 // CustomParams runs your own procedural algorithm as a layer. `values` are its inputs;

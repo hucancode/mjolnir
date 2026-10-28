@@ -105,8 +105,7 @@ update :: proc(app: ^App, dt: f32) {
   else {
     if cam, ok := render.main_camera(&app.renderer); ok && !app.input.mouse_captured {
       orbit := render.make_orbit(cam.position, {0, 1, 0})
-      render.orbit_drag(&orbit, &app.input)
-      render.camera_orbit(cam, orbit)
+      render.orbit_drag(&orbit, cam, &app.input)
     }
   }
   if !app.input.keyboard_captured {
@@ -147,11 +146,11 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   for &c in characters {
-    gltf.destroy(&c.instance, &app.scene)
+    gltf.destroy(&c.instance, &app.scene, &app.renderer)
     gltf.destroy(&c.model, &app.renderer)
   }
   for &m in models {
-    gltf.destroy(&m.instance, &app.scene)
+    gltf.destroy(&m.instance, &app.scene, &app.renderer)
     gltf.destroy(&m.model, &app.renderer)
   }
   delete(characters)
@@ -169,8 +168,7 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  ok := render.frame(&app.renderer)
+  ok := mjolnir.frame(&app.platform, &app.renderer)
   on_post_render(app)
   return ok
 }
@@ -597,9 +595,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     world.scale(&app.scene, handle, 0.2)
   }
   when false {
-    render.debug_sphere(&app.renderer, {0, 5, 0}, 5, render.DEBUG_WHITE, life = 5)
-    render.debug_cube(&app.renderer, {2, 3, 0}, half_extents = 0.5, color = render.DEBUG_CYAN, life = 5)
-    render.debug_arrow(&app.renderer, {0, 0, 0}, {3, 3, 0}, render.DEBUG_YELLOW, life = 5)
+    render.debug_sphere(&app.renderer, {0, 5, 0}, 5, render.COLOR_RGB[.WHITE], life = 5)
+    render.debug_cube(&app.renderer, {2, 3, 0}, half_extents = 0.5, color = render.COLOR_RGB[.CYAN], life = 5)
+    render.debug_arrow(&app.renderer, {0, 0, 0}, {3, 3, 0}, render.COLOR_RGB[.YELLOW], life = 5)
     render.debug_axes(&app.renderer, {0, 0, 0}, scale = 2)
   }
   // append(&app.renderer.effect_stack, render.FogEffect{color = {0.4, 0.0, 0.8}, density = 0.02, start = 5.0, end = 20.0})

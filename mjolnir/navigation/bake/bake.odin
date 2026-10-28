@@ -12,27 +12,31 @@ NavGeometryBuilder :: struct {
   area_types: [dynamic]u8,
 }
 
-// append_triangles adds a triangle mesh to b, its positions moved by `transform` (a node's
-// world matrix, say). Triangles are walkable unless `is_obstacle`.
+// AREA_BLOCKED marks triangles nothing walks on (an obstacle's footprint); AREA_WALKABLE is the
+// default ground. Areas in between are yours, e.g. mud or water: a query filter prices each one
+// (detour.Query_Filter.area_cost).
+AREA_BLOCKED :: u8(recast.RC_NULL_AREA)
+AREA_WALKABLE :: u8(recast.RC_WALKABLE_AREA)
+
+// append_triangles adds a triangle mesh of one area to b, its positions moved by `transform` (a
+// node's world matrix, say).
 append_triangles :: proc(
   self: ^NavGeometryBuilder,
   positions: [][3]f32,
   indices: []u32,
   transform: matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY,
-  is_obstacle: bool = false,
+  area: u8 = AREA_WALKABLE,
 ) {
   base := i32(len(self.vertices))
   for p in positions do append(&self.vertices, (transform * [4]f32{p.x, p.y, p.z, 1}).xyz)
   for i in indices do append(&self.indices, base + i32(i))
-  area: u8 = u8(recast.RC_NULL_AREA) if is_obstacle else u8(recast.RC_WALKABLE_AREA)
   for _ in 0 ..< len(indices) / 3 do append(&self.area_types, area)
 }
 
-// append_box adds the six faces of a box to b, e.g. a ground slab or an obstacle. Faces are
-// walkable unless `is_obstacle` (the bake still drops the steep sides).
-append_box :: proc(self: ^NavGeometryBuilder, center, half_extents: [3]f32, is_obstacle: bool = false) {
+// append_box adds the six faces of a box of one area to b, e.g. a ground slab or an obstacle
+// (AREA_BLOCKED); the bake drops the steep sides.
+append_box :: proc(self: ^NavGeometryBuilder, center, half_extents: [3]f32, area: u8 = AREA_WALKABLE) {
   faces := BOX_FACES
-  area: u8 = u8(recast.RC_NULL_AREA) if is_obstacle else u8(recast.RC_WALKABLE_AREA)
   for face in faces {
     base := i32(len(self.vertices))
     for corner in face do append(&self.vertices, center + corner * half_extents)
@@ -60,9 +64,8 @@ builder_destroy :: proc(self: ^NavGeometryBuilder) {
   self^ = {}
 }
 
-// build bakes the builder's triangles into a navigation mesh, encoded as navigation.save
-// encodes one, in memory the caller frees: navigation.init with it, or store it
-// (platform.write_file) and load it in the shipped game.
+// build bakes the builder's triangles into a navigation mesh in the detour .navmesh format, in
+// memory the caller frees: load it now, or store it and load it in the shipped game.
 build :: proc(
   self: ^NavGeometryBuilder,
   config: NavMeshConfig = DEFAULT_NAVMESH_CONFIG,
@@ -88,31 +91,16 @@ build :: proc(
     walkable_radius  = f32(cfg.walkable_radius) * cfg.cs,
     walkable_climb   = f32(cfg.walkable_climb) * cfg.ch,
   }
-  nav_data, create_status := create_nav_mesh_data(&nav_params)
-  if !detour.status_succeeded(create_status) {
-    log.errorf("Failed to create navigation mesh data: %v", create_status)
+  mesh, status := create_nav_mesh(&nav_params)
+  if !detour.status_succeeded(status) {
+    log.errorf("Failed to create the navigation mesh: %v", status)
     return nil, false
   }
-  mesh_params := detour.Nav_Mesh_Params {
-    orig        = pmesh.bmin,
-    tile_width  = pmesh.bmax[0] - pmesh.bmin[0],
-    tile_height = pmesh.bmax[2] - pmesh.bmin[2],
-    max_tiles   = 1,
-    max_polys   = 1024,
+  defer {
+    detour.nav_mesh_destroy(mesh)
+    free(mesh)
   }
-  mesh: detour.Nav_Mesh
-  defer detour.nav_mesh_destroy(&mesh)
-  if status := detour.nav_mesh_init(&mesh, &mesh_params); !detour.status_succeeded(status) {
-    log.errorf("Failed to initialize navigation mesh: %v", status)
-    delete(nav_data)
-    return nil, false
-  }
-  if _, status := detour.nav_mesh_add_tile(&mesh, nav_data, detour.DT_TILE_FREE_DATA); !detour.status_succeeded(status) {
-    log.errorf("Failed to add tile to navigation mesh: %v", status)
-    delete(nav_data)
-    return nil, false
-  }
-  return detour.save_navmesh(&mesh, allocator), true
+  return detour.save_navmesh(mesh, allocator), true
 }
 
 // destroy frees a builder, as builder_destroy does.

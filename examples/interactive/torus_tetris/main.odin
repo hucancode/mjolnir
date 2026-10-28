@@ -11,6 +11,7 @@ import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/rand"
+import "mjolnir/geometry"
 
 GRID_W :: 20
 GRID_H :: 20
@@ -42,7 +43,6 @@ State :: struct {
   active_piece:         Piece,
   active_pos:           [2]i32,
   fall_timer:           f32,
-  fall_period:          f32,
   score:                u32,
   high_score:           u32,
   game_over:            bool,
@@ -94,8 +94,7 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 draw_hud :: proc(app: ^App) {
@@ -117,12 +116,12 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
   app.renderer.skybox_intensity = 0
-  ground := render.mesh_create(&app.renderer, render.make_cylinder(segments = 64, height = 0.2, radius = RADIUS * 3.0))
+  ground := render.mesh_create(&app.renderer, geometry.make_cylinder(segments = 64, height = 0.2, radius = RADIUS * 3.0))
   dark_mat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0}))
   floor := world.spawn(&app.scene, {0, -0.1, 0})
-  render.attach(&app.renderer, render.SlotHandle(floor.index), render.MeshAttachment{mesh = ground, material = dark_mat, cast_shadow = false})
+  render.attach(&app.renderer, floor, render.MeshAttachment{mesh = ground, material = dark_mat, cast_shadow = false})
   spot := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, render.SlotHandle(spot.index), render.light_create(&app.renderer, render.make_spot_light({1, 1, 1}, 500, 16.0, math.PI * 0.35)))
+  render.attach(&app.renderer, spot, render.light_create(&app.renderer, render.make_spot_light({1, 1, 1}, 500, 16.0, math.PI * 0.35)))
   world.rotate(&app.scene, spot, -math.PI * 0.45, {1, 0, 0})
   app.orbit = render.make_orbit({0, 17, 17}, {0, 10, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
@@ -130,7 +129,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     app.state.transparent_material[i] = render.material_create(&app.renderer, render.make_material(type = .TRANSPARENT, base_color_factor = {c.r, c.g, c.b, PIECE_ALPHA}))
     app.state.opaque_material[i] = render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = c))
   }
-  app.state.fall_period = FALL_PERIOD
   reset_game(app)
   return .READY
 }
@@ -145,7 +143,7 @@ reset_game :: proc(app: ^App) {
     app.state.has_active = false
   }
   app.state.score = 0; app.state.fall_timer = 0
-  app.state.fall_period = FALL_PERIOD; app.state.game_over = false
+  app.state.game_over = false
   spawn_piece(app)
 }
 
@@ -158,7 +156,7 @@ spawn_piece :: proc(app: ^App) {
   mat := app.state.transparent_material[app.state.active_piece.color]
   for i in 0 ..< PIECE_LEN {
     h := world.spawn(&app.scene)
-    render.attach(&app.renderer, render.SlotHandle(h.index), render.primitive(&app.renderer, .CUBE, mat))
+    render.attach(&app.renderer, h, render.primitive(&app.renderer, .CUBE, mat))
     app.state.active_cells[i] = h
     world.scale(&app.scene, h, 0.5 * CELL)
   }
@@ -209,7 +207,7 @@ lock_piece :: proc(app: ^App) {
     row := app.state.active_pos[1] + c[1]
     app.state.board[col][row] = app.state.active_cells[i]
     app.state.occupied[col][row] = true
-    render.attach(&app.renderer, render.SlotHandle(app.state.active_cells[i].index), render.primitive(&app.renderer, .CUBE, opaque))
+    render.attach(&app.renderer, app.state.active_cells[i], render.primitive(&app.renderer, .CUBE, opaque))
   }
   app.state.has_active = false
   cleared := clear_lines(app)
@@ -250,8 +248,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   step_game(app, dt)
   world.update(&app.scene)
   render.stage_transforms(&app.renderer, world.changes(&app.scene))
@@ -271,7 +268,7 @@ step_game :: proc(app: ^App, dt: f32) {
     return
   }
   app.state.fall_timer += dt
-  period := app.state.fall_period
+  period := FALL_PERIOD
   if !app.input.keyboard_captured && input.key_down(&app.input, .DOWN) do period = SOFT_FALL_PERIOD
   for app.state.fall_timer >= period {
     app.state.fall_timer -= period
@@ -288,6 +285,6 @@ on_key :: proc(app: ^App, key: input.Key) {
   case .UP:    try_rotate(app)
   case .SPACE:
     for try_move(app, 0, -1) {}
-    app.state.fall_timer = app.state.fall_period
+    app.state.fall_timer = FALL_PERIOD
   }
 }

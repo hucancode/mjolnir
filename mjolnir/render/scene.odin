@@ -45,7 +45,8 @@ Pool :: enum {
   EMITTER_PLACEMENTS,
   FORCE_FIELD_PLACEMENTS,
   CAMERAS,
-  // render targets below MAX_RENDER_TARGETS, every other texture above (bindless_textures.odin)
+  BONES,
+  // render targets below MAX_RENDER_TARGETS, every other texture above (texture.odin)
   TARGETS,
   TEXTURES,
   // your GPU programs (gpu.odin) and post shaders, kept through teardown
@@ -75,6 +76,7 @@ POOLS := [Pool]struct {
   .EMITTER_PLACEMENTS     = {MAX_EMITTERS, 1, 0, false, .EMITTER_PLACEMENTS},
   .FORCE_FIELD_PLACEMENTS = {MAX_FORCE_FIELDS, 1, 0, false, .FORCE_FIELD_PLACEMENTS},
   .CAMERAS                = {MAX_ACTIVE_CAMERAS, 1, RETIRE_GRACE, true, {}},
+  .BONES                  = {MAX_BONE_PALETTES, 1, RETIRE_GRACE, true, {}},
   // retired, not reclaimed: submitted frames may still sample the slot
   .TARGETS                = {MAX_RENDER_TARGETS, 1, RETIRE_GRACE, false, {}},
   .TEXTURES               = {MAX_TEXTURES, MAX_RENDER_TARGETS, RETIRE_GRACE, true, {}},
@@ -129,13 +131,14 @@ Renderer_State :: struct {
   slots:                  [Pool]containers.Slots,
   cameras:                []Camera,
   camera_targets:         []CameraTargets,
-  camera_slots:           containers.Slots,
   // pass i writes slot i % POST_PROCESS_RING; its input and original are the two slots before
   post_process_ring:      [FRAMES_IN_FLIGHT][POST_PROCESS_RING]TextureHandle,
   mesh_slabs:             [MeshStream]containers.SlabAllocator,
-  bone_matrix_slab:       containers.SlabAllocator,
+  // the palettes' ranges of the bone table, and each palette's first bone (by BonesHandle)
+  bone_ranges:            containers.Ranges,
+  bone_first:             [MAX_BONE_PALETTES]u32,
   // the skinned vertex ranges of skinned slots (pass_skin.odin)
-  skin_slab:              containers.SlabAllocator,
+  skin_ranges:            containers.Ranges,
   // simulated seconds; an emitter emits floor(rate * time) particles in total
   particle_time:          f64,
   // emit's queue, and the bursts the last flush placed (row != 0)
@@ -190,6 +193,8 @@ Renderer_State :: struct {
   batch_high:             u32,
   batch_stale:            bool,
   batch_warned:           bool,
+  // this frame's live batches by draw list key, material and id: key << 44 | material << 20 | id
+  batch_order:            [dynamic]u64,
   // each pass's pipelines
   shadow_pipeline:        rhi.Pipeline,
   material_pipelines:     [MaterialPass][len(MaterialType)]rhi.Pipeline,
@@ -217,8 +222,9 @@ Renderer_State :: struct {
   ui_batches:             [dynamic]UIBatch,
   // the overlay was drawn or a tick ended since it was staged: the next stage_overlay replaces it
   ui_stale:               bool,
-  // sampled by text commands
+  // sampled by text commands: the uploaded font.atlas version
   ui_font_atlas:          TextureHandle,
+  ui_font_version:        u64,
   // the window's, as frame last measured it: maps window coordinates to pixels
   dpi_scale:              f32,
   mutex:                  sync.Recursive_Mutex,
@@ -230,16 +236,17 @@ Renderer_State :: struct {
   gpu_draws:              [dynamic]GpuDraw,
   gpu_draws_stale:        bool,
   gpu_layouts:            map[GpuLayoutKey]rhi.BindLayout,
-  // the format of each texture made with texture_create(storage = true)
-  storage_formats:        map[TextureHandle]TextureFormat,
+  // per texture, its format when made with texture_create(storage = true), else the zero
+  // format, RGBA8_SRGB, which no storage texture takes
+  storage_formats:        [MAX_TEXTURES]TextureFormat,
   // ready ran init_resources
   initialized:            bool,
 }
 
-// init brings the renderer up on a window (platform.Platform.window), sized as it is: the GPU
-// backend, every resource and an empty scene with a main camera. Paired with shutdown. A backend
-// whose device arrives asynchronously (wgpu on the web) finishes in ready: until it returns
-// true, nothing but ready may be called. Main thread.
+// init brings the renderer up on a window, sized as it is: the GPU backend, every resource and
+// an empty scene with a main camera. Paired with shutdown. A backend whose device arrives
+// asynchronously (wgpu on the web) finishes in ready: until it returns true, nothing but ready
+// may be called. Main thread.
 init :: proc(self: ^Renderer, window: WindowHandle) -> bool {
   for stream, s in MESH_STREAMS do containers.slab_init(&self.mesh_slabs[s], stream.slab)
   dev.init(&self.gpu, window) or_return
@@ -279,8 +286,8 @@ init_resources :: proc(self: ^Renderer) -> bool {
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     draw_list_create(self, SHADOW_DRAW_SLOT_BASE + frame, shadow = true) or_return
   }
-  containers.slab_init(&self.bone_matrix_slab, BONE_SLAB_CONFIG)
-  containers.slab_init(&self.skin_slab, SKIN_SLAB_CONFIG)
+  containers.ranges_init(&self.bone_ranges, MAX_BONES)
+  containers.ranges_init(&self.skin_ranges, MAX_SKINNED_VERTICES)
   self.cameras = make([]Camera, MAX_ACTIVE_CAMERAS)
   self.camera_targets = make([]CameraTargets, MAX_ACTIVE_CAMERAS)
   init_builtin_materials(self)
@@ -312,6 +319,7 @@ setup :: proc(self: ^Renderer) {
 mark_resources :: proc(self: ^Renderer) {
   for &slots, p in self.slots do if POOLS[p].kept do containers.slots_mark(&slots)
   for &slab in self.mesh_slabs do containers.slab_mark(&slab)
+  containers.ranges_mark(&self.bone_ranges)
 }
 
 // teardown ends a map in one go, waiting for the GPU: no particle stays alive, every slot
@@ -331,7 +339,7 @@ teardown :: proc(self: ^Renderer) {
   for r in containers.slots_flush(&self.slots[.TARGETS]) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
   for i in self.slots[.TEXTURES].mark ..< self.slots[.TEXTURES].high_water {
     dev.texture_destroy(&self.gpu, TextureHandle(i))
-    delete_key(&self.storage_formats, TextureHandle(i))
+    self.storage_formats[i] = {}
   }
   groups_clear(self)
   containers.slots_rewind(&self.slots[.TEXTURES])
@@ -351,8 +359,9 @@ teardown :: proc(self: ^Renderer) {
   clear_entry(self, .NODES, 0, self.node_count)
   self.node_count = 0
   when !BINDLESS do batches_reset(self)
-  containers.slab_rewind(&self.bone_matrix_slab)
-  containers.slab_rewind(&self.skin_slab)
+  containers.slots_rewind(&self.slots[.BONES])
+  containers.ranges_rewind(&self.bone_ranges)
+  containers.ranges_rewind(&self.skin_ranges)
   clear_entry(self, .SKIN_OWNERS, 0, self.skinned_vertex_count)
   self.skinned_vertex_count = 0
   self.shadow_casters = {}
@@ -383,6 +392,7 @@ shutdown :: proc(self: ^Renderer) {
   for frames in self.table_stale do for bits in frames do delete(bits)
   delete(self.batch_ids)
   delete(self.batch_free)
+  delete(self.batch_order)
   delete(self.ui_batches)
   delete(self.ui_vertices)
   delete(self.ui_indices)
@@ -391,8 +401,8 @@ shutdown :: proc(self: ^Renderer) {
   for inbox in self.debug_lines do delete(inbox)
   delete(self.bursts)
   for &slab in self.mesh_slabs do containers.slab_destroy(&slab)
-  containers.slab_destroy(&self.bone_matrix_slab)
-  containers.slab_destroy(&self.skin_slab)
+  containers.ranges_destroy(&self.bone_ranges)
+  containers.ranges_destroy(&self.skin_ranges)
   for &slots in self.slots do containers.slots_destroy(&slots)
   delete(self.cameras)
   delete(self.camera_targets)
@@ -443,12 +453,12 @@ post_process_release_images :: proc(self: ^Renderer) {
   }
 }
 
-// lock holds off frame while update edits the scene. With USE_PARALLEL_UPDATE update runs on
-// its own thread: make every edit there (world, physics, render, debug UI) and open update with
+// lock holds off frame while another thread edits the scene. When your simulation runs on its
+// own thread, make its edits of a tick under
 //   render.lock(r); defer render.unlock(r)
-// so frame, which only polls events and renders, sees whole ticks. The pointers material, light,
-// emitter, force_field and camera return are then valid for the tick. Single-threaded, the lock
-// costs nothing.
+// so frame, on the main thread, sees whole ticks. The pointers material, light, emitter,
+// force_field and camera return are then valid for the tick. Single-threaded, the lock costs
+// nothing.
 lock :: proc(self: ^Renderer) {
   sync.recursive_mutex_lock(&self.mutex)
 }
@@ -486,8 +496,9 @@ tick_resource_pools :: proc(self: ^Renderer) {
 }
 
 // update advances the render clock (shaders' time, debug line lifetimes) and the particle
-// simulation time, and ends the tick's overlay (stage_overlay). Call it once per update tick,
-// last; the next frame emits and simulates everything accumulated since the previous one.
+// simulation time, and ends the tick's overlay (stage_overlay). Call it once per simulation
+// tick, after the tick's stage_* calls; the next frame emits and simulates everything
+// accumulated since the previous one.
 update :: proc(self: ^Renderer, delta_time: f32) {
   sync.mutex_lock(&self.debug_mutex)
   self.time += delta_time
@@ -519,7 +530,7 @@ NodeFlagSet :: bit_set[NodeFlag;u32]
 SHADOW_CASTER_FLAGS :: NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
 
 // The zero record is an empty slot: mesh and material 0 are none. When .SKINNED is set,
-// attachment_data_index is the first entry of the slot's bone table range and
+// attachment_data_index is the first bone of its palette `bones` in the bone table and
 // skin_vertex_base the first of its skinned vertices (pass_skin.odin).
 @(private)
 Node :: struct #packed {
@@ -529,20 +540,34 @@ Node :: struct #packed {
   attachment_data_index: u32,
   flags:                 NodeFlagSet,
   skin_vertex_base:      u32,
-  _:                     [3]u32,
+  // the palette attachment_data_index is the first bone of
+  bones:                 BonesHandle,
+  _:                     [2]u32,
 }
 #assert(size_of(Node) == 96)
 
-// MeshAttachment draws mesh with material from a slot's transform.
+// MeshAttachment draws mesh with material from a slot's transform; a skinned mesh deforms by
+// the palette `bones` (bones_create), else draws as modelled.
 MeshAttachment :: struct {
   mesh:        MeshHandle,
   material:    MaterialHandle,
   cast_shadow: bool,
+  bones:       BonesHandle,
 }
 
-// SlotHandle is a scene slot: a world node's index (NodeHandle.index), whose transform
-// stage_transforms feeds.
+// SlotHandle is a scene slot: any u32 below MAX_SLOTS you pick, e.g. a scene graph node's
+// index; the cull's cost follows the highest slot in use, so keep them dense. Procs taking a
+// slot take a SlotHandle or any handle with an `index` field.
 SlotHandle :: distinct u32
+
+@(private)
+slot_index :: #force_inline proc(slot: $H) -> u32 {
+  when H == SlotHandle {
+    return u32(slot)
+  } else {
+    return u32(slot.index)
+  }
+}
 
 // What a slot draws: a mesh, or a light, emitter or force field (*_create) placed at the
 // slot's transform. One light, emitter or force field may be attached at many slots.
@@ -553,30 +578,51 @@ Attachment :: union {
   ForceFieldHandle,
 }
 
-// Grows the slot range to cover `slot`; slots past it are already empty (zero). Caller
-// holds the render mutex and marks what it changes.
+// Grows the slot range to cover `slot`; slots past it are already empty (zero). nil past
+// MAX_SLOTS. Caller holds the render mutex and marks what it changes.
 @(private)
 slot_node :: proc(self: ^Renderer, slot: u32) -> ^Node {
-  assert(slot < MAX_SLOTS, "slot exceeds MAX_SLOTS")
+  if slot >= MAX_SLOTS {
+    log.errorf("Slot %d exceeds MAX_SLOTS", slot)
+    return nil
+  }
   self.node_count = max(self.node_count, slot + 1)
   return &write_table(self, .NODES, Node)[slot]
 }
 
-// stage_transforms applies a change feed: sets each slot's world matrix and visibility,
-// and forgets slots marked removed. `changes` is any struct with `index`, `world_matrix`,
-// `visible` and `removed` fields (world.NodeChange), removals first.
+// place sets where a slot draws and whether it shows; a slot draws nothing until placed.
+place :: proc(self: ^Renderer, slot: $H, world_matrix: matrix[4, 4]f32, visible := true) {
+  slot := slot_index(slot)
+  guard(self)
+  node := slot_node(self, slot)
+  if node == nil do return
+  node.world_matrix = world_matrix
+  if visible do node.flags += {.VISIBLE}
+  else do node.flags -= {.VISIBLE}
+  mark_dirty(self, .NODES, int(slot))
+}
+
+// release empties a slot: it forgets its attachment and bone palette; meshes, materials and
+// what was attached stay.
+release :: proc(self: ^Renderer, slot: $H) {
+  slot := slot_index(slot)
+  guard(self)
+  unbind(self, slot)
+  #reverse for b, i in self.bursts do if b.row == 0 && b.slot == slot do ordered_remove(&self.bursts, i)
+  if slot >= self.node_count do return
+  release_bones(self, slot)
+  batch_leave(self, slot)
+  write_table(self, .NODES, Node)[slot] = {}
+  mark_dirty(self, .NODES, int(slot))
+}
+
+// stage_transforms applies a scene graph's change feed, place or release per entry: `changes` is
+// any struct with `index`, `world_matrix`, `visible` and `removed` fields, removals first.
 stage_transforms :: proc(self: ^Renderer, changes: []$T) {
   guard(self)
   for &c in changes {
-    if c.removed {
-      stage_slot_removal(self, c.index)
-      continue
-    }
-    node := slot_node(self, c.index)
-    node.world_matrix = c.world_matrix
-    if c.visible do node.flags += {.VISIBLE}
-    else do node.flags -= {.VISIBLE}
-    mark_dirty(self, .NODES, int(c.index))
+    if c.removed do release(self, SlotHandle(c.index))
+    else do place(self, SlotHandle(c.index), c.world_matrix, c.visible)
   }
 }
 
@@ -642,127 +688,135 @@ resource_destroy :: proc(self: ^Renderer, pool: Pool, index: u32) {
   clear_entry(self, POOLS[pool].table, index)
 }
 
-// Forget everything drawn at a slot; meshes and materials are shared and stay.
-@(private)
-stage_slot_removal :: proc(self: ^Renderer, slot: u32) {
-  guard(self)
-  unbind(self, slot)
-  #reverse for b, i in self.bursts do if b.row == 0 && b.slot == slot do ordered_remove(&self.bursts, i)
-  if slot >= self.node_count do return
-  release_bones(self, slot)
-  batch_leave(self, slot)
-  write_table(self, .NODES, Node)[slot] = {}
-  mark_dirty(self, .NODES, int(slot))
-}
-
-// whether mesh_id carries skinning data, so a bone palette may deform it
-@(private = "file")
-skinned_mesh :: proc(self: ^Renderer, mesh_id: u32) -> bool {
-  return .SKINNED in write_table(self, .MESHES, MeshData)[mesh_id].flags
-}
-
 // Gives the skinned vertices of the range at `base` to `owner` (slot + 1, 0 for none), for
-// the skinning pass. The whole block: the pass skips vertices past the owner's mesh.
+// the skinning pass.
 @(private = "file")
 skin_own :: proc(self: ^Renderer, base, owner: u32) {
-  size := containers.slab_block_size(&self.skin_slab, base)
+  size := containers.ranges_size(&self.skin_ranges, base)
   slice.fill(write_table(self, .SKIN_OWNERS, u32)[base:][:size], owner)
   mark_dirty(self, .SKIN_OWNERS, int(base), int(size))
   self.skinned_vertex_count = max(self.skinned_vertex_count, base + size)
 }
 
-// Drops the slot's bone palette and skinned vertices. Caller holds the render mutex.
+// Drops the slot's skinned vertices and its link to a palette. Caller holds the render mutex.
 @(private = "file")
 release_bones :: proc(self: ^Renderer, slot: u32) {
   node := &write_table(self, .NODES, Node)[slot]
   if .SKINNED not_in node.flags do return
-  containers.slab_free(&self.bone_matrix_slab, node.attachment_data_index)
   skin_own(self, node.skin_vertex_base, 0)
-  containers.slab_free(&self.skin_slab, node.skin_vertex_base)
-  node.attachment_data_index, node.skin_vertex_base = 0, 0
+  containers.ranges_free(&self.skin_ranges, node.skin_vertex_base)
+  node.attachment_data_index, node.skin_vertex_base, node.bones = 0, 0, 0
   node.flags -= {.SKINNED}
   mark_dirty(self, .NODES, int(slot))
 }
 
-// whether the slot's skinned vertex range holds mesh_id's vertices
-@(private = "file")
-skin_fits :: proc(self: ^Renderer, node: Node, mesh_id: u32) -> bool {
-  vertex_count := write_table(self, .MESHES, MeshData)[mesh_id].vertex_count
-  return containers.slab_block_size(&self.skin_slab, node.skin_vertex_base) >= vertex_count
+// BonesHandle is a bone palette (bones_create): skinned meshes attached with it deform by it.
+BonesHandle :: distinct u32
+
+// MAX_BONE_PALETTES is how many palettes (bones_create) exist at once.
+MAX_BONE_PALETTES :: 4096
+
+// bones_create makes a palette of `count` bones (one per animated character, shared by every
+// skinned mesh of it, MeshAttachment.bones), at rest until stage_bones; it lives until
+// bones_destroy or teardown. false past MAX_BONES bones in all.
+bones_create :: proc(self: ^Renderer, count: u32) -> (handle: BonesHandle, ok: bool) #optional_ok {
+  guard(self)
+  i := containers.slots_alloc(&self.slots[.BONES]) or_return
+  first, has_room := containers.ranges_alloc(&self.bone_ranges, count)
+  if !has_room {
+    containers.slots_free(&self.slots[.BONES], i)
+    log.warnf("No room for a %d-bone palette past MAX_BONES (%d)", count, MAX_BONES)
+    return 0, false
+  }
+  self.bone_first[i] = first
+  slice.fill(write_table(self, .BONES, matrix[4, 4]f32)[first:][:count], 1)
+  mark_dirty(self, .BONES, int(first), int(count))
+  return BonesHandle(i), true
 }
 
-// stage_bones sets the skin palette (bone skinning matrices, animation.Animator.palette) of
-// the skinned mesh attached at `slot`. The matrices are copied.
-stage_bones :: proc(self: ^Renderer, slot: SlotHandle, matrices: []matrix[4, 4]f32) {
-  slot := u32(slot)
-  count := u32(len(matrices))
-  if count == 0 do return
+// stage_bones sets a palette's bone skinning matrices (skeleton-space bone matrix times inverse
+// bind, per bone, relative to each slot's world matrix): every skinned mesh attached with it
+// deforms by them. The matrices are copied, at most the palette's bone count.
+stage_bones :: proc(self: ^Renderer, bones: BonesHandle, matrices: []matrix[4, 4]f32) {
   guard(self)
-  node := slot_node(self, slot)
-  if !skinned_mesh(self, node.mesh_id) {
-    log.warnf("Slot %d has no skinned mesh; its bone palette is dropped", slot)
-    return
-  }
-  if .SKINNED not_in node.flags || containers.slab_block_size(&self.bone_matrix_slab, node.attachment_data_index) < count {
-    release_bones(self, slot)
-    offset, ok := containers.slab_alloc(&self.bone_matrix_slab, count)
-    if !ok {
-      log.warnf("No bone range for a %d-bone palette; the mesh draws unskinned", count)
-      return
-    }
-    vertex_count := write_table(self, .MESHES, MeshData)[node.mesh_id].vertex_count
-    base, skin_ok := containers.slab_alloc(&self.skin_slab, vertex_count)
-    if !skin_ok {
-      containers.slab_free(&self.bone_matrix_slab, offset)
-      log.warnf("No skinned vertex range for %d vertices; the mesh draws unskinned", vertex_count)
-      return
-    }
-    node.attachment_data_index, node.skin_vertex_base = offset, base
-    node.flags += {.SKINNED}
-    skin_own(self, base, slot + 1)
-    mark_dirty(self, .NODES, int(slot))
-  }
-  offset := node.attachment_data_index
-  copy(write_table(self, .BONES, matrix[4, 4]f32)[offset:][:count], matrices)
-  mark_dirty(self, .BONES, int(offset), int(count))
+  if !containers.slots_live(&self.slots[.BONES], u32(bones)) do return
+  first := self.bone_first[bones]
+  count := min(u32(len(matrices)), containers.ranges_size(&self.bone_ranges, first))
+  copy(write_table(self, .BONES, matrix[4, 4]f32)[first:][:count], matrices[:count])
+  mark_dirty(self, .BONES, int(first), int(count))
 }
 
-// attach draws attachment at slot (a world node's index), replacing what the slot drew before. A bone palette
-// stays while the slot draws a skinned mesh whose vertices fit the slot's skinned range.
-attach :: proc(self: ^Renderer, slot: SlotHandle, attachment: Attachment) {
-  slot := u32(slot)
+// bones_destroy frees the palette; its meshes draw unskinned.
+bones_destroy :: proc(self: ^Renderer, bones: BonesHandle) {
+  guard(self)
+  if !containers.slots_free(&self.slots[.BONES], u32(bones)) do return
+  nodes := write_table(self, .NODES, Node)
+  for i in 0 ..< self.node_count do if nodes[i].bones == bones do release_bones(self, i)
+  containers.ranges_free(&self.bone_ranges, self.bone_first[bones])
+}
+
+// attach draws attachment at slot, replacing what the slot drew before; place sets where. A
+// skinned mesh with a palette (MeshAttachment.bones) gets the slot's range of skinned vertices,
+// kept while later attachments still fit in it.
+attach :: proc(self: ^Renderer, slot: $H, attachment: Attachment) {
+  slot := slot_index(slot)
   guard(self)
   node := slot_node(self, slot)
+  if node == nil do return
   unbind(self, slot)
   batch_leave(self, slot)
   node.mesh_id, node.material_id = 0, 0
   node.flags -= {.CASTS_SHADOW}
+  bones: BonesHandle
   switch a in attachment {
   case MeshAttachment:
     node.mesh_id, node.material_id = u32(a.mesh), u32(a.material)
     batch_join(self, slot, node.mesh_id, node.material_id)
     if a.cast_shadow do node.flags += {.CASTS_SHADOW}
+    bones = a.bones
   case LightHandle:
-    if _, placed := resource_create(self, .LIGHT_PLACEMENTS, LightPlacement{light = a, node = slot}); placed {
-      node.flags += {.PLACED}
-    } else {
-      log.warnf("No room for more than %d placed lights; the light is dropped", MAX_LIGHTS - 1)
-    }
+    place_row(self, node, .LIGHT_PLACEMENTS, LightPlacement{light = a, node = slot}, "light")
   case EmitterHandle:
-    if _, placed := resource_create(self, .EMITTER_PLACEMENTS, EmitterPlacement{emitter = a, node = slot}); placed {
-      node.flags += {.PLACED}
-    } else {
-      log.warnf("No room for more than %d placed emitters; the emitter is dropped", MAX_EMITTERS - 1)
-    }
+    place_row(self, node, .EMITTER_PLACEMENTS, EmitterPlacement{emitter = a, node = slot}, "emitter")
   case ForceFieldHandle:
-    if _, placed := resource_create(self, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement{force_field = a, node = slot}); placed {
-      node.flags += {.PLACED}
-    } else {
-      log.warnf("No room for more than %d placed force fields; the force field is dropped", MAX_FORCE_FIELDS - 1)
-    }
+    place_row(self, node, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement{force_field = a, node = slot}, "force field")
   }
-  if !skinned_mesh(self, node.mesh_id) || !skin_fits(self, node^, node.mesh_id) do release_bones(self, slot)
+  skin(self, slot, bones)
   mark_dirty(self, .NODES, int(slot))
+}
+
+// Adds a placement row naming the slot.
+@(private = "file")
+place_row :: proc(self: ^Renderer, node: ^Node, pool: Pool, row: $T, what: string) {
+  if _, placed := resource_create(self, pool, row); placed {
+    node.flags += {.PLACED}
+  } else {
+    log.warnf("No room for more than %d placed %ss; the %s is dropped", POOLS[pool].capacity - 1, what, what)
+  }
+}
+
+// Gives a slot drawing a skinned mesh with a live palette its skinned vertices (keeping a range
+// it already holds that fits), else none.
+@(private = "file")
+skin :: proc(self: ^Renderer, slot: u32, bones: BonesHandle) {
+  node := &write_table(self, .NODES, Node)[slot]
+  mesh := write_table(self, .MESHES, MeshData)[node.mesh_id]
+  if .SKINNED not_in mesh.flags || !containers.slots_live(&self.slots[.BONES], u32(bones)) {
+    release_bones(self, slot)
+    return
+  }
+  if .SKINNED not_in node.flags || containers.ranges_size(&self.skin_ranges, node.skin_vertex_base) < mesh.vertex_count {
+    release_bones(self, slot)
+    base, ok := containers.ranges_alloc(&self.skin_ranges, mesh.vertex_count)
+    if !ok {
+      log.warnf("No room for %d more skinned vertices past MAX_SKINNED_VERTICES (%d); the mesh draws unskinned", mesh.vertex_count, MAX_SKINNED_VERTICES)
+      return
+    }
+    node.skin_vertex_base = base
+    node.flags += {.SKINNED}
+    skin_own(self, base, slot + 1)
+  }
+  node.bones, node.attachment_data_index = bones, self.bone_first[bones]
 }
 
 // attachment returns the attachment of type T at slot, e.g. attachment(r, slot, LightHandle).
@@ -770,19 +824,19 @@ attach :: proc(self: ^Renderer, slot: SlotHandle, attachment: Attachment) {
 // MeshAttachment is a copy to pass back to attach.
 attachment :: proc(
   self: ^Renderer,
-  slot: SlotHandle,
+  slot: $H,
   $T: typeid,
 ) -> (
   att: T,
   ok: bool,
 ) #optional_ok {
-  slot := u32(slot)
+  slot := slot_index(slot)
   guard(self)
   when T == MeshAttachment {
     if slot >= self.node_count do return
     node := write_table(self, .NODES, Node)[slot]
     if node.mesh_id == 0 do return
-    return {MeshHandle(node.mesh_id), MaterialHandle(node.material_id), .CASTS_SHADOW in node.flags}, true
+    return {MeshHandle(node.mesh_id), MaterialHandle(node.material_id), .CASTS_SHADOW in node.flags, node.bones}, true
   } else when T == LightHandle {
     i := placed_at(self, .LIGHT_PLACEMENTS, LightPlacement, slot) or_return
     return write_table(self, .LIGHT_PLACEMENTS, LightPlacement)[i].light, true
@@ -1256,13 +1310,13 @@ flush :: proc(self: ^Renderer, frame_index: u32) {
   overlay_flush(self)
 }
 
-// frame renders and presents one frame, following the window's size: an out-of-date swapchain
-// is rebuilt to it. It returns false on a GPU error. Main thread.
-frame :: proc(self: ^Renderer) -> bool {
+// frame renders and presents one frame at the window's framebuffer size in pixels and its DPI
+// scale (pixels per window unit), as the window reports them: an out-of-date swapchain is
+// rebuilt to the size. It returns false on a GPU error. Main thread.
+frame :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool {
   frame_index := current_frame(self)
   guard(self)
-  framebuffer_size: [2]u32
-  framebuffer_size, self.dpi_scale = dev.window_size(&self.gpu)
+  self.dpi_scale = dpi_scale if dpi_scale > 0 else 1
   tick_resource_pools(self)
   flush(self, frame_index)
   submitted, status := frame_run(self, framebuffer_size)
@@ -1285,7 +1339,7 @@ frame :: proc(self: ^Renderer) -> bool {
   return false
 }
 
-// destroy frees a resource by its handle (or a Geometry), as its *_destroy does.
+// destroy frees a resource by its handle, as its *_destroy does.
 destroy :: proc {
   mesh_destroy,
   material_destroy,
@@ -1295,9 +1349,10 @@ destroy :: proc {
   emitter_destroy,
   force_field_destroy,
   material_shader_destroy,
+  bones_destroy,
   post_shader_destroy,
-  geometry_destroy,
   buffer_destroy,
   compute_shader_destroy,
   draw_shader_destroy,
+  model_looks_destroy,
 }

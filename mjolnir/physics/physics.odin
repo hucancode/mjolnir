@@ -9,13 +9,6 @@ import si "core:sys/info"
 import "core:thread"
 import "core:time"
 
-// KILL_Y is the height below which `step` destroys dynamic bodies (see World.killed).
-KILL_Y :: #config(PHYSICS_KILL_Y, -50.0)
-// PHYSICS_FPS is the highest rate `step` simulates at; calls coming faster are skipped and their
-// dt carried to the next step (-define:PHYSICS_FPS=n, default the engine's UPDATE_FPS).
-PHYSICS_FPS :: #config(PHYSICS_FPS, #config(UPDATE_FPS, #config(RENDER_FPS, 60)))
-@(private = "file")
-MIN_STEP_DT :: 1.0 / PHYSICS_FPS
 // MAX_STEP_DT is the longest time one `step` simulates; a longer dt (a stalled frame) is cut to it,
 // so the simulation slows down instead of breaking.
 MAX_STEP_DT :: #config(PHYSICS_MAX_STEP_DT, 1.0 / 30.0)
@@ -138,7 +131,7 @@ SensorOverlap :: struct {
   body:   BodyHandle,
 }
 
-// KilledBody is a body destroyed by `step` for falling below KILL_Y. `body` is already
+// KilledBody is a body destroyed by `step` for falling below World.kill_y. `body` is already
 // freed; `user` is its caller link, e.g. the scene node to destroy.
 KilledBody :: struct {
   body: BodyHandle,
@@ -149,6 +142,11 @@ KilledBody :: struct {
 // memory and thread pool (application lifetime); teardown empties it between maps.
 World :: struct {
   gravity: [3]f32,
+  // step destroys dynamic bodies below this height (killed); -math.INF_F32 never does
+  kill_y:  f32,
+  // the most steps per second: a step called sooner only banks its dt for the next; 0 steps
+  // every call
+  rate:    f32,
   using _: World_State,
 }
 
@@ -197,6 +195,7 @@ init :: proc(self: ^World, gravity := [3]f32{0, -9.81, 0}, thread_count := 0) ->
   containers.slots_init(&self.joint_slots, MAX_JOINTS)
   self.joints = make([]JointData, MAX_JOINTS)
   self.gravity = gravity
+  self.kill_y, self.rate = -50, 60
   self.thread_count = thread_count > 0 ? thread_count : default_thread_count()
   if self.thread_count > 1 {
     thread.pool_init(&self.thread_pool, context.allocator, self.thread_count)
@@ -402,6 +401,15 @@ apply_force :: proc(self: ^World, handle: BodyHandle, force: [3]f32) {
   wake_up(body)
 }
 
+// apply_torque spins a dynamic body during the next step, as apply_force pushes it, and wakes it.
+apply_torque :: proc(self: ^World, handle: BodyHandle, torque: [3]f32) {
+  body, ok := lookup(self, handle)
+  if !ok do return
+  if !is_dynamic(body) do return
+  body.torque += torque
+  wake_up(body)
+}
+
 // apply_impulse changes a dynamic body's velocity by impulse / mass and wakes it.
 apply_impulse :: proc(self: ^World, handle: BodyHandle, impulse: [3]f32) {
   body, ok := lookup(self, handle)
@@ -421,22 +429,23 @@ apply_impulse_at :: proc(self: ^World, handle: BodyHandle, impulse, point: [3]f3
   wake_up(body)
 }
 
-// BodyPose is a body's position and rotation together with its user link.
+// BodyPose is a body's position and rotation together with its handle and user link.
 BodyPose :: struct {
+  body:     BodyHandle,
   user:     Handle,
   position: [3]f32,
   rotation: quaternion128,
 }
 
-// body_poses returns the poses of awake moving bodies that have a `user` link, for copying back
-// into a scene graph after `step`; valid until the next body_poses or step.
+// body_poses returns the poses of the awake moving bodies, for copying back into a scene after
+// `step`; valid until the next body_poses or step.
 body_poses :: proc(self: ^World) -> []BodyPose {
   clear(&self.poses)
   c: u32
   for i in containers.slots_next(&self.body_slots, &c) {
     body := &self.bodies[i]
-    if !body.moving || body.is_sleeping || body.user == {} do continue
-    append(&self.poses, BodyPose{body.user, body.position, body.rotation})
+    if !body.moving || body.is_sleeping do continue
+    append(&self.poses, BodyPose{body_handle(self, i), body.user, body.position, body.rotation})
   }
   return self.poses[:]
 }
@@ -452,7 +461,7 @@ sensor_overlaps :: proc(self: ^World) -> []SensorOverlap {
   return self.sensor_overlaps[:]
 }
 
-// killed returns the bodies the last step destroyed for falling below KILL_Y, with their user
+// killed returns the bodies the last step destroyed for falling below kill_y, with their user
 // links to clean up; valid until the next step.
 killed :: proc(self: ^World) -> []KilledBody {
   return self.killed[:]
@@ -590,7 +599,7 @@ step_kill :: proc(self: ^World) {
   c: u32
   for i in containers.slots_next(&self.body_slots, &c) {
     body, handle := &self.bodies[i], body_handle(self, i)
-    if !is_dynamic(body) || body.position.y >= KILL_Y do continue
+    if !is_dynamic(body) || body.position.y >= self.kill_y do continue
     append(&self.killed, KilledBody{handle, body.user})
     body_destroy(self, handle)
   }
@@ -616,13 +625,13 @@ step_sensors :: proc(self: ^World) {
   }
 }
 
-// step advances the simulation by dt seconds, at most MAX_STEP_DT. Until PHYSICS_FPS allows the
-// next step it only banks dt, clears killed and returns false.
+// step advances the simulation by dt seconds, at most MAX_STEP_DT. Until `rate` allows the next
+// step it only banks dt, clears killed and returns false.
 // Millisecond timing blocks compile out with PHYSICS_PERF_STATS=false;
 // the durations then stay zero.
 step :: proc(self: ^World, dt: f32) -> (stepped: bool) {
   self.pending_dt += dt
-  if self.pending_dt < MIN_STEP_DT {
+  if self.rate > 0 && self.pending_dt < 1 / self.rate {
     clear(&self.killed)
     return false
   }
@@ -681,7 +690,10 @@ step :: proc(self: ^World, dt: f32) -> (stepped: bool) {
     c = 0
     for i in containers.slots_next(&self.body_slots, &c) {
       body := &self.bodies[i]
-      if body.moving && !body.is_sleeping do append(&self.awake_list, i)
+      if !body.moving || body.is_sleeping do continue
+      // enable_rotation may have changed since the last step
+      update_world_inertia(body)
+      append(&self.awake_list, i)
     }
 
     when PHYSICS_PERF_STATS do mark = time.now()

@@ -9,14 +9,11 @@ import "mjolnir/render"
 import "mjolnir/world"
 import "core:log"
 import "core:math"
-import "core:math/linalg"
 import mu "vendor:microui"
 
 GRID :: 6
 SPACING :: 2.5
 
-ibl_intensity: f32 = 1.0
-sun_intensity: f32 = 5.0
 skybox_on: bool = true
 metallic_min: f32 = 0.0
 metallic_max: f32 = 1.0
@@ -69,15 +66,13 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     x := f32(col) * SPACING - half
     y := f32(row) * SPACING - half
     sphere := world.spawn(&app.scene, {x, y, 0})
-    render.attach(&app.renderer, render.SlotHandle(sphere.index), render.primitive(&app.renderer, .SPHERE, mat))
+    render.attach(&app.renderer, sphere, render.primitive(&app.renderer, .SPHERE, mat))
   }
 
-  sun_heading := linalg.quaternion_angle_axis(math.PI * 0.65, linalg.VECTOR3F32_Y_AXIS)
-  sun_elevation := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
   sun := &app.renderer.sun
   sun.color = {1, 0.97, 0.92}
-  sun.intensity = sun_intensity
-  sun.direction = linalg.quaternion_mul_vector3(sun_heading * sun_elevation, [3]f32{0, 0, -1})
+  sun.intensity = 5
+  sun.direction = {-0.3, -1, -0.5}
   sun.shadow_distance = 12
   return .READY
 }
@@ -97,10 +92,8 @@ should_close :: proc(app: ^App) -> bool {
 axis_values :: proc(row, col: int) -> (metallic, roughness: f32) {
   t_row := f32(row) / f32(GRID - 1)
   t_col := f32(col) / f32(GRID - 1)
-  m_lo, m_hi := metallic_min, metallic_max
-  r_lo, r_hi := roughness_min, roughness_max
-  metallic = math.lerp(m_lo, m_hi, t_row)
-  roughness = math.lerp(r_lo, r_hi, t_col)
+  metallic = math.lerp(metallic_min, metallic_max, t_row)
+  roughness = math.lerp(roughness_min, roughness_max, t_col)
   return
 }
 
@@ -111,10 +104,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  app.renderer.sun.intensity = sun_intensity
-  app.renderer.ibl_intensity = ibl_intensity
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.renderer.skybox_intensity = skybox_on ? 1 : 0
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
@@ -122,33 +112,27 @@ update :: proc(app: ^App, dt: f32) {
     mat.metallic_value = m
     mat.roughness_value = r
   }
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Environment", {700, 20, 280, 180}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Material", {760, 20, 220, 360}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+    mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Sun intensity")
-    mu.slider(ctx, &sun_intensity, 0.0, 5.0)
+    mu.slider(ctx, &app.renderer.sun.intensity, 0, 20)
     mu.label(ctx, "IBL intensity")
-    mu.slider(ctx, &ibl_intensity, 0.0, 2.0)
+    mu.slider(ctx, &app.renderer.ibl_intensity, 0, 2)
     mu.checkbox(ctx, "Skybox", &skybox_on)
-  }
-  if debugui.window(&app.debug, "PBR Range", {700, 210, 280, 220}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
-    mu.label(ctx, "Metallic min (rows bottom)")
-    mu.slider(ctx, &metallic_min, 0.0, 1.0)
-    mu.label(ctx, "Metallic max (rows top)")
-    mu.slider(ctx, &metallic_max, 0.0, 1.0)
-    mu.label(ctx, "Roughness min (cols left)")
-    mu.slider(ctx, &roughness_min, 0.0, 1.0)
-    mu.label(ctx, "Roughness max (cols right)")
-    mu.slider(ctx, &roughness_max, 0.0, 1.0)
+    mu.label(ctx, "Metallic (bottom to top)")
+    mu.slider(ctx, &metallic_min, 0, 1)
+    mu.slider(ctx, &metallic_max, 0, 1)
+    mu.label(ctx, "Roughness (left to right)")
+    mu.slider(ctx, &roughness_min, 0, 1)
+    mu.slider(ctx, &roughness_max, 0, 1)
   }
 }

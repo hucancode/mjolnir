@@ -15,7 +15,8 @@ ALIGN_FACTOR := [Align]f32 {
 
 // layout lays every node out in the reference frame (init), then fits it to `window`: scaled
 // up or down until one axis matches, the other axis's leftover space going to the roots by
-// their pin. Rects, clips and lines come out in window pixels.
+// their pin. Rects, clips and lines come out in window pixels. Text is measured in f, which may
+// be nil for a tree without text.
 // A fixed sequence of passes over the nodes in tree order: widths resolve before text wraps,
 // heights after.
 layout :: proc(self: ^UI, window: [2]f32, f: ^font.Font) {

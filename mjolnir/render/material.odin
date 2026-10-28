@@ -17,6 +17,7 @@ Color :: enum {
   YELLOW,
   CYAN,
   MAGENTA,
+  ORANGE,
 }
 
 // Material is how a mesh surface looks. A texture of 0 (NO_TEXTURE) leaves that texture out;
@@ -150,6 +151,7 @@ COLOR_RGB :: [Color][4]f32 {
   .YELLOW  = {1.0, 1.0, 0.0, 1.0},
   .CYAN    = {0.0, 1.0, 1.0, 1.0},
   .MAGENTA = {1.0, 0.0, 1.0, 1.0},
+  .ORANGE  = {1.0, 0.5, 0.0, 1.0},
 }
 
 @(private)

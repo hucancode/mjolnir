@@ -1,20 +1,11 @@
 package world
 
+import "../geometry"
 import "core:math/linalg"
 
 // Transform is a node's local position, rotation and scale; update derives its world
 // matrix (world_matrix reads it).
-Transform :: struct {
-  position: [3]f32,
-  rotation: quaternion128,
-  scale:    [3]f32,
-}
-
-@(private)
-TRANSFORM_IDENTITY :: Transform {
-  rotation = linalg.QUATERNIONF32_IDENTITY,
-  scale    = {1, 1, 1},
-}
+Transform :: geometry.Transform
 
 // translate sets a node's local position:
 //   translate(w, node, x = 0, y = 0, z = 0)

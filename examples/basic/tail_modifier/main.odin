@@ -66,7 +66,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.destroy(&app.snake, &app.scene)
+  gltf.destroy(&app.snake, &app.scene, &app.renderer)
   gltf.destroy(&app.snake_model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
@@ -84,9 +84,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 4, -4}, {0, 1, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  ground := world.spawn(&app.scene, {0, GROUND_Y, 0})
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
-  world.scale(&app.scene, ground, 20.0)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, GROUND_Y, 0}, scale = 20.0)
   app.snake_model = gltf.model_create(&app.renderer, #load("assets/stuffed_snake_rigged.glb"))
   app.snake = gltf.instance_create(&app.snake_model, &app.scene, &app.renderer)
   if len(app.snake.skinned) == 0 do return .FAIL
@@ -111,8 +109,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   move_snake(app, dt)
   world.update(&app.scene)
   gltf.animate(&app.snake, &app.snake_model, &app.scene, &app.renderer, dt)
@@ -134,9 +131,7 @@ move_snake :: proc(app: ^App, dt: f32) {
 
 cursor_on_ground :: proc(app: ^App) -> (hit: [3]f32, ok: bool) {
   ray := render.cursor_ray(&app.renderer, app.input.cursor) or_return
-  t: f32
-  ok, t = geometry.ray_plane_intersection(ray, {0, GROUND_Y, 0}, {0, 1, 0})
-  return ray.origin + ray.direction * t, ok
+  return geometry.ray_plane_intersection(ray, {0, GROUND_Y, 0}, {0, 1, 0})
 }
 
 drag_head :: proc(app: ^App) {
@@ -155,8 +150,7 @@ drag_head :: proc(app: ^App) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

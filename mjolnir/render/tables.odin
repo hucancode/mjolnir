@@ -1,51 +1,15 @@
 package render
 
-import "../containers"
 import "core:slice"
 
-// About 16 MB per frame in flight.
-@(private)
-BONE_SLAB_CONFIG :: containers.SlabConfig {
-  {block_size = 32, block_count = 256},
-  {block_size = 64, block_count = 256},
-  {block_size = 128, block_count = 1024},
-  {block_size = 256, block_count = 256},
-  {block_size = 512, block_count = 32},
-  {block_size = 1024, block_count = 8},
-  {block_size = 0, block_count = 0},
-  {block_size = 0, block_count = 0},
-}
-// matrices in the bone table: the slab's capacity
-@(private)
-BONE_CAPACITY ::
-  int(BONE_SLAB_CONFIG[0].block_size * BONE_SLAB_CONFIG[0].block_count) +
-  int(BONE_SLAB_CONFIG[1].block_size * BONE_SLAB_CONFIG[1].block_count) +
-  int(BONE_SLAB_CONFIG[2].block_size * BONE_SLAB_CONFIG[2].block_count) +
-  int(BONE_SLAB_CONFIG[3].block_size * BONE_SLAB_CONFIG[3].block_count) +
-  int(BONE_SLAB_CONFIG[4].block_size * BONE_SLAB_CONFIG[4].block_count) +
-  int(BONE_SLAB_CONFIG[5].block_size * BONE_SLAB_CONFIG[5].block_count)
-#assert(BONE_SLAB_CONFIG[6].block_count == 0 && BONE_SLAB_CONFIG[7].block_count == 0)
+// MAX_BONES is the bone matrices of every palette (bones_create) together: 4 MB per frame in
+// flight at the default, about 950 palettes of a 69-bone character (-define:MAX_BONES=n).
+MAX_BONES :: #config(MAX_BONES, 1 << 16)
 
-// The skinned vertex ranges, one per skinned node, as many vertices as its mesh: about 24 MB.
-@(private)
-SKIN_SLAB_CONFIG :: containers.SlabConfig {
-  {block_size = 1024, block_count = 64},
-  {block_size = 4096, block_count = 32},
-  {block_size = 16384, block_count = 16},
-  {block_size = 65536, block_count = 2},
-  {block_size = 0, block_count = 0},
-  {block_size = 0, block_count = 0},
-  {block_size = 0, block_count = 0},
-  {block_size = 0, block_count = 0},
-}
-// vertices in the skinned vertex buffer and the skin owner table: the slab's capacity
-@(private)
-SKIN_CAPACITY ::
-  int(SKIN_SLAB_CONFIG[0].block_size * SKIN_SLAB_CONFIG[0].block_count) +
-  int(SKIN_SLAB_CONFIG[1].block_size * SKIN_SLAB_CONFIG[1].block_count) +
-  int(SKIN_SLAB_CONFIG[2].block_size * SKIN_SLAB_CONFIG[2].block_count) +
-  int(SKIN_SLAB_CONFIG[3].block_size * SKIN_SLAB_CONFIG[3].block_count)
-#assert(SKIN_SLAB_CONFIG[4].block_count == 0)
+// MAX_SKINNED_VERTICES is the vertices of every skinned mesh attached at once, each slot its
+// own: 96 MB at the default, about 130 characters of 16k vertices or 650 of 3k
+// (-define:MAX_SKINNED_VERTICES=n).
+MAX_SKINNED_VERTICES :: #config(MAX_SKINNED_VERTICES, 1 << 21)
 
 // The tables render writes: `capacity` entries of `stride` bytes. render keeps the one copy
 // (Renderer.tables) and marks what it writes in Renderer.dirty; tables_sync brings the GPU
@@ -60,14 +24,14 @@ TABLES := [Table]struct {
   .NODES = {size_of(Node), MAX_SLOTS},
   .MESHES = {size_of(MeshData), MAX_MESHES},
   .MATERIALS = {size_of(Material), MAX_MATERIALS},
-  .BONES = {size_of(matrix[4, 4]f32), BONE_CAPACITY},
+  .BONES = {size_of(matrix[4, 4]f32), MAX_BONES},
   .EMITTERS = {size_of(Emitter), MAX_EMITTERS},
   .FORCE_FIELDS = {size_of(ForceField), MAX_FORCE_FIELDS},
   .LIGHTS = {size_of(Light), MAX_LIGHTS},
   .DEBUG_LINES = {size_of(DebugLineSegment), MAX_SEGMENTS},
   .BATCHES = {size_of(Batch), MAX_BATCHES},
   .NODE_BATCH = {size_of(u32), MAX_SLOTS},
-  .SKIN_OWNERS = {size_of(u32), SKIN_CAPACITY},
+  .SKIN_OWNERS = {size_of(u32), MAX_SKINNED_VERTICES},
   .LIGHT_PLACEMENTS = {size_of(LightPlacement), MAX_LIGHTS},
   .EMITTER_PLACEMENTS = {size_of(EmitterPlacement), MAX_EMITTERS},
   .FORCE_FIELD_PLACEMENTS = {size_of(ForceFieldPlacement), MAX_FORCE_FIELDS},
@@ -95,11 +59,16 @@ clear_entry :: proc(self: ^Renderer, t: Table, index: u32, count: u32 = 1) {
 }
 
 @(private)
-mark_dirty :: proc(self: ^Renderer, t: Table, index: int, count := 1) {
+mark_dirty :: #force_inline proc(self: ^Renderer, t: Table, index: int, count := 1) {
   if count == 0 do return
   stride := TABLES[t].stride
   bits := self.dirty[t]
-  for r in index * stride / TABLE_REGION_BYTES ..= ((index + count) * stride - 1) / TABLE_REGION_BYTES {
-    bits[r / 64] |= 1 << u64(r % 64)
+  first, last := index * stride / TABLE_REGION_BYTES, ((index + count) * stride - 1) / TABLE_REGION_BYTES
+  // one entry spans at most two regions
+  if last - first <= 1 {
+    bits[first / 64] |= 1 << u64(first % 64)
+    bits[last / 64] |= 1 << u64(last % 64)
+    return
   }
+  for r in first ..= last do bits[r / 64] |= 1 << u64(r % 64)
 }

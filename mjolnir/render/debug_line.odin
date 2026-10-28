@@ -43,30 +43,24 @@ flush_debug_lines :: proc(self: ^Renderer) {
   defer sync.mutex_unlock(&self.debug_mutex)
   table := write_table(self, .DEBUG_LINES, DebugLineSegment)
   for &inbox, ring in self.debug_lines {
-    for seg in inbox {
+    if len(inbox) == 0 do continue
+    start := int(self.debug_filled[ring] % DEBUG_RING)
+    for seg, k in inbox {
       seg := seg
       if seg.expiry < 0 do seg.expiry = self.time
-      i := ring * DEBUG_RING + int(self.debug_filled[ring] % DEBUG_RING)
-      table[i] = seg
-      mark_dirty(self, .DEBUG_LINES, i)
-      self.debug_filled[ring] += 1
+      table[ring * DEBUG_RING + (start + k) % DEBUG_RING] = seg
     }
+    // the ring's written run, which wraps past its end at most once (inboxes hold a ring at most)
+    first := min(len(inbox), DEBUG_RING - start)
+    mark_dirty(self, .DEBUG_LINES, ring * DEBUG_RING + start, first)
+    mark_dirty(self, .DEBUG_LINES, ring * DEBUG_RING, len(inbox) - first)
+    self.debug_filled[ring] += u64(len(inbox))
     clear(&inbox)
   }
 }
 
-// DEBUG_* are the stock debug line colors. Every debug_* proc takes `life`, the seconds the
+// Every debug_* proc takes a color (COLOR_RGB holds the stock ones), `life`, the seconds the
 // shape stays (0 for one frame), and `bypass_depth` to draw it over everything.
-DEBUG_WHITE :: [4]f32{1, 1, 1, 1}
-DEBUG_BLACK :: [4]f32{0, 0, 0, 1}
-DEBUG_GRAY :: [4]f32{0.5, 0.5, 0.5, 1}
-DEBUG_RED :: [4]f32{1, 0, 0, 1}
-DEBUG_GREEN :: [4]f32{0, 1, 0, 1}
-DEBUG_BLUE :: [4]f32{0, 0.4, 1, 1}
-DEBUG_YELLOW :: [4]f32{1, 1, 0, 1}
-DEBUG_CYAN :: [4]f32{0, 1, 1, 1}
-DEBUG_MAGENTA :: [4]f32{1, 0, 1, 1}
-DEBUG_ORANGE :: [4]f32{1, 0.5, 0, 1}
 
 @(private = "file")
 CIRCLE_SEGMENTS :: 24
@@ -100,7 +94,7 @@ fill_circle :: proc(
 debug_segment :: proc(
   self: ^Renderer,
   a, b: [3]f32,
-  color: [4]f32 = DEBUG_WHITE,
+  color: [4]f32 = COLOR_RGB[.WHITE],
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
@@ -111,7 +105,7 @@ debug_segment :: proc(
 debug_aabb :: proc(
   self: ^Renderer,
   lo, hi: [3]f32,
-  color: [4]f32 = DEBUG_WHITE,
+  color: [4]f32 = COLOR_RGB[.WHITE],
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
@@ -119,13 +113,13 @@ debug_aabb :: proc(
 }
 
 // debug_cube queues a wireframe box at center with the given rotation, half_extents along each
-// axis (as physics.BoxCollider and a cube primitive scaled by them).
+// axis (as a cube primitive scaled by them).
 debug_cube :: proc(
   self: ^Renderer,
   center: [3]f32,
   rotation: quaternion128 = 1,
   half_extents: [3]f32 = {0.5, 0.5, 0.5},
-  color: [4]f32 = DEBUG_WHITE,
+  color: [4]f32 = COLOR_RGB[.WHITE],
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
@@ -172,7 +166,7 @@ debug_circle :: proc(
   self: ^Renderer,
   center, normal: [3]f32,
   radius: f32 = 1,
-  color: [4]f32 = DEBUG_WHITE,
+  color: [4]f32 = COLOR_RGB[.WHITE],
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
@@ -187,7 +181,7 @@ debug_sphere :: proc(
   self: ^Renderer,
   center: [3]f32,
   radius: f32 = 1,
-  color: [4]f32 = DEBUG_WHITE,
+  color: [4]f32 = COLOR_RGB[.WHITE],
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
@@ -205,7 +199,7 @@ debug_sphere :: proc(
 debug_arrow :: proc(
   self: ^Renderer,
   from, to: [3]f32,
-  color: [4]f32 = DEBUG_WHITE,
+  color: [4]f32 = COLOR_RGB[.WHITE],
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
@@ -239,7 +233,7 @@ debug_axes :: proc(
   x := linalg.quaternion_mul_vector3(rotation, [3]f32{scale, 0, 0})
   y := linalg.quaternion_mul_vector3(rotation, [3]f32{0, scale, 0})
   z := linalg.quaternion_mul_vector3(rotation, [3]f32{0, 0, scale})
-  // pure RGB, unlike the tinted DEBUG_BLUE
+  // pure RGB, unlike the tinted COLOR_RGB[.BLUE]
   segs := [3]DebugLineSegment {
     {a = origin, b = origin + x, color = {1, 0, 0, 1}},
     {a = origin, b = origin + y, color = {0, 1, 0, 1}},
@@ -253,7 +247,7 @@ debug_point :: proc(
   self: ^Renderer,
   p: [3]f32,
   size: f32 = 0.1,
-  color: [4]f32 = DEBUG_WHITE,
+  color: [4]f32 = COLOR_RGB[.WHITE],
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {

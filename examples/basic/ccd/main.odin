@@ -77,9 +77,7 @@ should_close :: proc(app: ^App) -> bool {
 spawn_box :: proc(app: ^App, position, half_extents: [3]f32, color: render.Color) {
   node := world.spawn(&app.scene, position)
   physics.body_create(&app.phys, position, collider = physics.BoxCollider{half_extents = half_extents}, user = world.Handle(node))
-  visual := world.spawn(&app.scene, parent = node)
-  render.attach(&app.renderer, render.SlotHandle(visual.index), render.primitive(&app.renderer, .CUBE, color))
-  world.scale(&app.scene, visual, half_extents)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, color), parent = node, scale = half_extents)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -103,9 +101,7 @@ spawn_bullet :: proc(app: ^App, lane: int, color: render.Color) {
   position := [3]f32{START_X, BULLET_HEIGHT, wall_z(lane)}
   node := world.spawn(&app.scene, position)
   handle := physics.body_create(&app.phys, position, mass = BULLET_MASS, collider = physics.SphereCollider{radius = BULLET_RADIUS}, user = world.Handle(node))
-  visual := world.spawn(&app.scene, parent = node)
-  render.attach(&app.renderer, render.SlotHandle(visual.index), render.primitive(&app.renderer, .SPHERE, color))
-  world.scale(&app.scene, visual, BULLET_RADIUS)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, color), parent = node, scale = BULLET_RADIUS)
   params := physics.body_params(&app.phys, handle)
   params.linear_damping = 0
   params.angular_damping = 0
@@ -142,8 +138,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.volley_timer += dt
   if app.volley_timer >= VOLLEY_SECONDS do start_volley(app)
   previous: [WALL_COUNT][3]f32
@@ -151,14 +146,11 @@ update :: proc(app: ^App, dt: f32) {
   physics.step(&app.phys, dt)
   draw_tracers(app, previous)
   world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

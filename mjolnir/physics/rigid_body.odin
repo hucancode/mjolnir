@@ -20,6 +20,8 @@ Body :: struct {
   collider:             Collider,
   velocity:             [3]f32,
   angular_velocity:     [3]f32,
+  // 1 / mass; 0 for an infinite-mass (static or kinematic) body
+  inv_mass:             f32,
   using params:         BodyParams,
   using _: Body_State,
 }
@@ -39,7 +41,6 @@ Body_State :: struct {
   cached_aabb:          geometry.Aabb,
   cached_sphere_center: [3]f32,
   cached_sphere_radius: f32,
-  inv_mass:             f32,
   inv_inertia:          [3]f32, // Diagonal inverse inertia in body space
   inv_inertia_world:    matrix[3, 3]f32,
   force:                [3]f32,

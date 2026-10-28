@@ -12,6 +12,7 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
+import "mjolnir/geometry"
 
 SEGMENTS :: 24
 RINGS :: 12
@@ -60,7 +61,7 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
-  if !debugui.init(&app.debug, r, {1000, 700}) do return .FAIL
+  if !debugui.init(&app.debug, r) do return .FAIL
   app.orbit = render.make_orbit({0, 3.5, 6.5}, {0, 1.4, 0})
   render.camera_orbit(render.main_camera(r), app.orbit)
 
@@ -71,14 +72,14 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.ring = render.material_create(r, render.make_material(.CUSTOM, shader = ring_shader))
 
   sphere := world.spawn(&app.scene, {0, RADIUS, 0})
-  sphere_mesh := render.mesh_create(r, render.make_sphere(segments = SEGMENTS, rings = RINGS, radius = RADIUS, faceted = true))
-  render.attach(r, render.SlotHandle(sphere.index), render.MeshAttachment{mesh = sphere_mesh, material = app.field})
+  sphere_mesh := render.mesh_create(r, geometry.make_sphere(segments = SEGMENTS, rings = RINGS, radius = RADIUS, faceted = true))
+  render.attach(r, sphere, render.MeshAttachment{mesh = sphere_mesh, material = app.field})
   disc := world.spawn(&app.scene, {0, RADIUS, 0})
-  disc_mesh := render.mesh_create(r, render.make_circle(segments = DISC_SEGMENTS, radius = DISC_RADIUS))
-  render.attach(r, render.SlotHandle(disc.index), render.MeshAttachment{mesh = disc_mesh, material = app.ring})
+  disc_mesh := render.mesh_create(r, geometry.make_circle(segments = DISC_SEGMENTS, radius = DISC_RADIUS))
+  render.attach(r, disc, render.MeshAttachment{mesh = disc_mesh, material = app.ring})
   flipped := world.spawn(&app.scene, {0, RADIUS, 0})
   world.rotate(&app.scene, flipped, math.PI, linalg.VECTOR3F32_X_AXIS)
-  render.attach(r, render.SlotHandle(flipped.index), render.MeshAttachment{mesh = disc_mesh, material = app.ring})
+  render.attach(r, flipped, render.MeshAttachment{mesh = disc_mesh, material = app.ring})
 
   return .READY
 }
@@ -102,10 +103,9 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if input.key_pressed(&app.input, .W) do wireframe = !wireframe
   if input.key_pressed(&app.input, .P) do pop = !pop
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   lines := f32(1) if wireframe else 0
   sphere := render.material(&app.renderer, app.field)
   sphere.params[0] = {f32(1) if pop else 0, lines, SEGMENTS, RINGS}
@@ -115,14 +115,11 @@ update :: proc(app: ^App, dt: f32) {
   ring.params[1] = {tone2.r, tone2.g, tone2.b, fade}
   ring.params[2].rgb = tone1
   ring.params[3].rgb = tone3
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

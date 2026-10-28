@@ -88,11 +88,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
-  ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .CUBE, .GRAY))
-  world.scale(&app.scene, ground, [3]f32{20, 0.2, 20})
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), scale = {20, 0.2, 20})
   light := world.spawn(&app.scene, {0, 12, 6})
-  render.attach(&app.renderer, render.SlotHandle(light.index), render.light_create(&app.renderer, render.make_point_light(intensity = 500, radius = 25)))
+  render.attach(&app.renderer, light, render.light_create(&app.renderer, render.make_point_light(intensity = 500, radius = 25)))
 
   app.model = gltf.model_create(&app.renderer, #load("assets/spider_leg.glb"))
   app.leg = gltf.instance_create(&app.model, &app.scene, &app.renderer)
@@ -120,7 +118,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 shutdown :: proc(app: ^App) {
-  gltf.destroy(&app.leg, &app.scene)
+  gltf.destroy(&app.leg, &app.scene, &app.renderer)
   gltf.destroy(&app.model, &app.renderer)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
@@ -136,8 +134,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   solve(app, dt)
   world.update(&app.scene)
   gltf.animate(&app.leg, &app.model, &app.scene, &app.renderer, dt)
@@ -190,8 +187,7 @@ solve :: proc(app: ^App, dt: f32) {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {

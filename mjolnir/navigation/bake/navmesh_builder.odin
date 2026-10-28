@@ -406,7 +406,7 @@ create_nav_mesh :: proc(
     tile_width  = params.poly_mesh.bmax[0] - params.poly_mesh.bmin[0],
     tile_height = params.poly_mesh.bmax[2] - params.poly_mesh.bmin[2],
     max_tiles   = 1,
-    max_polys   = 1024,
+    max_polys   = max(params.poly_mesh.npolys, 1),
   }
   status = detour.nav_mesh_init(nav_mesh, &nav_params)
   if !detour.status_succeeded(status) {
@@ -674,65 +674,4 @@ partition_polygons_by_axis :: proc(
     })
   }
   return i32(len(poly_info) / 2)
-}
-
-@(private)
-bake_navmesh :: proc(
-  pmesh: ^recast.Poly_Mesh,
-  dmesh: ^recast.Poly_Mesh_Detail,
-  walkable_height, walkable_radius, walkable_climb: f32,
-  allocator := context.allocator,
-) -> (
-  data: []u8,
-  ok: bool,
-) {
-  params := Create_Nav_Mesh_Data_Params {
-    poly_mesh          = pmesh,
-    poly_mesh_detail   = dmesh,
-    walkable_height    = walkable_height,
-    walkable_radius    = walkable_radius,
-    walkable_climb     = walkable_climb,
-    tile_x             = 0,
-    tile_y             = 0,
-    tile_layer         = 0,
-    user_id            = 0,
-    off_mesh_con_count = 0,
-  }
-  nav_data, create_status := create_nav_mesh_data(&params)
-  if !detour.status_succeeded(create_status) {
-    log.error("Failed to create navigation mesh data")
-    return nil, false
-  }
-  defer delete(nav_data)
-  nav_mesh := new(detour.Nav_Mesh)
-  defer {
-    detour.nav_mesh_destroy(nav_mesh)
-    free(nav_mesh)
-  }
-  mesh_params := detour.Nav_Mesh_Params {
-    orig        = pmesh.bmin,
-    tile_width  = pmesh.bmax.x - pmesh.bmin.x,
-    tile_height = pmesh.bmax.z - pmesh.bmin.z,
-    max_tiles   = 1,
-    max_polys   = 1024,
-  }
-  init_status := detour.nav_mesh_init(nav_mesh, &mesh_params)
-  if !detour.status_succeeded(init_status) {
-    log.error("Failed to initialize navigation mesh")
-    return nil, false
-  }
-  // Make a copy of nav_data since nav_mesh_add_tile may take ownership
-  nav_data_copy := make([]u8, len(nav_data))
-  copy(nav_data_copy, nav_data)
-  _, add_status := detour.nav_mesh_add_tile(
-    nav_mesh,
-    nav_data_copy,
-    detour.DT_TILE_FREE_DATA,
-  )
-  if !detour.status_succeeded(add_status) {
-    log.error("Failed to add tile to navigation mesh")
-    delete(nav_data_copy)
-    return nil, false
-  }
-  return detour.save_navmesh(nav_mesh, allocator), true
 }

@@ -13,9 +13,9 @@ PerspectiveProjection :: struct {
   fov: f32,
 }
 
-// OrthographicProjection is a parallel projection of the given view size.
+// OrthographicProjection is a parallel projection `height` units tall; the width follows the
+// camera's aspect ratio.
 OrthographicProjection :: struct {
-  width:  f32,
   height: f32,
 }
 
@@ -95,8 +95,8 @@ camera_projection_matrix :: proc(camera: ^Camera, extent: [2]u32) -> matrix[4, 4
       camera.far,
     )
   case OrthographicProjection:
-    hw := proj.width / 2
     hh := proj.height / 2
+    hw := hh * f32(extent[0]) / f32(max(extent[1], 1))
     return geometry.make_ortho_matrix(-hw, hw, -hh, hh, camera.near, camera.far)
   }
   return linalg.MATRIX4F32_IDENTITY
@@ -146,23 +146,29 @@ make_orbit :: proc(eye, target: [3]f32) -> Orbit {
   }
 }
 
-// orbit_drag steers the orbit from a tick of input, unless a consumer captured the mouse: it
-// turns by the mouse movement times speed while a button of `rotate_with` is held ({} only
-// zooms) and moves a step closer per scroll, keeping pitch short of the poles and distance in range.
+// orbit_drag steers the orbit from a tick of input and places camera on it (camera_orbit),
+// unless a consumer captured the mouse: it turns by the mouse movement times speed while a
+// button of `rotate_with` is held ({} only zooms) and moves a step closer per scroll, keeping
+// pitch short of the poles and distance in range.
 orbit_drag :: proc(
   self: ^Orbit,
+  camera: ^Camera,
   s: ^input.State,
   rotate_with: input.ButtonSet = {.LEFT},
   speed: f32 = 0.02,
   min_distance: f32 = 1,
   max_distance: f32 = 200,
 ) {
-  if s.mouse_captured do return
-  if s.buttons & rotate_with != {} {
-    self.yaw += s.mouse_delta.x * speed
-    self.pitch = clamp(self.pitch + s.mouse_delta.y * speed, -1.5, 1.5)
+  if !s.mouse_captured {
+    rotating := false
+    for b in rotate_with do rotating ||= input.mouse_down(s, b)
+    if rotating {
+      self.yaw += s.mouse_delta.x * speed
+      self.pitch = clamp(self.pitch + s.mouse_delta.y * speed, -1.5, 1.5)
+    }
+    self.distance = clamp(self.distance - s.scroll.y * 2, min_distance, max_distance)
   }
-  self.distance = clamp(self.distance - s.scroll.y * 2, min_distance, max_distance)
+  camera_orbit(camera, self^)
 }
 
 // camera_orbit places the camera at orbit, looking at its target.
@@ -183,34 +189,14 @@ camera_right :: proc(self: ^Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(self.rotation, [3]f32{1, 0, 0})
 }
 
-// camera_up returns the camera's world-space up (+Y) axis.
-camera_up :: proc(self: ^Camera) -> [3]f32 {
-  return linalg.quaternion_mul_vector3(self.rotation, [3]f32{0, 1, 0})
-}
-
-// camera_lerp blends the camera toward a pose: position lerps, rotation slerps the short arc.
-// t = 1 snaps; pass 1 - exp(-speed * dt) every tick for frame-rate independent smoothing.
-camera_lerp :: proc(self: ^Camera, position: [3]f32, rotation: quaternion128, t: f32) {
-  self.position = linalg.lerp(self.position, position, t)
-  self.rotation = linalg.quaternion_slerp(self.rotation, rotation, t)
-}
-
-// camera_lerp_look_at is camera_lerp toward a camera at from looking at to.
+// camera_lerp_look_at blends the camera toward one at from looking at to: position lerps,
+// rotation slerps the short arc. t = 1 snaps; pass 1 - exp(-speed * dt) every tick for
+// frame-rate independent smoothing.
 camera_lerp_look_at :: proc(self: ^Camera, from, to: [3]f32, t: f32, up: [3]f32 = {0, 0, 0}) {
   goal := Camera{}
   camera_look_at(&goal, from, to, up)
-  camera_lerp(self, goal.position, goal.rotation, t)
-}
-
-// camera_lerp_transform is camera_lerp toward a world matrix (see camera_set_transform).
-camera_lerp_transform :: proc(self: ^Camera, world_matrix: matrix[4, 4]f32, t: f32) {
-  camera_lerp(self, world_matrix[3].xyz, linalg.quaternion_from_matrix4_f32(world_matrix), t)
-}
-
-// camera_set_transform places the camera with a world matrix; it looks down the matrix's -Z.
-camera_set_transform :: proc(self: ^Camera, world_matrix: matrix[4, 4]f32) {
-  self.position = world_matrix[3].xyz
-  self.rotation = linalg.quaternion_from_matrix4_f32(world_matrix)
+  self.position = linalg.lerp(self.position, goal.position, t)
+  self.rotation = linalg.quaternion_slerp(self.rotation, goal.rotation, t)
 }
 
 // camera_set_perspective switches the camera to a perspective projection.
@@ -228,14 +214,11 @@ camera_set_perspective :: proc(
 // camera_set_orthographic switches the camera to an orthographic projection.
 camera_set_orthographic :: proc(
   self: ^Camera,
-  width, height: f32,
+  height: f32,
   near: f32 = 0.1,
   far: f32 = 100.0,
 ) {
-  self.projection = OrthographicProjection {
-    width  = width,
-    height = height,
-  }
+  self.projection = OrthographicProjection{height = height}
   self.near = near
   self.far = far
 }

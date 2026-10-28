@@ -31,7 +31,7 @@ test_save_load_roundtrip :: proc(t: ^testing.T) {
   data := save(&nav)
   defer delete(data)
   loaded: NavMesh
-  testing.expect(t, init(&loaded, data), "load")
+  testing.expect(t, navmesh_init(&loaded, data), "load")
   defer destroy(&loaded)
 
   a, _ := debug_triangles(&nav, context.temp_allocator)
@@ -46,5 +46,5 @@ test_save_load_roundtrip :: proc(t: ^testing.T) {
 // test_plane.navmesh is a 20x20 walkable plane centered at the origin, baked by navigation/bake
 @(private = "file")
 build_plane :: proc(t: ^testing.T, nav: ^NavMesh) {
-  testing.expect(t, init(nav, #load("test_plane.navmesh")), "load the plane fixture")
+  testing.expect(t, navmesh_init(nav, #load("test_plane.navmesh")), "load the plane fixture")
 }

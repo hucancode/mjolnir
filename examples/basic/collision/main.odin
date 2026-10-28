@@ -105,8 +105,7 @@ should_close :: proc(app: ^App) -> bool {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -133,9 +132,7 @@ spawn_scene :: proc(app: ^App) {
   for &b in app.bodies {
     b.node = world.spawn(&app.scene, b.position)
     world.rotate(&app.scene, b.node, body_rotation(&b))
-    b.visual = world.spawn(&app.scene, parent = b.node)
-    render.attach(&app.renderer, render.SlotHandle(b.visual.index), render.primitive(&app.renderer, body_mesh(b.shape), body_color(b.kind)))
-    world.scale(&app.scene, b.visual, body_visual_scale(&b))
+    b.visual = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, body_mesh(b.shape), body_color(b.kind)), scale = body_visual_scale(&b), parent = b.node)
     if b.kind == .STATIC {
       b.handle = physics.body_create(&app.phys, b.position, body_rotation(&b), body_collider(&b))
     } else {
@@ -147,9 +144,7 @@ spawn_scene :: proc(app: ^App) {
 spawn_scenery_box :: proc(app: ^App, center, half_extents: [3]f32) {
   node := world.spawn(&app.scene, center)
   physics.body_create(&app.phys, center, collider = physics.BoxCollider{half_extents = half_extents}, user = world.Handle(node))
-  visual := world.spawn(&app.scene, parent = node)
-  render.attach(&app.renderer, render.SlotHandle(visual.index), render.primitive(&app.renderer, .CUBE, .GRAY))
-  world.scale(&app.scene, visual, half_extents)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), parent = node, scale = half_extents)
 }
 
 body_collider :: proc(b: ^Body) -> physics.Collider {
@@ -198,7 +193,7 @@ body_rotation :: proc(b: ^Body) -> quaternion128 {
 
 apply_shape :: proc(app: ^App, b: ^Body) {
   physics.set_collider(&app.phys, b.handle, body_collider(b))
-  render.attach(&app.renderer, render.SlotHandle(b.visual.index), render.primitive(&app.renderer, body_mesh(b.shape), body_color(b.kind)))
+  render.attach(&app.renderer, b.visual, render.primitive(&app.renderer, body_mesh(b.shape), body_color(b.kind)))
   world.scale(&app.scene, b.visual, body_visual_scale(b))
 }
 
@@ -230,8 +225,7 @@ update :: proc(app: ^App, dt: f32) {
   debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, &app.input)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if app.reset_pending {
     app.reset_pending = false
     physics.teardown(&app.phys)
@@ -254,9 +248,7 @@ update :: proc(app: ^App, dt: f32) {
   draw_selection(app)
   if !app.paused do physics.step(&app.phys, dt)
   world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 handle_picking :: proc(app: ^App) {

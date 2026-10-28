@@ -391,3 +391,65 @@ test_scene_memory_cleanup :: proc(t: ^testing.T) {
   }
   // expect no memory leaks in the test report
 }
+
+// Live nodes, root included.
+node_count :: proc(self: ^World) -> int {
+  return int(self.slots.count)
+}
+
+@(test)
+test_set_parent_moves_subtree :: proc(t: ^testing.T) {
+  w: World
+  init(&w, 64)
+  defer shutdown(&w)
+  a := spawn(&w, {10, 0, 0})
+  b := spawn(&w, {0, 5, 0})
+  child := spawn(&w, {1, 0, 0}, parent = a)
+  update(&w)
+  testing.expect(t, set_parent(&w, child, b), "reparent")
+  update(&w)
+  testing.expect_value(t, world_matrix(&w, child)[3].xyz, [3]f32{1, 5, 0})
+  testing.expect(t, len(children(&w, a)) == 0 && len(children(&w, b)) == 1, "child lists follow")
+  testing.expect(t, set_parent(&w, child, a, keep_world = true), "reparent keeping the world pose")
+  update(&w)
+  testing.expect_value(t, world_matrix(&w, child)[3].xyz, [3]f32{1, 5, 0})
+  testing.expect(t, !set_parent(&w, a, child), "a node cannot hang under its own subtree")
+  testing.expect(t, !set_parent(&w, w.root, a), "the root has no parent")
+}
+
+@(test)
+test_setup_keeps_nodes_through_teardown :: proc(t: ^testing.T) {
+  w: World
+  init(&w, 64)
+  defer shutdown(&w)
+  player := spawn(&w, {1, 0, 0})
+  setup(&w)
+  level := spawn(&w, {2, 0, 0})
+  held := spawn(&w, parent = player)
+  update(&w)
+  teardown(&w)
+  update(&w)
+  _, kept := node(&w, player)
+  _, dropped := node(&w, level)
+  _, child_dropped := node(&w, held)
+  testing.expect(t, kept && !dropped && !child_dropped, "teardown keeps what setup marked, drops the rest")
+  testing.expect(t, len(children(&w, player)) == 0, "a kept node's later children go")
+}
+
+@(test)
+test_update_walks_only_touched_subtrees :: proc(t: ^testing.T) {
+  w: World
+  init(&w, 256)
+  defer shutdown(&w)
+  nodes: [100]NodeHandle
+  for &n, i in nodes do n = spawn(&w, {f32(i), 0, 0})
+  child := spawn(&w, {0, 1, 0}, parent = nodes[42])
+  update(&w)
+  translate(&w, nodes[42], 0, 0, 5)
+  update(&w)
+  feed := changes(&w)
+  testing.expect_value(t, len(feed), 2)
+  testing.expect_value(t, world_matrix(&w, child)[3].xyz, [3]f32{0, 1, 5})
+  update(&w)
+  testing.expect_value(t, len(changes(&w)), 0)
+}

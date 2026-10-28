@@ -292,21 +292,15 @@ Projectile :: struct {
 
 Screen :: enum {
   SELECT,
-  LEVEL_1,
-  LEVEL_2,
-  LEVEL_3,
+  LEVEL,
   RESULT,
 }
 
 SCREENS := [Screen]fsm.State(App, Screen) {
   .SELECT  = {enter = enter_select, update = update_select},
-  .LEVEL_1 = {enter = enter_level, update = update_level},
-  .LEVEL_2 = {enter = enter_level, update = update_level},
-  .LEVEL_3 = {enter = enter_level, update = update_level},
+  .LEVEL   = {enter = enter_level, update = update_level},
   .RESULT  = {enter = enter_result, update = update_result, exit = exit_result},
 }
-
-#assert(len(LEVELS) == int(Screen.LEVEL_3) - int(Screen.LEVEL_1) + 1)
 
 Panel :: struct {
   root, title, stats:  ui.NodeHandle,
@@ -343,7 +337,6 @@ App :: struct {
   lineup:       [len(HEROES)]Actor,
   spotlight:    world.NodeHandle,
   player:       Player,
-  feet:         [3]f32,
   enemies:      [dynamic]Enemy,
   pickups:      [dynamic]Pickup,
   projectiles:  [dynamic]Projectile,
@@ -388,7 +381,7 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   app.show_debug = DEBUG
-  if !platform.init(&app.platform, 1280, 720, "Third Person") do return
+  if !platform.init(&app.platform, 1280, 720, "Adventure") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   if !physics.init(&app.phys, gravity = {0, -20, 0}) do return
@@ -463,15 +456,15 @@ clear_scene :: proc(app: ^App) {
     actor_destroy(app, &e)
     delete(e.trace)
   }
-  for &i in app.props do gltf.destroy(&i, &app.scene)
-  for &p in app.pickups do gltf.destroy(&p.instance, &app.scene)
-  for &p in app.projectiles do gltf.destroy(&p.instance, &app.scene)
+  for &i in app.props do gltf.destroy(&i, &app.scene, &app.renderer)
+  for &p in app.pickups do gltf.destroy(&p.instance, &app.scene, &app.renderer)
+  for &p in app.projectiles do gltf.destroy(&p.instance, &app.scene, &app.renderer)
   clear(&app.enemies)
   clear(&app.pickups)
   clear(&app.projectiles)
   clear(&app.props)
   clear(&app.bodies)
-  nav.crowd_shutdown(&app.crowd)
+  nav.crowd_destroy(&app.crowd)
   nav.destroy(&app.navmesh)
   world.teardown(&app.scene)
   physics.teardown(&app.phys)
@@ -490,19 +483,14 @@ enter_select :: proc(app: ^App) {
   }
   app.spotlight = world.spawn(&app.scene)
   world.rotate(&app.scene, app.spotlight, linalg.quaternion_between_two_vector3([3]f32{0, 0, -1}, linalg.normalize([3]f32{0, -4, -3})))
-  render.attach(&app.renderer, render.SlotHandle(app.spotlight.index), render.light_create(&app.renderer, render.make_spot_light({1, 0.85, 0.6}, 500, 12, math.PI * 0.1)))
+  render.attach(&app.renderer, app.spotlight, render.light_create(&app.renderer, render.make_spot_light({1, 0.85, 0.6}, 500, 12, math.PI * 0.1)))
   actor_play(&app.lineup[app.hero], .CHEER)
   render.camera_look_at(render.main_camera(&app.renderer), {0, 3, 9}, {0, 1.2, 0})
 }
 
-level_screen :: proc(level: int) -> Screen {
-  return Screen(int(Screen.LEVEL_1) + level)
-}
-
 enter_level :: proc(app: ^App) {
   clear_scene(app)
-  level := int(app.screen.current) - int(Screen.LEVEL_1)
-  app.level = level
+  level := app.level
   app.result_timer = 0
   spawn_ground(app)
   app.renderer.ibl_intensity = 1
@@ -512,11 +500,9 @@ enter_level :: proc(app: ^App) {
   defer bake.destroy(&builder)
   bake.append_box(&builder, {0, -0.5, 0}, {ARENA * 2, 0.5, ARENA * 2})
   for box in LEVELS[level].obstacles {
-    node := world.spawn(&app.scene, box.center)
-    render.attach(&app.renderer, render.SlotHandle(node.index), render.primitive(&app.renderer, .CUBE, .GRAY))
-    world.scale(&app.scene, node, box.half_extents)
+    mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), box.center, scale = box.half_extents)
     append(&app.bodies, physics.body_create(&app.phys, box.center, collider = physics.BoxCollider{half_extents = box.half_extents}))
-    bake.append_box(&builder, box.center, box.half_extents, is_obstacle = true)
+    bake.append_box(&builder, box.center, box.half_extents, area = bake.AREA_BLOCKED)
   }
   for side in 0 ..< 4 {
     angle := f32(side) * math.PI * 0.5
@@ -524,7 +510,7 @@ enter_level :: proc(app: ^App) {
     append(&app.bodies, physics.body_create(&app.phys, center + {0, 2, 0}, collider = physics.BoxCollider{half_extents = {0.5 + abs(center.z), 2, 0.5 + abs(center.x)}}))
   }
   data, baked := bake.build(&builder, allocator = context.temp_allocator)
-  if !baked || !nav.init(&app.navmesh, data) || !nav.crowd_init(&app.crowd, 16, 1.2, &app.navmesh) {
+  if !baked || !nav.navmesh_init(&app.navmesh, data) || !nav.crowd_init(&app.crowd, 16, 1.2, &app.navmesh) {
     log.error("Navigation mesh bake failed")
     return
   }
@@ -538,9 +524,9 @@ enter_level :: proc(app: ^App) {
   torch_light := render.light_create(&app.renderer, render.make_point_light({1, 0.55, 0.2}, 30, 9, cast_shadow = false))
   for corner in ([4][3]f32{{-1, 0, -1}, {1, 0, -1}, {1, 0, 1}, {-1, 0, 1}}) {
     torch := world.spawn(&app.scene, corner * (ARENA - 2) + {0, 0.2, 0})
-    render.attach(&app.renderer, render.SlotHandle(torch.index), app.emitters[.FIRE])
+    render.attach(&app.renderer, torch, app.emitters[.FIRE])
     glow := world.spawn(&app.scene, {0, 1, 0}, parent = torch)
-    render.attach(&app.renderer, render.SlotHandle(glow.index), torch_light)
+    render.attach(&app.renderer, glow, torch_light)
   }
   fire_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {1, 0.4, 0.1, 1}, emissive_value = 1.5))
   app.fireball = render.primitive(&app.renderer, .SPHERE, fire_material, cast_shadow = false)
@@ -579,9 +565,7 @@ enter_level :: proc(app: ^App) {
 }
 
 spawn_ground :: proc(app: ^App) {
-  ground := world.spawn(&app.scene)
-  render.attach(&app.renderer, render.SlotHandle(ground.index), render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
-  world.scale(&app.scene, ground, ARENA * 2)
+  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = ARENA * 2)
   append(&app.bodies, physics.body_create(&app.phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {ARENA, 0.5, ARENA}}))
 }
 
@@ -649,7 +633,7 @@ actor_create :: proc(app: ^App, model: ^gltf.Model, attack: string, position: [3
 }
 
 actor_destroy :: proc(app: ^App, a: ^Actor) {
-  gltf.destroy(&a.instance, &app.scene)
+  gltf.destroy(&a.instance, &app.scene, &app.renderer)
   world.destroy(&app.scene, a.model)
   a^ = {}
 }
@@ -681,8 +665,8 @@ actor_move :: proc(a: ^Actor, moving: bool) {
   if !actor_busy(a) do actor_play(a, .RUN if moving else .IDLE)
 }
 
-actor_update :: proc(app: ^App, a: ^Actor, model: ^gltf.Model, dt: f32) {
-  gltf.animate(&a.instance, model, &app.scene, &app.renderer, dt)
+feet :: proc(app: ^App) -> [3]f32 {
+  return physics.body(&app.phys, app.player.body).position - {0, BODY_HALF_HEIGHT, 0}
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -707,26 +691,25 @@ update_select :: proc(app: ^App, dt: f32) -> Screen {
   world.translate(&app.scene, app.spotlight, f32(app.hero) * 2.2 - 4.4, 5, 3)
   for &a, i in app.lineup {
     actor_move(&a, false)
-    actor_update(app, &a, &app.heroes[i], dt)
+    gltf.animate(&a.instance, &app.heroes[i], &app.scene, &app.renderer, dt)
   }
   if !input.key_pressed(&app.input, .ENTER) && !input.key_pressed(&app.input, .SPACE) do return .SELECT
   app.score = 0
-  return .LEVEL_1
+  app.level = 0
+  return .LEVEL
 }
 
 update_level :: proc(app: ^App, dt: f32) -> Screen {
-  render.orbit_drag(&app.orbit, &app.input, {.RIGHT}, min_distance = 4, max_distance = 20)
   update_player(app, dt)
   physics.step(&app.phys, dt)
   world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
-  app.feet = physics.body(&app.phys, app.player.body).position - {0, BODY_HALF_HEIGHT, 0}
   nav.crowd_update(&app.crowd, dt)
   world.set_world_poses(&app.scene, nav.agent_poses(&app.crowd))
   update_enemies(app, dt)
   update_projectiles(app, dt)
   update_pickups(app, dt)
-  app.orbit.target = app.feet + {0, 1.8, 0}
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
+  app.orbit.target = feet(app) + {0, 1.8, 0}
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, {.RIGHT}, min_distance = 4, max_distance = 20)
   if app.show_debug do draw_debug(app)
   if app.result_timer == 0 && len(app.enemies) == 0 && app.player.health > 0 {
     actor_play(&app.player, .CHEER)
@@ -767,7 +750,7 @@ update_player :: proc(app: ^App, dt: f32) {
   physics.set_velocity(&app.phys, p.body, {velocity.x, vertical, velocity.z})
   if linalg.length(move) > 0 do p.facing = math.atan2(move.x, move.z)
   world.rotate(&app.scene, p.model, p.facing)
-  actor_update(app, p, &app.heroes[app.hero], dt)
+  gltf.animate(&p.instance, &app.heroes[app.hero], &app.scene, &app.renderer, dt)
 }
 
 move_direction :: proc(app: ^App) -> [3]f32 {
@@ -778,20 +761,19 @@ move_direction :: proc(app: ^App) -> [3]f32 {
 }
 
 on_ground :: proc(app: ^App) -> bool {
-  feet := physics.body(&app.phys, app.player.body).position - {0, BODY_HALF_HEIGHT + 0.01, 0}
-  return physics.raycast(&app.phys, geometry.Ray{origin = feet, direction = {0, -1, 0}}, 0.1, first_hit = true).hit
+  return physics.raycast(&app.phys, geometry.Ray{origin = feet(app) - {0, 0.01, 0}, direction = {0, -1, 0}}, 0.1, first_hit = true).hit
 }
 
 player_strike :: proc(app: ^App, hero: Hero, damage: f32) {
   forward := [2]f32{math.sin(app.player.facing), math.cos(app.player.facing)}
   if hero.shot != .NONE {
     direction := [3]f32{forward.x, 0, forward.y}
-    shoot(app, hero.shot, app.feet + {0, 1.4, 0} + direction * 0.6, direction, damage, friendly = true)
+    shoot(app, hero.shot, feet(app) + {0, 1.4, 0} + direction * 0.6, direction, damage, friendly = true)
     return
   }
   for &e in app.enemies {
     if e.health <= 0 do continue
-    to := enemy_position(app, &e).xz - app.feet.xz
+    to := enemy_position(app, &e).xz - feet(app).xz
     reach := REACH + 0.5 * FOES[e.kind].scale
     if linalg.length(to) < reach && linalg.dot(linalg.normalize0(to), forward) > 0.2 do hurt_enemy(app, &e, damage)
   }
@@ -799,20 +781,20 @@ player_strike :: proc(app: ^App, hero: Hero, damage: f32) {
 
 hurt_enemy :: proc(app: ^App, e: ^Enemy, damage: f32) {
   e.health -= damage
-  render.emit(&app.renderer, app.emitters[.HIT], render.SlotHandle(e.chest.index), 40)
+  render.emit(&app.renderer, app.emitters[.HIT], e.chest, 40)
   if e.health > 0 {
     actor_play(e, .HIT)
     return
   }
   app.score += FOES[e.kind].score
-  render.emit(&app.renderer, app.emitters[.DEATH], render.SlotHandle(e.model.index), 80)
+  render.emit(&app.renderer, app.emitters[.DEATH], e.model, 80)
 }
 
 hurt_player :: proc(app: ^App, damage: f32) {
   p := &app.player
   if p.health <= 0 || p.buffs[.SHIELD] > 0 do return
   p.health -= damage
-  render.emit(&app.renderer, app.emitters[.HIT], render.SlotHandle(p.chest.index), 40)
+  render.emit(&app.renderer, app.emitters[.HIT], p.chest, 40)
   if p.health > 0 {
     if !actor_busy(p) do actor_play(p, .HIT)
     return
@@ -831,7 +813,7 @@ enemy_position :: proc(app: ^App, e: ^Enemy) -> [3]f32 {
 }
 
 enemy_distance :: proc(app: ^App, e: ^Enemy) -> f32 {
-  return linalg.length(enemy_position(app, e).xz - app.feet.xz)
+  return linalg.length(enemy_position(app, e).xz - feet(app).xz)
 }
 
 update_enemies :: proc(app: ^App, dt: f32) {
@@ -844,7 +826,7 @@ update_enemies :: proc(app: ^App, dt: f32) {
     if app.player.health > 0 || e.health <= 0 do bt.tick(brain(e.kind), &Mob{app, e}, &e.trace)
     agent := nav.agent(&app.crowd, e.agent)
     if e.health > 0 && (e.clip == .ATTACK || linalg.length(agent.velocity.xz) < 0.3) {
-      to := app.feet - agent.position
+      to := feet(app) - agent.position
       world.rotate(&app.scene, e.model, math.atan2(to.x, to.z))
     }
     actor_move(e, linalg.length(agent.velocity.xz) > 0.3)
@@ -852,7 +834,7 @@ update_enemies :: proc(app: ^App, dt: f32) {
       e.strike -= dt
       if e.strike <= 0 && e.health > 0 do enemy_strike(app, e)
     }
-    actor_update(app, e, &app.foes[e.kind], dt)
+    gltf.animate(&e.instance, &app.foes[e.kind], &app.scene, &app.renderer, dt)
     if e.dying > DESPAWN_TIME {
       nav.agent_destroy(&app.crowd, e.agent)
       actor_destroy(app, e)
@@ -869,7 +851,7 @@ enemy_strike :: proc(app: ^App, e: ^Enemy) {
     return
   }
   from := enemy_position(app, e) + {0, 1.4, 0}
-  shoot(app, foe.shot, from, linalg.normalize0(app.feet + {0, 1.2, 0} - from), foe.damage, friendly = false)
+  shoot(app, foe.shot, from, linalg.normalize0(feet(app) + {0, 1.2, 0} - from), foe.damage, friendly = false)
 }
 
 shoot :: proc(app: ^App, shot: Shot, from, direction: [3]f32, damage: f32, friendly: bool) {
@@ -879,10 +861,10 @@ shoot :: proc(app: ^App, shot: Shot, from, direction: [3]f32, damage: f32, frien
   if shot == .ARROW {
     instance = gltf.instance_create(&app.arrow, &app.scene, &app.renderer, parent = node)
   } else {
-    render.attach(&app.renderer, render.SlotHandle(node.index), app.fireball)
+    render.attach(&app.renderer, node, app.fireball)
     world.scale(&app.scene, node, 0.25)
     trail := world.spawn(&app.scene, parent = node)
-    render.attach(&app.renderer, render.SlotHandle(trail.index), app.emitters[.MAGIC])
+    render.attach(&app.renderer, trail, app.emitters[.MAGIC])
   }
   append(&app.projectiles, Projectile{friendly = friendly, node = node, instance = instance, position = from, velocity = direction * 12, damage = damage, life = 2})
 }
@@ -937,7 +919,7 @@ chase :: proc(m: ^Mob) -> bt.Status {
   app, e := m.app, m.enemy
   if e.repath <= 0 {
     e.repath = 0.5
-    nav.move_to(&app.crowd, e.agent, app.feet)
+    nav.move_to(&app.crowd, e.agent, feet(app))
   }
   return .RUNNING
 }
@@ -952,7 +934,7 @@ retreat :: proc(m: ^Mob) -> bt.Status {
   if e.repath <= 0 {
     e.repath = 0.5
     position := enemy_position(app, e)
-    nav.move_to(&app.crowd, e.agent, position + linalg.normalize0(position - app.feet) * 4)
+    nav.move_to(&app.crowd, e.agent, position + linalg.normalize0(position - feet(app)) * 4)
   }
   return .RUNNING
 }
@@ -992,12 +974,12 @@ update_projectiles :: proc(app: ^App, dt: f32) {
         hit = true
         break
       }
-    } else if linalg.length(shot.position - (app.feet + {0, 1.2, 0})) < 0.8 {
+    } else if linalg.length(shot.position - (feet(app) + {0, 1.2, 0})) < 0.8 {
       hurt_player(app, shot.damage)
       hit = true
     }
     if hit || shot.life <= 0 {
-      gltf.destroy(&shot.instance, &app.scene)
+      gltf.destroy(&shot.instance, &app.scene, &app.renderer)
       world.destroy(&app.scene, shot.node)
       unordered_remove(&app.projectiles, i)
     }
@@ -1009,14 +991,14 @@ update_pickups :: proc(app: ^App, dt: f32) {
     pickup := &app.pickups[i]
     world.rotate_by(&app.scene, pickup.node, dt * 2)
     world.translate(&app.scene, pickup.node, pickup.base + {0, 0.2 * math.sin(app.screen.time * 3), 0})
-    if app.player.health <= 0 || linalg.length(pickup.base.xz - app.feet.xz) > 1.2 do continue
+    if app.player.health <= 0 || linalg.length(pickup.base.xz - feet(app).xz) > 1.2 do continue
     if pickup.power == .HEAL {
       app.player.health = min(app.player.health + 50, HEROES[app.hero].health)
     } else {
       app.player.buffs[pickup.power] = BUFF_TIME
     }
-    render.emit(&app.renderer, app.emitters[.PICKUP], render.SlotHandle(app.player.chest.index), 60)
-    gltf.destroy(&pickup.instance, &app.scene)
+    render.emit(&app.renderer, app.emitters[.PICKUP], app.player.chest, 60)
+    gltf.destroy(&pickup.instance, &app.scene, &app.renderer)
     world.destroy(&app.scene, pickup.node)
     unordered_remove(&app.pickups, i)
   }
@@ -1028,14 +1010,14 @@ draw_debug :: proc(app: ^App) {
     body := physics.body(&app.phys, h) or_continue
     draw_collider(app, body)
   }
-  render.debug_circle(&app.renderer, app.feet + {0, 0.05, 0}, {0, 1, 0}, REACH, render.DEBUG_RED)
+  render.debug_circle(&app.renderer, feet(app) + {0, 0.05, 0}, {0, 1, 0}, REACH, render.COLOR_RGB[.RED])
   for &e in app.enemies {
     agent := nav.agent(&app.crowd, e.agent)
     lift := [3]f32{0, 0.1, 0}
-    render.debug_circle(&app.renderer, agent.position + lift, {0, 1, 0}, agent.params.radius, render.DEBUG_YELLOW)
+    render.debug_circle(&app.renderer, agent.position + lift, {0, 1, 0}, agent.params.radius, render.COLOR_RGB[.YELLOW])
     from := agent.position + lift
     for corner in agent.corners[:agent.corner_count] {
-      render.debug_segment(&app.renderer, from, corner + lift, render.DEBUG_CYAN)
+      render.debug_segment(&app.renderer, from, corner + lift, render.COLOR_RGB[.CYAN])
       from = corner + lift
     }
   }
@@ -1044,13 +1026,13 @@ draw_debug :: proc(app: ^App) {
 draw_collider :: proc(app: ^App, body: physics.Body) {
   switch shape in body.collider {
   case physics.BoxCollider:
-    render.debug_cube(&app.renderer, body.position, body.rotation, shape.half_extents, render.DEBUG_GREEN)
+    render.debug_cube(&app.renderer, body.position, body.rotation, shape.half_extents, render.COLOR_RGB[.GREEN])
   case physics.SphereCollider:
-    render.debug_sphere(&app.renderer, body.position, shape.radius, render.DEBUG_GREEN)
+    render.debug_sphere(&app.renderer, body.position, shape.radius, render.COLOR_RGB[.GREEN])
   case physics.CylinderCollider:
     up := linalg.quaternion_mul_vector3(body.rotation, [3]f32{0, shape.half_height, 0})
-    render.debug_circle(&app.renderer, body.position + up, up, shape.radius, render.DEBUG_GREEN)
-    render.debug_circle(&app.renderer, body.position - up, up, shape.radius, render.DEBUG_GREEN)
+    render.debug_circle(&app.renderer, body.position + up, up, shape.radius, render.COLOR_RGB[.GREEN])
+    render.debug_circle(&app.renderer, body.position - up, up, shape.radius, render.COLOR_RGB[.GREEN])
   }
 }
 
@@ -1087,14 +1069,15 @@ exit_result :: proc(app: ^App) {
 update_result :: proc(app: ^App, dt: f32) -> Screen {
   ui.layout(&app.gui, render.window_size(&app.renderer), &app.font)
   ui.update_input(&app.gui, &app.input)
-  actor_update(app, &app.player, &app.heroes[app.hero], dt)
-  for &e in app.enemies do actor_update(app, &e, &app.foes[e.kind], dt)
+  gltf.animate(&app.player.instance, &app.heroes[app.hero], &app.scene, &app.renderer, dt)
+  for &e in app.enemies do gltf.animate(&e.instance, &app.foes[e.kind], &app.scene, &app.renderer, dt)
   switch {
   case ui.clicked(&app.gui, app.panel.retry):
     if !app.won do app.score = 0
-    return level_screen(app.level)
+    return .LEVEL
   case ui.clicked(&app.gui, app.panel.next):
-    return level_screen(app.level + 1)
+    app.level += 1
+    return .LEVEL
   case ui.clicked(&app.gui, app.panel.heroes):
     return .SELECT
   }
@@ -1102,8 +1085,7 @@ update_result :: proc(app: ^App, dt: f32) -> Screen {
 }
 
 frame :: proc(app: ^App) -> bool {
-  platform.poll_events(&app.platform)
-  return render.frame(&app.renderer)
+  return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 draw_hud :: proc(app: ^App) {
