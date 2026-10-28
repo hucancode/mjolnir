@@ -299,6 +299,9 @@ scene_bind :: proc(self: ^Renderer, cmd: rhi.CommandList, pass: ScenePass, f: u3
   }
 }
 
+// the cached groups name one shadow atlas: atlas[0]
+#assert(BINDLESS || FRAMES_IN_FLIGHT == 1)
+
 // The set of texture slots a WebGPU pass binds as set 1; textures reach a bindless shader
 // by index instead. Slot 0 takes the default of its kind.
 @(private)

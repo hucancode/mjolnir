@@ -87,9 +87,8 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
@@ -126,16 +125,12 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   return .READY
 }
 
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
-}
-
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {})
   debugui.feed(&app.debug, &app.input, &app.renderer)
+  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {})
   debug_ui(app)
   render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   app.elapsed += dt
@@ -173,6 +168,6 @@ debug_ui :: proc(app: ^App) {
   }
 }
 
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }

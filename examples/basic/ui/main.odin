@@ -53,9 +53,8 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
@@ -122,10 +121,6 @@ build_ui :: proc(app: ^App) {
   app.star = ui.node_create(&app.gui, {parent = screen, position = .ABSOLUTE, anchor = {0, 1}, offset = {16, -16}, size = {{.FIXED, 140}, {.FIXED, 140}}})
 }
 
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
-}
-
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
@@ -149,7 +144,7 @@ update :: proc(app: ^App, dt: f32) {
   render.update(&app.renderer, dt)
 }
 
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 

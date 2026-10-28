@@ -58,7 +58,7 @@ World_State :: struct {
   // per node index: where it sits in topo and where its subtree ends there
   topo_first:      [dynamic]u32,
   topo_end:        [dynamic]u32,
-  // spawned since the last build_tree
+  // parents changed (spawn, set_parent, teardown) since the last build_tree
   tree_stale:      bool,
   // nodes spawned, moved or shown/hidden since the last update: update walks their subtrees
   touched:         [dynamic]u32,
@@ -266,6 +266,7 @@ teardown :: proc(self: ^World) {
 }
 
 // node_destroy removes a node and its descendants; changes reports them after the next update.
+// false for the root or a stale handle.
 node_destroy :: proc(self: ^World, handle: NodeHandle) -> bool {
   if handle == self.root || !containers.slots_valid(&self.slots, handle) do return false
   // removals need no rebuild: the lists hold handles, and freed ones go stale

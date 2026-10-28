@@ -64,9 +64,8 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
@@ -147,10 +146,6 @@ shutdown :: proc(app: ^App) {
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
   free(app)
-}
-
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -257,7 +252,7 @@ hits_hammer :: proc(ray: geometry.Ray, hit: [3]f32) -> bool {
   return min(o.y + d.y * s0, o.y + d.y * s1) < HAMMER_TIP.y + 0.8
 }
 
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 

@@ -345,15 +345,20 @@ gpu_bindings :: proc(self: ^Renderer, bindings: []Binding, compute: bool) -> (la
       return
     }
   }
-  layout, ok = self.gpu_layouts[key]
-  if !ok {
-    entries := make([]rhi.BindEntry, key.count, context.temp_allocator)
-    for &e, i in entries do e = {kind = key.kinds[i], stages = {.COMPUTE} if compute else {.VERTEX, .FRAGMENT}, format = key.formats[i]}
-    layout = dev.bind_layout_create(&self.gpu, {entries = entries}) or_return
-    self.gpu_layouts[key] = layout
-  }
+  layout = gpu_layout(self, key) or_return
   group = dev.bind_group_create(&self.gpu, {layout = layout, resources = resources}) or_return
   return layout, group, true
+}
+
+// The bind layout of `key`, made once and kept until shutdown.
+@(private)
+gpu_layout :: proc(self: ^Renderer, key: GpuLayoutKey) -> (layout: rhi.BindLayout, ok: bool) {
+  if layout, ok = self.gpu_layouts[key]; ok do return
+  entries := make([]rhi.BindEntry, key.count, context.temp_allocator)
+  for &e, i in entries do e = {kind = key.kinds[i], stages = {.COMPUTE} if key.compute else {.VERTEX, .FRAGMENT}, format = key.formats[i]}
+  layout = dev.bind_layout_create(&self.gpu, {entries = entries}) or_return
+  self.gpu_layouts[key] = layout
+  return layout, true
 }
 
 // The camera index is set as the work or draw is recorded.

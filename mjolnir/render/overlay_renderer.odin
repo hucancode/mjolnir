@@ -57,12 +57,6 @@ overlay_clear :: proc(self: ^Renderer) {
   clear(&self.ui_batches)
 }
 
-// The staged draw2d commands draw only with a main camera.
-@(private)
-overlay_flush :: proc(self: ^Renderer) {
-  if _, ok := main_camera(self); !ok do overlay_clear(self)
-}
-
 // A batch takes the texture of its first quad.
 @(private)
 begin_batch :: proc(self: ^Renderer, scissor: [4]i32) {

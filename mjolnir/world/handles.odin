@@ -5,7 +5,7 @@ import "../containers"
 // Handle is an untyped handle, for links stored outside world (e.g. a physics body's user).
 Handle :: containers.Handle
 
-// NodeHandle identifies a node; stale after node_destroy.
+// NodeHandle identifies a node; stale after node_destroy, or teardown of a node made since setup.
 NodeHandle :: distinct Handle
 
 // RETIRE_GRACE is how many updates a despawned slot stays reserved, so index-keyed consumers see the removal.

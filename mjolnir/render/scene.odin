@@ -314,7 +314,7 @@ setup :: proc(self: ^Renderer) {
   mark_resources(self)
 }
 
-// teardown frees from the marks on
+// Marks what exists now as kept through teardown.
 @(private)
 mark_resources :: proc(self: ^Renderer) {
   for &slots, p in self.slots do if POOLS[p].kept do containers.slots_mark(&slots)
@@ -323,12 +323,9 @@ mark_resources :: proc(self: ^Renderer) {
 }
 
 // teardown ends a map in one go, waiting for the GPU: no particle stays alive, every slot
-// forgets its attachment and bone palette, and every camera, mesh, material, light, emitter, force field and
-// texture made since the last setup
-// (or init) is freed; an environment map among them gives way to the default one. What came
-// before stays:
-// what init made (builtin meshes and materials, the main camera, render targets, pipelines)
-// and what the application made before setup. Handles to freed resources are stale.
+// forgets its attachment and bone palette, and every camera, mesh, material, light, emitter,
+// force field and texture made since the last setup (or init) is freed, their handles stale; an
+// environment map among them gives way to the default one.
 teardown :: proc(self: ^Renderer) {
   guard(self)
   // their render targets and draw lists retire, and go with the flushes below
@@ -592,8 +589,30 @@ slot_node :: proc(self: ^Renderer, slot: u32) -> ^Node {
 
 // place sets where a slot draws and whether it shows; a slot draws nothing until placed.
 place :: proc(self: ^Renderer, slot: $H, world_matrix: matrix[4, 4]f32, visible := true) {
-  slot := slot_index(slot)
   guard(self)
+  place_slot(self, slot_index(slot), world_matrix, visible)
+}
+
+// release empties a slot: it forgets its attachment and bone palette; meshes, materials and
+// what was attached stay.
+release :: proc(self: ^Renderer, slot: $H) {
+  guard(self)
+  release_slot(self, slot_index(slot))
+}
+
+// stage_transforms applies a scene graph's change feed, place or release per entry: `changes` is
+// any struct with `index`, `world_matrix`, `visible` and `removed` fields, removals first.
+stage_transforms :: proc(self: ^Renderer, changes: []$T) {
+  guard(self)
+  for &c in changes {
+    if c.removed do release_slot(self, u32(c.index))
+    else do place_slot(self, u32(c.index), c.world_matrix, c.visible)
+  }
+}
+
+// place and release, the caller holding the render mutex.
+@(private = "file")
+place_slot :: proc(self: ^Renderer, slot: u32, world_matrix: matrix[4, 4]f32, visible: bool) {
   node := slot_node(self, slot)
   if node == nil do return
   node.world_matrix = world_matrix
@@ -602,11 +621,8 @@ place :: proc(self: ^Renderer, slot: $H, world_matrix: matrix[4, 4]f32, visible 
   mark_dirty(self, .NODES, int(slot))
 }
 
-// release empties a slot: it forgets its attachment and bone palette; meshes, materials and
-// what was attached stay.
-release :: proc(self: ^Renderer, slot: $H) {
-  slot := slot_index(slot)
-  guard(self)
+@(private = "file")
+release_slot :: proc(self: ^Renderer, slot: u32) {
   unbind(self, slot)
   #reverse for b, i in self.bursts do if b.row == 0 && b.slot == slot do ordered_remove(&self.bursts, i)
   if slot >= self.node_count do return
@@ -616,17 +632,8 @@ release :: proc(self: ^Renderer, slot: $H) {
   mark_dirty(self, .NODES, int(slot))
 }
 
-// stage_transforms applies a scene graph's change feed, place or release per entry: `changes` is
-// any struct with `index`, `world_matrix`, `visible` and `removed` fields, removals first.
-stage_transforms :: proc(self: ^Renderer, changes: []$T) {
-  guard(self)
-  for &c in changes {
-    if c.removed do release(self, SlotHandle(c.index))
-    else do place(self, SlotHandle(c.index), c.world_matrix, c.visible)
-  }
-}
-
-// A placement table holds at most one row per slot. The live row of `table` placed at `slot`.
+// A placement table holds at most one row per slot. The live row of the pool's table placed at
+// `slot`.
 @(private = "file")
 placed_at :: proc(self: ^Renderer, pool: Pool, $T: typeid, slot: u32) -> (index: u32, ok: bool) {
   rows := write_table(self, POOLS[pool].table, T)
@@ -1133,7 +1140,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
     caster_count += 1
   }
   slice.sort_by(casters[:caster_count], proc(a, b: Caster) -> bool {return a.score > b.score})
-  sun_layers: u32 = SHADOW_CASCADES if sun_casts_shadow(self.sun) && has_eye else 0
+  sun_layers: u32 = SHADOW_CASCADES if self.sun.enabled && self.sun.cast_shadow && self.sun.intensity > 0 && has_eye else 0
   self.sun_shadow_map = SHADOW_VIEW_BASE if sun_layers > 0 else 0
   maps := &self.shadow_casters
   selected := select_shadow_casters(casters[:caster_count], maps, dev.frame_serial(&self.gpu))
@@ -1194,11 +1201,6 @@ sun_light :: proc(sun: Sun) -> (radiance, toward: [4]f32) {
   radiance.rgb = sun.color * sun.intensity
   toward.xyz = -sun_direction(sun)
   return
-}
-
-@(private)
-sun_casts_shadow :: proc(sun: Sun) -> bool {
-  return sun.enabled && sun.cast_shadow && sun.intensity > 0
 }
 
 // Frees the rows of the bursts the last frame emitted and gives the queued ones a row each.
@@ -1307,7 +1309,8 @@ flush :: proc(self: ^Renderer, frame_index: u32) {
   // cull dispatches cover the slots up to the last one holding anything
   nodes := write_table(self, .NODES, Node)
   for self.node_count > 0 && nodes[self.node_count - 1] == {} do self.node_count -= 1
-  overlay_flush(self)
+  // the staged overlay draws only with a main camera
+  if _, ok := main_camera(self); !ok do overlay_clear(self)
 }
 
 // frame renders and presents one frame at the window's framebuffer size in pixels and its DPI

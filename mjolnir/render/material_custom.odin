@@ -10,7 +10,7 @@ MaterialShader :: distinct u32
 // stage is its fs_main and, optionally, a vs_main that moves the mesh's vertices (procedural
 // animation, defining CUSTOM_VERTEX before including material.slang); without one the vertex
 // stage is render's. Its materials draw in the forward pass, after the built-in forward types,
-// over the lit image: depth-tested, blended by `blend`, and writing depth unless `depth_write`
+// over the lit image: depth-tested, culled by `cull`, blended by `blend`, and writing depth unless `depth_write`
 // is false (so nearer meshes hide farther ones drawn after them; a blended shader that discards
 // nothing may want it off). They cast no shadow, are not occlusion-culled, are culled by the
 // mesh's bounds (keep moved vertices near them) and see only the sun (View.sun_direction,

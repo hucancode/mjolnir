@@ -45,7 +45,7 @@ append_box :: proc(self: ^NavGeometryBuilder, center, half_extents: [3]f32, area
   }
 }
 
-// The corners of each face of the unit box, wound as render's make_cube winds them.
+// The corners of each face of the unit box, wound counter-clockwise seen from outside.
 @(private = "file")
 BOX_FACES :: [6][4][3]f32 {
   {{-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}},

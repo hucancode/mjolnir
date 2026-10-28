@@ -236,9 +236,8 @@ BonePose :: struct {
 }
 
 Frame :: struct {
-  bone:     int,
-  position: [3]f32,
-  rotation: quaternion128,
+  bone:  int,
+  place: geometry.Transform,
 }
 
 Mesh :: enum {
@@ -334,18 +333,13 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
 
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
-}
-
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 
@@ -527,7 +521,7 @@ turn :: proc(angle: f32, axis: [3]f32) -> quaternion128 {
 }
 
 at :: proc(f: Frame, position: [3]f32, rotation := linalg.QUATERNIONF32_IDENTITY) -> Frame {
-  return {f.bone, f.position + linalg.quaternion128_mul_vector3(f.rotation, position), f.rotation * rotation}
+  return {f.bone, geometry.transform_mul(f.place, {position, rotation, 1})}
 }
 
 part :: proc(app: ^App, name: string) {
@@ -536,8 +530,8 @@ part :: proc(app: ^App, name: string) {
 
 piece :: proc(app: ^App, f: Frame, mesh: Mesh, scale: [3]f32, position: [3]f32 = {}, rotation := linalg.QUATERNIONF32_IDENTITY, next := true) {
   node := world.spawn(&app.scene, parent = app.bones[f.bone].node)
-  placed := at(f, position, rotation)
-  world.set_local(&app.scene, node, placed.position, placed.rotation, scale)
+  placed := geometry.transform_mul(f.place, {position, rotation, scale})
+  world.set_local(&app.scene, node, placed.position, placed.rotation, placed.scale)
   key := fmt.tprintf("%s %d", app.part, app.count)
   append(&app.pieces, Piece{node, mesh, hash.fnv32a(transmute([]u8)key)})
   if next do app.count += 1
@@ -586,8 +580,7 @@ mounts :: proc(j: Joint) -> (a, b: geometry.Face) {
 
 joint :: proc(app: ^App, parent: Frame, slot: geometry.Face, j: Joint, binds: [3]Bind, child: geometry.Face) -> (Frame, int) {
   a, b := mounts(j)
-  origin, rotation := geometry.seat(slot, a)
-  frame := at(parent, origin, rotation)
+  frame := Frame{parent.bone, geometry.transform_mul(parent.place, geometry.seat(slot, a))}
   part(app, j.name)
   #partial switch j.kind {
   case .HINGE, .HINGE_TWIST, .WRIST:
@@ -619,11 +612,11 @@ joint :: proc(app: ^App, parent: Frame, slot: geometry.Face, j: Joint, binds: [3
   }
   bones: [3]int
   for d, i in dofs[:count] {
-    if i == 0 do bones[i] = bone(app, frame.bone, at(frame, d.offset).position, frame.rotation * d.rest, d.axis, binds[i])
+    if i == 0 do bones[i] = bone(app, frame.bone, geometry.transform_point(frame.place, d.offset), frame.place.rotation * d.rest, d.axis, binds[i])
     else do bones[i] = bone(app, bones[i - 1], d.offset, d.rest, d.axis, binds[i])
   }
   ride :: proc(bone: int) -> Frame {
-    return {bone, {}, linalg.QUATERNIONF32_IDENTITY}
+    return {bone, geometry.TRANSFORM_IDENTITY}
   }
   #partial switch j.kind {
   case .HINGE, .HINGE_TWIST:
@@ -638,8 +631,7 @@ joint :: proc(app: ^App, parent: Frame, slot: geometry.Face, j: Joint, binds: [3
   case .BALL:
     ball_male(app, ride(bones[2]), j)
   }
-  position, seated := geometry.seat(b, child)
-  return {bones[count - 1], position, seated}, bones[0]
+  return {bones[count - 1], geometry.seat(b, child)}, bones[0]
 }
 
 jaw_width :: proc(j: Joint) -> f32 {
@@ -698,7 +690,7 @@ ball_male :: proc(app: ^App, f: Frame, j: Joint) {
 }
 
 build :: proc(app: ^App) {
-  pelvis := Frame{bone(app, -1), {}, linalg.QUATERNIONF32_IDENTITY}
+  pelvis := Frame{bone(app, -1), geometry.TRANSFORM_IDENTITY}
   part(app, "pelvis")
   cylinder(app, pelvis, HIP_W / 2, DISC_T, {0, -DISC_T, 0})
   cylinder(app, pelvis, HIP_H, DOME_W, {-DOME_W / 2, -DISC_T, 0}, turn(math.PI / 2, Y) * turn(math.PI / 2, X), .HALF_CYLINDER)

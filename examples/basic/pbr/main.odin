@@ -62,9 +62,8 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
@@ -96,10 +95,6 @@ shutdown :: proc(app: ^App) {
   free(app)
 }
 
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
-}
-
 show_model :: proc(app: ^App, index: int) {
   gltf.destroy(&app.instance, &app.scene, &app.renderer)
   gltf.destroy(&app.model, &app.renderer)
@@ -129,14 +124,14 @@ update :: proc(app: ^App, dt: f32) {
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
   if debugui.window(&app.debug, "PBR Lighting", {20, 20, 220, 440}, {}) {
-	mu.layout_row(ctx, {-1}, 0)
+  mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Sun intensity")
     mu.slider(ctx, &dir_intensity, 0.0, 20.0)
     mu.label(ctx, "IBL intensity")

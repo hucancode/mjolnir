@@ -256,7 +256,7 @@ aim :: proc(self: ^Choreo, s: Slider) -> f32 {
 }
 
 @(private = "file")
-draw :: proc(self: ^Choreo, pool: []Slider, n: int) -> []Slider {
+deal :: proc(self: ^Choreo, pool: []Slider, n: int) -> []Slider {
   @(static) buffer: [CHANNEL_COUNT]Slider
   rested := 0
   for s in pool do if s.key not_in self.busy {
@@ -358,7 +358,7 @@ improvise :: proc(self: ^Choreo) -> f32 {
     switch step {
     case .ANTIC:
       n := 1 + pick(self, min(3, smalls))
-      for s in draw(self, small[:smalls], n) do if allowed(self, s.key) {
+      for s in deal(self, small[:smalls], n) do if allowed(self, s.key) {
         cut(self, s.key, aim(self, s), t, dur, .Linear)
         moved += {s.key}
       }
@@ -370,7 +370,7 @@ improvise :: proc(self: ^Choreo) -> f32 {
         opens += 1
       }
       if opens > 0 {
-        s := draw(self, open[:opens], 1)[0]
+        s := deal(self, open[:opens], 1)[0]
         from := self.cur[s.key]
         to := aim(self, s)
         settle := durs[i + 1] if i + 1 < len(style) && steps[i + 1] == .BOUNCE else 0

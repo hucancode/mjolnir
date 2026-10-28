@@ -3,73 +3,189 @@ package geometry
 import "core:math"
 import "core:math/linalg"
 
-// make_cube builds a 2x2x2 cube centered at the origin with per-face normals.
-make_cube :: proc(
+// ProfilePoint is a point of a profile make_lathe turns about the Y axis: its distance from the
+// axis and its height, its outward normal in that plane, and its v texture coordinate.
+ProfilePoint :: struct {
+  position: [2]f32, // (radius, y)
+  normal:   [2]f32, // (radial, y)
+  v:        f32,
+}
+
+// make_lathe turns profile strips about the Y axis, `arc` radians from +X toward +Z, each strip
+// into a smooth band of `segments` columns: vases, columns, wheels, caps. Walk each strip down
+// the outside: top to bottom along a side, center to rim for a top cap, rim to center for a
+// bottom one; a corner is two strips meeting. u runs along the turn and v is the point's; a flat
+// strip (normals along Y) maps planar instead, as a disc as wide as its widest point. A faceted
+// lathe gives each quad its own four vertices and flat normal, so the quads can move apart.
+// Under a full turn `close` fills each cut end between the strips and the axis.
+make_lathe :: proc(
+  strips: [][]ProfilePoint,
+  segments: u32 = 32,
+  arc: f32 = 2.0 * math.PI,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  faceted := false,
+  close := false,
 ) -> Mesh {
-  vertices := make([]Vertex, 24)
-  indices := make([]u32, 36)
-  vertices[0] = {{-1, -1, 1}, VEC_FORWARD, color, {0, 1}, {}}
-  vertices[1] = {{1, -1, 1}, VEC_FORWARD, color, {1, 1}, {}}
-  vertices[2] = {{1, 1, 1}, VEC_FORWARD, color, {1, 0}, {}}
-  vertices[3] = {{-1, 1, 1}, VEC_FORWARD, color, {0, 0}, {}}
-  vertices[4] = {{-1, 1, -1}, VEC_BACKWARD, color, {1, 1}, {}}
-  vertices[5] = {{1, 1, -1}, VEC_BACKWARD, color, {0, 1}, {}}
-  vertices[6] = {{1, -1, -1}, VEC_BACKWARD, color, {0, 0}, {}}
-  vertices[7] = {{-1, -1, -1}, VEC_BACKWARD, color, {1, 0}, {}}
-  vertices[8] = {{1, 1, -1}, VEC_UP, color, {0, 1}, {}}
-  vertices[9] = {{-1, 1, -1}, VEC_UP, color, {1, 1}, {}}
-  vertices[10] = {{-1, 1, 1}, VEC_UP, color, {1, 0}, {}}
-  vertices[11] = {{1, 1, 1}, VEC_UP, color, {0, 0}, {}}
-  vertices[12] = {{1, -1, 1}, VEC_DOWN, color, {0, 1}, {}}
-  vertices[13] = {{-1, -1, 1}, VEC_DOWN, color, {1, 1}, {}}
-  vertices[14] = {{-1, -1, -1}, VEC_DOWN, color, {1, 0}, {}}
-  vertices[15] = {{1, -1, -1}, VEC_DOWN, color, {0, 0}, {}}
-  vertices[16] = {{1, -1, -1}, VEC_RIGHT, color, {0, 1}, {}}
-  vertices[17] = {{1, 1, -1}, VEC_RIGHT, color, {1, 1}, {}}
-  vertices[18] = {{1, 1, 1}, VEC_RIGHT, color, {1, 0}, {}}
-  vertices[19] = {{1, -1, 1}, VEC_RIGHT, color, {0, 0}, {}}
-  vertices[20] = {{-1, -1, 1}, VEC_LEFT, color, {0, 1}, {}}
-  vertices[21] = {{-1, 1, 1}, VEC_LEFT, color, {1, 1}, {}}
-  vertices[22] = {{-1, 1, -1}, VEC_LEFT, color, {1, 0}, {}}
-  vertices[23] = {{-1, -1, -1}, VEC_LEFT, color, {0, 0}, {}}
-  #unroll for face in 0 ..< 6 {
-    i := u32(face * 4)
-    p := indices[face * 6:]
-    p[0], p[1], p[2], p[3], p[4], p[5] = i, i + 1, i + 2, i + 2, i + 3, i
+  columns := int(segments) + 1
+  cut := close && arc < 2.0 * math.PI - 1e-4
+  // a band's triangles touching the axis have no area: skipped
+  on_axis :: proc(p: [2]f32) -> bool {
+    return abs(p.x) < 1e-6
+  }
+  vertex_count, index_count := 0, 0
+  for strip in strips {
+    if !faceted do vertex_count += len(strip) * columns
+    for k in 0 ..< len(strip) - 1 {
+      p0, p1 := strip[k].position, strip[k + 1].position
+      index_count += int(segments) * 3 * (int(!on_axis(p0)) + int(!on_axis(p1)))
+      if faceted do vertex_count += int(segments) * 4
+      if cut && has_cut_face(p0, p1) do vertex_count, index_count = vertex_count + 8, index_count + 12
+    }
+  }
+  vertices := make([]Vertex, vertex_count)
+  indices := make([]u32, index_count)
+  turn :: proc(p: [2]f32, angle: f32) -> [3]f32 {
+    return {p.x * math.cos(angle), p.y, p.x * math.sin(angle)}
+  }
+  has_cut_face :: proc(p0, p1: [2]f32) -> bool {
+    return (p0.x + p1.x) * abs(p0.y - p1.y) > 1e-6
+  }
+  v, i := 0, 0
+  for strip in strips {
+    flat := true
+    widest: f32
+    for p in strip {
+      if abs(p.normal.x) > 1e-6 do flat = false
+      widest = max(widest, p.position.x)
+    }
+    uv := proc(p: ProfilePoint, column: int, segments: u32, arc: f32, flat: bool, widest: f32) -> [2]f32 {
+      if !flat do return {f32(column) / f32(segments), p.v}
+      angle := arc * f32(column) / f32(segments)
+      r := p.position.x / widest if widest > 0 else 0
+      return 0.5 + 0.5 * r * [2]f32{math.cos(angle), math.sin(angle)}
+    }
+    base := v
+    if !faceted {
+      for p in strip {
+        for column in 0 ..< columns {
+          angle := arc * f32(column) / f32(segments)
+          vertices[v] = {
+            position = turn(p.position, angle),
+            normal   = turn(p.normal, angle),
+            color    = color,
+            uv       = uv(p, column, segments, arc, flat, widest),
+          }
+          v += 1
+        }
+      }
+    }
+    for k in 0 ..< len(strip) - 1 {
+      p0, p1 := strip[k], strip[k + 1]
+      for column in 0 ..< int(segments) {
+        // the quad's corners: column then column + 1 at p0, then at p1
+        a, a1, b, b1: u32
+        if faceted {
+          a = u32(v)
+          a1, b, b1 = a + 1, a + 2, a + 3
+          normal := turn(linalg.normalize0(p0.normal + p1.normal), arc * (f32(column) + 0.5) / f32(segments))
+          for corner in 0 ..< 4 {
+            p, c := strip[k + corner / 2], column + corner % 2
+            vertices[v] = {
+              position = turn(p.position, arc * f32(c) / f32(segments)),
+              normal   = normal,
+              color    = color,
+              uv       = uv(p, c, segments, arc, flat, widest),
+            }
+            v += 1
+          }
+        } else {
+          a = u32(base + k * columns + column)
+          a1, b, b1 = a + 1, a + u32(columns), a + u32(columns) + 1
+        }
+        if !on_axis(p0.position) {
+          indices[i], indices[i + 1], indices[i + 2] = a, a1, b
+          i += 3
+        }
+        if !on_axis(p1.position) {
+          indices[i], indices[i + 1], indices[i + 2] = b, a1, b1
+          i += 3
+        }
+      }
+      if !cut || !has_cut_face(p0.position, p1.position) do continue
+      // the end at angle 0 faces -Z, the end at arc faces on along the turn
+      for end in 0 ..< 2 {
+        angle := arc * f32(end)
+        normal := [3]f32{0, 0, -1} if end == 0 else {-math.sin(angle), 0, math.cos(angle)}
+        q := u32(v)
+        corners := [4]ProfilePoint{{position = {0, p0.position.y}, v = p0.v}, {position = {0, p1.position.y}, v = p1.v}, p0, p1}
+        for c in corners {
+          vertices[v] = {position = turn(c.position, angle), normal = normal, color = color, uv = {c.position.x / widest if widest > 0 else 0, c.v}}
+          v += 1
+        }
+        p := indices[i:]
+        if end == 0 do p[0], p[1], p[2], p[3], p[4], p[5] = q, q + 2, q + 1, q + 1, q + 2, q + 3
+        else do p[0], p[1], p[2], p[3], p[4], p[5] = q, q + 1, q + 2, q + 1, q + 3, q + 2
+        i += 6
+      }
+    }
   }
   return make_mesh(vertices, indices)
 }
 
-// make_wedge builds make_cube's 2x2x2 box with its top sloping down toward +Z: the front top
-// edge drops `taper` of the height (0 is the cube, 1 a full wedge).
-make_wedge :: proc(
-  taper: f32 = 1,
-  color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-) -> Mesh {
-  front := 1 - 2 * clamp(taper, 0, 1)
-  slope := linalg.normalize([3]f32{0, 1, taper})
-  faces := [6]struct {
-    normal:  [3]f32,
-    corners: [4][3]f32,
-  } {
-    {VEC_FORWARD, {{-1, -1, 1}, {1, -1, 1}, {1, front, 1}, {-1, front, 1}}},
-    {VEC_BACKWARD, {{-1, 1, -1}, {1, 1, -1}, {1, -1, -1}, {-1, -1, -1}}},
-    {slope, {{1, 1, -1}, {-1, 1, -1}, {-1, front, 1}, {1, front, 1}}},
-    {VEC_DOWN, {{1, -1, 1}, {-1, -1, 1}, {-1, -1, -1}, {1, -1, -1}}},
-    {VEC_RIGHT, {{1, -1, -1}, {1, 1, -1}, {1, front, 1}, {1, -1, 1}}},
-    {VEC_LEFT, {{-1, -1, 1}, {-1, front, 1}, {-1, 1, -1}, {-1, -1, -1}}},
+// make_extrusion builds a prism: a convex `polygon` in the XY plane, counter-clockwise seen from
+// +Z, extruded `depth` along Z and centered on it, with a flat normal per face. Each side maps
+// uv 0..1 along its edge and from front to back; the caps map planar over the polygon's bounds.
+make_extrusion :: proc(polygon: [][2]f32, depth: f32 = 2, color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> Mesh {
+  n := len(polygon)
+  if n < 3 do return {}
+  vertices := make([]Vertex, 6 * n)
+  indices := make([]u32, 6 * (n - 2) + 6 * n)
+  lo, hi := polygon[0], polygon[0]
+  for p in polygon do lo, hi = linalg.min(lo, p), linalg.max(hi, p)
+  size := linalg.max(hi - lo, 1e-6)
+  half := depth * 0.5
+  for p, j in polygon {
+    u, v := (p.x - lo.x) / size.x, (hi.y - p.y) / size.y
+    vertices[j] = {position = {p.x, p.y, half}, normal = VEC_FORWARD, color = color, uv = {u, v}}
+    vertices[n + j] = {position = {p.x, p.y, -half}, normal = VEC_BACKWARD, color = color, uv = {1 - u, v}}
   }
-  uvs := [4][2]f32{{0, 1}, {1, 1}, {1, 0}, {0, 0}}
-  vertices := make([]Vertex, 24)
-  indices := make([]u32, 36)
-  for face, f in faces {
-    i := u32(f * 4)
-    for corner, c in face.corners do vertices[int(i) + c] = {corner, face.normal, color, uvs[c], {}}
-    p := indices[f * 6:]
-    p[0], p[1], p[2], p[3], p[4], p[5] = i, i + 1, i + 2, i + 2, i + 3, i
+  i := 0
+  for j in 1 ..< u32(n - 1) {
+    back := u32(n)
+    p := indices[i:]
+    p[0], p[1], p[2], p[3], p[4], p[5] = 0, j, j + 1, back, back + j + 1, back + j
+    i += 6
+  }
+  for a, j in polygon {
+    b := polygon[(j + 1) % n]
+    normal := linalg.normalize0([3]f32{b.y - a.y, a.x - b.x, 0})
+    q := u32(2 * n + 4 * j)
+    vertices[q] = {position = {a.x, a.y, half}, normal = normal, color = color, uv = {0, 0}}
+    vertices[q + 1] = {position = {b.x, b.y, half}, normal = normal, color = color, uv = {1, 0}}
+    vertices[q + 2] = {position = {b.x, b.y, -half}, normal = normal, color = color, uv = {1, 1}}
+    vertices[q + 3] = {position = {a.x, a.y, -half}, normal = normal, color = color, uv = {0, 1}}
+    p := indices[i:]
+    p[0], p[1], p[2], p[3], p[4], p[5] = q, q + 2, q + 1, q, q + 3, q + 2
+    i += 6
   }
   return make_mesh(vertices, indices)
+}
+
+// make_cube builds a 2x2x2 cube centered at the origin with per-face normals.
+make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> Mesh {
+  square := [4][2]f32{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}
+  return make_extrusion(square[:], 2, color)
+}
+
+// make_wedge builds make_cube's 2x2x2 box with its top sloping down toward +Z: the front top
+// edge drops `taper` of the height (0 is the cube, 1 a full wedge).
+make_wedge :: proc(taper: f32 = 1, color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> Mesh {
+  // the side profile (z, y), extruded along X
+  front := 1 - 2 * clamp(taper, 0, 1)
+  side := [4][2]f32{{-1, -1}, {1, -1}, {1, front}, {-1, 1}}
+  mesh := make_extrusion(side[:], 2, color)
+  mesh_transform(mesh, {rotation = linalg.quaternion_angle_axis_f32(-math.PI / 2, VEC_UP), scale = {1, 1, 1}})
+  return mesh
 }
 
 // make_quad builds a quad on the XZ plane facing +Y.
@@ -102,9 +218,10 @@ make_billboard_quad :: proc(
   return make_mesh(vertices, indices)
 }
 
-// make_sphere builds a UV sphere of the given radius centered at the origin. A faceted sphere
-// gives each quad its own four vertices, all with the normal through the quad's center, so the
-// quads shade flat and can move apart.
+// make_sphere builds a UV sphere of the given radius centered at the origin: ring r of the
+// (rings + 1) * (segments + 1) vertices runs around at latitude r from the top. A faceted
+// sphere gives each quad its own four vertices, all with the normal through the quad's center,
+// so the quads shade flat and can move apart.
 make_sphere :: proc(
   segments: u32 = 16,
   rings: u32 = 16,
@@ -112,61 +229,14 @@ make_sphere :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
   faceted := false,
 ) -> Mesh {
-  point :: proc(seg, ring: f32, segments, rings: u32) -> [3]f32 {
-    phi := math.PI * ring / f32(rings)
-    theta := 2.0 * math.PI * seg / f32(segments)
-    return {math.sin(phi) * math.cos(theta), math.cos(phi), math.sin(phi) * math.sin(theta)}
+  profile := make([]ProfilePoint, rings + 1, context.temp_allocator)
+  for &p, ring in profile {
+    phi := math.PI * f32(ring) / f32(rings)
+    n := [2]f32{math.sin(phi), math.cos(phi)}
+    p = {radius * n, n, f32(ring) / f32(rings)}
   }
-  if faceted {
-    vertices := make([]Vertex, rings * segments * 4)
-    indices := make([]u32, rings * segments * 6)
-    for ring in 0 ..< rings {
-      for seg in 0 ..< segments {
-        quad := ring * segments + seg
-        normal := point(f32(seg) + 0.5, f32(ring) + 0.5, segments, rings)
-        for corner in u32(0) ..< 4 {
-          s, r := seg + corner % 2, ring + corner / 2
-          vertices[quad * 4 + corner] = Vertex {
-            position = radius * point(f32(s), f32(r), segments, rings),
-            normal   = normal,
-            color    = color,
-            uv       = {f32(s) / f32(segments), f32(r) / f32(rings)},
-          }
-        }
-        a := quad * 4
-        p := indices[quad * 6:]
-        p[0], p[1], p[2], p[3], p[4], p[5] = a, a + 1, a + 2, a + 2, a + 1, a + 3
-      }
-    }
-    return make_mesh(vertices, indices)
-  }
-  vert_count := (rings + 1) * (segments + 1)
-  idx_count := rings * segments * 6
-  vertices := make([]Vertex, vert_count)
-  indices := make([]u32, idx_count)
-  for ring in 0 ..= rings {
-    for seg in 0 ..= segments {
-      n := point(f32(seg), f32(ring), segments, rings)
-      idx := ring * (segments + 1) + seg
-      vertices[idx] = Vertex {
-        position = radius * n,
-        normal   = n,
-        color    = color,
-        uv       = {f32(seg) / f32(segments), f32(ring) / f32(rings)},
-      }
-    }
-  }
-  i := 0
-  for ring in 0 ..< rings {
-    for seg in 0 ..< segments {
-      a := ring * (segments + 1) + seg
-      b := a + segments + 1
-      p := indices[i:]
-      p[0], p[1], p[2], p[3], p[4], p[5] = a, a + 1, b, b, a + 1, b + 1
-      i += 6
-    }
-  }
-  return make_mesh(vertices, indices)
+  strips := [1][]ProfilePoint{profile}
+  return make_lathe(strips[:], segments, color = color, faceted = faceted)
 }
 
 // make_cone builds a cone along Y with a capped base and its tip at +height/2. A top_radius
@@ -178,42 +248,13 @@ make_cone :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
   top_radius: f32 = 0,
 ) -> Mesh {
-  // side columns (top then bottom vertex), then the bottom cap's center and rim, then the top cap's
-  ring := segments + 1
-  bottom_center := 2 * ring
-  top_center := bottom_center + 1 + ring
-  top_cap := top_radius > 0
-  vertices := make([]Vertex, top_center + (1 + ring if top_cap else 0))
-  indices := make([]u32, segments * (12 if top_cap else 6))
-  half_h := height * 0.5
-  for i in 0 ..< ring {
-    theta := 2.0 * math.PI * f32(i) / f32(segments)
-    x, z := math.cos(theta), math.sin(theta)
-    u := f32(i) / f32(segments)
-    normal := linalg.normalize([3]f32{x * height, radius - top_radius, z * height})
-    vertices[i * 2] = {position = {top_radius * x, half_h, top_radius * z}, normal = normal, color = color, uv = {u, 0}}
-    vertices[i * 2 + 1] = {position = {radius * x, -half_h, radius * z}, normal = normal, color = color, uv = {u, 1}}
-    cap_uv := [2]f32{0.5 + 0.5 * x, 0.5 + 0.5 * z}
-    vertices[bottom_center + 1 + i] = {position = {radius * x, -half_h, radius * z}, normal = {0, -1, 0}, color = color, uv = cap_uv}
-    if top_cap do vertices[top_center + 1 + i] = {position = {top_radius * x, half_h, top_radius * z}, normal = {0, 1, 0}, color = color, uv = cap_uv}
-  }
-  vertices[bottom_center] = {position = {0, -half_h, 0}, normal = {0, -1, 0}, color = color, uv = {0.5, 0.5}}
-  if top_cap do vertices[top_center] = {position = {0, half_h, 0}, normal = {0, 1, 0}, color = color, uv = {0.5, 0.5}}
-  i := 0
-  for seg in 0 ..< segments {
-    a, c := seg * 2, seg * 2 + 2
-    if top_cap {
-      top_rim := top_center + 1 + seg
-      p := indices[i:]
-      p[0], p[1], p[2], p[3], p[4], p[5] = a, c, a + 1, top_center, top_rim + 1, top_rim
-      i += 6
-    }
-    rim := bottom_center + 1 + seg
-    p := indices[i:]
-    p[0], p[1], p[2], p[3], p[4], p[5] = a + 1, c, c + 1, bottom_center, rim, rim + 1
-    i += 6
-  }
-  return make_mesh(vertices, indices)
+  h := height * 0.5
+  slope := linalg.normalize([2]f32{height, radius - top_radius})
+  side := [2]ProfilePoint{{{top_radius, h}, slope, 0}, {{radius, -h}, slope, 1}}
+  bottom := [2]ProfilePoint{{{radius, -h}, {0, -1}, 0}, {{0, -h}, {0, -1}, 0}}
+  top := [2]ProfilePoint{{{0, h}, {0, 1}, 0}, {{top_radius, h}, {0, 1}, 0}}
+  strips := [3][]ProfilePoint{side[:], bottom[:], top[:]}
+  return make_lathe(strips[:3 if top_radius > 0 else 2], segments, color = color)
 }
 
 // make_capsule builds a capsule along Y: two hemispheres joined by a cylinder.
@@ -225,68 +266,19 @@ make_capsule :: proc(
   radius: f32 = 0.5,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> Mesh {
-  half_cyl := height * 0.5 - radius
-  hemi_verts := (rings + 1) * (segments + 1)
-  vertices := make([]Vertex, 2 * hemi_verts + 2 * (segments + 1))
-  indices := make([]u32, (2 * rings + 1) * segments * 6)
-  v: u32 = 0
-  i := 0
-  // Hemispheres: ring 0 is the equator, ring `rings` the pole
-  for sign in ([2]f32{1, -1}) {
-    start := v
-    for ring in 0 ..= rings {
-      t := f32(ring) / f32(rings)
-      phi := (math.PI / 2.0) * t
-      y := sign * math.sin(phi)
-      r := math.cos(phi)
-      for seg in 0 ..= segments {
-        theta := 2.0 * math.PI * f32(seg) / f32(segments)
-        x := r * math.cos(theta)
-        z := r * math.sin(theta)
-        vertices[v] = Vertex {
-          position = {radius * x, sign * half_cyl + radius * y, radius * z},
-          normal   = {x, y, z},
-          color    = color,
-          uv       = {f32(seg) / f32(segments), 0.5 - sign * (0.25 + 0.25 * t)},
-        }
-        v += 1
-      }
-    }
-    for ring in 0 ..< rings {
-      for seg in 0 ..< segments {
-        a := start + ring * (segments + 1) + seg
-        b := a + segments + 1
-        p := indices[i:]
-        if sign > 0 {
-          p[0], p[1], p[2], p[3], p[4], p[5] = a, b, a + 1, b, b + 1, a + 1
-        } else {
-          p[0], p[1], p[2], p[3], p[4], p[5] = a, a + 1, b, b, a + 1, b + 1
-        }
-        i += 6
-      }
-    }
+  // each hemisphere's rings + 1 points, pole to equator then equator to pole: the cylinder is
+  // the band between the equators
+  half := height * 0.5 - radius
+  profile := make([]ProfilePoint, 2 * (rings + 1), context.temp_allocator)
+  for ring in 0 ..= rings {
+    t := f32(ring) / f32(rings)
+    phi := math.PI / 2 * t
+    n := [2]f32{math.sin(phi), math.cos(phi)}
+    profile[ring] = {{radius * n.x, half + radius * n.y}, n, 0.25 * t}
+    profile[2 * rings + 1 - ring] = {{radius * n.x, -half - radius * n.y}, {n.x, -n.y}, 1 - 0.25 * t}
   }
-  // Cylinder sides: top and bottom ring interleaved
-  cyl_start := v
-  for seg in 0 ..= segments {
-    theta := 2.0 * math.PI * f32(seg) / f32(segments)
-    x := math.cos(theta)
-    z := math.sin(theta)
-    u := f32(seg) / f32(segments)
-    vertices[v] = {{radius * x, half_cyl, radius * z}, {x, 0, z}, color, {u, 0.25}, {}}
-    vertices[v + 1] = {{radius * x, -half_cyl, radius * z}, {x, 0, z}, color, {u, 0.75}, {}}
-    v += 2
-  }
-  for seg in 0 ..< segments {
-    a := cyl_start + seg * 2
-    b := a + 1
-    c := a + 2
-    d := a + 3
-    p := indices[i:]
-    p[0], p[1], p[2], p[3], p[4], p[5] = a, c, b, b, c, d
-    i += 6
-  }
-  return make_mesh(vertices, indices)
+  strips := [1][]ProfilePoint{profile}
+  return make_lathe(strips[:], segments, color = color)
 }
 
 // make_torus builds a torus in the XY plane, around the Z axis.
@@ -297,44 +289,18 @@ make_torus :: proc(
   minor_radius: f32 = 0.3,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> Mesh {
-  vert_count := (segments + 1) * (sides + 1)
-  idx_count := segments * sides * 6
-  vertices := make([]Vertex, vert_count)
-  indices := make([]u32, idx_count)
-  for seg in 0 ..= segments {
-    theta := 2.0 * math.PI * f32(seg) / f32(segments)
-    cos_theta := math.cos(theta)
-    sin_theta := math.sin(theta)
-    for side in 0 ..= sides {
-      phi := 2.0 * math.PI * f32(side) / f32(sides)
-      cos_phi := math.cos(phi)
-      sin_phi := math.sin(phi)
-      x := (major_radius + minor_radius * cos_phi) * cos_theta
-      y := (major_radius + minor_radius * cos_phi) * sin_theta
-      z := minor_radius * sin_phi
-      idx := seg * (sides + 1) + side
-      nx := cos_theta * cos_phi
-      ny := sin_theta * cos_phi
-      nz := sin_phi
-      vertices[idx] = Vertex {
-        position = {x, y, z},
-        normal   = {nx, ny, nz},
-        color    = color,
-        uv       = {f32(seg) / f32(segments), f32(side) / f32(sides)},
-      }
-    }
+  // the tube's circle, walked down its outside
+  profile := make([]ProfilePoint, sides + 1, context.temp_allocator)
+  for &p, side in profile {
+    phi := -2.0 * math.PI * f32(side) / f32(sides)
+    n := [2]f32{math.cos(phi), math.sin(phi)}
+    p = {{major_radius, 0} + minor_radius * n, n, f32(side) / f32(sides)}
   }
-  i := 0
-  for seg in 0 ..< segments {
-    for side in 0 ..< sides {
-      a := seg * (sides + 1) + side
-      b := ((seg + 1) % (segments + 1)) * (sides + 1) + side
-      p := indices[i:]
-      p[0], p[1], p[2], p[3], p[4], p[5] = a, b, a + 1, b, b + 1, a + 1
-      i += 6
-    }
-  }
-  return make_mesh(vertices, indices)
+  strips := [1][]ProfilePoint{profile}
+  mesh := make_lathe(strips[:], segments, color = color)
+  // turned about Y, stood up around Z
+  mesh_transform(mesh, {rotation = linalg.quaternion_angle_axis_f32(math.PI / 2, VEC_RIGHT), scale = {1, 1, 1}})
+  return mesh
 }
 
 // make_cylinder builds a cylinder along Y centered at the origin, its side cut into `rings`
@@ -350,80 +316,22 @@ make_cylinder :: proc(
   caps := true,
   arc: f32 = 2.0 * math.PI,
 ) -> Mesh {
-  // side columns top to bottom, then each cap's center and rim, then the two cut faces (axis top,
-  // axis bottom, rim top, rim bottom); columns repeat the first for the UV seam
-  ring := segments + 1
-  column := rings + 1
-  side := ring * column
-  top_center := side
-  bottom_center := top_center + 1 + ring
-  cut := caps && arc < 2.0 * math.PI - 1e-4
-  cut_start := bottom_center + 1 + ring
-  vertices := make([]Vertex, side + (2 * (ring + 1) if caps else 0) + (8 if cut else 0))
-  indices := make([]u32, segments * rings * 6 + (segments * 6 if caps else 0) + (12 if cut else 0))
-  half_h := height * 0.5
-  for i in 0 ..< ring {
-    theta := arc * f32(i) / f32(segments)
-    x, z := math.cos(theta), math.sin(theta)
-    u := f32(i) / f32(segments)
-    for r in 0 ..< column {
-      v := f32(r) / f32(rings)
-      vertices[i * column + r] = {position = {radius * x, half_h - height * v, radius * z}, normal = {x, 0, z}, color = color, uv = {u, v}}
-    }
+  h := height * 0.5
+  side := make([]ProfilePoint, rings + 1, context.temp_allocator)
+  for &p, ring in side {
+    v := f32(ring) / f32(rings)
+    p = {{radius, h - height * v}, {1, 0}, v}
   }
-  for seg in 0 ..< segments {
-    for r in 0 ..< rings {
-      a, c := seg * column + r, (seg + 1) * column + r
-      p := indices[(seg * rings + r) * 6:]
-      p[0], p[1], p[2], p[3], p[4], p[5] = a, c, a + 1, a + 1, c, c + 1
-    }
-  }
-  if !caps do return make_mesh(vertices, indices)
-  vertices[top_center] = {position = {0, half_h, 0}, normal = {0, 1, 0}, color = color, uv = {0.5, 0.5}}
-  vertices[bottom_center] = {position = {0, -half_h, 0}, normal = {0, -1, 0}, color = color, uv = {0.5, 0.5}}
-  for i in 0 ..< ring {
-    theta := arc * f32(i) / f32(segments)
-    x, z := math.cos(theta), math.sin(theta)
-    cap_uv := [2]f32{0.5 + 0.5 * x, 0.5 + 0.5 * z}
-    vertices[top_center + 1 + i] = {position = {radius * x, half_h, radius * z}, normal = {0, 1, 0}, color = color, uv = cap_uv}
-    vertices[bottom_center + 1 + i] = {position = {radius * x, -half_h, radius * z}, normal = {0, -1, 0}, color = color, uv = cap_uv}
-  }
-  for seg in 0 ..< segments {
-    top_rim, bottom_rim := top_center + 1 + seg, bottom_center + 1 + seg
-    p := indices[segments * rings * 6 + seg * 6:]
-    p[0], p[1], p[2] = top_center, top_rim + 1, top_rim
-    p[3], p[4], p[5] = bottom_center, bottom_rim, bottom_rim + 1
-  }
-  if !cut do return make_mesh(vertices, indices)
-  for face in 0 ..< u32(2) {
-    theta := arc * f32(face)
-    x, z := math.cos(theta), math.sin(theta)
-    normal := [3]f32{0, 0, -1} if face == 0 else [3]f32{-z, 0, x}
-    a := cut_start + face * 4
-    corners := [4][3]f32{{0, half_h, 0}, {0, -half_h, 0}, {radius * x, half_h, radius * z}, {radius * x, -half_h, radius * z}}
-    uvs := [4][2]f32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}
-    for c in 0 ..< 4 do vertices[int(a) + c] = {position = corners[c], normal = normal, color = color, uv = uvs[c]}
-    p := indices[segments * rings * 6 + segments * 6 + face * 6:]
-    if face == 0 do p[0], p[1], p[2], p[3], p[4], p[5] = a, a + 2, a + 1, a + 1, a + 2, a + 3
-    else do p[0], p[1], p[2], p[3], p[4], p[5] = a, a + 1, a + 2, a + 1, a + 3, a + 2
-  }
-  return make_mesh(vertices, indices)
+  top := [2]ProfilePoint{{{0, h}, {0, 1}, 0}, {{radius, h}, {0, 1}, 0}}
+  bottom := [2]ProfilePoint{{{radius, -h}, {0, -1}, 0}, {{0, -h}, {0, -1}, 0}}
+  strips := [3][]ProfilePoint{side, top[:], bottom[:]}
+  return make_lathe(strips[:3 if caps else 1], segments, arc, color, close = caps)
 }
 
-// make_circle builds a disc in XZ facing +Y centered at the origin: a fan of `segments`
-// triangles, uv mapping the disc's square to [0, 1].
+// make_circle builds a disc in XZ facing +Y centered at the origin, of `segments` triangles,
+// uv mapping the disc's square to [0, 1].
 make_circle :: proc(segments: u32 = 32, radius: f32 = 1.0, color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> Mesh {
-  vertices := make([]Vertex, segments + 2)
-  indices := make([]u32, segments * 3)
-  vertices[0] = {normal = {0, 1, 0}, color = color, uv = {0.5, 0.5}}
-  for i in 0 ..= segments {
-    theta := 2.0 * math.PI * f32(i) / f32(segments)
-    x, z := math.cos(theta), math.sin(theta)
-    vertices[1 + i] = {position = {radius * x, 0, radius * z}, normal = {0, 1, 0}, color = color, uv = {0.5 + 0.5 * x, 0.5 + 0.5 * z}}
-  }
-  for seg in 0 ..< segments {
-    p := indices[seg * 3:]
-    p[0], p[1], p[2] = 0, seg + 2, seg + 1
-  }
-  return make_mesh(vertices, indices)
+  disc := [2]ProfilePoint{{{0, 0}, {0, 1}, 0}, {{radius, 0}, {0, 1}, 0}}
+  strips := [1][]ProfilePoint{disc[:]}
+  return make_lathe(strips[:], segments, color = color)
 }

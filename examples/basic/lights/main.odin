@@ -71,15 +71,10 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
-}
-
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -212,7 +207,7 @@ update :: proc(app: ^App, dt: f32) {
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 
@@ -246,7 +241,7 @@ light_block :: proc(ctx: ^mu.Context, name: string, enabled: ^bool, intensity: ^
     mu.slider(ctx, radius, 1.0, 30.0)
   }
   if cone != nil {
-    mu.label(ctx, "Cone angle (deg):")
+    mu.label(ctx, "Cone angle")
     mu.slider(ctx, cone, 5.0, 80.0)
   }
 }

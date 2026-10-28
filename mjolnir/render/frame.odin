@@ -178,14 +178,6 @@ camera_passes :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, closing: ..
   barrier(self, cmd, ..closing)
 }
 
-// Without a main camera nothing else covers the presented image.
-@(private = "file")
-clear_backbuffer :: proc(self: ^Renderer, cmd: rhi.CommandList) {
-  colors := [1]rhi.ColorTarget{{texture = BACKBUFFER, load = .CLEAR}}
-  dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:]})
-  dev.cmd_end_pass(&self.gpu, cmd)
-}
-
 // Records, submits and presents the frame flush wrote. RESIZE: the swapchain is out of date.
 @(private)
 frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool, status: rhi.FrameStatus) {
@@ -234,7 +226,8 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
   if has_main {
     camera_passes(self, cmd, f, .FORWARD_TO_COMPUTE, .CULL_TO_COPY)
     // the lists the main camera drew: culled last frame (Vulkan) or this one (WebGPU)
-    draw_count_record(self, cmd, camera_slot(main) + f if BINDLESS else camera_next_slot(main, f), f)
+    slot := camera_slot(main) + f if BINDLESS else camera_next_slot(main, f)
+    dev.cmd_copy_buffer(&self.gpu, cmd, self.draw_lists[slot].buffer, 0, self.draw_count_readback[f], 0, size_of(u32))
     barrier(self, cmd, .COLOR_TO_SAMPLE)
     {
       scope(self, cmd, "post")
@@ -243,7 +236,10 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
     debug_line_record(self, cmd, f, main)
   } else {
     camera_passes(self, cmd, f, .FORWARD_TO_COMPUTE)
-    clear_backbuffer(self, cmd)
+    // nothing else covers the presented image
+    colors := [1]rhi.ColorTarget{{texture = BACKBUFFER, load = .CLEAR}}
+    dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:]})
+    dev.cmd_end_pass(&self.gpu, cmd)
   }
   {
     scope(self, cmd, "overlay")

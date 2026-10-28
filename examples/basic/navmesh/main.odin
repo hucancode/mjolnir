@@ -55,18 +55,13 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
 
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
-}
-
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 
@@ -96,7 +91,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   go_to(app, {20, 0, 20})
   return .READY
 }
-
 
 show_navmesh :: proc(app: ^App) {
   positions, indices := nav.debug_triangles(&app.navmesh, context.temp_allocator)

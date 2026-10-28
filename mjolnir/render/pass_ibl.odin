@@ -55,7 +55,8 @@ precompute_ibl :: proc(self: ^Renderer, equirect, irradiance_cube, prefilter_cub
     .IRRADIANCE = shader_source("ibl_irradiance"),
     .PREFILTER  = shader_source("ibl_prefilter"),
   }
-  when !BINDLESS do layouts: [PrecomputeShader]rhi.BindLayout
+  // both shaders read the equirect and write one cube level
+  when !BINDLESS do group_layout := gpu_layout(self, {count = 2, compute = true, kinds = {0 = .TEXTURE_FLOAT, 1 = .STORAGE_TEXTURE_ARRAY}, formats = {1 = .RGBA16F}}) or_return
   pipelines: [PrecomputeShader]rhi.Pipeline
   groups: [PRECOMPUTE_TARGETS]rhi.BindGroup
   defer {
@@ -64,12 +65,7 @@ precompute_ibl :: proc(self: ^Renderer, equirect, irradiance_cube, prefilter_cub
   }
   for shader in PrecomputeShader {
     layout := pipeline_layout(self, .NONE)
-    when !BINDLESS {
-      stages := bit_set[rhi.ShaderStage]{.COMPUTE}
-      entries := [?]rhi.BindEntry{{kind = .TEXTURE_FLOAT, stages = stages}, {kind = .STORAGE_TEXTURE_ARRAY, stages = stages, format = .RGBA16F}}
-      layouts[shader] = dev.bind_layout_create(&self.gpu, {entries = entries[:]}) or_return
-      layout = pipeline_layout(self, .NONE, .NONE, layouts[shader])
-    }
+    when !BINDLESS do layout = pipeline_layout(self, .NONE, .NONE, group_layout)
     pipelines[shader] = dev.compute_pipeline_create(&self.gpu, {sources[shader], layout}) or_return
   }
   when BINDLESS {
@@ -77,7 +73,7 @@ precompute_ibl :: proc(self: ^Renderer, equirect, irradiance_cube, prefilter_cub
   } else {
     for d, i in dispatches {
       resources := [2]rhi.BindResource{rhi.TextureView{d.src, -1}, rhi.TextureView{d.dst, i32(d.mip)}}
-      groups[i] = dev.bind_group_create(&self.gpu, {layout = layouts[d.shader], resources = resources[:]}) or_return
+      groups[i] = dev.bind_group_create(&self.gpu, {layout = group_layout, resources = resources[:]}) or_return
     }
   }
   cmd := dev.cmd_begin(&self.gpu, .GRAPHICS, 0)

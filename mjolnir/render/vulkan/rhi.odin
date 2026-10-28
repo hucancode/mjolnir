@@ -930,6 +930,8 @@ rhi_cmd_label_end :: proc(b: ^Backend, handle: rhi.CommandList) {
 
 rhi_cmd_bind_pipeline :: proc(b: ^Backend, handle: rhi.CommandList, pipeline: rhi.Pipeline) {
   cmd := cmd_get(b, handle)
+  // bound state outlives render passes within a command buffer
+  if cmd.pipeline == pipeline do return
   cmd.pipeline = pipeline
   p := &b.pipelines.items[pipeline]
   vk.CmdBindPipeline(cmd.cb, p.bind_point, p.pipeline)

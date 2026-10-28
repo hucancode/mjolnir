@@ -33,3 +33,18 @@ decompose_matrix :: proc "contextless" (
   rotation = linalg.to_quaternion(rot_mat)
   return
 }
+
+// transform_mul returns child placed in parent's frame: child's transform followed by parent's.
+// Exact while parent's scale is uniform or the child is unrotated.
+transform_mul :: proc "contextless" (parent, child: Transform) -> Transform {
+  return {
+    position = transform_point(parent, child.position),
+    rotation = parent.rotation * child.rotation,
+    scale    = parent.scale * child.scale,
+  }
+}
+
+// transform_point returns p moved from t's frame into its parent's: scaled, rotated, translated.
+transform_point :: proc "contextless" (t: Transform, p: [3]f32) -> [3]f32 {
+  return t.position + qmv(t.rotation, t.scale * p)
+}

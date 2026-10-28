@@ -78,9 +78,8 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
@@ -126,10 +125,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     if !ok do return .FAIL
   }
   return .READY
-}
-
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -201,6 +196,6 @@ debug_ui :: proc(app: ^App) {
   }
 }
 
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }

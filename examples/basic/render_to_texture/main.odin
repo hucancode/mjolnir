@@ -33,9 +33,8 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
@@ -45,10 +44,6 @@ shutdown :: proc(app: ^App) {
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
   free(app)
-}
-
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
 }
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, position: [3]f32, scale_factor: f32 = 1, cast_shadow := true) -> world.NodeHandle {
@@ -87,6 +82,6 @@ update :: proc(app: ^App, dt: f32) {
   render.update(&app.renderer, dt)
 }
 
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }

@@ -4,23 +4,12 @@ package vulkan_backend
 
 // Layer 1: foundation
 
-// It changes when Vulkan does; it never
-// imports render or platform and decides nothing. It is the graphics API behind rhi: rhi.odin
-// is its half of rhi's contract (PROCS, lifecycle included), the rest is what that needs. Beside
-// PROCS render takes only the names it aliases in backend_glue.odin: Backend, FRAMES_IN_FLIGHT,
-// RETIRE_GRACE, BINDLESS, LAYERED_RENDERING and the slot counts that follow from them
-// (MAX_PYRAMID_SLOTS, MAX_DRAW_LIST_SLOTS).
-// Vulkan is bindless (the global arrays of textures.odin, written through rhi's bindless_write)
-// and renders layers together, both BINDLESS and LAYERED_RENDERING; it takes push constants,
-// draws with indirect count, runs compute on its own queue where the device has one and leaves
-// every hazard to the caller's barriers, which are Caps. Staged uploads land where the caller records cmd_flush_uploads, and only the
-// submission the caller marks present touches the swapchain. Pipelines of one interface share a
-// pipeline layout, so a command list binds a set once for all of them, and UPLOAD buffers sit
-// in mappable device memory where there is room. Command lists come from a transient pool per
-// recording thread, queue and frame slot, reset whole by frame_wait, so threads record apart;
-// label scopes are debug-utils labels and, with host query reset, timestamps read back once
-// their slot is waited for. Below rhi it wraps Vulkan: GPUContext (instance, device, queues,
-// context.odin), Swapchain, Image and Buffer, whose memory is a range of a large block
-// (allocator.odin), pipeline helpers, deferred destruction (defer_destroy, memory.odin) and
-// batched staging uploads (queue_*, upload.odin). The window is a GLFW window it makes a Vulkan surface on. It owns no shaders,
-// scene data or passes: render does.
+// It changes when Vulkan does, never imports render or platform and decides nothing:
+// rhi.odin is its half of rhi's contract; render aliases a few more names (backend_glue.odin).
+// Vulkan is bindless and renders layers together; it takes push constants, draws with indirect
+// count, runs compute on its own queue where there is one, and leaves every hazard to the
+// caller's barriers. Pipelines of one interface share a layout, so a set binds once for all.
+// Command lists come from a transient pool per recording thread, queue and frame slot, reset by
+// frame_wait. Below rhi: GPUContext (context.odin), Swapchain, Image, Buffer sub-allocated from
+// large blocks (allocator.odin), deferred destruction (memory.odin) and batched staging uploads
+// (upload.odin).

@@ -272,7 +272,6 @@ TRACE_COLORS := [bt.Status][4]u8 {
   .RUNNING = {250, 210, 80, 255},
 }
 
-
 Pickup :: struct {
   node:     world.NodeHandle,
   instance: gltf.Instance,
@@ -390,9 +389,8 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
@@ -443,10 +441,6 @@ load_assets :: proc(app: ^App) -> bool {
   for data, i in DECOR do app.decor[i] = gltf.model_create(&app.renderer, data) or_return
   app.arrow = gltf.model_create(&app.renderer, ARROW_MODEL) or_return
   return true
-}
-
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
 }
 
 clear_scene :: proc(app: ^App) {
@@ -580,7 +574,6 @@ spawn_sun :: proc(app: ^App, intensity: f32) {
   }
 }
 
-
 spawn_enemy :: proc(app: ^App, kind: EnemyKind, position: [3]f32) {
   foe := FOES[kind]
   at := nav.nearest_point(&app.navmesh, position) or_else position
@@ -615,7 +608,6 @@ effect_emitter :: proc(app: ^App, effect: Effect) -> render.Emitter {
   }
   return {}
 }
-
 
 actor_create :: proc(app: ^App, model: ^gltf.Model, attack: string, position: [3]f32, parent := world.NodeHandle{}) -> (a: Actor) {
   a.model = world.spawn(&app.scene, position, parent = parent)
@@ -880,7 +872,6 @@ brain :: proc(kind: EnemyKind) -> Behavior {
   return MELEE
 }
 
-
 is_dead :: proc(m: ^Mob) -> bool {
   return m.enemy.health <= 0
 }
@@ -1004,7 +995,6 @@ update_pickups :: proc(app: ^App, dt: f32) {
   }
 }
 
-
 draw_debug :: proc(app: ^App) {
   for h in app.bodies {
     body := physics.body(&app.phys, h) or_continue
@@ -1084,7 +1074,7 @@ update_result :: proc(app: ^App, dt: f32) -> Screen {
   return .RESULT
 }
 
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 
@@ -1135,10 +1125,10 @@ hud :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand) {
     point := render.world_to_screen(&app.renderer, head) or_continue
     bar(commands, point - {30, 0}, {60, 7}, e.health / FOES[e.kind].health, {230, 200, 60, 255})
     if !app.show_debug do continue
-    y := point.y - 6
+    line := point.y - 6
     #reverse for step in e.trace {
-      y -= 16
-      text(commands, fmt.tprintf("%s %v", step.name, step.status), {point.x - 30, y}, 13, TRACE_COLORS[step.status])
+      line -= 16
+      text(commands, fmt.tprintf("%s %v", step.name, step.status), {point.x - 30, line}, 13, TRACE_COLORS[step.status])
     }
   }
 }

@@ -28,10 +28,8 @@ Unit :: struct {
 }
 
 Part :: struct {
-  unit:     Unit,
-  position: [3]f32,
-  rotation: quaternion128,
-  scale:    [3]f32,
+  unit:  Unit,
+  place: geometry.Transform,
 }
 
 Shape :: struct {
@@ -40,7 +38,7 @@ Shape :: struct {
 }
 
 shape :: proc(unit: Unit, scale: [3]f32, position: [3]f32 = {}) -> Shape {
-  return {parts = {0 = {unit, position, linalg.QUATERNIONF32_IDENTITY, scale}}, count = 1}
+  return {parts = {0 = {unit, {position, linalg.QUATERNIONF32_IDENTITY, scale}}}, count = 1}
 }
 
 box :: proc(w, h, d: f32, slope: f32 = 0) -> Shape {
@@ -74,7 +72,7 @@ sphere :: proc(r: f32) -> Shape {
 half_cylinder_box :: proc(r, h, depth: f32) -> Shape {
   s := half_cylinder(r, h)
   s.parts[1] = box(2 * r, h, depth).parts[0]
-  s.parts[1].position = {0, h / 2, -depth / 2}
+  s.parts[1].place.position = {0, h / 2, -depth / 2}
   s.count = 2
   return s
 }
@@ -85,10 +83,7 @@ around :: proc(angle: f32, axis: [3]f32) -> quaternion128 {
 
 spin :: proc(s: Shape, q: quaternion128) -> Shape {
   s := s
-  for &p in s.parts[:s.count] {
-    p.rotation = q * p.rotation
-    p.position = linalg.quaternion128_mul_vector3(q, p.position)
-  }
+  for &p in s.parts[:s.count] do p.place = geometry.transform_mul({rotation = q, scale = 1}, p.place)
   return s
 }
 
@@ -106,7 +101,7 @@ rot_z :: proc(s: Shape, angle: f32) -> Shape {
 
 move :: proc(s: Shape, x, y, z: f32) -> Shape {
   s := s
-  for &p in s.parts[:s.count] do p.position += {x, y, z}
+  for &p in s.parts[:s.count] do p.place.position += {x, y, z}
   return s
 }
 

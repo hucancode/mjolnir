@@ -229,8 +229,9 @@ load_layer :: proc(p: ^Pkg) {
     text = strings.trim_prefix(text[2:], " ")
     if p.layer_name == "" && strings.has_prefix(text, "Layer ") {
       colon := strings.index(text, ": ")
-      n, is_number := strconv.parse_int(text[len("Layer "):max(colon, 0)], 10)
-      if colon < 0 || !is_number || n < 0 do die("%s: bad layer line %q", p.path, text)
+      if colon < 0 do die("%s: bad layer line %q", p.path, text)
+      n, is_number := strconv.parse_int(text[len("Layer "):colon], 10)
+      if !is_number || n < 0 do die("%s: bad layer line %q", p.path, text)
       p.layer, p.layer_name = n, text[colon + 2:]
       continue
     }

@@ -10,15 +10,13 @@ RENDER_FPS :: #config(RENDER_FPS, 60)
 @(private = "file")
 FRAME_TIME :: 1.0 / RENDER_FPS
 @(private = "file")
-FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
+FRAME_TIME_MILLIS :: FRAME_TIME * 1_000.0
 // UPDATE_FPS is the tick rate of Loop.update (-define:UPDATE_FPS=n, default RENDER_FPS).
 UPDATE_FPS :: #config(UPDATE_FPS, RENDER_FPS)
 @(private = "file")
 UPDATE_FRAME_TIME :: 1.0 / UPDATE_FPS
 @(private = "file")
-UPDATE_FRAME_TIME_MILIS :: UPDATE_FRAME_TIME * 1_000.0
-@(private = "file")
-MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
+UPDATE_FRAME_TIME_MILLIS :: UPDATE_FRAME_TIME * 1_000.0
 // USE_PARALLEL_UPDATE runs Loop.update on its own thread (-define:USE_PARALLEL_UPDATE=true).
 USE_PARALLEL_UPDATE :: #config(USE_PARALLEL_UPDATE, false)
 #assert(ODIN_OS != .JS || !USE_PARALLEL_UPDATE, "no threads on the web")
@@ -33,23 +31,23 @@ Setup :: enum {
   FAIL,
 }
 
-// Loop holds the application callbacks run drives; it knows nothing else.
+// Loop holds the application callbacks run paces; it knows nothing else.
 Loop :: struct($T: typeid) {
-  app:          ^T,
-  should_close: proc(app: ^T) -> bool, // polled once per iteration, main thread
+  app:      ^T,
+  // optional, main thread: called each iteration until it returns READY, before the first
+  // update (wait for render.ready, build the scene); FAIL stops the loop
+  setup:    proc(app: ^T) -> Setup,
   // UPDATE_FPS ticks, on its own thread with USE_PARALLEL_UPDATE: read input and make every
   // edit here, under render.lock
-  update:       proc(app: ^T, dt: f32),
-  frame:        proc(app: ^T) -> bool, // RENDER_FPS, main thread: only poll events and render; false on error
-  // optional, main thread: called each iteration until it returns READY, before the first
-  // update (wait for render.ready, build the scene); FAIL stops the loop. shutdown runs once
-  // after the last iteration
-  setup:        proc(app: ^T) -> Setup,
-  shutdown:     proc(app: ^T),
+  update:   proc(app: ^T, dt: f32),
+  // RENDER_FPS, main thread: poll events and render (mjolnir.frame); false ends the loop
+  render:   proc(app: ^T) -> bool,
+  // optional: runs once after the last iteration
+  shutdown: proc(app: ^T),
 }
 
-// run drives loop until should_close, setup fails, FRAME_LIMIT frames, or too many
-// consecutive frame failures, then calls shutdown. Natively it returns then, on the calling
+// run drives loop until render returns false, setup fails or FRAME_LIMIT frames, then calls
+// shutdown. Natively it returns then, on the calling
 // thread (the one that created the window); on the web it returns at once and the browser
 // calls step each animation frame.
 run :: proc(loop: Loop($T)) {
@@ -63,7 +61,6 @@ Runner :: struct {
   last_update: time.Time,
   last_frame:  time.Time,
   frame:       int,
-  error_count: int,
   // setup returned READY
   started:     bool,
   // the update thread runs ticks while true
@@ -87,7 +84,6 @@ advance :: proc() -> bool {
 @(private = "file")
 step :: proc(r: ^Runner) -> bool {
   loop := &r.loop
-  if loop.should_close(loop.app) do return false
   if !r.started {
     if loop.setup != nil {
       switch loop.setup(loop.app) {
@@ -114,30 +110,21 @@ step :: proc(r: ^Runner) -> bool {
   when !USE_PARALLEL_UPDATE {
     tick(r)
   }
-  remaining := FRAME_TIME_MILIS - time.duration_milliseconds(time.since(r.last_frame))
+  remaining := FRAME_TIME_MILLIS - time.duration_milliseconds(time.since(r.last_frame))
   if remaining > 0 {
     // Don't oversleep past the next update tick (UPDATE_FPS may exceed
     // RENDER_FPS); keep input latency bounded to one tick.
     when !USE_PARALLEL_UPDATE {
-      until_tick := UPDATE_FRAME_TIME_MILIS - time.duration_milliseconds(time.since(r.last_update))
+      until_tick := UPDATE_FRAME_TIME_MILLIS - time.duration_milliseconds(time.since(r.last_update))
       if until_tick < remaining do remaining = until_tick
     }
     if remaining > 0.2 do platform.sleep(remaining)
     return true
   }
   r.last_frame = time.now()
-  ok := loop.frame(loop.app)
+  running := loop.render(loop.app)
   free_all(context.temp_allocator)
-  if ok {
-    r.error_count = 0
-  } else {
-    r.error_count += 1
-    if r.error_count >= MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
-      log.errorf("Too many render errors, exiting...")
-      platform.fail()
-      return false
-    }
-  }
+  if !running do return false
   r.frame += 1
   when FRAME_LIMIT > 0 {
     if r.frame >= FRAME_LIMIT {

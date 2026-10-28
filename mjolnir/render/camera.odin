@@ -248,7 +248,8 @@ world_to_screen :: proc(self: ^Renderer, position: [3]f32) -> (point: [2]f32, ok
   return (ndc + 1) * 0.5 * [2]f32{f32(extent[0]), f32(extent[1])} / self.dpi_scale, true
 }
 
-// camera returns the camera of handle, or false if it is not live.
+// camera returns the camera of handle, to edit in place, or false if it is not live. The
+// pointer is valid for this tick.
 camera :: proc(self: ^Renderer, handle: CameraHandle) -> (^Camera, bool) #optional_ok {
   if !containers.slots_live(&self.slots[.CAMERAS], u32(handle)) do return nil, false
   return &self.cameras[handle], true

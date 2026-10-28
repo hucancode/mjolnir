@@ -89,9 +89,8 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
@@ -144,10 +143,6 @@ shutdown :: proc(app: ^App) {
   free(app)
 }
 
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
-}
-
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
@@ -196,7 +191,7 @@ simulate :: proc(app: ^App, dt: f32, shark: [3]f32) {
   render.stage_draw_indirect(&app.renderer, app.draw, FISH_VERTICES, app.counters, 0, FishParams{first = (1 - src) * MAX_FISH})
 }
 
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 

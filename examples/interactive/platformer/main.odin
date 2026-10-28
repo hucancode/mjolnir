@@ -182,9 +182,8 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
@@ -199,10 +198,6 @@ shutdown :: proc(app: ^App) {
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
   free(app)
-}
-
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -506,9 +501,9 @@ animate :: proc(app: ^App) {
       }
       continue
     }
-    position := b2.Body_GetPosition(enemy.body)
+    feet := b2.Body_GetPosition(enemy.body) - {0, ENEMY_HALF.y}
     render.set_sprite_frame(&app.renderer, enemy.look, ENEMY_WALK[tick % 2])
-    place_character(app, enemy.node, position - {0, ENEMY_HALF.y}, math.sign(b2.Body_GetLinearVelocity(enemy.body).x))
+    place_character(app, enemy.node, feet, math.sign(b2.Body_GetLinearVelocity(enemy.body).x))
   }
 }
 
@@ -535,7 +530,7 @@ follow_player :: proc(app: ^App) {
   world.translate(&app.scene, app.backdrop, math.round(center.x * PARALLAX * pixels_per_unit) / pixels_per_unit, 0, Z_BACKGROUND)
 }
 
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 

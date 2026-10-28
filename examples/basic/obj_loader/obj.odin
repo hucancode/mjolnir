@@ -54,7 +54,7 @@ load_obj :: proc(
         if slash_idx >= 0 {
           vertex_str = face_part[:slash_idx]
         }
-        if vertex_idx, ok := strconv.parse_i64(vertex_str); ok {
+        if vertex_idx, parsed := strconv.parse_i64(vertex_str); parsed {
           idx := i32(vertex_idx)
           if idx < 0 {
             idx = i32(len(positions)) + idx + 1

@@ -71,9 +71,8 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
@@ -107,10 +106,6 @@ shutdown :: proc(app: ^App) {
   free(app)
 }
 
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
-}
-
 build_level :: proc(app: ^App) -> bool {
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
@@ -125,7 +120,6 @@ build_level :: proc(app: ^App) -> bool {
   data := bake.build(&builder, allocator = context.temp_allocator) or_return
   return nav.navmesh_init(&app.navmesh, data)
 }
-
 
 show_navmesh :: proc(app: ^App) {
   positions, indices := nav.debug_triangles(&app.navmesh, context.temp_allocator)
@@ -216,7 +210,7 @@ draw_corners :: proc(app: ^App, ag: nav.Agent, color: [4]f32) {
   }
 }
 
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 

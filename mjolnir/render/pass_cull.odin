@@ -422,12 +422,6 @@ draw_batches :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, key
   }
 }
 
-// Copies the main camera's opaque draw count out of slot's lists, for draw_count.
-@(private)
-draw_count_record :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, f: u32) {
-  dev.cmd_copy_buffer(&self.gpu, cmd, self.draw_lists[slot].buffer, 0, self.draw_count_readback[f], 0, size_of(u32))
-}
-
 // draw_count is how many opaque draws the main camera's culling kept in a recent frame:
 // a statistic to show.
 draw_count :: proc(self: ^Renderer) -> u32 {

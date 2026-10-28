@@ -119,3 +119,34 @@ make_mesh_from_triangles :: proc(positions: [][3]f32, indices: []u32) -> Mesh {
   }
   return make_mesh(vertices, slice.clone(indices))
 }
+
+// mesh_transform moves a mesh's vertices by t in place: positions, normals and tangents. A
+// mirroring scale (an odd count of negative axes) also flips the triangles' winding.
+mesh_transform :: proc(mesh: Mesh, t: Transform) {
+  inverse_scale := 1 / t.scale
+  for &v in mesh.vertices {
+    v.position = transform_point(t, v.position)
+    v.normal = linalg.normalize0(qmv(t.rotation, inverse_scale * v.normal))
+    v.tangent.xyz = linalg.normalize0(qmv(t.rotation, t.scale * v.tangent.xyz))
+  }
+  if t.scale.x * t.scale.y * t.scale.z >= 0 do return
+  for i := 0; i + 2 < len(mesh.indices); i += 3 do mesh.indices[i + 1], mesh.indices[i + 2] = mesh.indices[i + 2], mesh.indices[i + 1]
+}
+
+// mesh_merge returns one mesh holding every part placed by its transform (transforms[i] places
+// parts[i]), e.g. the pieces of a procedural prop; the parts are copied, not freed, and their
+// skinning is dropped.
+mesh_merge :: proc(parts: []Mesh, transforms: []Transform) -> Mesh {
+  vertex_count, index_count := 0, 0
+  for p in parts do vertex_count, index_count = vertex_count + len(p.vertices), index_count + len(p.indices)
+  vertices := make([]Vertex, vertex_count)
+  indices := make([]u32, index_count)
+  v, i := 0, 0
+  for p, k in parts {
+    copy(vertices[v:], p.vertices)
+    for index, j in p.indices do indices[i + j] = index + u32(v)
+    mesh_transform({vertices = vertices[v:][:len(p.vertices)], indices = indices[i:][:len(p.indices)]}, transforms[k])
+    v, i = v + len(p.vertices), i + len(p.indices)
+  }
+  return {vertices = vertices, indices = indices}
+}

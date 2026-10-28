@@ -87,35 +87,27 @@ Link :: struct {
   mount:  SlotDef,
   first:  int,
   bone:   int,
-  seat_r: quaternion128,
-  seat_t: [3]f32,
+  seat:   geometry.Transform,
   depth:  int,
 }
 
 Piece :: struct {
-  node:     world.NodeHandle,
-  bone:     int,
-  group:    int,
-  index:    int,
-  unit:     Unit,
-  position: [3]f32,
-  rotation: quaternion128,
-  scale:    [3]f32,
-  key:      u32,
+  node:  world.NodeHandle,
+  bone:  int,
+  group: int,
+  index: int,
+  unit:  Unit,
+  place: geometry.Transform,
+  key:   u32,
 }
 
 Group :: struct {
   link, count, pieces: int,
 }
 
-Xform :: struct {
-  position: [3]f32,
-  rotation: quaternion128,
-}
-
 Snapshot :: struct {
-  bones:   [dynamic]Xform,
-  pieces:  [dynamic]Xform,
+  bones:   [dynamic]geometry.Transform,
+  pieces:  [dynamic]geometry.Transform,
   centers: [dynamic][3]f32,
   normals: [dynamic][3]f32,
 }
@@ -137,8 +129,7 @@ App :: struct {
   groups:    [dynamic]Group,
   cursor:    struct {
     bone, group: int,
-    seat_r:      quaternion128,
-    seat_t:      [3]f32,
+    seat:        geometry.Transform,
   },
   live:      Snapshot,
   build:     Build,
@@ -166,18 +157,13 @@ main :: proc() {
       app = app,
       setup = setup,
       shutdown = shutdown,
-      should_close = should_close,
       update = update,
-      frame = frame,
+      render = draw,
     },
   )
 }
 
-should_close :: proc(app: ^App) -> bool {
-  return platform.should_close(&app.platform)
-}
-
-frame :: proc(app: ^App) -> bool {
+draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 
@@ -241,7 +227,7 @@ place :: proc(app: ^App) {
   }
   for p, i in app.pieces {
     x := app.live.pieces[i]
-    world.set_local(&app.scene, p.node, x.position, x.rotation, p.scale)
+    world.set_local(&app.scene, p.node, x.position, x.rotation, x.scale)
     world.set_visible(&app.scene, p.node, true)
   }
 }
@@ -327,25 +313,24 @@ add :: proc(app: ^App, shape: Shape) {
   app.groups[c.group].count += 1
   app.groups[c.group].pieces += s.count
   for part in s.parts[:s.count] {
-    key := fmt.tprintf("%v %.4f %.4f %.4f %.4f", part.unit.kind, part.unit.param, part.scale.x, part.scale.y, part.scale.z)
+    scale := part.place.scale
+    key := fmt.tprintf("%v %.4f %.4f %.4f %.4f", part.unit.kind, part.unit.param, scale.x, scale.y, scale.z)
     p := Piece {
-      node     = world.spawn(&app.scene),
-      bone     = c.bone,
-      group    = c.group,
-      index    = index,
-      unit     = part.unit,
-      position = c.seat_t + linalg.quaternion128_mul_vector3(c.seat_r, part.position),
-      rotation = c.seat_r * part.rotation,
-      scale    = part.scale,
-      key      = hash.fnv32a(transmute([]u8)key),
+      node  = world.spawn(&app.scene),
+      bone  = c.bone,
+      group = c.group,
+      index = index,
+      unit  = part.unit,
+      place = geometry.transform_mul(c.seat, part.place),
+      key   = hash.fnv32a(transmute([]u8)key),
     }
     append(&app.pieces, p)
     attach(app, p)
   }
 }
 
-emit :: proc(app: ^App, bone: int, seat_r := linalg.QUATERNIONF32_IDENTITY, seat_t: [3]f32 = {}) {
-  app.cursor = {bone, len(app.groups) - 1, seat_r, seat_t}
+emit :: proc(app: ^App, bone: int, seat := geometry.TRANSFORM_IDENTITY) {
+  app.cursor = {bone, len(app.groups) - 1, seat}
 }
 
 bone :: proc(app: ^App, parent: int, offset: [3]f32, rest: quaternion128, axis: Axis) -> int {
@@ -392,23 +377,23 @@ build :: proc(app: ^App) {
       l.mount = slots(l.part, l.params)[l.at].?
       l.first = bone(app, -1, {}, linalg.QUATERNIONF32_IDENTITY, .FREE)
       l.bone = l.first
-      l.seat_r, l.seat_t = linalg.QUATERNIONF32_IDENTITY, -l.mount.face.position
+      l.seat = {-l.mount.face.position, linalg.QUATERNIONF32_IDENTITY, 1}
     } else {
       parent := &app.links[l.parent]
       l.depth = parent.depth + 1
       slot := slots(parent.part, parent.params)[l.at].?
       j := l.joint.? or_else slot.joint.?
       a, b := mounts(j)
-      origin, r0 := geometry.seat(slot.face, a)
-      if slot.axis do origin = slot.face.position
-      r := parent.seat_r * r0
-      origin = parent.seat_t + linalg.quaternion128_mul_vector3(parent.seat_r, origin)
+      joined := geometry.seat(slot.face, a)
+      if slot.axis do joined.position = slot.face.position
+      joined = geometry.transform_mul(parent.seat, joined)
+      origin, r := joined.position, joined.rotation
       append(&app.groups, Group{link = i})
       switch j.kind {
       case .HINGE:
         l.first = bone(app, parent.bone, origin, r, .X)
         l.bone = l.first
-        emit(app, parent.bone, r, origin)
+        emit(app, parent.bone, joined)
         hinge_female(app, j, false)
         emit(app, l.first)
         hinge_male(app, j, false, false)
@@ -423,17 +408,16 @@ build :: proc(app: ^App) {
       case .BALL:
         l.first = bone(app, parent.bone, origin, r, .FREE)
         l.bone = l.first
-        emit(app, parent.bone, r, origin)
+        emit(app, parent.bone, joined)
         ball_female(app, j)
         emit(app, l.first)
         ball_male(app, j)
       }
-      position: [3]f32
-      position, l.seat_r = geometry.seat(b, l.mount.face)
-      l.seat_t = -linalg.quaternion128_mul_vector3(l.seat_r, l.mount.face.position) if l.mount.axis else position
+      l.seat = geometry.seat(b, l.mount.face)
+      if l.mount.axis do l.seat.position = -linalg.quaternion128_mul_vector3(l.seat.rotation, l.mount.face.position)
     }
     append(&app.groups, Group{link = i})
-    emit(app, l.bone, l.seat_r, l.seat_t)
+    emit(app, l.bone, l.seat)
     build_part(app, l.part, l.params)
   }
 }
@@ -455,7 +439,7 @@ ride :: proc(app: ^App, pose: Pose) {
   for l in app.links {
     if !l.spine do continue
     next := pivots[k + 1] if k + 1 < len(pivots) else tip
-    app.bones[l.first].aim = frame_from_z(pivots[k] - next) * linalg.quaternion_inverse(l.seat_r)
+    app.bones[l.first].aim = frame_from_z(pivots[k] - next) * linalg.quaternion_inverse(l.seat.rotation)
     k += 1
   }
   for l in app.links {
@@ -529,7 +513,7 @@ snapshot :: proc(app: ^App, offset: f32, out: ^Snapshot) {
   ride(app, pose)
   resize(&out.bones, len(app.bones))
   for b, i in app.bones {
-    parent := Xform{rotation = linalg.QUATERNIONF32_IDENTITY}
+    parent := geometry.TRANSFORM_IDENTITY
     if b.parent >= 0 do parent = out.bones[b.parent]
     m: quaternion128
     switch b.axis {
@@ -542,21 +526,20 @@ snapshot :: proc(app: ^App, offset: f32, out: ^Snapshot) {
     case .FREE:
       m = linalg.quaternion_inverse(b.rest) * linalg.quaternion_inverse(parent.rotation) * b.aim
     }
-    out.bones[i] = {parent.position + linalg.quaternion128_mul_vector3(parent.rotation, b.offset), linalg.normalize(parent.rotation * b.rest * m)}
+    out.bones[i] = {geometry.transform_point(parent, b.offset), linalg.normalize(parent.rotation * b.rest * m), 1}
   }
   resize(&out.pieces, len(app.pieces))
   resize(&out.centers, len(app.groups))
   resize(&out.normals, len(app.groups))
   for &c in out.centers do c = {}
   for p, i in app.pieces {
-    w := out.bones[p.bone]
-    out.pieces[i] = {w.position + linalg.quaternion128_mul_vector3(w.rotation, p.position), w.rotation * p.rotation}
+    out.pieces[i] = geometry.transform_mul(out.bones[p.bone], p.place)
     out.centers[p.group] += out.pieces[i].position
   }
   for g, i in app.groups {
     l := app.links[g.link]
     out.centers[i] /= f32(max(1, g.pieces))
-    out.normals[i] = -linalg.normalize(linalg.quaternion128_mul_vector3(out.bones[l.bone].rotation * l.seat_r, l.mount.face.normal))
+    out.normals[i] = -linalg.normalize(linalg.quaternion128_mul_vector3(out.bones[l.bone].rotation * l.seat.rotation, l.mount.face.normal))
   }
 }
 

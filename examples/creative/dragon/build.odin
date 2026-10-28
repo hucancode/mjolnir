@@ -3,6 +3,7 @@ package main
 import "core:math"
 import "core:math/ease"
 import "core:math/linalg"
+import "mjolnir/geometry"
 import "mjolnir/input"
 import "mjolnir/world"
 
@@ -218,7 +219,7 @@ assemble :: proc(app: ^App) {
     }
     ref := &app.build.refs[refs[gi]]
     base := ref.pieces[i]
-    x := Xform{rotation = base.rotation}
+    x := base
     if f.active {
       parked := base.position - ref.centers[gi]
       offset := linalg.lerp(parked, target.position - live.centers[gi], f.settle)
@@ -254,7 +255,7 @@ assemble :: proc(app: ^App) {
   }
 }
 
-show :: proc(app: ^App, p: Piece, x: Xform) {
-  world.set_local(&app.scene, p.node, x.position, x.rotation, p.scale)
+show :: proc(app: ^App, p: Piece, x: geometry.Transform) {
+  world.set_local(&app.scene, p.node, x.position, x.rotation, x.scale)
   world.set_visible(&app.scene, p.node, true)
 }
