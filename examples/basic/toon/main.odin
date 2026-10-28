@@ -28,7 +28,7 @@ shade: f32 = 0.35
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  if !platform.init(&app.platform, 1000, 700, "Toon Material") do return
+  if !platform.init(&app.platform, 1280, 720, "Toon Material") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -109,7 +109,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Toon", {700, 20, 280, 230}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Toon", {20, 20, 280, 230}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Bands"); mu.slider(ctx, &bands, 1, 8, 1)
     mu.label(ctx, "Rim"); mu.slider(ctx, &rim, 0, 1)

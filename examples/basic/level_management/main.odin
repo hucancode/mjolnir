@@ -56,7 +56,7 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   app.auto_switch = true
-  if !platform.init(&app.platform, 1100, 760, "Level Management") do return
+  if !platform.init(&app.platform, 1280, 720, "Level Management") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -171,7 +171,7 @@ run_test_step :: proc(app: ^App) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Level Management", {20, 20, 320, 380}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Level Management", {20, 20, 320, 380}, {}) {
     levels := LEVELS
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, fmt.tprintf("Level:     %s", levels[app.current].name if app.current >= 0 else "none"))

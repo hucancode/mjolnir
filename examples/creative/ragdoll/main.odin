@@ -79,7 +79,7 @@ main :: proc() {
   app := new(App)
   app.mirror = true
   app.show = true
-  if !platform.init(&app.platform, 1024, 720, "Ragdoll") do return
+  if !platform.init(&app.platform, 1280, 720, "Ragdoll") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   if !physics.init(&app.phys) do return
@@ -245,7 +245,7 @@ draw_blocks :: proc(app: ^App) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Ragdoll", {700, 20, 310, 420}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Ragdoll", {20, 20, 310, 420}, {}) {
     mu.layout_row(ctx, {140, -1}, 0)
     if .SUBMIT in mu.button(ctx, "Edit" if app.mode == .SIM else "[Edit]") do set_mode(app, .EDIT)
     if .SUBMIT in mu.button(ctx, "[Simulate]" if app.mode == .SIM else "Simulate") do set_mode(app, .SIM)

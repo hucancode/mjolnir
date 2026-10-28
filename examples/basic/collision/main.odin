@@ -76,7 +76,7 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   if !physics.init(&app.phys) do return
-  if !platform.init(&app.platform, 1100, 760, "Collision") do return
+  if !platform.init(&app.platform, 1280, 720, "Collision") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -347,14 +347,14 @@ inspector :: proc(ctx: ^mu.Context, b: ^Body) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Inspector", {20, 220, 320, 400}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Inspector", {940, 20, 320, 400}, {.RIGHT, .TOP}) {
     if app.selected == NO_SELECTION {
       mu.label(ctx, "Left-click an object to select it.")
     } else {
       inspector(ctx, &app.bodies[app.selected])
     }
   }
-  if debugui.window(&app.debug, "Collision", {20, 20, 320, 180}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Collision", {20, 20, 320, 180}, {}) {
     mu.layout_row(ctx, {150, -1}, 0)
     if .SUBMIT in mu.button(ctx, "Reset Scene") do app.reset_pending = true
     if .SUBMIT in mu.button(ctx, "Resume" if app.paused else "Pause") do app.paused = !app.paused

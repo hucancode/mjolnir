@@ -40,7 +40,7 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  if !platform.init(&app.platform, 1000, 700, "OBJ Loader") do return
+  if !platform.init(&app.platform, 1280, 720, "OBJ Loader") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -133,7 +133,7 @@ attach_model :: proc(app: ^App) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "OBJ Loader", {720, 20, 260, 200}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "OBJ Loader", {20, 20, 260, 200}, {}) {
     labels := OBJ_LABELS
     mu.label(ctx, fmt.tprintf("Current: %s", labels[app.current]))
     mu.label(ctx, "")

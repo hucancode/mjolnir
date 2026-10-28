@@ -37,7 +37,7 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   if !physics.init(&app.phys) do return
-  if !platform.init(&app.platform, 800, 600, "AOE Query") do return
+  if !platform.init(&app.platform, 1280, 720, "AOE Query") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(

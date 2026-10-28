@@ -325,7 +325,7 @@ main :: proc() {
   app.dancing = true
   app.tempo = 60 / PERIOD
   app.seed = rand.uint32()
-  if !platform.init(&app.platform, 1024, 720, "Atlas") do return
+  if !platform.init(&app.platform, 1280, 720, "Atlas") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   choreo_init(&app.choreo, rand.uint32(), true)
@@ -476,7 +476,7 @@ recolor :: proc(app: ^App) {
 
 panel :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Settings", {724, 10, 290, 245}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Settings", {20, 20, 290, 245}, {}) {
     mu.layout_row(ctx, {90, -1}, 0)
     mu.checkbox(ctx, "Dance", &app.dancing)
     if .CHANGE in mu.checkbox(ctx, "Mirror", &app.choreo.mirror) do choreo_rewire(&app.choreo)
@@ -499,7 +499,7 @@ panel :: proc(app: ^App) {
     mu.label(ctx, "bounce power")
     mu.slider(ctx, &app.choreo.power, 0, 0.5, 0, "%.2f")
   }
-  if debugui.window(&app.debug, "Rig", {724, 280, 290, 430}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Rig", {970, 20, 290, 430}, {.RIGHT, .TOP}) {
     for c in Channel {
       ctl := CONTROLS[c]
       if ctl.max <= ctl.min do continue

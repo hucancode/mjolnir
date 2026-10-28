@@ -63,7 +63,7 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   app.wander = true
-  if !platform.init(&app.platform, 1000, 700, "Crowd Navigation") do return
+  if !platform.init(&app.platform, 1280, 720, "Crowd Navigation") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -222,7 +222,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Crowd", {720, 20, 260, 230}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Crowd", {20, 20, 260, 230}, {}) {
     mu.label(ctx, fmt.tprintf("Agents: %d", AGENT_COUNT))
     mu.label(ctx, "Right-click: set all goals")
     mu.layout_row(ctx, {-1}, 0)

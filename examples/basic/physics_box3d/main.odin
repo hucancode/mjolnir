@@ -50,7 +50,7 @@ main :: proc() {
   world_def := b3.DefaultWorldDef()
   world_def.gravity = {0, -9.81, 0}
   app.phys = b3.CreateWorld(world_def)
-  if !platform.init(&app.platform, 800, 600, "Physics (Box3D)") do return
+  if !platform.init(&app.platform, 1280, 720, "Physics (Box3D)") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(

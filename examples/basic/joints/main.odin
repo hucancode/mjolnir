@@ -49,7 +49,7 @@ main :: proc() {
   app := new(App)
   app.strength = 4
   if !physics.init(&app.phys) do return
-  if !platform.init(&app.platform, 800, 600, "Joints") do return
+  if !platform.init(&app.platform, 1280, 720, "Joints") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -153,7 +153,7 @@ update :: proc(app: ^App, dt: f32) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Joints", {20, 20, 220, 180}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Joints", {20, 20, 220, 180}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Left click: push")
     mu.label(ctx, "Right drag: orbit")

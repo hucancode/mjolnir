@@ -43,7 +43,7 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   app.mode = .FOLLOW
-  if !platform.init(&app.platform, 1000, 700, "Camera Controllers") do return
+  if !platform.init(&app.platform, 1280, 720, "Camera Controllers") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -121,7 +121,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Cameras", {680, 20, 300, 260}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Cameras", {20, 20, 300, 260}, {}) {
     mu.label(ctx, "Controller:")
     mu.layout_row(ctx, {66, 66, 66, 66}, 0)
     names := [CameraMode]string{.ORBIT = "Orbit", .FREE = "Free", .FOLLOW = "Follow", .TOP = "Top"}

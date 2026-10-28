@@ -40,7 +40,7 @@ Field :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  if !platform.init(&app.platform, 1100, 720, "Forcefield") do return
+  if !platform.init(&app.platform, 1280, 720, "Forcefield") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -163,7 +163,7 @@ field_panel :: proc(app: ^App, ctx: ^mu.Context, name: string, f: ^Field) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Forcefields", {780, 20, 300, 550}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Forcefields", {20, 20, 300, 550}, {}) {
     field_panel(app, ctx, "Repel (blue)", &app.repel)
     field_panel(app, ctx, "Attract (green)", &app.attract)
   }

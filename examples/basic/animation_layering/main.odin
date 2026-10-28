@@ -45,7 +45,7 @@ main :: proc() {
   app.walk_run_blend = 0.5
   app.auto_mix = true
   app.target = {0, 4, 5}
-  if !platform.init(&app.platform, 800, 600, "Animation Layering") do return
+  if !platform.init(&app.platform, 1280, 720, "Animation Layering") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -152,7 +152,7 @@ set_walk_run :: proc(app: ^App) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Animation", {20, 20, 260, 220}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Animation", {20, 20, 260, 220}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Walk <-> Run")
     if .CHANGE in mu.slider(ctx, &app.walk_run_blend, 0, 1) {

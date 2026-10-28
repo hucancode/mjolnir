@@ -67,7 +67,7 @@ main :: proc() {
   app.body_speed_max = 5
   app.body_height = 2
   app.body_position = {0, app.body_height, 0}
-  if !platform.init(&app.platform, 900, 700, "Spider") do return
+  if !platform.init(&app.platform, 1280, 720, "Spider") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -208,7 +208,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Spider Legs", {580, 20, 300, 350}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Spider Legs", {20, 20, 300, 350}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Move: WASD")
     mu.checkbox(ctx, "Autopilot", &app.autopilot)

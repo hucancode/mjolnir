@@ -44,7 +44,7 @@ main :: proc() {
   app := new(App)
   app.speed = 1
   app.auto_switch = true
-  if !platform.init(&app.platform, 800, 600, "GLTF") do return
+  if !platform.init(&app.platform, 1280, 720, "GLTF") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -148,7 +148,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Fox", {20, 20, 220, 200}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Fox", {20, 20, 220, 200}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     for clip, i in app.fox_model.rigs[app.fox_rig].clips {
       label := fmt.tprintf("%s%s", "> " if i == app.clip else "", clip.name)

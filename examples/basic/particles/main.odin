@@ -43,7 +43,7 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   app.emission_rate = 200
-  if !platform.init(&app.platform, 1280, 800, "Particles") do return
+  if !platform.init(&app.platform, 1280, 720, "Particles") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -118,7 +118,7 @@ debug_ui :: proc(app: ^App) {
   em := render.emitter(&app.renderer, app.emitter)
   if em == nil do return
 
-  if debugui.window(&app.debug, "Particles", {940, 20, 320, 570}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Particles", {20, 20, 320, 570}, {}) {
     half := (mu.get_current_container(ctx).body.w - 3 * ctx.style.spacing) / 2
     mu.layout_row(ctx, {half, -1}, 0)
     for file, i in TEXTURE_FILES {

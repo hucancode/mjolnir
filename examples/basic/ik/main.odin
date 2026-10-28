@@ -65,7 +65,7 @@ main :: proc() {
   app.ik_weight = 1
   app.pole_weight = 1
   app.iterations = 10
-  if !platform.init(&app.platform, 800, 600, "IK") do return
+  if !platform.init(&app.platform, 1280, 720, "IK") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -192,7 +192,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "IK", {480, 20, 300, 380}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "IK", {20, 20, 300, 380}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Scenario")
     mu.layout_row(ctx, {68, 68, 68, 68}, 0)

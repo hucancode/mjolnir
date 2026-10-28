@@ -29,7 +29,7 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  if !platform.init(&app.platform, 1000, 700, "Scene Graph") do return
+  if !platform.init(&app.platform, 1280, 720, "Scene Graph") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -101,7 +101,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Scene Graph", {720, 20, 260, 180}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Scene Graph", {20, 20, 260, 180}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Hierarchy: sun > planets > moon")
     mu.label(ctx, "Orbit speed")

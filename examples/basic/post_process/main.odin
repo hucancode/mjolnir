@@ -56,7 +56,7 @@ vignette_strength: f32 = 0.8
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  if !platform.init(&app.platform, 1000, 700, "Post-process Stack Panel") do return
+  if !platform.init(&app.platform, 1280, 720, "Post-process Stack Panel") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -150,7 +150,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Post-process", {700, 20, 280, 560}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Post-process", {20, 20, 280, 560}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Tonemap", &tonemap_on)
     if tonemap_on {

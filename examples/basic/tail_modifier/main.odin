@@ -50,7 +50,7 @@ main :: proc() {
   app.auto_animate = true
   app.drive_frequency = 0.7
   app.drive_amplitude = 0.5
-  if !platform.init(&app.platform, 900, 700, "Tail Modifier") do return
+  if !platform.init(&app.platform, 1280, 720, "Tail Modifier") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -155,7 +155,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Tail Modifier", {20, 20, 320, 320}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Tail Modifier", {20, 20, 320, 320}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Auto animate", &app.auto_animate)
     if app.auto_animate {

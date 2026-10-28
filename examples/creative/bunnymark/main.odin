@@ -190,7 +190,7 @@ spawn :: proc(app: ^App, at: [2]f32) {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Bunnymark", {20, 20, 200, 120}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Bunnymark", {20, 20, 200, 120}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, fmt.tprintf("Bunnies %d", len(app.bunnies)))
     mu.label(ctx, fmt.tprintf("FPS %.0f", app.fps))

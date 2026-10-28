@@ -53,7 +53,7 @@ auto_move := true
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  if !platform.init(&app.platform, 1000, 700, "Cartoon Snake") do return
+  if !platform.init(&app.platform, 1280, 720, "Cartoon Snake") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -199,7 +199,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Cartoon Snake", {20, 20, 260, 250}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Cartoon Snake", {20, 20, 260, 250}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "WASD / arrows slither")
     mu.checkbox(ctx, "Auto move", &auto_move)

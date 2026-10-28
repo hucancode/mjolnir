@@ -156,7 +156,7 @@ main :: proc() {
   app.spin = 0.3
   app.seed = rand.uint32()
   build_play(app)
-  if !platform.init(&app.platform, 1024, 720, "Dragon") do return
+  if !platform.init(&app.platform, 1280, 720, "Dragon") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   if !animation.spline_init_closed(&app.loop, LOOP[:], 2048) do return
@@ -248,7 +248,7 @@ place :: proc(app: ^App) {
 
 panel :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Dragon", {724, 10, 290, 180}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Dragon", {20, 20, 290, 180}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Autoplay", &app.autoplay)
     mu.layout_row(ctx, {110, -1}, 0)
@@ -266,7 +266,7 @@ panel :: proc(app: ^App) {
     before := app.build.t
     if .CHANGE in mu.slider(ctx, &app.build.t, 0, 1, 0, "%.2f") do build_scrub(app, before)
   }
-  if debugui.window(&app.debug, "Rig", {724, 200, 290, 200}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Rig", {970, 20, 290, 200}, {.RIGHT, .TOP}) {
     mu.layout_row(ctx, {110, -1}, 0)
     angle_slider(ctx, "jaw open", &app.pose.jaw, 0, 45)
     angle_slider(ctx, "arm swing", &app.pose.arm_swing, -180, 180)

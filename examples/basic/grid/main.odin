@@ -27,7 +27,7 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  if !platform.init(&app.platform, 800, 600, "Grid") do return
+  if !platform.init(&app.platform, 1280, 720, "Grid") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -101,14 +101,14 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Grid", {540, 20, 240, 200}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Grid", {1020, 20, 240, 200}, {.RIGHT, .TOP}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, fmt.tprintf("Cubes: %d / %d", len(app.cubes), app.size * app.size))
     for n in GRID_SIZES {
       if .SUBMIT in mu.button(ctx, fmt.tprintf("%dx%d", n, n)) && n != app.size do select_size(app, n)
     }
   }
-  if debugui.window(&app.debug, "GPU", {20, 20, 240, 250}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "GPU", {20, 20, 240, 250}, {}) {
     timings := render.gpu_timings(&app.renderer)
     if len(timings) == 0 do mu.label(ctx, "No GPU timers on this device")
     mu.layout_row(ctx, {150, -1}, 0)

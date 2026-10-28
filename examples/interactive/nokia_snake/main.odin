@@ -49,7 +49,7 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  if !platform.init(&app.platform, 1024, 768, "Snake 3D") do return
+  if !platform.init(&app.platform, 1280, 720, "Snake 3D") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(

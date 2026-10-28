@@ -7,7 +7,8 @@ import "core:math"
 import mu "vendor:microui"
 
 // Context is the debug UI: build widgets on its microui context (mu) between begin and end.
-// Widgets sit in a reference frame (the window at init by default) that feed fits to the window.
+// Windows are declared in a reference frame (the window at init by default) and keep to their
+// edges when the window differs from it; nothing scales but the display's DPI.
 Context :: struct {
   mu:      mu.Context,
   using _: Context_State,
@@ -17,10 +18,10 @@ Context :: struct {
 Context_State :: struct {
   // microui's builtin font and icon atlas
   atlas:    render.TextureHandle,
-  // the frame widgets are laid out in, and it fitted to the window on the last feed
+  // the frame windows are declared in, and the window's size on the last feed
   reference: [2]f32,
-  frame:    anchor.Frame,
-  // the frame size each window was last placed in
+  size:     [2]f32,
+  // the window size each window was last placed in
   windows:  map[mu.Id][2]f32,
   // buttons pressed over the UI, owned by it through release
   buttons:  input.ButtonSet,
@@ -38,7 +39,7 @@ init :: proc(self: ^Context, r: ^render.Renderer, reference := [2]f32{}) -> bool
   mu.init(&self.mu)
   reference := reference if reference != {} else render.window_size(r)
   self.reference = reference
-  self.frame = anchor.frame(reference, reference)
+  self.size = reference
   self.mu.text_width = mu.default_atlas_text_width
   self.mu.text_height = mu.default_atlas_text_height
   ok: bool
@@ -64,14 +65,14 @@ window :: proc(self: ^Context, title: string, rect: mu.Rect, pin: anchor.Anchor 
   from, placed := self.windows[id]
   r := rect
   if !placed {
-    f := anchor.fit(to_anchor_rect(rect), pin, self.reference, self.frame.size)
+    f := anchor.fit(to_anchor_rect(rect), pin, self.reference, self.size)
     r = from_anchor_rect(f)
-  } else if from != self.frame.size {
+  } else if from != self.size {
     if cnt := mu.get_container(&self.mu, title, opt); cnt != nil {
-      cnt.rect = from_anchor_rect(anchor.fit(to_anchor_rect(cnt.rect), pin, from, self.frame.size))
+      cnt.rect = from_anchor_rect(anchor.fit(to_anchor_rect(cnt.rect), pin, from, self.size))
     }
   }
-  self.windows[id] = self.frame.size
+  self.windows[id] = self.size
   return mu.begin_window(&self.mu, title, r, opt)
 }
 
@@ -144,7 +145,7 @@ end :: proc(self: ^Context) -> []render.RenderCommand {
       hidden = c.rect.w <= 0 || c.rect.h <= 0
       clip := to_anchor_rect(c.rect)
       append(&runs, Run{
-        clip = {clip.pos * self.frame.scale, clip.size * self.frame.scale},
+        clip = clip,
         first_vertex = len(self.vertices),
         first_index = len(self.indices),
       })
@@ -174,8 +175,8 @@ end :: proc(self: ^Context) -> []render.RenderCommand {
 @(private = "file")
 quad :: proc(self: ^Context, dst, src: mu.Rect, color: mu.Color) {
   atlas_size := [2]f32{mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT}
-  p0 := [2]f32{f32(dst.x), f32(dst.y)} * self.frame.scale
-  p1 := [2]f32{f32(dst.x + dst.w), f32(dst.y + dst.h)} * self.frame.scale
+  p0 := [2]f32{f32(dst.x), f32(dst.y)}
+  p1 := [2]f32{f32(dst.x + dst.w), f32(dst.y + dst.h)}
   uv0 := [2]f32{f32(src.x), f32(src.y)} / atlas_size
   uv1 := [2]f32{f32(src.x + src.w), f32(src.y + src.h)} / atlas_size
   rgba := [4]u8{color.r, color.g, color.b, color.a}
@@ -189,16 +190,14 @@ quad :: proc(self: ^Context, dst, src: mu.Rect, color: mu.Color) {
   append(&self.indices, base, base + 1, base + 2, base, base + 2, base + 3)
 }
 
-// feed passes one input tick to the debug UI, fits its reference frame to r's window and
-// captures the mouse and keyboard it uses
-// (input.State.mouse_captured / keyboard_captured). Call it first among input consumers on
-// the update tick.
+// feed passes one input tick to the debug UI, reads r's window size (which windows keep to their
+// edges in) and captures the mouse and keyboard it uses (input.State.mouse_captured /
+// keyboard_captured). Call it first among input consumers on the update tick.
 feed :: proc(self: ^Context, s: ^input.State, r: ^render.Renderer) {
   ctx := &self.mu
   hovered := ctx.hover_root != nil
-  self.frame = anchor.frame(self.reference, render.window_size(r))
-  cursor := anchor.to_reference(s.cursor, self.frame)
-  x, y := i32(math.round(cursor.x)), i32(math.round(cursor.y))
+  self.size = render.window_size(r)
+  x, y := i32(math.round(s.cursor.x)), i32(math.round(s.cursor.y))
   mu.input_mouse_move(ctx, x, y)
   for b in input.MouseButton {
     // a press over the debug UI belongs to it until the tick after release

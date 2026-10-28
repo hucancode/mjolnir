@@ -68,7 +68,7 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  if !platform.init(&app.platform, 1024, 768, "Chain") do return
+  if !platform.init(&app.platform, 1280, 720, "Chain") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -204,7 +204,7 @@ should_close :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Chain", {20, 20, 260, 370}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Chain", {20, 20, 260, 370}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "You can grab dragon head and drag")
     mu.checkbox(ctx, "Auto move", &auto_move)

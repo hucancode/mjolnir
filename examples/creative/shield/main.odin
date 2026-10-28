@@ -43,7 +43,7 @@ field: [3]f32 = {0.15, 0.75, 0.3}
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  if !platform.init(&app.platform, 1000, 700, "Shield") do return
+  if !platform.init(&app.platform, 1280, 720, "Shield") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -124,7 +124,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Shield", {20, 20, 260, 400}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Shield", {20, 20, 260, 400}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Wireframe (W)", &wireframe)
     mu.checkbox(ctx, "Pop panels (P)", &pop)

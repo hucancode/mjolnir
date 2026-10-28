@@ -46,7 +46,7 @@ main :: proc() {
   app.height = 2
   app.lobes = 3
   app.auto_play = true
-  if !platform.init(&app.platform, 900, 650, "Path Modifier") do return
+  if !platform.init(&app.platform, 1280, 720, "Path Modifier") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -145,7 +145,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Path Modifier", {20, 20, 200, 380}, {}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Path Modifier", {20, 20, 200, 380}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Auto play", &app.auto_play)
     mu.label(ctx, "Offset"); mu.slider(ctx, &app.offset, 0, animation.spline_arc_length(app.spline))

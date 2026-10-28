@@ -46,7 +46,7 @@ main :: proc() {
   app := new(App)
   app.speed = DEFAULT_SPEED
   if !physics.init(&app.phys, gravity = {0, 0, 0}) do return
-  if !platform.init(&app.platform, 1000, 700, "Bullet vs Thin Wall (CCD)") do return
+  if !platform.init(&app.platform, 1280, 720, "Bullet vs Thin Wall (CCD)") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -155,7 +155,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "CCD", {700, 20, 280, 120}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "CCD", {20, 20, 280, 120}, {}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Velocity (m/s)")
     mu.slider(ctx, &app.speed, 1.0, 1000.0)

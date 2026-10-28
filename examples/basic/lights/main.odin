@@ -63,7 +63,7 @@ main :: proc() {
   context.logger = log.create_console_logger()
   rand.reset(1)
   app := new(App)
-  if !platform.init(&app.platform, 1000, 700, "Lights") do return
+  if !platform.init(&app.platform, 1280, 720, "Lights") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
   mjolnir.run(
@@ -218,7 +218,7 @@ frame :: proc(app: ^App) -> bool {
 
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Lights", {700, 20, 280, 480}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+  if debugui.window(&app.debug, "Lights", {20, 20, 280, 480}, {}) {
     point_count, spot_count: int
     for l in app.lights {
       if l.kind == .POINT do point_count += 1
