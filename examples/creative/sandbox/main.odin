@@ -1,0 +1,537 @@
+// Sandbox: the general test. The Warrior holds a Sponza courtyard: an adventurer party patrols, a sprite warrior idles, runs and strikes, a city hides behind the walls (occlusion culling), with torches, orbiting shadow casters, physics, particles, a portal and bloom.
+package main
+
+import "core:fmt"
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import "core:math/rand"
+import mu "vendor:microui"
+import "mjolnir"
+import "mjolnir/animation"
+import "mjolnir/debugui"
+import "mjolnir/geometry"
+import "mjolnir/gltf"
+import "mjolnir/input"
+import "mjolnir/physics"
+import "mjolnir/platform"
+import "mjolnir/render"
+import "mjolnir/world"
+
+Model :: enum {
+  SPONZA,
+  WARRIOR,
+  KNIGHT,
+  MAGE,
+  BARBARIAN,
+  ROGUE,
+  FOX,
+  DAMAGED_HELMET,
+  SCIFI_HELMET,
+  SUZANNE,
+  DUCK,
+  HAMMER,
+  SWORD,
+  SHIELD,
+  STAFF,
+  AXE,
+  DAGGER,
+}
+
+MODEL_FILES := [Model][]u8 {
+  .SPONZA           = #load("assets/Sponza.glb"),
+  .WARRIOR          = #load("assets/Warrior.glb"),
+  .KNIGHT           = #load("assets/kaykit_adventurers/Knight.glb"),
+  .MAGE             = #load("assets/kaykit_adventurers/Mage.glb"),
+  .BARBARIAN        = #load("assets/kaykit_adventurers/Barbarian.glb"),
+  .ROGUE            = #load("assets/kaykit_adventurers/Rogue.glb"),
+  .FOX              = #load("assets/Fox2.glb"),
+  .DAMAGED_HELMET   = #load("assets/DamagedHelmet.glb"),
+  .SCIFI_HELMET     = #load("assets/SciFiHelmet.glb"),
+  .SUZANNE          = #load("assets/Suzanne.glb"),
+  .DUCK             = #load("assets/Duck.glb"),
+  .HAMMER           = #load("assets/Mjolnir.glb"),
+  .SWORD            = #load("assets/kaykit_adventurers/sword_1handed.glb"),
+  .SHIELD           = #load("assets/kaykit_adventurers/shield_round_color.glb"),
+  .STAFF            = #load("assets/kaykit_adventurers/staff.glb"),
+  .AXE              = #load("assets/kaykit_adventurers/axe_2handed.glb"),
+  .DAGGER           = #load("assets/kaykit_adventurers/dagger.glb"),
+}
+
+HERO_CLIPS := [?]string{"intro", "idle", "jump", "idle", "jump_lick", "idle"}
+HERO_CLIP_SECONDS :: 4
+
+// Sponza at twice its size: the courtyard runs x -22..20 between pillar rows at z -4.4 and 3,
+// with an aisle behind each; MID is its center line.
+SPONZA_SCALE :: 2
+MID :: -0.6
+
+// A camera tour: (eye, target) stops, TOUR_LEG seconds apart.
+TOUR := [?][2][3]f32 {
+  {{-20, 3, MID}, {0, 2, MID}},
+  {{-3.5, 1.8, 1.6}, {0, 2.2, MID}},
+  {{16, 2, 6.6}, {-16, 1.4, 6.6}},
+  {{2, 15, MID}, {0, 1, MID}},
+  {{0, 48, 48}, {0, 0, 0}},
+  {{13.5, 2.2, 1.5}, {17, 1.4, MID}},
+  {{4.5, 1.8, 1.6}, {8, 0.8, MID}},
+  {{-16, 2, -7.8}, {16, 1.4, -7.8}},
+}
+TOUR_LEG :: 7.0
+// the tour stop the camera starts at (-define:TOUR_START=n)
+TOUR_START :: #config(TOUR_START, 0)
+
+TORCHES := [?][3]f32{{-15, 2.6, 2.4}, {-5, 2.6, 2.4}, {5, 2.6, 2.4}, {15, 2.6, 2.4}, {-15, 2.6, -3.8}, {-5, 2.6, -3.8}, {5, 2.6, -3.8}, {15, 2.6, -3.8}}
+ORBIT_LIGHTS :: 6
+TORCH_INTENSITY :: 40
+MAX_BALLS :: 40
+
+// The Warrior sprite sheet's clips (examples/basic/sprite): idle, run, and one-shot actions.
+SpriteClip :: struct {
+  first, count: u32,
+}
+SPRITE_IDLE :: SpriteClip{0, 6}
+SPRITE_RUN :: SpriteClip{6, 8}
+SPRITE_ACTIONS := [?]SpriteClip{{14, 12}, {42, 8}, {84, 7}, {76, 8}, {63, 10}}
+SPRITE_FPS :: 10
+SPRITE_HEIGHT :: 2
+SPRITE_ASPECT :: f32(69.0 / 44.0)
+// the stretch of courtyard floor the sprite runs along
+SPRITE_LANE :: [2]f32{3.4, 6.6}
+SPRITE_SPEED :: 2.4
+
+CameraMode :: enum {
+  TOUR,
+  ORBIT,
+  FLY,
+}
+
+// A glTF instance under its own root; a nonzero path walks the root around an ellipse of those
+// radii about the courtyard's center, {0, 0, MID}.
+Actor :: struct {
+  model:    Model,
+  root:     world.NodeHandle,
+  instance: gltf.Instance,
+  path:     [2]f32,
+  speed:    f32,
+  phase:    f32,
+}
+
+Ball :: struct {
+  node: world.NodeHandle,
+  body: physics.BodyHandle,
+}
+
+App :: struct {
+  platform:      platform.Platform,
+  scene:         world.World,
+  renderer:      render.Renderer,
+  debug:         debugui.Context,
+  input:         input.State,
+  phys:          physics.World,
+  orbit:         render.Orbit,
+  camera:        CameraMode,
+  tour:          f32,
+  time:          f32,
+  models:        [Model]gltf.Model,
+  actors:        [dynamic]Actor,
+  props:         [dynamic]gltf.Instance,
+  spinners:      [dynamic]world.NodeHandle,
+  balls:         [dynamic]Ball,
+  torches:       [len(TORCHES)]render.LightHandle,
+  hero:          int,
+  hero_clip:     int,
+  hammer:        world.NodeHandle,
+  lights_root:   world.NodeHandle,
+  portal_camera: render.CameraHandle,
+  portal:        render.MaterialHandle,
+  sprite:        render.MaterialHandle,
+  sprite_node:   world.NodeHandle,
+  sprite_clip:   SpriteClip,
+  sprite_once:   bool,
+  sprite_time:   f32,
+  sprite_left:   f32,
+  sprite_x:      f32,
+  sprite_facing: f32,
+  ball_look:     render.MeshAttachment,
+  objects:       int,
+  bloom:         bool,
+  spin_lights:   bool,
+  sun_angle:     f32,
+}
+
+main :: proc() {
+  context.logger = log.create_console_logger()
+  app := new(App)
+  if !platform.init(&app.platform, 1280, 720, "Sandbox") do return
+  if !render.init(&app.renderer, app.platform.window) do return
+  if !world.init(&app.scene) do return
+  if !physics.init(&app.phys) do return
+  mjolnir.run(mjolnir.Loop(App){app = app, setup = setup, update = update, render = draw, shutdown = shutdown})
+}
+
+setup :: proc(app: ^App) -> mjolnir.Setup {
+  if !render.ready(&app.renderer) do return .WAIT
+  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
+  for &model, m in app.models {
+    model = gltf.model_create(&app.renderer, MODEL_FILES[m]) or_else {}
+    if len(model.nodes) == 0 do log.errorf("cannot load %v", m)
+  }
+  r := &app.renderer
+  r.ibl_intensity = 0.4
+  app.sun_angle = 62
+  app.bloom = true
+  app.spin_lights = true
+  app.tour = TOUR_START * TOUR_LEG
+  set_effects(app)
+
+  actor(app, .SPONZA, {}, SPONZA_SCALE)
+  courtyard(app)
+  party(app)
+  lights(app)
+  particles(app)
+  crates(app)
+  portal(app)
+  hidden_city(app)
+  app.ball_look = render.primitive(r, .SPHERE, .ORANGE)
+  return .READY
+}
+
+// Spawns a model under a new root, plays `clip` and puts the hands' weapons in their slots.
+actor :: proc(app: ^App, model: Model, position: [3]f32, scale: f32 = 1, yaw: f32 = 0, clip := "", hands: [2]Maybe(Model) = {}) -> ^Actor {
+  root := world.spawn(&app.scene, position)
+  world.rotate(&app.scene, root, yaw)
+  world.scale(&app.scene, root, scale)
+  a := Actor{model = model, root = root}
+  a.instance = gltf.instance_create(&app.models[model], &app.scene, &app.renderer, root)
+  for &animator, i in a.instance.animators do animation.play(&animator, &app.models[model].rigs[i], clip)
+  for hand, i in hands {
+    weapon := hand.? or_continue
+    slot := world.find(&app.scene, "handslot.r" if i == 0 else "handslot.l", root) or_continue
+    append(&app.props, gltf.instance_create(&app.models[weapon], &app.scene, &app.renderer, slot))
+  }
+  append(&app.actors, a)
+  return &app.actors[len(app.actors) - 1]
+}
+
+mesh :: proc(app: ^App, look: render.MeshAttachment, position: [3]f32, scale: [3]f32 = 1, parent: world.NodeHandle = {}) -> world.NodeHandle {
+  app.objects += 1
+  return mjolnir.spawn_mesh(&app.scene, &app.renderer, look, position, scale, parent)
+}
+
+courtyard :: proc(app: ^App) {
+  r := &app.renderer
+  stone := render.material_create(r, render.make_material(base_color_factor = {0.55, 0.52, 0.48, 1}, roughness_value = 0.7))
+  pedestal := render.MeshAttachment{mesh = r.builtin_meshes[.CYLINDER], material = stone, cast_shadow = true}
+  mesh(app, pedestal, {0, 0.3, MID}, {1.2, 0.3, 1.2})
+  app.hero = len(app.actors)
+  actor(app, .WARRIOR, {0, 0.6, MID}, clip = HERO_CLIPS[0])
+  app.hammer = world.spawn(&app.scene, {0, 4.2, MID})
+  hammer := actor(app, .HAMMER, {}, 0.6)
+  world.set_parent(&app.scene, hammer.root, app.hammer)
+  for x in ([2]f32{-17, 17}) {
+    mesh(app, pedestal, {x, 0.5, MID}, {0.9, 0.5, 0.9})
+    helmet := actor(app, .DAMAGED_HELMET if x < 0 else .SCIFI_HELMET, {x, 1, MID}, 0.6 if x < 0 else 0.45)
+    append(&app.spinners, helmet.root)
+    spot := world.spawn(&app.scene, {x, 7, MID})
+    world.rotate(&app.scene, spot, -math.PI / 2, {1, 0, 0})
+    render.attach(r, spot, render.light_create(r, render.make_spot_light({1, 0.9, 0.75}, 400, 10, math.PI * 0.12)))
+  }
+  suzanne := actor(app, .SUZANNE, {0, 9, MID}, 1.4)
+  append(&app.spinners, suzanne.root)
+  duck := actor(app, .DUCK, {-8, 2.6, MID}, 0.6)
+  append(&app.spinners, duck.root)
+}
+
+party :: proc(app: ^App) {
+  Walker :: struct {
+    model:        Model,
+    clip:         string,
+    hands:        [2]Maybe(Model),
+    scale, phase: f32,
+  }
+  walkers := [?]Walker {
+    {.KNIGHT, "Walking_A", {.SWORD, .SHIELD}, 0.75, 0},
+    {.MAGE, "Walking_B", {.STAFF, nil}, 0.75, 0.35},
+    {.BARBARIAN, "Walking_A", {.AXE, nil}, 0.8, 0.7},
+    {.ROGUE, "Walking_C", {.DAGGER, .DAGGER}, 0.72, 1.05},
+  }
+  for w in walkers {
+    a := actor(app, w.model, {}, w.scale, clip = w.clip, hands = w.hands)
+    a.path, a.speed, a.phase = {15, 2}, 0.1, w.phase
+  }
+  fox := actor(app, .FOX, {}, 0.6, clip = "Run")
+  fox.path, fox.speed = {2.6, 2.4}, -0.9
+}
+
+lights :: proc(app: ^App) {
+  r := &app.renderer
+  sconce := render.primitive(r, .CYLINDER, .BLACK)
+  for p, i in TORCHES {
+    mesh(app, sconce, p - {0, 0.25, 0}, {0.08, 0.2, 0.08})
+    app.torches[i] = render.light_create(r, render.make_point_light({1, 0.55, 0.2}, TORCH_INTENSITY, 8, cast_shadow = false))
+    render.attach(r, world.spawn(&app.scene, p + {0, 0.2, 0}), app.torches[i])
+  }
+  app.lights_root = world.spawn(&app.scene, {0, 5, MID})
+  for i in 0 ..< ORBIT_LIGHTS {
+    angle := f32(i) / ORBIT_LIGHTS * 2 * math.PI
+    color := [3]f32{0.5 + 0.5 * math.cos(angle), 0.5 + 0.5 * math.cos(angle + 2.1), 0.5 + 0.5 * math.cos(angle + 4.2)}
+    lamp := world.spawn(&app.scene, {math.cos(angle) * 12, 0, math.sin(angle) * 2}, parent = app.lights_root)
+    render.attach(r, lamp, render.light_create(r, render.make_point_light(color, 60, 10)))
+    bulb := render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, emissive_value = 8))
+    mesh(app, {mesh = r.builtin_meshes[.SPHERE], material = bulb}, {0, 0.35, 0}, 0.12, lamp)
+  }
+}
+
+particles :: proc(app: ^App) {
+  r := &app.renderer
+  flame := render.texture_create(r, #load("assets/particles/flame_03.png"))
+  star := render.texture_create(r, #load("assets/particles/star_07.png"))
+  spark := render.texture_create(r, #load("assets/particles/light_01.png"))
+  fire := render.emitter_create(r, render.make_emitter(flame, 45, {0, 1.2, 0}, 0.25, {1, 0.7, 0.3, 1}, {1, 0.15, 0, 0}, 0.7, 0.08, 180, 40, -0.1))
+  for p in TORCHES do render.attach(r, world.spawn(&app.scene, p), fire)
+  sparks := render.emitter_create(r, render.make_emitter(spark, 60, {0, 0.4, 0}, 1.2, {0.6, 0.8, 1, 1}, {0.2, 0.4, 1, 0}, 1.4, 0.6, 90, 10, 0.05))
+  render.attach(r, world.spawn(&app.scene, {0, 1.2, 0}, parent = app.hammer), sparks)
+  fountain := render.emitter_create(r, render.make_emitter(star, 140, {0, 5, 0}, 0.6, {1, 0.9, 0.3, 1}, {1, 0.3, 0.6, 0}, 2.6, 0.15, 160, 60, 1))
+  render.attach(r, world.spawn(&app.scene, {-8, 0.2, MID}), fountain)
+  render.attach(r, world.spawn(&app.scene, {-8, 3.5, MID}), render.force_field_create(r, render.make_force_field(3, 4, 6)))
+}
+
+crates :: proc(app: ^App) {
+  physics.body_create(&app.phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {30, 0.5, 30}})
+  colors := [?]render.Color{.RED, .YELLOW, .GREEN, .CYAN, .BLUE, .MAGENTA}
+  half :: 0.25
+  for layer in 0 ..< 5 {
+    for x in 0 ..< 3 {
+      for z in 0 ..< 3 {
+        p := [3]f32{8 + (f32(x) - 1) * 2 * half, half + f32(layer) * 2 * half, MID + (f32(z) - 1) * 2 * half}
+        node := mesh(app, render.primitive(&app.renderer, .CUBE, colors[(x + z + layer) % len(colors)]), p, half)
+        physics.body_create(&app.phys, p, collider = physics.BoxCollider{half_extents = half}, mass = 2, user = world.Handle(node))
+      }
+    }
+  }
+}
+
+portal :: proc(app: ^App) {
+  r := &app.renderer
+  app.portal_camera = render.camera_create(r, 512, 512, {0, 40, MID + 0.01}, {0, 0, MID}, 0.9, 0.1, 100)
+  app.portal = render.material_create(r, render.make_material(emissive_value = 0.2))
+  frame := render.primitive(r, .CUBE, .BLACK)
+  mesh(app, frame, {-21.6, 3.2, MID}, {0.1, 2.3, 2.3})
+  screen := mesh(app, {mesh = r.builtin_meshes[.QUAD_XY], material = app.portal}, {-21.45, 3.2, MID}, {2.1, 2.1, 1})
+  world.rotate(&app.scene, screen, math.PI / 2)
+  sheet := render.texture_create(r, #load("assets/Warrior_Sheet-Effect.png"))
+  app.sprite = render.material_create(r, render.make_material(.SPRITE, albedo_texture = sheet, frame_columns = 6, frame_rows = 17))
+  app.sprite_node = mesh(app, render.primitive(r, .QUAD_XY, app.sprite, cast_shadow = false), {})
+  app.sprite_x, app.sprite_facing = SPRITE_LANE.x, 1
+  sprite_play(app, SPRITE_IDLE, false, 3)
+}
+
+// Thousands of props outside Sponza's walls: from the courtyard the walls hide them and the
+// occlusion cull drops their draws; the high tour stop shows them.
+hidden_city :: proc(app: ^App) {
+  shapes := [?]render.Primitive{.CUBE, .SPHERE, .CONE, .CYLINDER}
+  colors := [?]render.Color{.RED, .YELLOW, .GREEN, .CYAN, .BLUE, .MAGENTA, .WHITE}
+  rng := rand.create(7)
+  context.random_generator = rand.default_random_generator(&rng)
+  for x := f32(-52); x <= 52; x += 2 {
+    for z := f32(-52); z <= 52; z += 2 {
+      if abs(x) < 33 && abs(z) < 22 do continue
+      height := 0.4 + rand.float32() * 2
+      look := render.primitive(&app.renderer, rand.choice(shapes[:]), rand.choice(colors[:]), cast_shadow = false)
+      mesh(app, look, {x, height, z}, {0.7, height, 0.7})
+    }
+  }
+}
+
+set_effects :: proc(app: ^App) {
+  clear(&app.renderer.effect_stack)
+  if app.bloom do append(&app.renderer.effect_stack, render.BloomEffect{threshold = 1, intensity = 0.35, blur_radius = 24})
+}
+
+shutdown :: proc(app: ^App) {
+  for &a in app.actors do gltf.destroy(&a.instance, &app.scene, &app.renderer)
+  for &p in app.props do gltf.destroy(&p, &app.scene, &app.renderer)
+  for &m in app.models do gltf.destroy(&m, &app.renderer)
+  delete(app.actors)
+  delete(app.props)
+  delete(app.spinners)
+  delete(app.balls)
+  physics.shutdown(&app.phys)
+  world.shutdown(&app.scene)
+  debugui.shutdown(&app.debug)
+  render.shutdown(&app.renderer)
+  platform.shutdown(&app.platform)
+  free(app)
+}
+
+update :: proc(app: ^App, dt: f32) {
+  r := &app.renderer
+  render.lock(r)
+  defer render.unlock(r)
+  platform.read_input(&app.platform, &app.input)
+  debugui.feed(&app.debug, &app.input, r)
+  panel(app)
+  render.stage_overlay(r, debugui.end(&app.debug))
+  app.time += dt
+  steer(app, dt)
+  if !app.input.keyboard_captured {
+    if input.key_pressed(&app.input, .TAB) do app.camera = .FLY if app.camera != .FLY else .TOUR
+    if input.key_pressed(&app.input, .SPACE) do shoot(app)
+  }
+  animate(app, dt)
+  physics.step(&app.phys, dt)
+  world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
+  world.update(&app.scene)
+  for &a in app.actors do gltf.animate(&a.instance, &app.models[a.model], &app.scene, r, dt)
+  render.stage_transforms(r, world.changes(&app.scene))
+  render.update(r, dt)
+}
+
+animate :: proc(app: ^App, dt: f32) {
+  r := &app.renderer
+  t := app.time
+  hero := &app.actors[app.hero]
+  if next := int(t / HERO_CLIP_SECONDS) % len(HERO_CLIPS); next != app.hero_clip {
+    app.hero_clip = next
+    for &animator, i in hero.instance.animators do animation.play(&animator, &app.models[.WARRIOR].rigs[i], HERO_CLIPS[next])
+  }
+  for &a in app.actors do if a.path != {} {
+    a.phase += a.speed * dt
+    c, s := math.cos(a.phase), math.sin(a.phase)
+    heading := math.sign(a.speed) * [2]f32{-s * a.path.x, c * a.path.y}
+    world.translate(&app.scene, a.root, c * a.path.x, 0, MID + s * a.path.y)
+    world.rotate(&app.scene, a.root, math.atan2(heading.x, heading.y))
+  }
+  for node in app.spinners do world.rotate_by(&app.scene, node, dt * 0.6)
+  world.translate(&app.scene, app.hammer, 0, 4.2 + 0.25 * math.sin(t * 1.7), MID)
+  world.rotate(&app.scene, app.hammer, t * 1.3)
+  if app.spin_lights do world.rotate_by(&app.scene, app.lights_root, dt * 0.35)
+  for h, i in app.torches {
+    if l, ok := render.light(r, h); ok do l.intensity = TORCH_INTENSITY * (0.8 + 0.2 * math.sin(t * 13 + f32(i) * 1.7) * math.sin(t * 7.3 + f32(i)))
+  }
+  sprite_step(app, dt)
+  if m, ok := render.material(r, app.portal); ok do m.albedo_texture = render.camera_image(r, app.portal_camera, .FINAL_IMAGE, previous_frame = true)
+  elevation := app.sun_angle * math.RAD_PER_DEG
+  r.sun = {
+    enabled         = true,
+    cast_shadow     = true,
+    color           = {1, 0.92, 0.8},
+    intensity       = 4,
+    direction       = {-math.cos(elevation) * 0.35, -math.sin(elevation), -math.cos(elevation)},
+    shadow_distance = 45,
+  }
+}
+
+steer :: proc(app: ^App, dt: f32) {
+  cam := render.main_camera(&app.renderer)
+  switch app.camera {
+  case .TOUR:
+    app.tour += dt
+    leg := app.tour / TOUR_LEG
+    i := int(leg) % len(TOUR)
+    j := (i + 1) % len(TOUR)
+    f := leg - math.floor(leg)
+    f = f * f * (3 - 2 * f)
+    render.camera_look_at(cam, linalg.lerp(TOUR[i][0], TOUR[j][0], f), linalg.lerp(TOUR[i][1], TOUR[j][1], f))
+  case .ORBIT:
+    render.orbit_drag(&app.orbit, cam, &app.input)
+  case .FLY:
+    if app.input.keyboard_captured do return
+    s := &app.input
+    move := geometry.qx(cam.rotation) * input.axis(s, .A, .D) + {0, 1, 0} * input.axis(s, .Q, .E) - geometry.qz(cam.rotation) * input.axis(s, .S, .W)
+    cam.position += move * 6 * dt
+    if input.mouse_down(s, .RIGHT) {
+      d := s.mouse_delta * 0.003
+      cam.rotation = linalg.quaternion_angle_axis(-d.x, linalg.VECTOR3F32_Y_AXIS) * cam.rotation
+      cam.rotation = linalg.quaternion_angle_axis(-d.y, geometry.qx(cam.rotation)) * cam.rotation
+    }
+  }
+}
+
+shoot :: proc(app: ^App) {
+  cam := render.main_camera(&app.renderer)
+  forward := render.camera_forward(cam)
+  if len(app.balls) == MAX_BALLS {
+    physics.body_destroy(&app.phys, app.balls[0].body)
+    world.destroy(&app.scene, app.balls[0].node)
+    ordered_remove(&app.balls, 0)
+  }
+  at := cam.position + forward
+  node := mesh(app, app.ball_look, at, 0.25)
+  body := physics.body_create(&app.phys, at, collider = physics.SphereCollider{radius = 0.25}, mass = 6, user = world.Handle(node))
+  physics.set_velocity(&app.phys, body, forward * 22)
+  append(&app.balls, Ball{node, body})
+}
+
+panel :: proc(app: ^App) {
+  ctx := debugui.begin(&app.debug)
+  if debugui.window(&app.debug, "Sandbox", {20, 20, 280, 330}, {}, {.NO_CLOSE}) {
+    mu.layout_row(ctx, {80, 80, -1}, 0)
+    for mode in CameraMode {
+      if .SUBMIT in mu.button(ctx, fmt.tprint(mode)) {
+        cam := render.main_camera(&app.renderer)
+        if mode == .ORBIT do app.orbit = render.make_orbit(cam.position, {0, 1.5, MID})
+        app.camera = mode
+      }
+    }
+    mu.layout_row(ctx, {-1}, 0)
+    mu.label(ctx, fmt.tprintf("Camera: %v", app.camera))
+    mu.label(ctx, fmt.tprintf("Opaque draws after culling: %d", render.draw_count(&app.renderer)))
+    mu.label(ctx, fmt.tprintf("Meshes: %d   Actors: %d", app.objects, len(app.actors)))
+    mu.label(ctx, fmt.tprintf("Lights: %d + sun   Balls: %d", len(TORCHES) + ORBIT_LIGHTS + 2, len(app.balls)))
+    if .CHANGE in mu.checkbox(ctx, "Bloom", &app.bloom) do set_effects(app)
+    mu.checkbox(ctx, "Orbit lights", &app.spin_lights)
+    mu.layout_row(ctx, {80, -1}, 0)
+    mu.label(ctx, "Sun angle")
+    mu.slider(ctx, &app.sun_angle, 10, 90, 1, "%.0f")
+    mu.layout_row(ctx, {-1}, 0)
+    mu.label(ctx, "Space: shoot   Tab: fly (WASD QE,")
+    mu.label(ctx, "right drag looks)")
+  }
+  if debugui.window(&app.debug, "GPU", {980, 20, 280, 300}, {.RIGHT, .TOP}, {.NO_CLOSE}) {
+    timings := render.gpu_timings(&app.renderer)
+    if len(timings) == 0 do mu.label(ctx, "No GPU timers on this device")
+    mu.layout_row(ctx, {170, -1}, 0)
+    for t in timings {
+      mu.label(ctx, fmt.tprintf("%*s%s", int(t.depth) * 2, "", t.name))
+      mu.label(ctx, fmt.tprintf("%.3f ms", t.ms))
+    }
+  }
+}
+
+draw :: proc(app: ^App) -> bool {
+  return mjolnir.frame(&app.platform, &app.renderer)
+}
+
+// Starts a clip: a looping one for `seconds`, a one-shot one until its last frame.
+sprite_play :: proc(app: ^App, clip: SpriteClip, once: bool, seconds: f32 = 0) {
+  app.sprite_clip, app.sprite_once, app.sprite_time, app.sprite_left = clip, once, 0, seconds
+}
+
+// Idles, now and then runs along its lane, and now and then strikes an action, back to idle after.
+sprite_step :: proc(app: ^App, dt: f32) {
+  app.sprite_time += dt
+  app.sprite_left -= dt
+  frame := u32(app.sprite_time * SPRITE_FPS)
+  running := app.sprite_clip == SPRITE_RUN
+  if app.sprite_once && frame >= app.sprite_clip.count {
+    sprite_play(app, SPRITE_IDLE, false, 2 + 3 * rand.float32())
+    frame = 0
+  } else if !app.sprite_once && app.sprite_left <= 0 {
+    roll := rand.float32()
+    if !running && roll < 0.5 do sprite_play(app, SPRITE_RUN, false, 2 + 3 * rand.float32())
+    else if roll < 0.8 do sprite_play(app, rand.choice(SPRITE_ACTIONS[:]), true)
+    else do sprite_play(app, SPRITE_IDLE, false, 2 + 2 * rand.float32())
+    frame = 0
+  }
+  if app.sprite_clip == SPRITE_RUN {
+    app.sprite_x += app.sprite_facing * SPRITE_SPEED * dt
+    if app.sprite_x < SPRITE_LANE.x || app.sprite_x > SPRITE_LANE.y do app.sprite_facing = -app.sprite_facing
+    app.sprite_x = clamp(app.sprite_x, SPRITE_LANE.x, SPRITE_LANE.y)
+  }
+  clip := app.sprite_clip
+  render.set_sprite_frame(&app.renderer, app.sprite, clip.first + (min(frame, clip.count - 1) if app.sprite_once else frame % clip.count))
+  world.translate(&app.scene, app.sprite_node, app.sprite_x, SPRITE_HEIGHT / 2, MID)
+  world.scale(&app.scene, app.sprite_node, app.sprite_facing * SPRITE_HEIGHT * SPRITE_ASPECT / 2, SPRITE_HEIGHT / 2, 1)
+}

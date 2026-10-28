@@ -11,17 +11,20 @@ SLANG_FLAGS := -I $(SHADER_DIR) -matrix-layout-column-major -warnings-disable 39
 SPV_SHADERS := $(SLANG_ENTRIES:.slang=.spv)
 WGSL_SHADERS := $(SLANG_ENTRIES:.slang=.wgsl)
 
+# The sandbox example exercises most features at once: the general test.
+SANDBOX := examples/creative/sandbox
+
 run: shader
-	odin run . -out:bin/main
+	odin run $(SANDBOX) -out:bin/main
 
 debug: shader
-	VK_LOADER_DEBUG=all VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation odin run . -out:bin/main-debug -debug
+	VK_LOADER_DEBUG=all VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation odin run $(SANDBOX) -out:bin/main-debug -debug
 
 build: shader
-	odin build . -out:bin/main
+	odin build $(SANDBOX) -out:bin/main
 
 build-debug: shader
-	odin build . -out:bin/main-debug -debug
+	odin build $(SANDBOX) -out:bin/main-debug -debug
 
 shader: $(SPV_SHADERS) $(WGSL_SHADERS)
 	@echo "Shader compilation complete."
@@ -29,10 +32,10 @@ shader: $(SPV_SHADERS) $(WGSL_SHADERS)
 # The WebGPU backend. Natively it needs wgpu-native in Odin's vendor/wgpu/lib (see
 # vendor/wgpu/doc.odin).
 run-wgpu: shader
-	odin run . -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
+	odin run $(SANDBOX) -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
 
 build-wgpu: shader
-	odin build . -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
+	odin build $(SANDBOX) -out:bin/main-wgpu -define:RENDER_BACKEND=wgpu
 
 # Examples live in examples/<category>/<name>; everything else addresses them by bare name.
 # EXAMPLE picks one (cube when unset); record takes all of them when unset.
