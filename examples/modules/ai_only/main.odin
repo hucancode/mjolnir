@@ -1,11 +1,14 @@
-// FSM and behavior tree on their own: a guard on a line patrols, chases an intruder and returns as a state machine, while a worker gathers, delivers and eats by a behavior tree. Prints what each decides.
+// FSM and behavior tree on their own: a guard on a line patrols, chases an intruder and returns as a state machine, while a worker gathers, delivers and eats by a behavior tree. Both report what each decides: the command line prints it, the web page shows it.
 package main
 
 import "core:fmt"
+import "core:strings"
 import bt "mjolnir/behavior_tree"
 import "mjolnir/fsm"
 
 DT :: 0.5
+
+out: strings.Builder
 
 GuardState :: enum {
   PATROL,
@@ -44,7 +47,7 @@ go_back :: proc(g: ^Guard, dt: f32) -> GuardState {
 }
 
 say :: proc(g: ^Guard, what: string) {
-  fmt.printfln("  guard at %.1f %s", g.position, what)
+  fmt.sbprintfln(&out, "  guard at %.1f %s", g.position, what)
 }
 
 Worker :: struct {
@@ -73,27 +76,29 @@ gather :: proc(w: ^Worker) -> bt.Status {
   return .RUNNING
 }
 
-main :: proc() {
+// run plays both for a while and returns what they decided.
+run :: proc() -> string {
   intruder := f32(-12)
   guard := Guard{heading = 1, intruder = &intruder}
   machine: fsm.Machine(GuardState)
-  fmt.println("guard (fsm):")
+  fmt.sbprintln(&out, "guard (fsm):")
   fsm.start(&machine, GUARD, &guard, .PATROL)
   for _ in 0 ..< 120 {
     intruder += 0.6 * DT
     fsm.update(&machine, GUARD, &guard, DT)
   }
-  fmt.printfln("  after 60s: %v at %.1f, intruder at %.1f", machine.current, guard.position, intruder)
+  fmt.sbprintfln(&out, "  after 60s: %v at %.1f, intruder at %.1f", machine.current, guard.position, intruder)
 
-  fmt.println("worker (behavior tree):")
+  fmt.sbprintln(&out, "worker (behavior tree):")
   worker: Worker
   trace := make([dynamic]bt.Step, context.temp_allocator)
   for tick in 0 ..< 12 {
     clear(&trace)
     worker.hunger += 1
     status := bt.tick(WORKER, &worker, &trace)
-    fmt.printf("  tick %d %v", tick, status)
-    for s in trace do fmt.printf(" %s:%v", s.name, s.status)
-    fmt.printfln("  (hunger %d, carried %d, delivered %d)", worker.hunger, worker.carried, worker.delivered)
+    fmt.sbprintf(&out, "  tick %d %v", tick, status)
+    for s in trace do fmt.sbprintf(&out, " %s:%v", s.name, s.status)
+    fmt.sbprintfln(&out, "  (hunger %d, carried %d, delivered %d)", worker.hunger, worker.carried, worker.delivered)
   }
+  return strings.to_string(out)
 }

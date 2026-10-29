@@ -368,6 +368,12 @@ load_examples :: proc(root, wasm_dir, media: string) -> []Example {
         append(&desc, text)
         if strings.has_suffix(text, ".") || strings.has_suffix(text, "!") do break
       }
+      // the example's other .odin files (e.g. per-target drivers) follow main.odin, each under its name
+      files, _ := os.read_all_directory_by_path(fi.fullpath, context.allocator)
+      slice.sort_by(files, proc(a, b: os.File_Info) -> bool {return a.name < b.name})
+      for file in files do if file.name != "main.odin" && filepath.ext(file.name) == ".odin" {
+        source = strings.concatenate({source, "\n// ", file.name, "\n", read(file.fullpath)})
+      }
       video_path, _ := filepath.join({media, "videos", fmt.tprintf("%s.mp4", fi.name)})
       wasm_path, _ := filepath.join({wasm_dir, fmt.tprintf("%s.wasm", fi.name)})
       append(&out, Example {

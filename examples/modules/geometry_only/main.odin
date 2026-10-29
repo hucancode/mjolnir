@@ -1,30 +1,17 @@
-// Geometry on its own: build meshes, ray-trace them through a BVH, and frustum-cull a field of boxes. Writes artifacts/modules/geometry_only/{shapes.obj,render.png,cull.svg}.
+// Geometry on its own: build meshes, ray-trace them through a BVH, and frustum-cull a field of boxes. The command line writes artifacts/modules/geometry_only/{shapes.obj,render.png,cull.svg}; the web page shows them.
 package main
 
+import "base:runtime"
+import "core:c"
 import "core:fmt"
 import "core:math"
 import "core:math/linalg"
-import "core:os"
 import "core:strings"
 import "mjolnir/geometry"
 import stbi "vendor:stb/image"
 
-OUT :: "artifacts/modules/geometry_only/"
 WIDTH :: 640
 HEIGHT :: 400
-
-main :: proc() {
-  os.make_directory_all(OUT)
-  scene := build_scene()
-  defer geometry.destroy(scene)
-  write_obj(OUT + "shapes.obj", scene)
-  hits := trace(scene, OUT + "render.png")
-  kept, total := cull(OUT + "cull.svg")
-  fmt.printfln("%d vertices, %d triangles", len(scene.vertices), len(scene.indices) / 3)
-  fmt.printfln("%d of %d rays hit", hits, WIDTH * HEIGHT)
-  fmt.printfln("%d of %d boxes in the frustum", kept, total)
-  fmt.printfln("wrote %sshapes.obj, %srender.png, %scull.svg", OUT, OUT, OUT)
-}
 
 build_scene :: proc() -> geometry.Mesh {
   parts := []geometry.Mesh {
@@ -50,16 +37,16 @@ build_scene :: proc() -> geometry.Mesh {
   return geometry.mesh_merge(parts, transforms)
 }
 
-write_obj :: proc(path: string, mesh: geometry.Mesh) {
+obj :: proc(mesh: geometry.Mesh) -> string {
   b := strings.builder_make(context.temp_allocator)
   for v in mesh.vertices do fmt.sbprintfln(&b, "v %f %f %f", v.position.x, v.position.y, v.position.z)
   for i := 0; i + 2 < len(mesh.indices); i += 3 {
     fmt.sbprintfln(&b, "f %d %d %d", mesh.indices[i] + 1, mesh.indices[i + 1] + 1, mesh.indices[i + 2] + 1)
   }
-  _ = os.write_entire_file(path, strings.to_string(b))
+  return strings.to_string(b)
 }
 
-trace :: proc(mesh: geometry.Mesh, path: string) -> (hits: int) {
+trace :: proc(mesh: geometry.Mesh) -> (image: []u8, hits: int) {
   triangle_count := len(mesh.indices) / 3
   triangles := make([]u32, triangle_count, context.temp_allocator)
   bounds := make([]geometry.Aabb, triangle_count, context.temp_allocator)
@@ -105,8 +92,18 @@ trace :: proc(mesh: geometry.Mesh, path: string) -> (hits: int) {
       for k in 0 ..< 3 do p[k] = u8(clamp(color[k], 0, 1) * 255)
     }
   }
-  stbi.write_png(strings.clone_to_cstring(path, context.temp_allocator), WIDTH, HEIGHT, 3, raw_data(pixels), WIDTH * 3)
-  return
+  return png(WIDTH, HEIGHT, 3, pixels), hits
+}
+
+// png encodes pixels as a PNG file in memory.
+png :: proc(w, h, channels: int, pixels: []u8) -> []u8 {
+  out := make([dynamic]u8, context.temp_allocator)
+  write :: proc "c" (ctx: rawptr, data: rawptr, size: c.int) {
+    context = runtime.default_context()
+    append(cast(^[dynamic]u8)ctx, ..([^]u8)(data)[:size])
+  }
+  stbi.write_png_to_func(write, &out, i32(w), i32(h), i32(channels), raw_data(pixels), i32(w * channels))
+  return out[:]
 }
 
 corners :: proc(mesh: geometry.Mesh, triangle: u32) -> (a, b, c: [3]f32) {
@@ -114,7 +111,7 @@ corners :: proc(mesh: geometry.Mesh, triangle: u32) -> (a, b, c: [3]f32) {
   return mesh.vertices[i[0]].position, mesh.vertices[i[1]].position, mesh.vertices[i[2]].position
 }
 
-cull :: proc(path: string) -> (kept, total: int) {
+cull :: proc() -> (svg: string, kept, total: int) {
   eye := [3]f32{0, 2, 0}
   view := linalg.matrix4_look_at(eye, [3]f32{6, 2, 8}, [3]f32{0, 1, 0})
   projection := geometry.make_perspective_matrix(math.PI / 3, 16.0 / 9.0, 0.5, 18)
@@ -141,6 +138,5 @@ cull :: proc(path: string) -> (kept, total: int) {
   }
   fmt.sbprintfln(&b, `<polygon points="%f,%f %f,%f %f,%f" fill="none" stroke="#ffd166" stroke-width="2"/>`, eye.x * SCALE, eye.z * SCALE, fan[0].x * SCALE, fan[0].z * SCALE, fan[1].x * SCALE, fan[1].z * SCALE)
   fmt.sbprintln(&b, "</svg>")
-  _ = os.write_entire_file(path, strings.to_string(b))
-  return
+  return strings.to_string(b), kept, total
 }

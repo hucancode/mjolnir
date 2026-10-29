@@ -7,6 +7,11 @@
   <style>
     html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
     #canvas { display: block; width: 100%; height: 100%; }
+    /* an app without a canvas (or drawing over it) fills #output with text, SVG or images */
+    #output { position: fixed; inset: 0; overflow: auto; color: #ccc; font: 13px/1.4 monospace; white-space: pre-wrap; }
+    #output:empty { display: none; }
+    #output:has(svg, img) { white-space: normal; }
+    #output svg, #output img { display: block; max-width: 100%; max-height: 100%; margin: 0 auto; }
     #console { position: fixed; left: 0; bottom: 0; max-height: 30%; margin: 0; overflow: auto; color: #ccc; font: 12px monospace; }
     #status { position: fixed; inset: 0; display: grid; place-items: center; color: #ccc; font: 14px sans-serif; pointer-events: none; }
     .embedded #console, .embedded #status { display: none; } /* the docs page shows these itself */
@@ -14,6 +19,7 @@
 </head>
 <body>
   <canvas id="canvas" tabindex="0" oncontextmenu="return false"></canvas>
+  <div id="output"></div>
   <div id="status">Loading…</div>
   <pre id="console"></pre>
   <script src="odin.js"></script>
@@ -56,23 +62,28 @@
       return URL.createObjectURL(new Blob(chunks, { type: "application/wasm" }));
     }
 
-    const webgpu = typeof odin.WebGPUInterface === "function";
-    if (webgpu && !navigator.gpu) {
-      fail("This browser has no WebGPU.");
-    } else {
-      // what the engine calls (platform.ready, platform.fail; its log has the details)
-      const page = {
-        ready: () => { statusElement.style.display = "none"; tell("ready"); },
-        fail: () => fail("Stopped on an error, see the log."),
-      };
-      download(`${example}.wasm`).then((url) => {
-        statusElement.textContent = "Starting…";
-        const mem = new odin.WasmMemoryInterface();
-        const imports = { mjolnir: page };
-        if (webgpu) imports.wgpu = new odin.WebGPUInterface(mem).getInterface();
-        return odin.runWasm(url, consoleElement, imports, mem);
-      }).catch((e) => fail(String(e)));
+    // what the engine calls (platform.ready, platform.fail; its log has the details)
+    const ready = () => { statusElement.style.display = "none"; tell("ready"); };
+    const page = { ready, fail: () => fail("Stopped on an error, see the log.") };
+    // an app that shows itself in #output is ready once it does
+    const output = document.getElementById("output");
+    new MutationObserver((_, observer) => { observer.disconnect(); ready(); }).observe(output, { childList: true });
+
+    // Only a build that imports the WebGPU bindings needs WebGPU.
+    async function needsMissingGpu(url) {
+      if (navigator.gpu || typeof odin.WebGPUInterface !== "function") return false;
+      const module = await WebAssembly.compile(await (await fetch(url)).arrayBuffer());
+      return WebAssembly.Module.imports(module).some((i) => i.module === "wgpu");
     }
+
+    download(`${example}.wasm`).then(async (url) => {
+      if (await needsMissingGpu(url)) return fail("This browser has no WebGPU.");
+      statusElement.textContent = "Starting…";
+      const mem = new odin.WasmMemoryInterface();
+      const imports = { mjolnir: page };
+      if (navigator.gpu) imports.wgpu = new odin.WebGPUInterface(mem).getInterface();
+      return odin.runWasm(url, consoleElement, imports, mem);
+    }).catch((e) => fail(String(e)));
   </script>
 </body>
 </html>

@@ -142,7 +142,8 @@ function show() {
   const e = list.find((x) => x.name === name) ?? list[0];
   if (e === current) return;
   current = e;
-  live = hasGpu && e.wasm; // fall back to the video without WebGPU or a wasm build
+  // fall back to the video without WebGPU or a wasm build; a build without a video may need no GPU
+  live = e.wasm && (hasGpu || !e.video);
   document.title = e.name + ' - Examples - ' + data.project;
   for (const a of nav.querySelectorAll('a')) a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + e.name);
   nav.querySelector('a[aria-current]')?.scrollIntoView({ block: 'nearest' });

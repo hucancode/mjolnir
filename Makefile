@@ -41,9 +41,6 @@ build-wgpu: shader
 # EXAMPLE picks one (cube when unset); record takes all of them when unset.
 example_dir = $(firstword $(wildcard examples/*/$(1)))
 EXAMPLES := $(notdir $(patsubst %/main.odin,%,$(wildcard examples/*/*/main.odin)))
-# examples/modules/<module>_only use one module alone; they skip the web site's builds.
-MODULE_EXAMPLES := $(notdir $(patsubst %/main.odin,%,$(wildcard examples/modules/*/main.odin)))
-WEB_EXAMPLES := $(filter-out $(MODULE_EXAMPLES),$(EXAMPLES))
 ONE_EXAMPLE = $(or $(EXAMPLE),cube)
 
 example: shader
@@ -76,7 +73,7 @@ doc: shader
 	mkdir -p docs/build
 	cp -R docs/site/. docs/build/
 	$(web_runtime)
-	@for name in $(WEB_EXAMPLES); do \
+	@for name in $(EXAMPLES); do \
 		echo "wasm: $$name"; \
 		odin build $$(ls -d examples/*/$$name) $(WASM_FLAGS) -out:$(WEB_OUT)/$$name.wasm >/dev/null 2>&1 \
 			|| echo "  skipped $$name (no web build)"; \
@@ -88,13 +85,14 @@ doc: shader
 record: shader
 	./examples/record.sh $(RECORD_ARGS) $(EXAMPLE)
 
-# Runs every modules example (windowed ones for MODULE_FRAMES frames), writing artifacts/modules/,
-# after checking each imports no root package and Layer 2+ packages of one module only.
+# Runs every modules example natively (windowed ones for MODULE_FRAMES frames), writing
+# artifacts/modules/, after checking each imports no root package and Layer 2+ packages of one
+# module only. Each splits into main.odin, shared, and a native.odin and web.odin driver.
 MODULE_FRAMES ?= 120
 modules: shader
 	@for d in examples/modules/*/; do \
 		name=$$(basename $$d); \
-		imports=$$(grep -ho '"mjolnir[^"]*"' $$d*.odin | tr -d '"' | sort -u); \
+		imports=$$(grep -h '^import' $$d*.odin | grep -o '"mjolnir[^"]*"' | tr -d '"' | sort -u); \
 		if echo "$$imports" | grep -qx mjolnir; then echo "$$name imports the root package"; exit 1; fi; \
 		families=$$(for i in $$imports; do grep -q "^// Layer [23]" $$i/doc.odin 2>/dev/null && echo $$i | cut -d/ -f2; done | sort -u); \
 		if [ $$(echo "$$families" | grep -c .) -gt 1 ]; then echo "$$name uses more than one module: $$families"; exit 1; fi; \
