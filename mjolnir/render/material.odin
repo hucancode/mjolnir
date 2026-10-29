@@ -33,7 +33,8 @@ Material :: struct {
   // .CUSTOM: the user shader drawing it
   shader:                   MaterialShader,
   base_color_factor:        [4]f32,
-  // .SPRITE: sheet size in cells and the cell shown, row-major
+  // .SPRITE: sheet size in cells and the cell shown, row-major and wrapped to the sheet; animate
+  // by setting frame_index as time advances
   frame_columns:            u32,
   frame_rows:               u32,
   frame_index:              u32,
@@ -94,15 +95,6 @@ material_create :: proc(self: ^Renderer, m: Material) -> (handle: MaterialHandle
   m := m
   m.frame_columns, m.frame_rows = max(m.frame_columns, 1), max(m.frame_rows, 1)
   return MaterialHandle(resource_create(self, .MATERIALS, m) or_return), true
-}
-
-// set_sprite_frame shows cell `frame` (row-major, wrapped to the sheet size) of a sprite
-// material. Animate by calling it as time advances.
-set_sprite_frame :: proc(self: ^Renderer, handle: MaterialHandle, frame: u32) -> bool {
-  guard(self)
-  m := material(self, handle) or_return
-  m.frame_index = frame % (m.frame_columns * m.frame_rows)
-  return true
 }
 
 // material_destroy frees the material; a stale handle is ignored.

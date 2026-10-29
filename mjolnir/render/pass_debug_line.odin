@@ -10,16 +10,16 @@ import "rhi"
 debug_line_init :: proc(self: ^Renderer) -> bool {
   shader := shader_source("debug_line")
   formats := [?]TextureFormat{.BACKBUFFER}
-  for &pipeline, ring in self.debug_line_pipelines {
+  for p in BuiltinPipeline.DEBUG_LINE ..= BuiltinPipeline.DEBUG_LINE_OVER {
     desc := rhi.GraphicsPipelineDesc {
       shader        = shader,
       layout        = pipeline_layout(self, .DEBUG_LINE),
       topology      = .LINE_LIST,
       color_formats = formats[:],
       blend         = .ALPHA,
-      depth         = rhi.DepthState{compare = .LESS_EQUAL if ring == 0 else .ALWAYS},
+      depth         = rhi.DepthState{compare = .LESS_EQUAL if p == .DEBUG_LINE else .ALWAYS},
     }
-    pipeline = dev.graphics_pipeline_create(&self.gpu, desc) or_return
+    self.pipelines[p] = dev.graphics_pipeline_create(&self.gpu, desc) or_return
   }
   return true
 }
@@ -33,10 +33,10 @@ debug_line_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u3
   dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:], depth = rhi.DepthTarget{texture = self.camera_targets[cam].images[.DEPTH][f], load = .LOAD, read_only = true}})
   // the shader skips segments past their expiry
   camera_index := cam
-  pipeline_bind(self, cmd, self.debug_line_pipelines[0], .DEBUG_LINE, f, &camera_index, .NONE)
+  pipeline_bind(self, cmd, self.pipelines[.DEBUG_LINE], .DEBUG_LINE, f, &camera_index, .NONE)
   for count, ring in counts {
     if count == 0 do continue
-    dev.cmd_bind_pipeline(&self.gpu, cmd, self.debug_line_pipelines[ring])
+    dev.cmd_bind_pipeline(&self.gpu, cmd, self.pipelines[.DEBUG_LINE if ring == 0 else .DEBUG_LINE_OVER])
     dev.cmd_draw(&self.gpu, cmd, 2 * count, 1, u32(ring) * 2 * DEBUG_RING, 0)
   }
   dev.cmd_end_pass(&self.gpu, cmd)

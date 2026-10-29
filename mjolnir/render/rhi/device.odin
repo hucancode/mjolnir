@@ -7,9 +7,13 @@ package rhi
 // emulates a capability it lacks behind the caller's back.
 
 // Handles are indices into a backend's pools; 0 is none.
+// Buffer is GPU memory (buffer_create).
 Buffer :: distinct u32
+// Pipeline is a compiled shader with its fixed-function state.
 Pipeline :: distinct u32
+// BindLayout is the shape of a bind group: what each binding holds.
 BindLayout :: distinct u32
+// BindGroup is a set of resources bound together, made against a BindLayout.
 BindGroup :: distinct u32
 
 // CommandList names a command buffer (Vulkan) or encoder (WebGPU) being recorded.
@@ -19,6 +23,7 @@ CommandList :: distinct u32
 // target. One command list per frame renders into it, and that list leaves it ready to present.
 BACKBUFFER :: TextureHandle(max(u32))
 
+// Queue is where a command list runs.
 Queue :: enum {
   GRAPHICS,
   COMPUTE,
@@ -33,7 +38,7 @@ SyncPoint :: struct {
 }
 
 // What the device can do, known once it is up; what a backend always can or cannot do is its
-// compile-time constants (BINDLESS, LAYERED_RENDERING). render branches on these.
+// compile-time constants (BINDLESS). render branches on these.
 Caps :: struct {
   multi_draw_indirect_count: bool,
   // the COMPUTE queue runs beside the GRAPHICS one, ordered only by the SyncPoints a submission
@@ -74,6 +79,7 @@ SubmitDesc :: struct {
   present: bool,
 }
 
+// BufferUsage is what a buffer may be used as.
 BufferUsage :: enum {
   STORAGE,
   VERTEX,
@@ -92,12 +98,14 @@ MemoryKind :: enum {
   READBACK,
 }
 
+// BufferDesc describes a buffer for buffer_create: `size` bytes.
 BufferDesc :: struct {
   size:   int,
   usage:  bit_set[BufferUsage],
   memory: MemoryKind,
 }
 
+// Stage is a pipeline stage a Barrier or SyncPoint orders.
 Stage :: enum {
   DRAW_INDIRECT,
   VERTEX_SHADER,
@@ -109,6 +117,7 @@ Stage :: enum {
   TRANSFER,
 }
 
+// Access is a kind of memory access a Barrier orders.
 Access :: enum {
   INDIRECT_READ,
   SHADER_READ,
@@ -128,6 +137,7 @@ Barrier :: struct {
   src_access, dst_access: bit_set[Access],
 }
 
+// ShaderStage is a shader stage a binding is visible to.
 ShaderStage :: enum {
   VERTEX,
   FRAGMENT,
@@ -149,6 +159,7 @@ BindKind :: enum {
   STORAGE_TEXTURE_ARRAY,
 }
 
+// BindEntry is one binding of a BindLayout.
 BindEntry :: struct {
   kind:   BindKind,
   stages: bit_set[ShaderStage],
@@ -161,6 +172,7 @@ BindLayoutDesc :: struct {
   entries: []BindEntry,
 }
 
+// BufferRange binds `size` bytes of a buffer from `offset`.
 BufferRange :: struct {
   buffer: Buffer,
   offset: int,
@@ -175,6 +187,7 @@ TextureView :: struct {
   mip:     i32,
 }
 
+// BindResource is what a binding of a BindGroup holds.
 BindResource :: union {
   BufferRange,
   TextureView,
@@ -191,11 +204,13 @@ BindGroupDesc :: struct {
 // stage.
 ShaderSource :: []u8
 
+// VertexStep is whether a vertex buffer advances per vertex or per instance.
 VertexStep :: enum {
   VERTEX,
   INSTANCE,
 }
 
+// VertexFormat is the type of a vertex attribute.
 VertexFormat :: enum {
   UNORM8X4,
   F32X2,
@@ -204,30 +219,35 @@ VertexFormat :: enum {
   U32,
 }
 
+// VertexAttribute feeds shader input `location` from `offset` bytes into each element.
 VertexAttribute :: struct {
   location: u32,
   format:   VertexFormat,
   offset:   u32,
 }
 
+// VertexBuffer is one vertex stream of a pipeline: elements of `stride` bytes.
 VertexBuffer :: struct {
   stride:     u32,
   step:       VertexStep,
   attributes: []VertexAttribute,
 }
 
+// Topology is how a draw assembles vertices into primitives.
 Topology :: enum {
   TRIANGLE_LIST,
   LINE_LIST,
   POINT_LIST,
 }
 
+// CullMode is which triangle faces a pipeline skips.
 CullMode :: enum {
   NONE,
   BACK,
   FRONT,
 }
 
+// BlendMode is how a pipeline combines its output with the color target.
 BlendMode :: enum {
   NONE,
   ALPHA,
@@ -235,6 +255,7 @@ BlendMode :: enum {
   MAX,
 }
 
+// CompareOp is the depth test: a fragment passes when its depth compares so to the stored one.
 CompareOp :: enum {
   LESS_EQUAL,
   ALWAYS,
@@ -242,6 +263,7 @@ CompareOp :: enum {
   GREATER_EQUAL,
 }
 
+// DepthState is a pipeline's depth test and write.
 DepthState :: struct {
   write:      bool,
   compare:    CompareOp,
@@ -264,11 +286,13 @@ PipelineLayoutDesc :: struct {
   bindless:  bool,
 }
 
+// ComputePipelineDesc describes a compute pipeline: the shader's `main` entry point.
 ComputePipelineDesc :: struct {
   shader: ShaderSource,
   layout: PipelineLayoutDesc,
 }
 
+// GraphicsPipelineDesc describes a graphics pipeline: the shader's vs_main and fs_main.
 GraphicsPipelineDesc :: struct {
   shader:        ShaderSource,
   layout:        PipelineLayoutDesc,
@@ -285,18 +309,22 @@ GraphicsPipelineDesc :: struct {
   wireframe:     bool,
 }
 
+// LoadOp is what a pass target holds when the pass begins.
 LoadOp :: enum {
   LOAD,
   CLEAR,
   DONT_CARE,
 }
 
+// ColorTarget is a color image a pass renders into, cleared to `clear` with .CLEAR.
 ColorTarget :: struct {
   texture: TextureHandle,
   load:    LoadOp,
   clear:   [4]f32,
 }
 
+// DepthTarget is the depth image of a pass: cleared to `clear` with .CLEAR, kept after the pass
+// with `store`, only tested against with `read_only`.
 DepthTarget :: struct {
   texture:   TextureHandle,
   load:      LoadOp,
@@ -309,7 +337,7 @@ DepthTarget :: struct {
 PassDesc :: struct {
   colors:      []ColorTarget,
   depth:       Maybe(DepthTarget),
-  // layers drawn into together (the backend's LAYERED_RENDERING) when above 1; 0 is 1
+  // layers drawn into together (on a BINDLESS backend) when above 1; 0 is 1
   layer_count: u32,
 }
 

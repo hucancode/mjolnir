@@ -140,7 +140,7 @@ update :: proc(app: ^App, dt: f32) {
     clip = STATE_CLIPS[app.state]
     step = 0
   }
-  render.set_sprite_frame(&app.renderer, app.sprite, clip.first + step % clip.count)
+  render.material(&app.renderer, app.sprite).frame_index = clip.first + step % clip.count
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 

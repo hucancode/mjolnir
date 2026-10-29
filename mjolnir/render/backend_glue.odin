@@ -7,18 +7,16 @@ import wgpu "wgpu"
 
 // What render takes of the chosen backend: `dev` is its rhi.Procs (lifecycle included), a
 // constant, so calls through it cost no dispatch; the rest are its compile-time features
-// (BINDLESS, LAYERED_RENDERING).
+// (BINDLESS).
 when RENDER_BACKEND == "vulkan" {
   Backend :: vulkan.Backend
   RETIRE_GRACE :: vulkan.RETIRE_GRACE
   BINDLESS :: vulkan.BINDLESS
-  LAYERED_RENDERING :: vulkan.LAYERED_RENDERING
   dev :: vulkan.PROCS
 } else when RENDER_BACKEND == "wgpu" {
   Backend :: wgpu.Backend
   RETIRE_GRACE :: wgpu.RETIRE_GRACE
   BINDLESS :: wgpu.BINDLESS
-  LAYERED_RENDERING :: wgpu.LAYERED_RENDERING
   dev :: wgpu.PROCS
 }
 

@@ -47,12 +47,12 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  world_def := b3.DefaultWorldDef()
-  world_def.gravity = {0, -9.81, 0}
-  app.phys = b3.CreateWorld(world_def)
   if !platform.init(&app.platform, 1280, 720, "Physics (Box3D)") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
+  world_def := b3.DefaultWorldDef()
+  world_def.gravity = {0, -9.81, 0}
+  app.phys = b3.CreateWorld(world_def)
   mjolnir.run(
     mjolnir.Loop(App) {
       app = app,
@@ -65,11 +65,11 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
+  delete(app.pieces)
+  b3.DestroyWorld(app.phys)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
-  delete(app.pieces)
-  b3.DestroyWorld(app.phys)
   free(app)
 }
 

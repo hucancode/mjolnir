@@ -12,7 +12,7 @@ SKIN_GROUP_SIZE :: 64
 
 @(private)
 skin_init :: proc(self: ^Renderer) -> bool {
-  self.skin_pipeline = dev.compute_pipeline_create(
+  self.pipelines[.SKIN] = dev.compute_pipeline_create(
     &self.gpu,
     {shader_source("skin"), pipeline_layout(self, .SKIN)},
   ) or_return
@@ -27,7 +27,7 @@ skin_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   barrier(self, cmd, .DRAW_TO_SKIN)
   dev.cmd_begin_compute(&self.gpu, cmd)
   vertex_count := count
-  pipeline_bind(self, cmd, self.skin_pipeline, .SKIN, f, &vertex_count, .NONE)
+  pipeline_bind(self, cmd, self.pipelines[.SKIN], .SKIN, f, &vertex_count, .NONE)
   dev.cmd_dispatch(&self.gpu, cmd, (count + SKIN_GROUP_SIZE - 1) / SKIN_GROUP_SIZE, 1, 1)
   dev.cmd_end_compute(&self.gpu, cmd)
   barrier(self, cmd, .SKIN_TO_DRAW)

@@ -209,28 +209,29 @@ main_camera :: proc(self: ^Renderer) -> (^Camera, bool) #optional_ok {
   return camera(self, self.main_camera)
 }
 
-// camera_create creates a perspective camera with its own render targets; it lives until
-// camera_destroy or teardown. Switch projections by setting Camera.projection.
-// Every camera is drawn each frame; the main camera is presented to the swapchain.
-camera_create :: proc(
-  self: ^Renderer,
-  width, height: u32,
+// make_camera returns a perspective Camera at `position` looking at `target`, for camera_create.
+make_camera :: proc(
   position: [3]f32 = {0, 0, 3},
   target: [3]f32 = {0, 0, 0},
   fov: f32 = math.PI * 0.5,
   near: f32 = 0.1,
   far: f32 = 1000.0,
 ) -> (
-  handle: CameraHandle,
-  ok: bool,
-) #optional_ok {
+  c: Camera,
+) {
+  c = {projection = PerspectiveProjection{fov}, near = near, far = far}
+  camera_look_at(&c, position, target)
+  return
+}
+
+// camera_create stores `c` (make_camera fills one) as a camera with its own render targets of
+// `size` pixels; it lives until camera_destroy or teardown. Every camera is drawn each frame;
+// the main camera is presented to the swapchain.
+camera_create :: proc(self: ^Renderer, size: [2]u32, c: Camera) -> (handle: CameraHandle, ok: bool) #optional_ok {
   guard(self)
   handle = CameraHandle(containers.slots_alloc(&self.slots[.CAMERAS]) or_return)
-  cam := &self.cameras[handle]
-  cam^ = {}
-  self.camera_targets[handle] = {extent = {width, height}}
-  cam.projection, cam.near, cam.far = PerspectiveProjection{fov}, near, far
-  camera_look_at(cam, position, target)
+  self.cameras[handle] = c
+  self.camera_targets[handle] = {extent = size}
   // the lists' size does not depend on the camera's extent
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     if !draw_list_create(self, camera_slot(u32(handle)) + frame, shadow = false) {

@@ -304,7 +304,7 @@ crates :: proc(app: ^App) {
 
 portal :: proc(app: ^App) {
   r := &app.renderer
-  app.portal_camera = render.camera_create(r, 512, 512, {0, 40, MID + 0.01}, {0, 0, MID}, 0.9, 0.1, 100)
+  app.portal_camera = render.camera_create(r, {512, 512}, render.make_camera({0, 40, MID + 0.01}, {0, 0, MID}, 0.9, far = 100))
   app.portal = render.material_create(r, render.make_material(emissive_value = 0.2))
   frame := render.primitive(r, .CUBE, .BLACK)
   mesh(app, frame, {-21.6, 3.2, MID}, {0.1, 2.3, 2.3})
@@ -437,7 +437,7 @@ shoot :: proc(app: ^App) {
   cam := render.main_camera(&app.renderer)
   forward := render.camera_forward(cam)
   if len(app.balls) == MAX_BALLS {
-    physics.body_destroy(&app.phys, app.balls[0].body)
+    physics.destroy(&app.phys, app.balls[0].body)
     world.destroy(&app.scene, app.balls[0].node)
     ordered_remove(&app.balls, 0)
   }
@@ -514,7 +514,7 @@ sprite_step :: proc(app: ^App, dt: f32) {
     app.sprite_x = clamp(app.sprite_x, SPRITE_LANE.x, SPRITE_LANE.y)
   }
   clip := app.sprite_clip
-  render.set_sprite_frame(&app.renderer, app.sprite, clip.first + (min(frame, clip.count - 1) if app.sprite_once else frame % clip.count))
+  render.material(&app.renderer, app.sprite).frame_index = clip.first + (min(frame, clip.count - 1) if app.sprite_once else frame % clip.count)
   world.translate(&app.scene, app.sprite_node, {app.sprite_x, SPRITE_HEIGHT / 2, MID})
   world.scale(&app.scene, app.sprite_node, {app.sprite_facing * SPRITE_HEIGHT * SPRITE_ASPECT / 2, SPRITE_HEIGHT / 2, 1})
 }

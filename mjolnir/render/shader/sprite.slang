@@ -58,8 +58,9 @@ VertexOut vs_main(VertexIn v)
     float scale_y = length(column3(world, 1));
     float3 vertex_pos = world_pos + camera_right * (v.position.x * scale_x) + camera_up * (v.position.y * scale_y);
     float2 frame_size = float2(1.0 / float(sprite.frame_columns), 1.0 / float(sprite.frame_rows));
-    uint column = sprite.frame_index % sprite.frame_columns;
-    uint row = sprite.frame_index / sprite.frame_columns;
+    uint cell = sprite.frame_index % (sprite.frame_columns * sprite.frame_rows);
+    uint column = cell % sprite.frame_columns;
+    uint row = cell / sprite.frame_columns;
     VertexOut o;
     o.uv = v.uv * frame_size + float2(float(column), float(row)) * frame_size;
     o.color = v.color * sprite.base_color_factor;

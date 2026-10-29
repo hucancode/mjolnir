@@ -13,10 +13,9 @@ FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 // RETIRE_GRACE is the frames a freed resource or pool slot waits before it is
 // destroyed or reused: frames in flight plus one for async compute.
 RETIRE_GRACE :: FRAMES_IN_FLIGHT + 1
-// Textures and storage images reach shaders through global arrays indexed by handle.
+// Textures and storage images reach shaders through global arrays indexed by handle, and one
+// pass renders into several layers of a texture (rhi.PassDesc.layer_count).
 BINDLESS :: true
-// One pass renders into several layers of a texture (rhi.PassDesc.layer_count).
-LAYERED_RENDERING :: true
 
 // Backend is every Vulkan object the renderer draws with. render keeps it opaque and goes
 // through PROCS (rhi.odin) and the procs below; textures are indexed by render's TextureHandle.

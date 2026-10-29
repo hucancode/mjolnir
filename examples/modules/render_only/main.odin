@@ -31,8 +31,8 @@ setup :: proc() -> bool {
   return true
 }
 
-// draw animates the slots for `frame` and renders into a framebuffer of `size` pixels.
-draw :: proc(frame: int, size: [2]u32, dpi_scale: f32) {
+// draw animates the slots for `frame` and renders.
+draw :: proc(frame: int) {
   t := f32(frame) / 60
   render.place(r, TORUS, linalg.matrix4_translate([3]f32{0, 1, 0}) * linalg.matrix4_rotate(t, [3]f32{1, 1, 0}))
   for i in 0 ..< RING {
@@ -46,5 +46,5 @@ draw :: proc(frame: int, size: [2]u32, dpi_scale: f32) {
   render.debug_circle(r, {0, 0.02, 0}, {0, 1, 0}, 4)
   render.stage_overlay(r, {{shape = render.DrawTextCommand{"render only: slots placed by hand", {16, 16}, 24, {255, 255, 255, 255}}}}, &f)
   render.update(r, 1.0 / 60)
-  render.frame(r, size, dpi_scale)
+  render.frame(r)
 }

@@ -36,7 +36,7 @@ step :: proc(dt: f64) -> bool {
     js.set_element_key_f64("canvas", "width", f64(size.x))
     js.set_element_key_f64("canvas", "height", f64(size.y))
   }
-  draw(frame, size, f32(ratio))
+  draw(frame)
   return true
 }
 

@@ -12,10 +12,9 @@ FRAMES_IN_FLIGHT :: 1
 // RETIRE_GRACE is the frames a freed resource or pool slot waits before it is destroyed or
 // reused: WebGPU keeps destroyed objects alive for submitted work and orders uploads after it.
 RETIRE_GRACE :: 1
-// Textures reach shaders through bind groups, not global arrays.
+// Textures reach shaders through bind groups, not global arrays, and a pass renders into one
+// layer.
 BINDLESS :: false
-// A pass renders into one layer.
-LAYERED_RENDERING :: false
 
 
 

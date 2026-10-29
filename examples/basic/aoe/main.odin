@@ -36,10 +36,10 @@ App :: struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  if !physics.init(&app.phys) do return
   if !platform.init(&app.platform, 1280, 720, "AOE Query") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
+  if !physics.init(&app.phys) do return
   mjolnir.run(
     mjolnir.Loop(App) {
       app = app,
@@ -71,10 +71,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
 shutdown :: proc(app: ^App) {
   delete(app.affected)
+  physics.shutdown(&app.phys)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
-  physics.shutdown(&app.phys)
   free(app)
 }
 

@@ -37,7 +37,7 @@ atlas_make :: proc(self: ^Renderer, f: int, layers: u32) -> bool {
     usage  = {.DEPTH_TARGET, .SAMPLED},
     layers = layers,
   }
-  when !LAYERED_RENDERING {
+  when !BINDLESS {
     cols := min(layers, ATLAS_COLUMNS)
     desc.extent = {cols * SHADOW_MAP_SIZE, (layers + cols - 1) / cols * SHADOW_MAP_SIZE}
     desc.layers = 1
@@ -64,7 +64,7 @@ shadow_atlas_reserve :: proc(self: ^Renderer, f: u32, layers: u32) -> bool {
 
 @(private)
 shadow_init :: proc(self: ^Renderer) -> bool {
-  self.shadow_pipeline = dev.graphics_pipeline_create(
+  self.pipelines[.SHADOW] = dev.graphics_pipeline_create(
     &self.gpu,
     {
       shader = shader_source("shadow"),
@@ -86,8 +86,8 @@ shadow_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   views := self.shadow_view_count
   draw_list := SHADOW_DRAW_SLOT_BASE + f
   types := [1]u32{u32(MaterialType.PBR)}
-  pipelines := [1]rhi.Pipeline{self.shadow_pipeline}
-  when LAYERED_RENDERING {
+  pipelines := [1]rhi.Pipeline{self.pipelines[.SHADOW]}
+  when BINDLESS {
     // with the clear of the shadow lists, last frame's draws done with them
     if views == 0 {
       barrier_discard(self, cmd, textures[:])
@@ -100,7 +100,7 @@ shadow_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
     barrier(self, cmd, .CULL_TO_INDIRECT)
     dev.cmd_begin_pass(&self.gpu, cmd, {depth = rhi.DepthTarget{texture = atlas, load = .CLEAR, clear = 1, store = true}, layer_count = views})
     mesh_buffers_bind(self, cmd)
-    dev.cmd_bind_pipeline(&self.gpu, cmd, self.shadow_pipeline)
+    dev.cmd_bind_pipeline(&self.gpu, cmd, self.pipelines[.SHADOW])
     scene_bind(self, cmd, .SHADOW, f)
     draw_list_draw(self, cmd, draw_list, 0, types[:], pipelines[:], f, false)
     dev.cmd_end_pass(&self.gpu, cmd)
@@ -111,7 +111,7 @@ shadow_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
     dev.cmd_begin_pass(&self.gpu, cmd, {depth = rhi.DepthTarget{texture = atlas, load = .CLEAR, clear = 1, store = true}})
     // the shadow view a batched draw renders (the bindless path reads it per draw)
     view_index: u32 = SHADOW_VIEW_BASE
-    pipeline_bind(self, cmd, self.shadow_pipeline, .SHADOW, f, &view_index, .NONE)
+    pipeline_bind(self, cmd, self.pipelines[.SHADOW], .SHADOW, f, &view_index, .NONE)
     mesh_buffers_bind(self, cmd)
     for v in 0 ..< views {
       tile := shadow_tile(v, self.atlas_layers[f])

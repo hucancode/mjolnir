@@ -100,7 +100,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 shutdown :: proc(app: ^App) {
-  geometry.chain_destroy(&app.chain)
+  geometry.destroy(&app.chain)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -120,11 +120,8 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 steer :: proc(app: ^App, dt: f32) {
-  move: [2]f32
-  if input.key_down(&app.input, .UP) || input.key_down(&app.input, .W) do move.y += 1
-  if input.key_down(&app.input, .DOWN) || input.key_down(&app.input, .S) do move.y -= 1
-  if input.key_down(&app.input, .RIGHT) || input.key_down(&app.input, .D) do move.x += 1
-  if input.key_down(&app.input, .LEFT) || input.key_down(&app.input, .A) do move.x -= 1
+  s := &app.input
+  move := linalg.clamp([2]f32{input.axis(s, .A, .D) + input.axis(s, .LEFT, .RIGHT), input.axis(s, .S, .W) + input.axis(s, .DOWN, .UP)}, -1, 1)
   ahead := linalg.normalize0(render.camera_forward(render.main_camera(&app.renderer)).xz)
   want := ahead * move.y + [2]f32{-ahead.y, ahead.x} * move.x
   aim, target := f32(0), f32(0)

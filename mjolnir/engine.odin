@@ -47,9 +47,8 @@ Loop :: struct($T: typeid) {
 }
 
 // run drives loop until render returns false, setup fails or FRAME_LIMIT frames, then calls
-// shutdown. Natively it returns then, on the calling
-// thread (the one that created the window); on the web it returns at once and the browser
-// calls step each animation frame.
+// shutdown. Natively it returns then, on the calling thread (the one that created the window);
+// on the web it returns at once and the browser calls step each animation frame.
 run :: proc(loop: Loop($T)) {
   runner = {loop = transmute(Loop(byte))loop}
   platform.run(advance)

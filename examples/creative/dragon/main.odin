@@ -193,7 +193,7 @@ shutdown :: proc(app: ^App) {
   delete(app.pieces)
   delete(app.bones)
   delete(app.links)
-  geometry.spline_destroy(&app.loop)
+  geometry.destroy(&app.loop)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)

@@ -103,7 +103,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
 play_clip :: proc(app: ^App, clip: int) {
   rig, animator := &app.fox_model.rigs[app.fox_rig], &app.fox.animators[app.fox_rig]
-  animation.layer_destroy(animator, app.fading)
+  animation.destroy(animator, app.fading)
   animation.layer_fade(animator, app.playing, 0, FADE_SECONDS)
   app.fading = app.playing
   params := animation.ClipParams{clip = animation.ClipHandle(clip), speed = app.speed}

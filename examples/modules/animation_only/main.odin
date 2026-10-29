@@ -32,8 +32,8 @@ setup :: proc() -> bool {
 
 teardown :: proc() {
   for f in ([]^Figure{&arm, &tail}) {
-    animation.animator_destroy(&f.animator)
-    animation.rig_destroy(&f.rig)
+    animation.destroy(&f.animator)
+    animation.destroy(&f.rig)
   }
 }
 

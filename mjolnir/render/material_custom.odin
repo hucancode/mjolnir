@@ -37,7 +37,7 @@ material_shader_create :: proc(
     containers.slots_free(&self.slots[.MATERIAL_SHADERS], u32(shader))
     return 0, false
   }
-  self.custom_material_pipelines[shader - 1] = pipeline
+  self.custom_material_pipelines[shader] = pipeline
   return shader, true
 }
 
@@ -46,7 +46,7 @@ material_shader_create :: proc(
 material_shader_destroy :: proc(self: ^Renderer, shader: MaterialShader) {
   guard(self)
   if !containers.slots_free(&self.slots[.MATERIAL_SHADERS], u32(shader)) do return
-  dev.pipeline_retire(&self.gpu, self.custom_material_pipelines[shader - 1])
-  self.custom_material_pipelines[shader - 1] = 0
+  dev.pipeline_retire(&self.gpu, self.custom_material_pipelines[shader])
+  self.custom_material_pipelines[shader] = 0
 }
 

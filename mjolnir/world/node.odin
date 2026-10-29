@@ -1,6 +1,5 @@
 package world
 
-import "../geometry"
 import "core:math/linalg"
 
 // translate sets a node's local position.

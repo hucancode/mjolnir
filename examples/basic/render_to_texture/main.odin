@@ -62,7 +62,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   spawn_primitive(app, .CONE,   .BLUE,  {1.5, 0.5, -0.5})
   app.spinner = spawn_primitive(app, .CUBE, .YELLOW, {0, 1.8, 0}, 0.4)
 
-  app.top_down_camera = render.camera_create(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
+  app.top_down_camera = render.camera_create(&app.renderer, {512, 512}, render.make_camera({0, 8, 0.01}, {0, 0, 0}, far = 100))
   app.screen_material = render.material_create(&app.renderer, render.make_material())
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, app.screen_material, cast_shadow = false), {0, 2.5, -3.5}, scale = 3.0)
   return .READY

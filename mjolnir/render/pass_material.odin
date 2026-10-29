@@ -146,7 +146,7 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
     count += 1
   }
   if pass == .FORWARD {
-    for p, i in self.custom_material_pipelines {
+    for p, i in self.custom_material_pipelines[1:] {
       if p == 0 do continue
       keys[count], pipelines[count] = u32(MaterialType.CUSTOM) + u32(i), p
       count += 1

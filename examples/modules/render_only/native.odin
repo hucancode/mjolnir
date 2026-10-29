@@ -23,8 +23,6 @@ main :: proc() {
   defer font.destroy(&f)
   for frame := 0; !glfw.WindowShouldClose(window) && (FRAMES == 0 || frame < FRAMES); frame += 1 {
     glfw.PollEvents()
-    w, h := glfw.GetFramebufferSize(window)
-    ww, _ := glfw.GetWindowSize(window)
-    draw(frame, {u32(w), u32(h)}, f32(w) / f32(max(ww, 1)))
+    draw(frame)
   }
 }

@@ -108,11 +108,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 shutdown :: proc(app: ^App) {
+  delete(app.lights)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
-  delete(app.lights)
   free(app)
 }
 

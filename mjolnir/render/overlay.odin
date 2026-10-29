@@ -15,7 +15,7 @@ stage_overlay :: proc(self: ^Renderer, commands: []RenderCommand, text_font: ^fo
 }
 
 // window_size returns the window in the units overlay commands and the cursor use: its
-// framebuffer divided by the DPI scale frame was given (init measures them before the first).
+// framebuffer divided by the DPI scale the last frame measured (init measures it before the first).
 window_size :: proc(self: ^Renderer) -> [2]f32 {
   extent := dev.extent(&self.gpu)
   return {f32(extent.x), f32(extent.y)} / (self.dpi_scale if self.dpi_scale > 0 else 1)

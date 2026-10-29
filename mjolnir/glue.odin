@@ -14,12 +14,12 @@ MAX_CONSECUTIVE_RENDER_ERRORS :: 20
 @(private = "file")
 render_errors: int
 
-// frame is the usual Loop.render body: poll the window's events, then render a frame at its
-// size. false once the window should close or after too many render failures in a row.
+// frame is the usual Loop.render body: poll the window's events, then render a frame. false
+// once the window should close or after too many render failures in a row.
 frame :: proc(p: ^platform.Platform, r: ^render.Renderer) -> bool {
   if platform.should_close(p) do return false
   platform.poll_events(p)
-  if render.frame(r, platform.framebuffer_size(p), platform.dpi_scale(p)) {
+  if render.frame(r) {
     render_errors = 0
     return true
   }

@@ -45,10 +45,10 @@ main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
   app.speed = DEFAULT_SPEED
-  if !physics.init(&app.phys, gravity = {0, 0, 0}) do return
   if !platform.init(&app.platform, 1280, 720, "Bullet vs Thin Wall (CCD)") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
+  if !physics.init(&app.phys, gravity = {0, 0, 0}) do return
   mjolnir.run(
     mjolnir.Loop(App) {
       app = app,
@@ -61,11 +61,11 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
+  physics.shutdown(&app.phys)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
-  physics.shutdown(&app.phys)
   free(app)
 }
 

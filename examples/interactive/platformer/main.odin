@@ -468,7 +468,7 @@ stomp :: proc(app: ^App, enemy: ^Enemy) {
   enemy.alive = false
   enemy.squash_time = SQUASH_TIME
   b2.DestroyBody(enemy.body)
-  render.set_sprite_frame(&app.renderer, enemy.look, ENEMY_SQUASHED)
+  render.material(&app.renderer, enemy.look).frame_index = ENEMY_SQUASHED
   velocity := b2.Body_GetLinearVelocity(app.player.body)
   b2.Body_SetLinearVelocity(app.player.body, {velocity.x, STOMP_BOUNCE})
 }
@@ -481,14 +481,14 @@ respawn :: proc(app: ^App) {
 
 animate :: proc(app: ^App) {
   tick := int(app.time * ANIMATION_FPS)
-  render.set_sprite_frame(&app.renderer, app.coin_look, COIN_FRAMES[tick / 2 % 2])
-  render.set_sprite_frame(&app.renderer, app.flag_look, FLAG_FRAMES[tick / 2 % 2])
+  render.material(&app.renderer, app.coin_look).frame_index = COIN_FRAMES[tick / 2 % 2]
+  render.material(&app.renderer, app.flag_look).frame_index = FLAG_FRAMES[tick / 2 % 2]
 
   p := &app.player
   position := b2.Body_GetPosition(p.body)
   grounded := p.air_time < COYOTE_TIME
   stepping := !grounded || (app.run != 0 && tick % 2 == 0)
-  render.set_sprite_frame(&app.renderer, p.look, PLAYER_STEP if stepping else PLAYER_STAND)
+  render.material(&app.renderer, p.look).frame_index = PLAYER_STEP if stepping else PLAYER_STAND
   place_character(app, p.node, position - {0, PLAYER_HALF.y}, -p.facing)
 
   #reverse for &enemy, i in app.enemies {
@@ -500,7 +500,7 @@ animate :: proc(app: ^App) {
       continue
     }
     feet := b2.Body_GetPosition(enemy.body) - {0, ENEMY_HALF.y}
-    render.set_sprite_frame(&app.renderer, enemy.look, ENEMY_WALK[tick % 2])
+    render.material(&app.renderer, enemy.look).frame_index = ENEMY_WALK[tick % 2]
     place_character(app, enemy.node, feet, math.sign(b2.Body_GetLinearVelocity(enemy.body).x))
   }
 }

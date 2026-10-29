@@ -97,7 +97,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 shutdown :: proc(app: ^App) {
-  nav.crowd_destroy(&app.crowd)
+  nav.destroy(&app.crowd)
   nav.destroy(&app.navmesh)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)

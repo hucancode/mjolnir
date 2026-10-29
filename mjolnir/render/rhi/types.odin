@@ -33,6 +33,7 @@ TextureFormat :: enum {
   BACKBUFFER,
 }
 
+// TextureUsage is what a texture may be used as.
 TextureUsage :: enum {
   SAMPLED,
   COLOR_TARGET,

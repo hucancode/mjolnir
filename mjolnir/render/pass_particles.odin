@@ -46,15 +46,15 @@ ParticleDrawPush :: struct {
 
 @(private)
 particles_init :: proc(self: ^Renderer) -> bool {
-  self.particle_emit_pipeline = dev.compute_pipeline_create(
+  self.pipelines[.PARTICLE_EMIT] = dev.compute_pipeline_create(
     &self.gpu,
     {shader_source("particle_emit"), pipeline_layout(self, .PARTICLE_EMIT)},
   ) or_return
-  self.particle_sim_pipeline = dev.compute_pipeline_create(
+  self.pipelines[.PARTICLE_SIMULATE] = dev.compute_pipeline_create(
     &self.gpu,
     {shader_source("particle_simulate"), pipeline_layout(self, .PARTICLE_SIMULATE)},
   ) or_return
-  self.particle_draw_pipeline = dev.graphics_pipeline_create(
+  self.pipelines[.PARTICLE_DRAW] = dev.graphics_pipeline_create(
     &self.gpu,
     {
       shader = shader_source("particle"),
@@ -91,11 +91,11 @@ particles_simulate :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   dev.cmd_begin_compute(&self.gpu, cmd)
   defer dev.cmd_end_compute(&self.gpu, cmd)
   if params.emit_total > 0 {
-    pipeline_bind(self, cmd, self.particle_emit_pipeline, .PARTICLE_EMIT, f, params, .NONE)
+    pipeline_bind(self, cmd, self.pipelines[.PARTICLE_EMIT], .PARTICLE_EMIT, f, params, .NONE)
     dev.cmd_dispatch(&self.gpu, cmd, (params.emit_total + 63) / 64, 1, 1)
   }
   barrier(self, cmd, .FILL_TO_COMPUTE)
-  pipeline_bind(self, cmd, self.particle_sim_pipeline, .PARTICLE_SIMULATE, f, params, .NONE)
+  pipeline_bind(self, cmd, self.pipelines[.PARTICLE_SIMULATE], .PARTICLE_SIMULATE, f, params, .NONE)
   dev.cmd_dispatch(&self.gpu, cmd, MAX_PARTICLES / COMPUTE_PARTICLE_BATCH, 1, 1)
 }
 
@@ -116,6 +116,6 @@ particles_draw :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, camera_ind
       n += 1
     }
   }
-  pipeline_bind(self, cmd, self.particle_draw_pipeline, .PARTICLE_DRAW, f, &push, .PARTICLES, ..textures[:])
+  pipeline_bind(self, cmd, self.pipelines[.PARTICLE_DRAW], .PARTICLE_DRAW, f, &push, .PARTICLES, ..textures[:])
   dev.cmd_draw_indirect(&self.gpu, cmd, self.buffers[.PARTICLE_ALIVE][0], 0, 1, 0)
 }

@@ -32,7 +32,7 @@ overlay_init :: proc(self: ^Renderer) -> bool {
     color_formats = formats[:],
     blend = .ALPHA,
   }
-  self.overlay_pipeline = dev.graphics_pipeline_create(&self.gpu, desc) or_return
+  self.pipelines[.OVERLAY] = dev.graphics_pipeline_create(&self.gpu, desc) or_return
   return true
 }
 
@@ -40,8 +40,8 @@ overlay_init :: proc(self: ^Renderer) -> bool {
 @(private)
 overlay_upload :: proc(self: ^Renderer, f: u32) {
   if len(self.ui_indices) == 0 do return
-  dev.buffer_write(&self.gpu, self.ui_vertex_buffers[f], 0, slice.to_bytes(self.ui_vertices[:]))
-  dev.buffer_write(&self.gpu, self.ui_index_buffers[f], 0, slice.to_bytes(self.ui_indices[:]))
+  dev.buffer_write(&self.gpu, self.buffers[.UI_VERTICES][f], 0, slice.to_bytes(self.ui_vertices[:]))
+  dev.buffer_write(&self.gpu, self.buffers[.UI_INDICES][f], 0, slice.to_bytes(self.ui_indices[:]))
 }
 
 @(private)
@@ -49,13 +49,13 @@ overlay_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   if len(self.ui_indices) == 0 do return
   colors := [1]rhi.ColorTarget{{texture = BACKBUFFER, load = .LOAD}}
   dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:]})
-  dev.cmd_bind_pipeline(&self.gpu, cmd, self.overlay_pipeline)
+  dev.cmd_bind_pipeline(&self.gpu, cmd, self.pipelines[.OVERLAY])
   scene_bind(self, cmd, .NONE, f)
   extent := dev.extent(&self.gpu)
   // pixel y grows down, as clip-space y does
   push := OverlayPush{projection = linalg.matrix_ortho3d_f32(0, f32(extent.x), 0, f32(extent.y), -1, 1)}
-  dev.cmd_bind_vertex(&self.gpu, cmd, 0, self.ui_vertex_buffers[f], 0)
-  dev.cmd_bind_index(&self.gpu, cmd, self.ui_index_buffers[f], 0)
+  dev.cmd_bind_vertex(&self.gpu, cmd, 0, self.buffers[.UI_VERTICES][f], 0)
+  dev.cmd_bind_index(&self.gpu, cmd, self.buffers[.UI_INDICES][f], 0)
   for &batch in self.ui_batches {
     if batch.index_count == 0 do continue
     s := batch.scissor

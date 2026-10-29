@@ -227,7 +227,7 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
     camera_passes(self, cmd, f, .FORWARD_TO_COMPUTE, .CULL_TO_COPY)
     // the lists the main camera drew: culled last frame (Vulkan) or this one (WebGPU)
     slot := camera_slot(main) + f if BINDLESS else camera_next_slot(main, f)
-    dev.cmd_copy_buffer(&self.gpu, cmd, self.draw_lists[slot].buffer, 0, self.draw_count_readback[f], 0, size_of(u32))
+    dev.cmd_copy_buffer(&self.gpu, cmd, self.draw_lists[slot].buffer, 0, self.buffers[.DRAW_COUNT_READBACK][f], 0, size_of(u32))
     barrier(self, cmd, .COLOR_TO_SAMPLE)
     {
       scope(self, cmd, "post")

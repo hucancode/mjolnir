@@ -36,9 +36,7 @@ standalone :: proc(ttf: []u8) {
     debug_axes(r, {})
     stage_overlay(r, {{shape = DrawTextCommand{"render only", {10, 10}, 20, {255, 255, 255, 255}}}}, &f)
     update(r, 1.0 / 60)
-    w, h := glfw.GetFramebufferSize(window)
-    ww, _ := glfw.GetWindowSize(window)
-    frame(r, {u32(w), u32(h)}, f32(w) / f32(max(ww, 1)))
+    frame(r)
   }
   release(r, BALL)
 }

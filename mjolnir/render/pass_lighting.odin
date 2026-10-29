@@ -35,17 +35,19 @@ LightingPush :: struct {
   sun_shadow_map:   u32,
 }
 
+// WebGPU: group 3 of the lighting dispatch, the image it writes.
+@(private = "file")
+LIGHTING_OUTPUT_LAYOUT :: GpuLayoutKey{count = 1, compute = true, kinds = {0 = .STORAGE_TEXTURE}, formats = {0 = HDR_COLOR_FORMAT}}
+
 @(private)
 lighting_init :: proc(self: ^Renderer) -> bool {
-  when !BINDLESS {
-    entries := [1]rhi.BindEntry{{kind = .STORAGE_TEXTURE, stages = {.COMPUTE}, format = HDR_COLOR_FORMAT}}
-    self.lighting_output_layout = dev.bind_layout_create(&self.gpu, {entries = entries[:]}) or_return
-  }
-  self.lighting_pipeline = dev.compute_pipeline_create(
+  output_layout: rhi.BindLayout
+  when !BINDLESS do output_layout = gpu_layout(self, LIGHTING_OUTPUT_LAYOUT) or_return
+  self.pipelines[.LIGHTING] = dev.compute_pipeline_create(
     &self.gpu,
     {
       shader_source("lighting"),
-      pipeline_layout(self, .LIGHTING, .LIGHTING, self.lighting_output_layout),
+      pipeline_layout(self, .LIGHTING, .LIGHTING, output_layout),
     },
   ) or_return
   return true
@@ -59,7 +61,7 @@ lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32)
     output := images[.FINAL_IMAGE][f]
     resources := [1]rhi.BindResource{rhi.TextureView{output, 0}}
     ok: bool
-    group, ok = cached_group(self, output, self.lighting_output_layout, resources[:])
+    group, ok = cached_group(self, output, gpu_layout(self, LIGHTING_OUTPUT_LAYOUT) or_else 0, resources[:])
     if !ok do return
   }
   push := LightingPush {
@@ -80,7 +82,7 @@ lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32)
   pipeline_bind(
     self,
     cmd,
-    self.lighting_pipeline,
+    self.pipelines[.LIGHTING],
     .LIGHTING,
     f,
     &push,

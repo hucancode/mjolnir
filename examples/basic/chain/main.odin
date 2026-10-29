@@ -102,7 +102,7 @@ add_box :: proc(parts: ^[dynamic]geometry.Mesh, places: ^[dynamic]geometry.Trans
 build_head :: proc() -> geometry.Mesh {
   parts := make([dynamic]geometry.Mesh, context.temp_allocator)
   places := make([dynamic]geometry.Transform, context.temp_allocator)
-  defer for p in parts do geometry.mesh_destroy(p)
+  defer for p in parts do geometry.destroy(p)
   ink := [4]f32{0.07, 0.08, 0.1, 1}
   jade := [4]f32{0.12, 0.3, 0.28, 1}
   gold := [4]f32{0.95, 0.75, 0.2, 1}
@@ -177,14 +177,14 @@ shape_build :: proc(app: ^App, head, forward: [2]f32) {
 }
 
 shape_destroy :: proc(app: ^App) {
-  geometry.chain_destroy(&app.chain)
-  for &w in app.whiskers do geometry.chain_destroy(&w)
+  geometry.destroy(&app.chain)
+  for &w in app.whiskers do geometry.destroy(&w)
 }
 
 shutdown :: proc(app: ^App) {
   shape_destroy(app)
-  debugui.shutdown(&app.debug)
   world.shutdown(&app.scene)
+  debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
   free(app)

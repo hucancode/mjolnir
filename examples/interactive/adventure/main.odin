@@ -458,10 +458,10 @@ clear_scene :: proc(app: ^App) {
   clear(&app.projectiles)
   clear(&app.props)
   clear(&app.bodies)
-  nav.crowd_destroy(&app.crowd)
+  nav.destroy(&app.crowd)
   nav.destroy(&app.navmesh)
-  world.teardown(&app.scene)
   physics.teardown(&app.phys)
+  world.teardown(&app.scene)
   render.teardown(&app.renderer)
 }
 
@@ -824,7 +824,7 @@ update_enemies :: proc(app: ^App, dt: f32) {
     }
     gltf.animate(&e.instance, &app.foes[e.kind], &app.scene, &app.renderer, dt)
     if e.dying > DESPAWN_TIME {
-      nav.agent_destroy(&app.crowd, e.agent)
+      nav.destroy(&app.crowd, e.agent)
       actor_destroy(app, e)
       delete(e.trace)
       unordered_remove(&app.enemies, i)
