@@ -120,7 +120,7 @@ sleep :: proc(ms: f64) {
 }
 
 // read_file reads the file at path into memory the caller frees; false when it cannot.
-read_file :: proc(path: string, allocator := context.allocator) -> (data: []u8, ok: bool) {
+read_file :: proc(path: string, allocator := context.allocator) -> (data: []u8, ok: bool) #optional_ok {
   err: os.Error
   data, err = os.read_entire_file(path, allocator)
   if err != nil {

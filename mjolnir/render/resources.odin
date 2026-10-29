@@ -309,30 +309,46 @@ texture_bind :: proc(self: ^Renderer, cmd: rhi.CommandList, layout: TextureLayou
   when BINDLESS do return
   key := TextureGroupKey{layout = layout}
   for t, i in textures do key.textures[i] = t
-  group, ok := self.texture_groups[key]
+  slots := TEXTURE_LAYOUTS[layout]
+  resources: [MAX_GROUP_TEXTURES]rhi.BindResource
+  for slot, i in slots {
+    texture := key.textures[i]
+    switch slot {
+    case .FLOAT, .DEPTH:
+      if texture == 0 do texture = self.white
+    case .CUBE:
+      if texture == 0 do texture = self.black_cube
+    case .SHADOW_ATLAS:
+      texture = self.atlas[0]
+    }
+    resources[i] = rhi.TextureView{texture = texture, mip = -1}
+  }
+  group, ok := cached_group(self, key, self.texture_layouts[layout], resources[:len(slots)])
   if !ok {
-    slots := TEXTURE_LAYOUTS[layout]
-    resources := make([]rhi.BindResource, len(slots), context.temp_allocator)
-    for slot, i in slots {
-      texture := key.textures[i]
-      switch slot {
-      case .FLOAT, .DEPTH:
-        if texture == 0 do texture = self.white
-      case .CUBE:
-        if texture == 0 do texture = self.black_cube
-      case .SHADOW_ATLAS:
-        texture = self.atlas[0]
-      }
-      resources[i] = rhi.TextureView{texture = texture, mip = -1}
-    }
-    group, ok = dev.bind_group_create(&self.gpu, {layout = self.texture_layouts[layout], resources = resources})
-    if !ok {
-      log.errorf("Texture group %v failed", layout)
-      return
-    }
-    self.texture_groups[key] = group
+    log.errorf("Texture group %v failed", layout)
+    return
   }
   dev.cmd_bind_group(&self.gpu, cmd, 1, group)
+}
+
+// What a cached bind group binds (WebGPU): a pass's textures, the lighting dispatch's output
+// image, a batched cull's draw list and pyramid, a pyramid mip build.
+@(private)
+GroupKey :: union {
+  TextureGroupKey,
+  TextureHandle,
+  CullKey,
+  ReduceKey,
+}
+
+// The bind group of `key`, made of `layout` over `resources` the first time and kept until
+// groups_clear.
+@(private)
+cached_group :: proc(self: ^Renderer, key: GroupKey, layout: rhi.BindLayout, resources: []rhi.BindResource) -> (group: rhi.BindGroup, ok: bool) {
+  if group, ok = self.bind_groups[key]; ok do return
+  group = dev.bind_group_create(&self.gpu, {layout = layout, resources = resources}) or_return
+  self.bind_groups[key] = group
+  return group, true
 }
 
 // Binds `pipeline` and what a pass binds after it: the scene set of `scene` for frame `f`, the
@@ -349,11 +365,8 @@ pipeline_bind :: proc(self: ^Renderer, cmd: rhi.CommandList, pipeline: rhi.Pipel
 // Drops every cached bind group, made again on use: a texture they name changed.
 @(private)
 groups_clear :: proc(self: ^Renderer) {
-  for _, g in self.texture_groups do dev.bind_group_retire(&self.gpu, g)
-  clear(&self.texture_groups)
-  cull_groups_clear(self)
-  for _, g in self.lighting_output_groups do dev.bind_group_retire(&self.gpu, g)
-  clear(&self.lighting_output_groups)
+  for _, g in self.bind_groups do dev.bind_group_retire(&self.gpu, g)
+  clear(&self.bind_groups)
 }
 
 // The layouts of a pipeline of `pass`: the scene set, then `user` (set 1, a shader of yours,

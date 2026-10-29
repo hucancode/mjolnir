@@ -2,7 +2,6 @@ package render
 
 import "../geometry"
 import "../containers"
-import "../input"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -52,8 +51,7 @@ CAMERA_LIST_CAPACITY :: MAX_SLOTS
 @(private)
 SHADOW_LIST_CAPACITY :: 4096 * MAX_SHADOW_VIEWS
 
-// Camera is a view into the scene: pose and projection. Its images are camera_image's,
-// its size camera_resize's.
+// Camera is a view into the scene: pose and projection. Its images are camera_image's.
 Camera :: struct {
   position:   [3]f32,
   rotation:   quaternion128,
@@ -146,31 +144,6 @@ make_orbit :: proc(eye, target: [3]f32) -> Orbit {
   }
 }
 
-// orbit_drag steers the orbit from a tick of input and places camera on it (camera_orbit),
-// unless a consumer captured the mouse: it turns by the mouse movement times speed while a
-// button of `rotate_with` is held ({} only zooms) and moves a step closer per scroll, keeping
-// pitch short of the poles and distance in range.
-orbit_drag :: proc(
-  self: ^Orbit,
-  camera: ^Camera,
-  s: ^input.State,
-  rotate_with: input.ButtonSet = {.LEFT},
-  speed: f32 = 0.02,
-  min_distance: f32 = 1,
-  max_distance: f32 = 200,
-) {
-  if !s.mouse_captured {
-    rotating := false
-    for b in rotate_with do rotating ||= input.mouse_down(s, b)
-    if rotating {
-      self.yaw += s.mouse_delta.x * speed
-      self.pitch = clamp(self.pitch + s.mouse_delta.y * speed, -1.5, 1.5)
-    }
-    self.distance = clamp(self.distance - s.scroll.y * 2, min_distance, max_distance)
-  }
-  camera_orbit(camera, self^)
-}
-
 // camera_orbit places the camera at orbit, looking at its target.
 camera_orbit :: proc(self: ^Camera, orbit: Orbit) {
   cp, sp := math.cos(orbit.pitch), math.sin(orbit.pitch)
@@ -199,33 +172,9 @@ camera_lerp_look_at :: proc(self: ^Camera, from, to: [3]f32, t: f32, up: [3]f32 
   self.rotation = linalg.quaternion_slerp(self.rotation, goal.rotation, t)
 }
 
-// camera_set_perspective switches the camera to a perspective projection.
-camera_set_perspective :: proc(
-  self: ^Camera,
-  fov: f32 = math.PI / 3,
-  near: f32 = 0.1,
-  far: f32 = 1000.0,
-) {
-  self.projection = PerspectiveProjection{fov = fov}
-  self.near = near
-  self.far = far
-}
-
-// camera_set_orthographic switches the camera to an orthographic projection.
-camera_set_orthographic :: proc(
-  self: ^Camera,
-  height: f32,
-  near: f32 = 0.1,
-  far: f32 = 100.0,
-) {
-  self.projection = OrthographicProjection{height = height}
-  self.near = near
-  self.far = far
-}
-
 // cursor_ray returns the world-space ray from the main camera's near plane through cursor,
 // given in window coordinates as input.State reports them (the DPI scale is applied here).
-cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (ray: geometry.Ray, ok: bool) {
+cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (ray: geometry.Ray, ok: bool) #optional_ok {
   cam := main_camera(self) or_return
   extent := self.camera_targets[self.main_camera].extent
   p := cursor * self.dpi_scale
@@ -239,7 +188,7 @@ cursor_ray :: proc(self: ^Renderer, cursor: [2]f32) -> (ray: geometry.Ray, ok: b
 
 // world_to_screen returns where position appears on screen through the main camera, in window
 // coordinates (those of cursor_ray and the overlay); false when it is behind the camera.
-world_to_screen :: proc(self: ^Renderer, position: [3]f32) -> (point: [2]f32, ok: bool) {
+world_to_screen :: proc(self: ^Renderer, position: [3]f32) -> (point: [2]f32, ok: bool) #optional_ok {
   cam := main_camera(self) or_return
   extent := self.camera_targets[self.main_camera].extent
   clip := camera_projection_matrix(cam, extent) * camera_view_matrix(cam) * [4]f32{position.x, position.y, position.z, 1}
@@ -261,7 +210,7 @@ main_camera :: proc(self: ^Renderer) -> (^Camera, bool) #optional_ok {
 }
 
 // camera_create creates a perspective camera with its own render targets; it lives until
-// camera_destroy or teardown.
+// camera_destroy or teardown. Switch projections by setting Camera.projection.
 // Every camera is drawn each frame; the main camera is presented to the swapchain.
 camera_create :: proc(
   self: ^Renderer,
@@ -270,39 +219,47 @@ camera_create :: proc(
   target: [3]f32 = {0, 0, 0},
   fov: f32 = math.PI * 0.5,
   near: f32 = 0.1,
-  far: f32 = 100.0,
+  far: f32 = 1000.0,
 ) -> (
   handle: CameraHandle,
   ok: bool,
 ) #optional_ok {
+  guard(self)
   handle = CameraHandle(containers.slots_alloc(&self.slots[.CAMERAS]) or_return)
   cam := &self.cameras[handle]
   cam^ = {}
   self.camera_targets[handle] = {extent = {width, height}}
-  camera_set_perspective(cam, fov, near, far)
+  cam.projection, cam.near, cam.far = PerspectiveProjection{fov}, near, far
   camera_look_at(cam, position, target)
   // the lists' size does not depend on the camera's extent
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     if !draw_list_create(self, camera_slot(u32(handle)) + frame, shadow = false) {
-      camera_destroy(self, handle)
+      free_camera(self, handle)
       return 0, false
     }
   }
   if !create_targets(self, u32(handle)) {
-    camera_destroy(self, handle)
+    free_camera(self, handle)
     return 0, false
   }
   return handle, true
 }
 
-// camera_destroy frees the camera; its handle is stale at once.
-camera_destroy :: proc(self: ^Renderer, handle: CameraHandle) {
-  cam := camera(self, handle)
-  if cam == nil do return
+// camera_destroy frees the camera; its handle is stale at once. false for the main camera,
+// which lives as long as the renderer, or a stale handle.
+camera_destroy :: proc(self: ^Renderer, handle: CameraHandle) -> bool {
+  guard(self)
+  if handle == self.main_camera do return false
+  camera(self, handle) or_return
+  free_camera(self, handle)
+  return true
+}
+
+@(private)
+free_camera :: proc(self: ^Renderer, handle: CameraHandle) {
   destroy_targets(self, u32(handle))
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) do draw_list_destroy(self, camera_slot(u32(handle)) + frame)
   containers.slots_free(&self.slots[.CAMERAS], u32(handle))
-  if handle == self.main_camera do self.main_camera = 0
 }
 
 // camera_image returns one of a camera's images as the next frame renders it. The camera
@@ -318,13 +275,15 @@ camera_image :: proc(
   texture: TextureHandle,
   ok: bool,
 ) #optional_ok {
+  guard(self)
   camera(self, handle) or_return
   f := current_frame(self)
   if previous_frame do f = (f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
   return self.camera_targets[handle].images[image][f], true
 }
 
-// camera_resize resizes a camera's render targets; a perspective projection follows the new aspect ratio.
+// Resizes a camera's render targets; a perspective projection follows the new aspect ratio.
+@(private)
 camera_resize :: proc(
   self: ^Renderer,
   handle: CameraHandle,
@@ -413,6 +372,6 @@ destroy_targets :: proc(self: ^Renderer, index: u32) {
   for frames in targets.images do for handle in frames do texture_destroy(self, handle)
   for handle in targets.pyramid do texture_destroy(self, handle)
   targets.images, targets.pyramid, targets.pyramid_bound = {}, {}, {}
-  cull_groups_clear(self)
+  groups_clear(self)
 }
 

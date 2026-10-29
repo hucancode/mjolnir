@@ -1,6 +1,6 @@
 package render
 
-import "rhi"
+import "../containers"
 
 // MaterialShader is a user material shader made by material_shader_create, drawing the
 // .CUSTOM materials whose Material.shader it is; 0 is none.
@@ -30,34 +30,23 @@ material_shader_create :: proc(
   shader: MaterialShader,
   ok: bool,
 ) #optional_ok {
-  slot := -1
-  for p, i in self.custom_material_pipelines {
-    if p == 0 {
-      slot = i
-      break
-    }
+  guard(self)
+  shader = MaterialShader(containers.slots_alloc(&self.slots[.MATERIAL_SHADERS]) or_return)
+  pipeline, created := material_pipeline_create(self, .FORWARD, {source = source, cull = cull, blend = blend, opaque = depth_write})
+  if !created {
+    containers.slots_free(&self.slots[.MATERIAL_SHADERS], u32(shader))
+    return 0, false
   }
-  if slot < 0 do return 0, false
-  desc := rhi.GraphicsPipelineDesc {
-    shader        = source,
-    layout        = pipeline_layout(self, .MESH, .MATERIAL),
-    vertex        = mesh_vertex_streams(),
-    cull          = cull,
-    color_formats = material_pass_formats(.FORWARD),
-    blend         = blend,
-    depth         = material_pass_depth(.FORWARD, opaque = depth_write),
-  }
-  pipeline := dev.graphics_pipeline_create(&self.gpu, desc) or_return
-  self.custom_material_pipelines[slot] = pipeline
-  return MaterialShader(slot + 1), true
+  self.custom_material_pipelines[shader - 1] = pipeline
+  return shader, true
 }
 
 // material_shader_destroy frees a shader from material_shader_create; its materials draw
 // nothing until they get another.
 material_shader_destroy :: proc(self: ^Renderer, shader: MaterialShader) {
-  if shader == 0 || int(shader) > MAX_MATERIAL_SHADERS do return
-  p := &self.custom_material_pipelines[shader - 1]
-  if p^ != 0 do dev.pipeline_retire(&self.gpu, p^)
-  p^ = 0
+  guard(self)
+  if !containers.slots_free(&self.slots[.MATERIAL_SHADERS], u32(shader)) do return
+  dev.pipeline_retire(&self.gpu, self.custom_material_pipelines[shader - 1])
+  self.custom_material_pipelines[shader - 1] = 0
 }
 

@@ -26,6 +26,53 @@ MATERIAL_PASS_TYPES := [MaterialPass][2]MaterialType {
   .FORWARD = {FIRST_FORWARD_TYPE, .CUSTOM},
 }
 
+// How a material shader draws, built-in or yours (material_shader_create): its source, face
+// culling and blending, whether it writes depth in the forward pass (`opaque`), and whether it
+// draws edges (`wireframe`). The pass is its type's (MATERIAL_PASS_TYPES).
+@(private)
+MaterialShaderDesc :: struct {
+  source:    rhi.ShaderSource,
+  cull:      rhi.CullMode,
+  blend:     rhi.BlendMode,
+  opaque:    bool,
+  wireframe: bool,
+  // pulls its vertices from the index buffer where there are no line polygons nor primitive
+  // indices (WebGPU): its draws are non-indexed
+  pulled:    bool,
+}
+
+// The built-in material types; .CUSTOM's shaders are yours.
+@(private)
+material_types :: proc() -> [MaterialType]MaterialShaderDesc {
+  return #partial {
+    .PBR          = {source = shader_source("gbuffer"), cull = .BACK},
+    .TRANSPARENT  = {source = shader_source("transparent"), cull = .BACK, blend = .ALPHA},
+    .WIREFRAME    = {source = shader_source("wireframe"), cull = .NONE, blend = .ALPHA, wireframe = true, pulled = true},
+    .RANDOM_COLOR = {source = shader_source("random_color"), cull = .BACK, blend = .ALPHA, pulled = true},
+    // cut-out pixels: opaque, depth-ordered
+    .SPRITE       = {source = shader_source("sprite"), cull = .NONE, blend = .ALPHA, opaque = true},
+  }
+}
+
+// The pipeline of a material shader drawn in `pass`.
+@(private)
+material_pipeline_create :: proc(self: ^Renderer, pass: MaterialPass, desc: MaterialShaderDesc) -> (rhi.Pipeline, bool) {
+  return dev.graphics_pipeline_create(
+    &self.gpu,
+    {
+      shader = desc.source,
+      layout = pipeline_layout(self, .MESH, .MATERIAL),
+      vertex = mesh_vertex_streams(),
+      topology = .LINE_LIST if desc.wireframe && !BINDLESS else .TRIANGLE_LIST,
+      cull = desc.cull,
+      color_formats = material_pass_formats(pass),
+      blend = desc.blend,
+      depth = material_pass_depth(pass, desc.opaque),
+      wireframe = desc.wireframe,
+    },
+  )
+}
+
 // The formats a material pass draws into, for the pipelines of anything drawn in it.
 @(private)
 material_pass_formats :: proc(pass: MaterialPass) -> []TextureFormat {
@@ -64,30 +111,11 @@ mesh_vertex_streams :: proc(position_only := false) -> []rhi.VertexBuffer {
 
 @(private)
 material_init :: proc(self: ^Renderer) -> bool {
-  sources := #partial [MaterialType]rhi.ShaderSource {
-    .PBR          = shader_source("gbuffer"),
-    .TRANSPARENT  = shader_source("transparent"),
-    // no line polygon mode and no primitive index in core WebGPU: the shader pulls vertices
-    .WIREFRAME    = shader_source("wireframe"),
-    .RANDOM_COLOR = shader_source("random_color"),
-    .SPRITE       = shader_source("sprite"),
-  }
-  cull := #partial [MaterialType]rhi.CullMode{.PBR = .BACK, .TRANSPARENT = .BACK, .WIREFRAME = .NONE, .RANDOM_COLOR = .BACK, .SPRITE = .NONE}
+  types := material_types()
   for pass in MaterialPass {
-    types := MATERIAL_PASS_TYPES[pass]
-    for type in types[0] ..< types[1] {
-      desc := rhi.GraphicsPipelineDesc {
-        shader        = sources[type],
-        layout        = pipeline_layout(self, .MESH, .MATERIAL),
-        vertex        = mesh_vertex_streams(),
-        topology      = .LINE_LIST if type == .WIREFRAME && !BINDLESS else .TRIANGLE_LIST,
-        cull          = cull[type],
-        color_formats = material_pass_formats(pass),
-        blend         = .ALPHA if pass == .FORWARD else .NONE,
-        depth         = material_pass_depth(pass, opaque = type == .SPRITE),
-        wireframe     = type == .WIREFRAME,
-      }
-      self.material_pipelines[pass][int(type)] = dev.graphics_pipeline_create(&self.gpu, desc) or_return
+    range := MATERIAL_PASS_TYPES[pass]
+    for type in range[0] ..< range[1] {
+      self.material_pipelines[pass][int(type)] = material_pipeline_create(self, pass, types[type]) or_return
     }
   }
   return true

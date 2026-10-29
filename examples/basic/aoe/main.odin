@@ -62,7 +62,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     physics.body_create(&app.phys, position, collider = physics.BoxCollider{half_extents = CUBE_HALF_EXTENT}, user = world.Handle(node))
   }
   effector_material := render.material_create(&app.renderer, render.make_material(emissive_value = 5.0))
-  app.effector = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, effector_material, cast_shadow = false), scale = 0.5)
+  app.effector = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, effector_material, cast_shadow = false), scale = 0.5)
   app.orbit = render.make_orbit({10, 30, 10}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   log.infof("AOE test setup complete: %d cubes", GRID_SIZE * GRID_SIZE)
@@ -86,7 +86,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
 
   if input.mouse_pressed(&app.input, .LEFT) && !app.input.mouse_captured {
     set_cube_half_extent(app, app.clicked, CUBE_HALF_EXTENT)

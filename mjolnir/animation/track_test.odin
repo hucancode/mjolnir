@@ -2,6 +2,7 @@
 #+private
 package animation
 
+import "../geometry"
 import "core:math"
 import "core:math/linalg"
 import "core:testing"
@@ -232,7 +233,7 @@ test_clip_sample_trs_keeps_unanimated :: proc(t: ^testing.T) {
   defer clip_destroy(&clip)
   clip_set_positions(&clip, 0, {0, 1}, {{0, 0, 0}, {10, 0, 0}})
   q := linalg.quaternion_angle_axis_f32(0.3, linalg.VECTOR3F32_X_AXIS)
-  out := TRS{position = {7, 7, 7}, rotation = q, scale = {3, 3, 3}}
+  out := geometry.Transform{position = {7, 7, 7}, rotation = q, scale = {3, 3, 3}}
   clip_sample_trs(&clip, 0, 1, &out)
   testing.expect_value(t, out.position, [3]f32{10, 0, 0})
   testing.expect(t, out.rotation == q, "rotation untouched")
@@ -328,7 +329,7 @@ test_clip_player_update_samples_over_rest :: proc(t: ^testing.T) {
   defer clip_destroy(&clip)
   clip_set_positions(&clip, 0, {0, 2}, {{0, 0, 0}, {4, 0, 0}})
   p := ClipPlayer{speed = 1}
-  rest := TRS{position = {0, 1, 0}, rotation = linalg.QUATERNIONF32_IDENTITY, scale = {2, 2, 2}}
+  rest := geometry.Transform{position = {0, 1, 0}, rotation = linalg.QUATERNIONF32_IDENTITY, scale = {2, 2, 2}}
   m := clip_player_update(&p, &clip, 0.5, rest)
   testing.expect_value(t, p.time, 0.5)
   testing.expect_value(t, m[3].xyz, [3]f32{1, 0, 0})

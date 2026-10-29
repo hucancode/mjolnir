@@ -105,11 +105,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   ground_body := body_create(app, .staticBody, {0, -0.5, 0})
   ground_hull := b3.MakeBoxHull(PLANE_WIDTH, 0.5, PLANE_HEIGHT)
   _ = b3.CreateHullShape(ground_body, shape_def(0), &ground_hull.base)
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), parent = ground, scale = {PLANE_WIDTH, 0.5, PLANE_HEIGHT})
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), parent = ground, scale = {PLANE_WIDTH, 0.5, PLANE_HEIGHT})
   ball := world.spawn(&app.scene, {2.5, SPHERE_RADIUS, 0})
   ball_body := body_create(app, .staticBody, {2.5, SPHERE_RADIUS, 0})
   _ = b3.CreateSphereShape(ball_body, shape_def(0), &b3.Sphere{radius = SPHERE_RADIUS})
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .MAGENTA), parent = ball, scale = SPHERE_RADIUS)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .MAGENTA), parent = ball, scale = SPHERE_RADIUS)
 
   box_hull := b3.MakeBoxHull(1, 1, 1)
   centered_y_offset: f32 = -CYLINDER_HEIGHT / 2.0
@@ -131,7 +131,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
       look = sphere_look
     }
     node := world.spawn(&app.scene, pos)
-    mjolnir.spawn_mesh(&app.scene, &app.renderer, look, parent = node)
+    mjolnir.spawn(&app.scene, &app.renderer, look, parent = node)
     append(&app.pieces, Piece{body, node})
   }
   log.infof("Created %d Box3D bodies", PIECE_COUNT)
@@ -144,7 +144,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   b3.World_Step(app.phys, dt, BOX3D_SUBSTEPS)
   for i := len(app.pieces) - 1; i >= 0; i -= 1 {
     p := app.pieces[i]

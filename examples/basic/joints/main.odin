@@ -75,7 +75,7 @@ shutdown :: proc(app: ^App) {
 
 spawn_piece :: proc(app: ^App, position: [3]f32, collider: physics.Collider, look: render.MeshAttachment, size: [3]f32, mass: f32) -> physics.BodyHandle {
   node := world.spawn(&app.scene, position)
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, look, scale = size, parent = node)
+  mjolnir.spawn(&app.scene, &app.renderer, look, scale = size, parent = node)
   body := physics.body_create(&app.phys, position, collider = collider, mass = mass, user = world.Handle(node))
   if mass > 0 do append(&app.pieces, Piece{body, position, linalg.QUATERNIONF32_IDENTITY})
   return body
@@ -123,10 +123,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {.RIGHT})
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {.RIGHT})
 
   if input.mouse_pressed(&app.input, .LEFT) && !app.input.mouse_captured {
     if ray, ok := render.cursor_ray(&app.renderer, app.input.cursor); ok {
@@ -141,14 +139,15 @@ update :: proc(app: ^App, dt: f32) {
   }
 
   physics.step(&app.phys, dt)
-  world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
+  mjolnir.sync_bodies(&app.scene, &app.phys)
   render.debug_segment(&app.renderer, PENDULUM_ANCHOR, physics.body(&app.phys, app.bob).position, render.COLOR_RGB[.WHITE])
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Joints", {20, 20, 220, 180}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Joints", {20, 20, 220, 180}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Left click: push")
     mu.label(ctx, "Right drag: orbit")

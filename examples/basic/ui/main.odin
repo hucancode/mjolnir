@@ -137,11 +137,9 @@ update :: proc(app: ^App, dt: f32) {
     list := ui.node(&app.gui, app.list)
     list.scroll.y = clamp(list.scroll.y - app.input.scroll.y * 20, 0, ui.max_scroll(&app.gui, app.list).y)
   }
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   draw_hud(app)
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 draw :: proc(app: ^App) -> bool {

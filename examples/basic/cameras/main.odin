@@ -16,22 +16,22 @@ import mu "vendor:microui"
 CameraMode :: enum {ORBIT, FREE, FOLLOW, TOP}
 
 App :: struct {
-  platform:   platform.Platform,
-  scene:      world.World,
-  renderer:   render.Renderer,
-  debug:      debugui.Context,
-  input:      input.State,
-  mode:       CameraMode,
-  orbit:      render.Orbit,
-  runner:     world.NodeHandle,
-  runner_pos: [3]f32,
-  time:       f32,
+  platform:    platform.Platform,
+  scene:       world.World,
+  renderer:    render.Renderer,
+  debug:       debugui.Context,
+  input:       input.State,
+  mode:        CameraMode,
+  orbit:       render.Orbit,
+  perspective: render.CameraProjection,
+  runner:      world.NodeHandle,
+  runner_pos:  [3]f32,
+  time:        f32,
 }
 
 ORBIT_MIN_DISTANCE :: 2
 ORBIT_MAX_DISTANCE :: 40
 
-orbit_distance:     f32 = 8.0
 free_speed:         f32 = 5.0
 follow_offset_y:    f32 = 3.0
 follow_offset_back: f32 = 6.0
@@ -61,17 +61,18 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 6, 12}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  orbit_distance = app.orbit.distance
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 20.0)
+  cam := render.main_camera(&app.renderer)
+  render.camera_orbit(cam, app.orbit)
+  app.perspective = cam.projection
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 20.0)
 
   spawn_landmark(app, {-6, 1, 0}, .RED)
   spawn_landmark(app, {6, 1, 0}, .GREEN)
   spawn_landmark(app, {0, 1, -6}, .BLUE)
   spawn_landmark(app, {0, 1, 6}, .YELLOW)
 
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .MAGENTA), {0, 0.5, 0})
-  app.runner = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .CYAN), app.runner_pos, scale = 0.6)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .MAGENTA), {0, 0.5, 0})
+  app.runner = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .CYAN), app.runner_pos, scale = 0.6)
   return .READY
 }
 
@@ -84,16 +85,14 @@ shutdown :: proc(app: ^App) {
 }
 
 spawn_landmark :: proc(app: ^App, pos: [3]f32, color: render.Color) {
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CONE, color), pos)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CONE, color), pos)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   app.time += dt
   phase := app.time * 0.6
   app.runner_pos = {7.0 * math.sin(phase), 0.6, 4.0 * math.sin(phase * 2.0)}
@@ -115,8 +114,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Cameras", {20, 20, 300, 260}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Cameras", {20, 20, 300, 260}) {
     mu.label(ctx, "Controller:")
     mu.layout_row(ctx, {66, 66, 66, 66}, 0)
     names := [CameraMode]string{.ORBIT = "Orbit", .FREE = "Free", .FOLLOW = "Follow", .TOP = "Top"}
@@ -127,7 +127,7 @@ debug_ui :: proc(app: ^App) {
     switch app.mode {
     case .ORBIT:
       mu.label(ctx, "Distance:")
-      if .CHANGE in mu.slider(ctx, &orbit_distance, ORBIT_MIN_DISTANCE, ORBIT_MAX_DISTANCE) do app.orbit.distance = orbit_distance
+      mu.slider(ctx, &app.orbit.distance, ORBIT_MIN_DISTANCE, ORBIT_MAX_DISTANCE)
     case .FREE:
       mu.label(ctx, "Move speed:"); mu.slider(ctx, &free_speed, 1.0, 30.0)
     case .FOLLOW:
@@ -144,17 +144,13 @@ debug_ui :: proc(app: ^App) {
 switch_mode :: proc(app: ^App, mode: CameraMode) {
   if app.mode == mode do return
   cam := render.main_camera(&app.renderer)
-  if app.mode == .TOP do render.camera_set_perspective(cam)
+  if app.mode == .TOP do cam.projection = app.perspective
   app.mode = mode
-  if mode == .ORBIT {
-    app.orbit = render.make_orbit(render.main_camera(&app.renderer).position, app.orbit.target)
-    orbit_distance = app.orbit.distance
-  }
+  if mode == .ORBIT do app.orbit = render.make_orbit(cam.position, app.orbit.target)
 }
 
 orbit_camera :: proc(app: ^App, cam: ^render.Camera) {
-  render.orbit_drag(&app.orbit, cam, &app.input, min_distance = ORBIT_MIN_DISTANCE, max_distance = ORBIT_MAX_DISTANCE)
-  orbit_distance = app.orbit.distance
+  mjolnir.orbit_drag(&app.orbit, cam, &app.input, min_distance = ORBIT_MIN_DISTANCE, max_distance = ORBIT_MAX_DISTANCE)
 }
 
 follow_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
@@ -173,7 +169,7 @@ free_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
 }
 
 top_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
-  render.camera_set_orthographic(cam, top_view_height)
+  cam.projection = render.OrthographicProjection{top_view_height}
   up := [3]f32{math.sin(top_yaw), 0, -math.cos(top_yaw)}
   render.camera_lerp_look_at(cam, {0, 30, 0}, {0, 0, 0}, 1 - math.exp(-follow_lerp * dt), up)
 }

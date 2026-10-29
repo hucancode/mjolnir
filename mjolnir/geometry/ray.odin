@@ -24,3 +24,22 @@ ray_plane_intersection :: proc "contextless" (
   if t < 0 || t > max_t do return
   return ray.origin + ray.direction * t, true
 }
+
+// ray_triangle_intersection returns the distance t along dir (hit at origin + t * dir) where the
+// ray crosses triangle (v0, v1, v2) from either side; false when it misses or t <= 0.
+ray_triangle_intersection :: proc "contextless" (origin, dir, v0, v1, v2: [3]f32) -> (t: f32, hit: bool) {
+  e1 := v1 - v0
+  e2 := v2 - v0
+  h := linalg.cross(dir, e2)
+  a := linalg.dot(e1, h)
+  if abs(a) < 1e-8 do return 0, false
+  f := 1 / a
+  s := origin - v0
+  u := f * linalg.dot(s, h)
+  if u < 0 || u > 1 do return 0, false
+  q := linalg.cross(s, e1)
+  v := f * linalg.dot(dir, q)
+  if v < 0 || u + v > 1 do return 0, false
+  t = f * linalg.dot(e2, q)
+  return t, t > 0
+}

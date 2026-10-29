@@ -2,6 +2,7 @@
 #+private
 package animation
 
+import "../geometry"
 import "core:math/linalg"
 import "core:slice"
 import "core:testing"
@@ -65,7 +66,7 @@ test_skeleton_lengths_and_rest :: proc(t: ^testing.T) {
     testing.expectf(t, abs(skel.lengths[i] - e) < 1e-5, "length[%d]=%f want %f", i, skel.lengths[i], e)
   }
   testing.expect(t, almost_equal_vec3(skel.rest[0].position, {0, 1, 0}), "knee rest local offset")
-  // rest local TRS composed along parents reproduces bind
+  // rest local transforms composed along parents reproduces bind
   model: [5]matrix[4, 4]f32
   for i in skel.order {
     m := trs_matrix(skel.rest[i])

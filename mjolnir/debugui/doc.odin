@@ -1,5 +1,5 @@
-// Quick debug windows (microui): feed it input, build widgets and hand them to
-// render.stage_overlay, each tick in update.
+// Quick debug windows (microui): begin with the tick's input, build widgets, end to draw them,
+// each tick in update.
 package debugui
 
 // Layer 3: glue

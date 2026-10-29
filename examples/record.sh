@@ -147,6 +147,8 @@ record_one() {
 
 if [[ ${#targets[@]} -eq 0 ]]; then
     for d in examples/*/*/; do
+        # the modules examples prove a module on its own; most draw nothing to record
+        [[ "$d" == examples/modules/* ]] && continue
         targets+=("$(basename "$d")")
     done
 fi

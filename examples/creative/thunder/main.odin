@@ -75,8 +75,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(r) do return .WAIT
   if !debugui.init(&app.debug, r) do return .FAIL
   app.orbit = render.make_orbit({12, 10, 12}, {0, 1.6, 0})
-  render.camera_orbit(render.main_camera(r), app.orbit)
-  render.camera_set_perspective(render.main_camera(r), math.to_radians(f32(50)), 0.3, 600)
+  cam := render.main_camera(r)
+  render.camera_orbit(cam, app.orbit)
+  cam.projection, cam.near, cam.far = render.PerspectiveProjection{math.to_radians(f32(50))}, 0.3, 600
 
   app.model = gltf.model_create(r, #load("assets/Mjolnir.glb"))
   app.hammer = gltf.instance_create(&app.model, &app.scene, r)
@@ -84,7 +85,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   world.translate(&app.scene, app.hammer.roots[0], {0, 0.106, 0})
 
   floor_material := render.material_create(r, render.make_material(base_color_factor = {0.02, 0.02, 0.035, 1}, roughness_value = 0.35))
-  mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .QUAD_XZ, floor_material, cast_shadow = false), scale = 400)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, floor_material, cast_shadow = false), scale = 400)
 
   for i in 0 ..< MAX_LIGHTS {
     app.lamps[i] = world.spawn(&app.scene)
@@ -138,7 +139,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
 shutdown :: proc(app: ^App) {
   storm_destroy(&app.storm)
-  render.mesh_destroy(&app.renderer, app.rod)
+  render.destroy(&app.renderer, app.rod)
   gltf.destroy(&app.hammer, &app.scene, &app.renderer)
   gltf.destroy(&app.model, &app.renderer)
   world.shutdown(&app.scene)
@@ -153,13 +154,11 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(r)
   defer render.unlock(r)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, r)
   debug_ui(app)
-  render.stage_overlay(r, debugui.end(&app.debug))
   click_to_strike(app)
   if orbiting && !app.pressed do app.orbit.yaw += dt * 0.04
   camera := render.main_camera(r)
-  render.orbit_drag(&app.orbit, camera, &app.input)
+  mjolnir.orbit_drag(&app.orbit, camera, &app.input)
   eye := camera.position
 
   lights := advance(&app.storm, min(dt, 0.05), eye)
@@ -257,8 +256,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Thunder", {20, 20, 280, 520}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Thunder", {20, 20, 280, 520}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Click: strike   Drag: look around")
     mu.label(ctx, "Strike rate"); mu.slider(ctx, &rate, 0, 4)

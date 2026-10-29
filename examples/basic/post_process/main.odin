@@ -86,7 +86,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   ok: bool
   app.vignette, ok = render.post_shader_create(&app.renderer, #load("vignette." + render.SHADER_EXT))
   if !ok do log.error("Failed to create the vignette shader")
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 30.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 30.0)
 
   magenta_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.1, 0.8, 1}, emissive_value = 4.0))
   spawn_primitive(app, .SPHERE, magenta_emit, {-3.0, 1.2, 1.5})
@@ -106,23 +106,20 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   for i in 0 ..< 5 do spawn_primitive(app, .CUBE, app.renderer.builtin_materials[.WHITE], {f32(i) * 4.0 - 8.0, 0.5, -7.0})
 
-  lamp := world.spawn(&app.scene, {0, 3, 0})
-  render.attach(&app.renderer, lamp, render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2}, intensity = 200, radius = 8.0, cast_shadow = false)))
+  mjolnir.spawn(&app.scene, &app.renderer, render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2}, intensity = 200, radius = 8.0, cast_shadow = false)))
   return .READY
 }
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, material: render.MaterialHandle, position: [3]f32, cast_shadow := true) {
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, material, cast_shadow), position)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, material, cast_shadow), position)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   clear(&app.renderer.effect_stack)
   if outline_on    do append(&app.renderer.effect_stack, render.OutlineEffect{thickness = outline_thickness})
   if fog_on        do append(&app.renderer.effect_stack, render.FogEffect{color = {0.55, 0.6, 0.7}, start = fog_start, end = fog_end})
@@ -144,8 +141,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Post-process", {20, 20, 280, 560}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Post-process", {20, 20, 280, 560}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Tonemap", &tonemap_on)
     if tonemap_on {

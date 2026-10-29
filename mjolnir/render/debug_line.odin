@@ -1,5 +1,6 @@
 package render
 
+import "../geometry"
 import "core:math"
 import "core:math/linalg"
 import "core:sync"
@@ -27,7 +28,7 @@ debug_line_add :: proc(self: ^Renderer, life: f32, bypass_depth: bool, segs: ..D
   // one-frame segments (life <= 0) are stamped at flush, once the clock for the frame that
   // draws them is known; update may advance it between this call and that frame
   expiry: f32 = -1
-  if life > 0 do expiry = self.time + life
+  if life > 0 do expiry = f32(self.time) + life
   for seg in segs {
     s := seg
     s.expiry = expiry
@@ -47,7 +48,7 @@ flush_debug_lines :: proc(self: ^Renderer) {
     start := int(self.debug_filled[ring] % DEBUG_RING)
     for seg, k in inbox {
       seg := seg
-      if seg.expiry < 0 do seg.expiry = self.time
+      if seg.expiry < 0 do seg.expiry = f32(self.time)
       table[ring * DEBUG_RING + (start + k) % DEBUG_RING] = seg
     }
     // the ring's written run, which wraps past its end at most once (inboxes hold a ring at most)
@@ -64,15 +65,6 @@ flush_debug_lines :: proc(self: ^Renderer) {
 
 @(private = "file")
 CIRCLE_SEGMENTS :: 24
-
-// n must be normalized.
-@(private = "file")
-orthonormal_basis :: proc(n: [3]f32) -> (u, v: [3]f32) {
-  tmp := [3]f32{0, 1, 0} if abs(n.y) < 0.9 else [3]f32{1, 0, 0}
-  u = linalg.normalize0(linalg.cross(tmp, n))
-  v = linalg.cross(n, u)
-  return
-}
 
 @(private = "file")
 fill_circle :: proc(
@@ -170,7 +162,8 @@ debug_circle :: proc(
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
-  u, v := orthonormal_basis(linalg.normalize0(normal))
+  if normal == 0 do return
+  u, v := geometry.tangent_basis(linalg.normalize(normal))
   segs: [CIRCLE_SEGMENTS]DebugLineSegment
   fill_circle(segs[:], center, u, v, radius, color)
   debug_line_add(self, life, bypass_depth, ..segs[:])
@@ -207,7 +200,8 @@ debug_arrow :: proc(
   length := linalg.length(dir)
   // a zero-length arrow's head collapses onto `to`
   d := linalg.normalize0(dir)
-  u, v := orthonormal_basis(d)
+  u, v: [3]f32
+  if length > 0 do u, v = geometry.tangent_basis(d)
   head_len := min(length * 0.2, 0.5)
   head_r := head_len * 0.4
   base := to - d * head_len

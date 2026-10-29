@@ -313,26 +313,27 @@ PassDesc :: struct {
   layer_count: u32,
 }
 
-// The global arrays beside the textures (bindless_write), as the shaders index them.
+// The global arrays beside the textures (bindless_write), as the shaders index them; init
+// takes their sizes.
 BindlessArray :: enum {
   // storage images: a TextureView names one mip
   STORAGE_IMAGES,
-  // indirect draw lists, storage buffers
-  DRAW_LISTS,
-  // one u32 per depth pyramid slot: its groups done
-  PYRAMID_COUNTERS,
+  // storage buffers
+  STORAGE_BUFFERS,
+  // one more storage buffer array, for shaders that need a second
+  EXTRA_BUFFERS,
 }
 
 // Procs is what a backend provides, over its device and window types. Each backend declares
 // `PROCS :: rhi.Procs(Backend, WindowHandle){...}`: that assignment is the conformance check.
 // render calls the backend's procs directly, so none of this costs a dispatch.
 Procs :: struct($Device: typeid, $Window: typeid) {
-  // lifecycle: init brings the device up on window (ready says when it is, the web finishes
-  // later); shutdown destroys everything. window_size measures the window: its framebuffer in
+  // lifecycle: init brings the device up on window, its bindless arrays of the sizes given
+  // (ready says when it is, the web finishes later); shutdown destroys everything. window_size measures the window: its framebuffer in
   // pixels and its DPI scale (pixels per window unit). wait_idle lands every upload and waits for the GPU,
   // then destroys what was retired. tick destroys what was retired RETIRE_GRACE frames ago,
   // once per frame. frame_serial counts presented frames; extent is the swapchain's size.
-  init:                          proc(d: ^Device, window: Window) -> bool,
+  init:                          proc(d: ^Device, window: Window, bindless: [BindlessArray]u32) -> bool,
   window_size:                   proc(d: ^Device) -> (framebuffer_size: [2]u32, dpi_scale: f32),
   ready:                         proc(d: ^Device) -> bool,
   shutdown:                      proc(d: ^Device),

@@ -22,14 +22,7 @@ aabb_union :: #force_inline proc "contextless" (a, b: Aabb) -> Aabb {
 
 // aabb_intersects reports whether a and b overlap (touching counts).
 aabb_intersects :: #force_inline proc "contextless" (a, b: Aabb) -> bool {
-  return(
-    a.min.x <= b.max.x &&
-    a.max.x >= b.min.x &&
-    a.min.y <= b.max.y &&
-    a.max.y >= b.min.y &&
-    a.min.z <= b.max.z &&
-    a.max.z >= b.min.z \
-  )
+  return overlap_bounds(a.min, a.max, b.min, b.max)
 }
 
 // aabb_contains reports whether inner lies fully inside outer.
@@ -83,48 +76,19 @@ aabb_sphere_intersects :: proc "contextless" (
   return linalg.dot(diff, diff) <= radius * radius
 }
 
-// ray_aabb_intersection returns the entry and exit distances of a ray (origin, 1/direction) through aabb; t_far < t_near means a miss.
-ray_aabb_intersection :: proc "contextless" (
+// ray_aabb_intersection returns the entry and exit distances of a ray (origin, 1/direction)
+// through aabb; t_far < t_near means a miss. An axis-parallel ray has an infinite inverse there.
+ray_aabb_intersection :: #force_inline proc "contextless" (
   origin: [3]f32,
   inv_dir: [3]f32,
   aabb: Aabb,
 ) -> (
   t_near, t_far: f32,
 ) {
-  t_min := [3]f32{-F32_MAX, -F32_MAX, -F32_MAX}
-  t_max := [3]f32{F32_MAX, F32_MAX, F32_MAX}
-  #unroll for i in 0 ..< 3 {
-    if math.abs(inv_dir[i]) < 1e-6 {
-      if origin[i] < aabb.min[i] || origin[i] > aabb.max[i] {
-        return F32_MAX, -F32_MAX
-      }
-    } else {
-      t1 := (aabb.min[i] - origin[i]) * inv_dir[i]
-      t2 := (aabb.max[i] - origin[i]) * inv_dir[i]
-      t_min[i] = min(t1, t2)
-      t_max[i] = max(t1, t2)
-    }
-  }
-  t_near = max(t_min.x, t_min.y, t_min.z)
-  t_far = min(t_max.x, t_max.y, t_max.z)
-  return
-}
-
-@(private)
-ray_aabb_intersection_far :: proc "contextless" (
-  origin: [3]f32,
-  inv_dir: [3]f32,
-  aabb: Aabb,
-) -> f32 {
   t1 := (aabb.min - origin) * inv_dir
   t2 := (aabb.max - origin) * inv_dir
-  t_max := linalg.max(t1, t2)
-  return min(t_max.x, t_max.y, t_max.z)
-}
-
-@(private)
-min_vec3 :: proc "contextless" (v: [3]f32) -> f32 {
-  return min(v.x, v.y, v.z)
+  lo, hi := linalg.min(t1, t2), linalg.max(t1, t2)
+  return max(lo.x, lo.y, lo.z), min(hi.x, hi.y, hi.z)
 }
 
 // Obb is an oriented bounding box.
@@ -155,30 +119,16 @@ obb_closest_point :: proc "contextless" (obb: Obb, point: [3]f32) -> [3]f32 {
   return obb.center + qmv(obb.rotation, clamped)
 }
 
-// overlap_bounds reports whether two boxes overlap in 3D.
-overlap_bounds :: proc "contextless" (amin, amax, bmin, bmax: [3]f32) -> bool {
+// overlap_bounds reports whether boxes (amin, amax) and (bmin, bmax) overlap, touching counts;
+// float or quantized (integer) corners.
+overlap_bounds :: #force_inline proc "contextless" (amin, amax, bmin, bmax: [3]$T) -> bool {
   return(
     amin.x <= bmax.x &&
     amax.x >= bmin.x &&
     amin.y <= bmax.y &&
     amax.y >= bmin.y &&
     amin.z <= bmax.z &&
-    amax.z >= bmin.z \
-  )
-}
-
-// overlap_quantized_bounds reports whether two quantized boxes overlap.
-overlap_quantized_bounds :: proc "contextless" (
-  amin, amax, bmin, bmax: [3]i32,
-) -> bool {
-  return(
-    amin.x <= bmax.x &&
-    amax.x >= bmin.x &&
-    amin.y <= bmax.y &&
-    amax.y >= bmin.y &&
-    amin.z <= bmax.z &&
-    amax.z >= bmin.z \
-  )
+    amax.z >= bmin.z   )
 }
 
 // quantize_float scales v by factor and rounds to integer coordinates.

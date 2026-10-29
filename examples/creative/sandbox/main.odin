@@ -61,12 +61,9 @@ MODEL_FILES := [Model][]u8 {
 HERO_CLIPS := [?]string{"intro", "idle", "jump", "idle", "jump_lick", "idle"}
 HERO_CLIP_SECONDS :: 4
 
-// Sponza at twice its size: the courtyard runs x -22..20 between pillar rows at z -4.4 and 3,
-// with an aisle behind each; MID is its center line.
 SPONZA_SCALE :: 2
 MID :: -0.6
 
-// A camera tour: (eye, target) stops, TOUR_LEG seconds apart.
 TOUR := [?][2][3]f32 {
   {{-20, 3, MID}, {0, 2, MID}},
   {{-3.5, 1.8, 1.6}, {0, 2.2, MID}},
@@ -78,7 +75,6 @@ TOUR := [?][2][3]f32 {
   {{-16, 2, -7.8}, {16, 1.4, -7.8}},
 }
 TOUR_LEG :: 7.0
-// the tour stop the camera starts at (-define:TOUR_START=n)
 TOUR_START :: #config(TOUR_START, 0)
 
 TORCHES := [?][3]f32{{-15, 2.6, 2.4}, {-5, 2.6, 2.4}, {5, 2.6, 2.4}, {15, 2.6, 2.4}, {-15, 2.6, -3.8}, {-5, 2.6, -3.8}, {5, 2.6, -3.8}, {15, 2.6, -3.8}}
@@ -86,7 +82,6 @@ ORBIT_LIGHTS :: 6
 TORCH_INTENSITY :: 40
 MAX_BALLS :: 40
 
-// The Warrior sprite sheet's clips (examples/basic/sprite): idle, run, and one-shot actions.
 SpriteClip :: struct {
   first, count: u32,
 }
@@ -96,7 +91,6 @@ SPRITE_ACTIONS := [?]SpriteClip{{14, 12}, {42, 8}, {84, 7}, {76, 8}, {63, 10}}
 SPRITE_FPS :: 10
 SPRITE_HEIGHT :: 2
 SPRITE_ASPECT :: f32(69.0 / 44.0)
-// the stretch of courtyard floor the sprite runs along
 SPRITE_LANE :: [2]f32{3.4, 6.6}
 SPRITE_SPEED :: 2.4
 
@@ -106,8 +100,6 @@ CameraMode :: enum {
   FLY,
 }
 
-// A glTF instance under its own root; a nonzero path walks the root around an ellipse of those
-// radii about the courtyard's center, {0, 0, MID}.
 Actor :: struct {
   model:    Model,
   root:     world.NodeHandle,
@@ -197,7 +189,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   return .READY
 }
 
-// Spawns a model under a new root, plays `clip` and puts the hands' weapons in their slots.
 actor :: proc(app: ^App, model: Model, position: [3]f32, scale: f32 = 1, yaw: f32 = 0, clip := "", hands: [2]Maybe(Model) = {}) -> ^Actor {
   root := world.spawn(&app.scene, position)
   world.rotate(&app.scene, root, yaw)
@@ -216,13 +207,13 @@ actor :: proc(app: ^App, model: Model, position: [3]f32, scale: f32 = 1, yaw: f3
 
 mesh :: proc(app: ^App, look: render.MeshAttachment, position: [3]f32, scale: [3]f32 = 1, parent: world.NodeHandle = {}) -> world.NodeHandle {
   app.objects += 1
-  return mjolnir.spawn_mesh(&app.scene, &app.renderer, look, position, scale, parent)
+  return mjolnir.spawn(&app.scene, &app.renderer, look, position, scale, parent)
 }
 
 courtyard :: proc(app: ^App) {
   r := &app.renderer
   stone := render.material_create(r, render.make_material(base_color_factor = {0.55, 0.52, 0.48, 1}, roughness_value = 0.7))
-  pedestal := render.MeshAttachment{mesh = r.builtin_meshes[.CYLINDER], material = stone, cast_shadow = true}
+  pedestal := render.primitive(r, .CYLINDER, stone)
   mesh(app, pedestal, {0, 0.3, MID}, {1.2, 0.3, 1.2})
   app.hero = len(app.actors)
   actor(app, .WARRIOR, {0, 0.6, MID}, clip = HERO_CLIPS[0])
@@ -270,16 +261,15 @@ lights :: proc(app: ^App) {
   for p, i in TORCHES {
     mesh(app, sconce, p - {0, 0.25, 0}, {0.08, 0.2, 0.08})
     app.torches[i] = render.light_create(r, render.make_point_light({1, 0.55, 0.2}, TORCH_INTENSITY, 8, cast_shadow = false))
-    render.attach(r, world.spawn(&app.scene, p + {0, 0.2, 0}), app.torches[i])
+    mjolnir.spawn(&app.scene, r, app.torches[i], p + {0, 0.2, 0})
   }
   app.lights_root = world.spawn(&app.scene, {0, 5, MID})
   for i in 0 ..< ORBIT_LIGHTS {
     angle := f32(i) / ORBIT_LIGHTS * 2 * math.PI
     color := [3]f32{0.5 + 0.5 * math.cos(angle), 0.5 + 0.5 * math.cos(angle + 2.1), 0.5 + 0.5 * math.cos(angle + 4.2)}
-    lamp := world.spawn(&app.scene, {math.cos(angle) * 12, 0, math.sin(angle) * 2}, parent = app.lights_root)
-    render.attach(r, lamp, render.light_create(r, render.make_point_light(color, 60, 10)))
+    lamp := mjolnir.spawn(&app.scene, r, render.light_create(r, render.make_point_light(color, 60, 10)), {math.cos(angle) * 12, 0, math.sin(angle) * 2}, parent = app.lights_root)
     bulb := render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, emissive_value = 8))
-    mesh(app, {mesh = r.builtin_meshes[.SPHERE], material = bulb}, {0, 0.35, 0}, 0.12, lamp)
+    mesh(app, render.primitive(r, .SPHERE, bulb, cast_shadow = false), {0, 0.35, 0}, 0.12, lamp)
   }
 }
 
@@ -289,11 +279,11 @@ particles :: proc(app: ^App) {
   star := render.texture_create(r, #load("assets/particles/star_07.png"))
   spark := render.texture_create(r, #load("assets/particles/light_01.png"))
   fire := render.emitter_create(r, render.make_emitter(flame, 45, {0, 1.2, 0}, 0.25, {1, 0.7, 0.3, 1}, {1, 0.15, 0, 0}, 0.7, 0.08, 180, 40, -0.1))
-  for p in TORCHES do render.attach(r, world.spawn(&app.scene, p), fire)
+  for p in TORCHES do mjolnir.spawn(&app.scene, r, fire, p)
   sparks := render.emitter_create(r, render.make_emitter(spark, 60, {0, 0.4, 0}, 1.2, {0.6, 0.8, 1, 1}, {0.2, 0.4, 1, 0}, 1.4, 0.6, 90, 10, 0.05))
-  render.attach(r, world.spawn(&app.scene, {0, 1.2, 0}, parent = app.hammer), sparks)
+  mjolnir.spawn(&app.scene, r, sparks, {0, 1.2, 0}, parent = app.hammer)
   fountain := render.emitter_create(r, render.make_emitter(star, 140, {0, 5, 0}, 0.6, {1, 0.9, 0.3, 1}, {1, 0.3, 0.6, 0}, 2.6, 0.15, 160, 60, 1))
-  render.attach(r, world.spawn(&app.scene, {-8, 0.2, MID}), fountain)
+  mjolnir.spawn(&app.scene, r, fountain, {-8, 0.2, MID})
   render.attach(r, world.spawn(&app.scene, {-8, 3.5, MID}), render.force_field_create(r, render.make_force_field(3, 4, 6)))
 }
 
@@ -318,7 +308,7 @@ portal :: proc(app: ^App) {
   app.portal = render.material_create(r, render.make_material(emissive_value = 0.2))
   frame := render.primitive(r, .CUBE, .BLACK)
   mesh(app, frame, {-21.6, 3.2, MID}, {0.1, 2.3, 2.3})
-  screen := mesh(app, {mesh = r.builtin_meshes[.QUAD_XY], material = app.portal}, {-21.45, 3.2, MID}, {2.1, 2.1, 1})
+  screen := mesh(app, render.primitive(r, .QUAD_XY, app.portal, cast_shadow = false), {-21.45, 3.2, MID}, {2.1, 2.1, 1})
   world.rotate(&app.scene, screen, math.PI / 2)
   sheet := render.texture_create(r, #load("assets/Warrior_Sheet-Effect.png"))
   app.sprite = render.material_create(r, render.make_material(.SPRITE, albedo_texture = sheet, frame_columns = 6, frame_rows = 17))
@@ -327,8 +317,6 @@ portal :: proc(app: ^App) {
   sprite_play(app, SPRITE_IDLE, false, 3)
 }
 
-// Thousands of props outside Sponza's walls: from the courtyard the walls hide them and the
-// occlusion cull drops their draws; the high tour stop shows them.
 hidden_city :: proc(app: ^App) {
   shapes := [?]render.Primitive{.CUBE, .SPHERE, .CONE, .CYLINDER}
   colors := [?]render.Color{.RED, .YELLOW, .GREEN, .CYAN, .BLUE, .MAGENTA, .WHITE}
@@ -370,9 +358,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(r)
   defer render.unlock(r)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, r)
   panel(app)
-  render.stage_overlay(r, debugui.end(&app.debug))
   app.time += dt
   steer(app, dt)
   if !app.input.keyboard_captured {
@@ -381,11 +367,9 @@ update :: proc(app: ^App, dt: f32) {
   }
   animate(app, dt)
   physics.step(&app.phys, dt)
-  world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
-  world.update(&app.scene)
+  mjolnir.sync_bodies(&app.scene, &app.phys)
+  mjolnir.update(&app.scene, r, dt)
   for &a in app.actors do gltf.animate(&a.instance, &app.models[a.model], &app.scene, r, dt)
-  render.stage_transforms(r, world.changes(&app.scene))
-  render.update(r, dt)
 }
 
 animate :: proc(app: ^App, dt: f32) {
@@ -400,11 +384,11 @@ animate :: proc(app: ^App, dt: f32) {
     a.phase += a.speed * dt
     c, s := math.cos(a.phase), math.sin(a.phase)
     heading := math.sign(a.speed) * [2]f32{-s * a.path.x, c * a.path.y}
-    world.translate(&app.scene, a.root, c * a.path.x, 0, MID + s * a.path.y)
+    world.translate(&app.scene, a.root, {c * a.path.x, 0, MID + s * a.path.y})
     world.rotate(&app.scene, a.root, math.atan2(heading.x, heading.y))
   }
   for node in app.spinners do world.rotate_by(&app.scene, node, dt * 0.6)
-  world.translate(&app.scene, app.hammer, 0, 4.2 + 0.25 * math.sin(t * 1.7), MID)
+  world.translate(&app.scene, app.hammer, {0, 4.2 + 0.25 * math.sin(t * 1.7), MID})
   world.rotate(&app.scene, app.hammer, t * 1.3)
   if app.spin_lights do world.rotate_by(&app.scene, app.lights_root, dt * 0.35)
   for h, i in app.torches {
@@ -435,7 +419,7 @@ steer :: proc(app: ^App, dt: f32) {
     f = f * f * (3 - 2 * f)
     render.camera_look_at(cam, linalg.lerp(TOUR[i][0], TOUR[j][0], f), linalg.lerp(TOUR[i][1], TOUR[j][1], f))
   case .ORBIT:
-    render.orbit_drag(&app.orbit, cam, &app.input)
+    mjolnir.orbit_drag(&app.orbit, cam, &app.input)
   case .FLY:
     if app.input.keyboard_captured do return
     s := &app.input
@@ -465,7 +449,8 @@ shoot :: proc(app: ^App) {
 }
 
 panel :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
   if debugui.window(&app.debug, "Sandbox", {20, 20, 280, 330}, {}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {80, 80, -1}, 0)
     for mode in CameraMode {
@@ -504,12 +489,10 @@ draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 
-// Starts a clip: a looping one for `seconds`, a one-shot one until its last frame.
 sprite_play :: proc(app: ^App, clip: SpriteClip, once: bool, seconds: f32 = 0) {
   app.sprite_clip, app.sprite_once, app.sprite_time, app.sprite_left = clip, once, 0, seconds
 }
 
-// Idles, now and then runs along its lane, and now and then strikes an action, back to idle after.
 sprite_step :: proc(app: ^App, dt: f32) {
   app.sprite_time += dt
   app.sprite_left -= dt
@@ -532,6 +515,6 @@ sprite_step :: proc(app: ^App, dt: f32) {
   }
   clip := app.sprite_clip
   render.set_sprite_frame(&app.renderer, app.sprite, clip.first + (min(frame, clip.count - 1) if app.sprite_once else frame % clip.count))
-  world.translate(&app.scene, app.sprite_node, app.sprite_x, SPRITE_HEIGHT / 2, MID)
-  world.scale(&app.scene, app.sprite_node, app.sprite_facing * SPRITE_HEIGHT * SPRITE_ASPECT / 2, SPRITE_HEIGHT / 2, 1)
+  world.translate(&app.scene, app.sprite_node, {app.sprite_x, SPRITE_HEIGHT / 2, MID})
+  world.scale(&app.scene, app.sprite_node, {app.sprite_facing * SPRITE_HEIGHT * SPRITE_ASPECT / 2, SPRITE_HEIGHT / 2, 1})
 }

@@ -1,4 +1,4 @@
-package animation
+package geometry
 
 import "core:math"
 import "core:math/linalg"

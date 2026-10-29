@@ -8,7 +8,7 @@ import "core:slice"
 // Node is one scene-graph entry: links, local transform and visibility.
 Node :: struct {
   parent:    NodeHandle,
-  transform: Transform,
+  transform: geometry.Transform,
   name:      string,
   visible:   bool, // node's own visibility state
 }

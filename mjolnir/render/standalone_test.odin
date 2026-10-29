@@ -2,7 +2,6 @@
 #+private file
 package render
 
-import "../asset"
 import "../font"
 import "../geometry"
 import "core:math/linalg"
@@ -11,7 +10,7 @@ import "vendor:glfw"
 
 // render on its own, with a raw GLFW window and no scene graph: type-checked by `odin test`, run
 // by hand (it opens a window), so the standalone path keeps compiling.
-standalone :: proc(model_file: []u8, ttf: []u8) {
+standalone :: proc(ttf: []u8) {
   if !glfw.Init() do return
   defer glfw.Terminate()
   glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
@@ -28,14 +27,6 @@ standalone :: proc(model_file: []u8, ttf: []u8) {
   attach(r, LAMP, light_create(r, make_point_light()))
   place(r, LAMP, linalg.matrix4_translate([3]f32{0, 3, 0}))
   place(r, BALL, linalg.matrix4_translate([3]f32{2, 0, 0}))
-  model, loaded := asset.load_gltf(model_file)
-  if loaded {
-    looks := model_upload(r, &model)
-    defer model_looks_destroy(r, &looks)
-    if len(looks.meshes) > 0 && len(looks.meshes[0]) > 0 do attach(r, SlotHandle(3), looks.meshes[0][0])
-    place(r, SlotHandle(3), linalg.MATRIX4F32_IDENTITY)
-    asset.destroy(&model)
-  }
   f: font.Font
   font.init(&f, ttf)
   defer font.destroy(&f)

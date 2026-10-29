@@ -1,5 +1,6 @@
 package animation
 
+import "../geometry"
 import "core:math/linalg"
 import "core:strings"
 
@@ -140,7 +141,7 @@ clip_sample_channel :: proc(
 
 // Sample a channel into `out`, keeping components the channel does not animate.
 @(private)
-clip_sample_trs :: proc(self: ^Clip, channel: int, t: f32, out: ^TRS) {
+clip_sample_trs :: proc(self: ^Clip, channel: int, t: f32, out: ^geometry.Transform) {
   p, r, s := clip_sample_channel(self, channel, t)
   if v, ok := p.?; ok do out.position = v
   if v, ok := r.?; ok do out.rotation = v
@@ -149,7 +150,7 @@ clip_sample_trs :: proc(self: ^Clip, channel: int, t: f32, out: ^TRS) {
 
 // clip_sample writes the clip at time t into out (channel i into out[i]), keeping the components
 // a channel does not animate: fill out with the rest pose first to sample over it.
-clip_sample :: proc(self: ^Clip, t: f32, out: []TRS) {
+clip_sample :: proc(self: ^Clip, t: f32, out: []geometry.Transform) {
   for i in 0 ..< min(len(self.channels), len(out)) do clip_sample_trs(self, i, t, &out[i])
 }
 
@@ -160,7 +161,7 @@ clip_player_update :: proc(
   self: ^ClipPlayer,
   clip: ^Clip,
   delta_time: f32,
-  rest := TRS_IDENTITY,
+  rest := geometry.TRANSFORM_IDENTITY,
   channel := 0,
 ) -> matrix[4, 4]f32 {
   playback_advance(self, clip.duration, delta_time)

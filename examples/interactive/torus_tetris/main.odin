@@ -113,10 +113,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.renderer.skybox_intensity = 0
   ground := render.mesh_create(&app.renderer, geometry.make_cylinder(segments = 64, height = 0.2, radius = RADIUS * 3.0))
   dark_mat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0}))
-  floor := world.spawn(&app.scene, {0, -0.1, 0})
-  render.attach(&app.renderer, floor, render.MeshAttachment{mesh = ground, material = dark_mat, cast_shadow = false})
-  spot := world.spawn(&app.scene, {0, 10, 0})
-  render.attach(&app.renderer, spot, render.light_create(&app.renderer, render.make_spot_light({1, 1, 1}, 500, 16.0, math.PI * 0.35)))
+  mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = ground, material = dark_mat}, {0, -0.1, 0})
+  spot := mjolnir.spawn(&app.scene, &app.renderer, render.light_create(&app.renderer, render.make_spot_light({1, 1, 1}, 500, 16.0, math.PI * 0.35)), {0, 10, 0})
   world.rotate(&app.scene, spot, -math.PI * 0.45, {1, 0, 0})
   app.orbit = render.make_orbit({0, 17, 17}, {0, 10, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
@@ -243,12 +241,10 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   step_game(app, dt)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
   draw_hud(app)
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 step_game :: proc(app: ^App, dt: f32) {

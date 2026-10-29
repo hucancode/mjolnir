@@ -90,7 +90,7 @@ raycast :: proc(
           v0 := tile.verts[poly.verts[0]]
           v1 := tile.verts[poly.verts[j]]
           v2 := tile.verts[poly.verts[j + 1]]
-          if t, hit := ray_triangle(origin, dir, v0, v1, v2); hit && t < best {
+          if t, hit := geometry.ray_triangle_intersection(origin, dir, v0, v1, v2); hit && t < best {
             best = t
             ok = true
           }
@@ -108,7 +108,7 @@ raycast :: proc(
             v[j] = tile.detail_verts[pd.vert_base + u32(tri[j] - poly.vert_count)]
           }
         }
-        if t, hit := ray_triangle(origin, dir, v[0], v[1], v[2]); hit && t < best {
+        if t, hit := geometry.ray_triangle_intersection(origin, dir, v[0], v[1], v[2]); hit && t < best {
           best = t
           ok = true
         }
@@ -117,24 +117,6 @@ raycast :: proc(
   }
   if !ok do return {}, false
   return origin + dir * best, true
-}
-
-@(private = "file")
-ray_triangle :: proc "contextless" (origin, dir, v0, v1, v2: [3]f32) -> (t: f32, hit: bool) {
-  e1 := v1 - v0
-  e2 := v2 - v0
-  h := linalg.cross(dir, e2)
-  a := linalg.dot(e1, h)
-  if abs(a) < 1e-8 do return 0, false
-  f := 1 / a
-  s := origin - v0
-  u := f * linalg.dot(s, h)
-  if u < 0 || u > 1 do return 0, false
-  q := linalg.cross(s, e1)
-  v := f * linalg.dot(dir, q)
-  if v < 0 || u + v > 1 do return 0, false
-  t = f * linalg.dot(e2, q)
-  return t, t > 0
 }
 
 // find_path returns straight-line waypoints from start to end, the cheapest way filter allows;

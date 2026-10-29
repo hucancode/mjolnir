@@ -2,7 +2,7 @@
 package main
 
 import "mjolnir"
-import "mjolnir/animation"
+import "mjolnir/geometry"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
@@ -22,7 +22,7 @@ App :: struct {
   orbit:    render.Orbit,
   time:     f32,
   cubes:    [CUBE_COUNT]world.NodeHandle,
-  spline:   animation.Spline([3]f32),
+  spline:   geometry.Spline([3]f32),
 }
 
 main :: proc() {
@@ -43,7 +43,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  animation.destroy(&app.spline)
+  geometry.destroy(&app.spline)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
@@ -64,13 +64,13 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     points[i] = {scale * math.sin(t), 0, scale * math.sin(2.0 * t) * 0.5}
     times[i] = f32(i) * ANIMATION_DURATION / f32(CONTROL_POINTS - 1)
   }
-  if !animation.spline_init(&app.spline, points[:], times[:]) do log.error("Spline validation failed!")
+  if !geometry.spline_init(&app.spline, points[:], times[:]) do log.error("Spline validation failed!")
 
   colors := [?]render.Color{.RED, .GREEN, .BLUE, .YELLOW, .CYAN, .MAGENTA, .WHITE, .GRAY, .BLACK}
   for &cube, i in app.cubes {
-    cube = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, colors[i % len(colors)]), scale = 0.3)
+    cube = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, colors[i % len(colors)]), scale = 0.3)
   }
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -2, 0}, scale = 20.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -2, 0}, scale = 20.0)
   return .READY
 }
 
@@ -79,13 +79,13 @@ update :: proc(app: ^App, dt: f32) {
   defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
-  total_length := animation.spline_arc_length(app.spline)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  total_length := geometry.spline_arc_length(app.spline)
   for cube, i in app.cubes {
     offset := f32(i) / f32(CUBE_COUNT) * total_length
     distance := math.mod_f32(app.time * (total_length / ANIMATION_DURATION) + offset, total_length)
     eased := ease.ease(.Quadratic_In_Out, distance / total_length) * total_length
-    world.translate(&app.scene, cube, animation.spline_sample_uniform(app.spline, eased))
+    world.translate(&app.scene, cube, geometry.spline_sample_uniform(app.spline, eased))
   }
   draw_spline(app)
   mjolnir.update(&app.scene, &app.renderer, dt)
@@ -97,10 +97,10 @@ draw :: proc(app: ^App) -> bool {
 
 draw_spline :: proc(app: ^App) {
   CURVE_SEGMENTS :: 200
-  duration := animation.spline_duration(app.spline)
-  prev := animation.spline_sample(app.spline, 0)
+  duration := geometry.spline_duration(app.spline)
+  prev := geometry.spline_sample(app.spline, 0)
   for i in 1 ..= CURVE_SEGMENTS {
-    next := animation.spline_sample(app.spline, f32(i) / CURVE_SEGMENTS * duration)
+    next := geometry.spline_sample(app.spline, f32(i) / CURVE_SEGMENTS * duration)
     render.debug_segment(&app.renderer, prev, next, render.COLOR_RGB[.WHITE])
     prev = next
   }

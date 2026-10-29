@@ -2,16 +2,6 @@ package rhi
 
 // The vocabulary of textures and the few budgets a device sizes itself by.
 
-MAX_ACTIVE_CAMERAS :: 128
-
-// mips of the prefiltered environment cube
-PREFILTER_MIPS :: 5
-// the IBL precompute's storage targets: the irradiance cube, then each prefilter mip
-PRECOMPUTE_TARGETS :: 1 + PREFILTER_MIPS
-
-// mips a depth pyramid may have (shader/depth_reduce.slang MAX_MIPS)
-MAX_DEPTH_MIPS :: 16
-
 MAX_TEXTURES :: 1000
 
 // SamplerType names the samplers every device makes; shaders index them with these values as

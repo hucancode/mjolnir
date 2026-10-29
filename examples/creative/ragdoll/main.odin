@@ -102,9 +102,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), {0, -0.05, 0}, scale = {40, 0.1, 40})
-  light := world.spawn(&app.scene, {2, 6, 4})
-  render.attach(&app.renderer, light, render.light_create(&app.renderer, render.make_point_light(intensity = 200, radius = 25)))
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), {0, -0.05, 0}, scale = {40, 0.1, 40})
+  mjolnir.spawn(&app.scene, &app.renderer, render.light_create(&app.renderer, render.make_point_light(intensity = 200, radius = 25)), {2, 6, 4})
   physics.body_create(&app.phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {20, 0.5, 20}})
 
   app.model = gltf.model_create(&app.renderer, #load("assets/CesiumMan.glb"))
@@ -152,13 +151,11 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   if app.dirty do respawn(app)
   if app.mode == .EDIT do pick_part(app)
   else do drag_part(app)
-  if !app.grab.active do render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, {.RIGHT})
+  if !app.grab.active do mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, {.RIGHT})
 
   if app.mode == .SIM do physics.step(&app.phys, dt)
   rig := app.inst.skinned[0].rig
@@ -239,8 +236,9 @@ draw_blocks :: proc(app: ^App) {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Ragdoll", {20, 20, 310, 420}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Ragdoll", {20, 20, 310, 420}) {
     mu.layout_row(ctx, {140, -1}, 0)
     if .SUBMIT in mu.button(ctx, "Edit" if app.mode == .SIM else "[Edit]") do set_mode(app, .EDIT)
     if .SUBMIT in mu.button(ctx, "[Simulate]" if app.mode == .SIM else "Simulate") do set_mode(app, .SIM)

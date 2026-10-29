@@ -113,8 +113,10 @@ GpuPush :: struct {
 
 @(private)
 GpuWork :: struct {
+  // zeroes `buffer` instead of dispatching
+  clear:  bool,
   shader: ComputeShader,
-  // a dispatch_indirect's arguments, or the buffer a clear zeroes (shader 0)
+  // a clear's buffer, or a dispatch_indirect's arguments
   buffer: BufferHandle,
   offset: int,
   groups: [3]u32,
@@ -240,7 +242,7 @@ draw_shader_destroy :: proc(self: ^Renderer, shader: DrawShader) {
 // stage_clear queues zeroing the buffer, ordered with the dispatches around it.
 stage_clear :: proc(self: ^Renderer, buffer: BufferHandle) {
   guard(self)
-  if _, live := gpu_buffer(self, buffer); live do gpu_work_add(self, {buffer = buffer})
+  if _, live := gpu_buffer(self, buffer); live do gpu_work_add(self, {clear = true, buffer = buffer})
 }
 
 // stage_dispatch queues the shader over `groups` workgroups with `params` (the shaders'
@@ -372,7 +374,7 @@ gpu_push :: proc(params: $T) -> (push: GpuPush) {
 
 @(private = "file")
 gpu_work_add :: proc(self: ^Renderer, work: GpuWork) {
-  if work.shader != 0 && !containers.slots_live(&self.slots[.GPU_SHADERS], u32(work.shader)) do return
+  if !work.clear && !containers.slots_live(&self.slots[.GPU_SHADERS], u32(work.shader)) do return
   if len(self.gpu_work) >= MAX_GPU_WORK {
     log.warnf("More than %d dispatches staged before a frame; dropping", MAX_GPU_WORK)
     return
@@ -414,7 +416,7 @@ gpu_work_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   in_compute := false
   for &work, i in self.gpu_work {
     if i > 0 do barrier(self, cmd, .GPU_WORK)
-    if work.shader == 0 {
+    if work.clear {
       if in_compute do dev.cmd_end_compute(&self.gpu, cmd)
       in_compute = false
       if b, live := gpu_buffer(self, work.buffer); live && b.size > 0 do dev.cmd_fill_buffer(&self.gpu, cmd, b.buffer, 0, (b.size + 3) &~ 3)

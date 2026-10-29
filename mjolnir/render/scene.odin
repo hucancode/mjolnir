@@ -53,6 +53,7 @@ Pool :: enum {
   GPU_BUFFERS,
   GPU_SHADERS,
   POST_SHADERS,
+  MATERIAL_SHADERS,
 }
 
 // Each pool's capacity, first index and reuse grace; `kept` pools keep what was made before
@@ -84,6 +85,8 @@ POOLS := [Pool]struct {
   .GPU_BUFFERS            = {MAX_GPU_BUFFERS, 1, 0, false, {}},
   .GPU_SHADERS            = {MAX_GPU_SHADERS, 1, 0, false, {}},
   .POST_SHADERS           = {MAX_POST_SHADERS, 1, 0, false, {}},
+  // custom_material_pipelines[shader - 1]
+  .MATERIAL_SHADERS       = {MAX_MATERIAL_SHADERS + 1, 1, 0, false, {}},
 }
 
 // Renderer is the whole renderer; its fields are the settings an application edits.
@@ -139,7 +142,8 @@ Renderer_State :: struct {
   bone_first:             [MAX_BONE_PALETTES]u32,
   // the skinned vertex ranges of skinned slots (pass_skin.odin)
   skin_ranges:            containers.Ranges,
-  // simulated seconds; an emitter emits floor(rate * time) particles in total
+  // `time` as of the last submitted frame: particles are emitted and simulated up to it, an
+  // emitter having emitted floor(rate * particle_time) in total
   particle_time:          f64,
   // emit's queue, and the bursts the last flush placed (row != 0)
   bursts:                 [dynamic]Burst,
@@ -148,7 +152,7 @@ Renderer_State :: struct {
   // segments each ring has taken in total (debug_line.odin)
   debug_filled:           [2]u64,
   // seconds render.update has advanced; shaders read it as View.time and PostPush.time
-  time:                   f32,
+  time:                   f64,
   debug_mutex:            sync.Mutex,
   shadow_casters:         [MAX_SHADOW_MAPS]Caster,
   // the last compute submission, which the next frame's graphics waits for
@@ -169,7 +173,8 @@ Renderer_State :: struct {
   scene_layouts:          [ScenePass]rhi.BindLayout,
   scene_groups:           [ScenePass][FRAMES_IN_FLIGHT]rhi.BindGroup,
   texture_layouts:        [TextureLayout]rhi.BindLayout,
-  texture_groups:         map[TextureGroupKey]rhi.BindGroup,
+  // WebGPU's bind groups past the scene set, made on first use (cached_group)
+  bind_groups:            map[GroupKey]rhi.BindGroup,
   // culling (pass_cull.odin)
   cull_pipeline:          rhi.Pipeline,
   // batched: writes the draw of each batch
@@ -179,8 +184,6 @@ Renderer_State :: struct {
   // batched: group 3 of the cull and of the pyramid build
   cull_layout:            rhi.BindLayout,
   reduce_layout:          rhi.BindLayout,
-  cull_groups:            map[CullKey]rhi.BindGroup,
-  reduce_groups:          map[ReduceKey]rhi.BindGroup,
   draw_lists:             [MAX_DRAW_LIST_SLOTS]GpuDrawList,
   pyramid_counters:       rhi.Buffer,
   // the main camera's visible opaque draws, copied out per frame in flight
@@ -199,12 +202,11 @@ Renderer_State :: struct {
   shadow_pipeline:        rhi.Pipeline,
   material_pipelines:     [MaterialPass][len(MaterialType)]rhi.Pipeline,
   lighting_pipeline:      rhi.Pipeline,
-  // WebGPU: group 3 of the lighting dispatch, the image it writes, a group per image
+  // WebGPU: group 3 of the lighting dispatch, the image it writes
   lighting_output_layout: rhi.BindLayout,
-  lighting_output_groups: map[TextureHandle]rhi.BindGroup,
-  // [is_last][tag]: every pass writes an HDR ring image but the last, which writes the backbuffer
-  post_pipelines:         [2][POST_EFFECT_COUNT]rhi.Pipeline,
-  // [PostShader][is_last]
+  // [tag][is_last] and [PostShader][is_last]: every pass writes an HDR ring image but the last,
+  // which writes the backbuffer
+  post_pipelines:         [POST_EFFECT_COUNT][2]rhi.Pipeline,
   custom_post_pipelines:  [MAX_POST_SHADERS][2]rhi.Pipeline,
   // [MaterialShader - 1], 0 where free
   custom_material_pipelines: [MAX_MATERIAL_SHADERS]rhi.Pipeline,
@@ -249,7 +251,7 @@ Renderer_State :: struct {
 // may be called. Main thread.
 init :: proc(self: ^Renderer, window: WindowHandle) -> bool {
   for stream, s in MESH_STREAMS do containers.slab_init(&self.mesh_slabs[s], stream.slab)
-  dev.init(&self.gpu, window) or_return
+  dev.init(&self.gpu, window, BINDLESS_SIZES) or_return
   for t, i in TABLES {
     self.tables[i] = make([]u8, t.stride * t.capacity)
     words := (t.stride * t.capacity + TABLE_REGION_BYTES * 64 - 1) / (TABLE_REGION_BYTES * 64)
@@ -297,7 +299,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
   post_process_create_images(self) or_return
   for &inbox in self.debug_lines do inbox = make([dynamic]DebugLineSegment, 0, 1024)
   extent := dev.extent(&self.gpu)
-  cam, created := camera_create(self, extent.x, extent.y, position = {3, 4, 3}, far = 1000.0)
+  cam, created := camera_create(self, extent.x, extent.y, position = {3, 4, 3})
   if !created do return false
   self.main_camera = cam
   self.sun = DEFAULT_SUN
@@ -330,7 +332,7 @@ teardown :: proc(self: ^Renderer) {
   guard(self)
   // their render targets and draw lists retire, and go with the flushes below
   c := self.slots[.CAMERAS].mark
-  for i in containers.slots_next(&self.slots[.CAMERAS], &c) do camera_destroy(self, CameraHandle(i))
+  for i in containers.slots_next(&self.slots[.CAMERAS], &c) do free_camera(self, CameraHandle(i))
   // queued uploads may be init's: they land before anything is freed
   dev.wait_idle(&self.gpu)
   for r in containers.slots_flush(&self.slots[.TARGETS]) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
@@ -379,10 +381,7 @@ environment_map_load :: proc(self: ^Renderer, data: []u8) -> bool {
 // shutdown destroys everything, whatever map is up.
 shutdown :: proc(self: ^Renderer) {
   dump_finish(self)
-  delete(self.cull_groups)
-  delete(self.reduce_groups)
-  delete(self.lighting_output_groups)
-  delete(self.texture_groups)
+  delete(self.bind_groups)
   dev.shutdown(&self.gpu)
   for table in self.tables do delete(table)
   for bits in self.dirty do delete(bits)
@@ -497,15 +496,12 @@ tick_resource_pools :: proc(self: ^Renderer) {
 // tick, after the tick's stage_* calls; the next frame emits and simulates everything
 // accumulated since the previous one.
 update :: proc(self: ^Renderer, delta_time: f32) {
-  sync.mutex_lock(&self.debug_mutex)
-  self.time += delta_time
-  sync.mutex_unlock(&self.debug_mutex)
   guard(self)
+  sync.mutex_lock(&self.debug_mutex)
+  self.time += f64(max(delta_time, 0))
+  sync.mutex_unlock(&self.debug_mutex)
   self.ui_stale = true
   self.gpu_draws_stale = true
-  if delta_time <= 0 do return
-  // flush_particles emits for it; particles_simulate consumes it
-  self.particle_params.delta_time += delta_time
 }
 
 @(private)
@@ -515,20 +511,52 @@ NodeFlag :: enum u32 {
   // attachment_data_index holds a bone range; only set while the mesh is skinned, so the
   // shaders skin by this flag alone
   SKINNED,
-  // a light, emitter or force field is attached: a placement row names the slot
-  PLACED,
+  // a light, emitter or force field is attached: attachment_data_index is its placement row
+  LIGHT,
+  EMITTER,
+  FORCE_FIELD,
 }
 
 @(private)
 NodeFlagSet :: bit_set[NodeFlag;u32]
+
+// What a slot may have placed at it instead of a mesh, each a placement table naming the slot.
+@(private)
+PlacedKind :: enum {
+  LIGHT,
+  EMITTER,
+  FORCE_FIELD,
+}
+
+// Per kind: the node flag saying it is placed, its placement pool and its name in warnings.
+@(private)
+PLACED := [PlacedKind]struct {
+  flag: NodeFlag,
+  pool: Pool,
+  name: string,
+} {
+  .LIGHT       = {.LIGHT, .LIGHT_PLACEMENTS, "light"},
+  .EMITTER     = {.EMITTER, .EMITTER_PLACEMENTS, "emitter"},
+  .FORCE_FIELD = {.FORCE_FIELD, .FORCE_FIELD_PLACEMENTS, "force field"},
+}
+
+// Every placement row starts with its resource's handle, then its slot.
+#assert(offset_of(LightPlacement, node) == 4 && offset_of(EmitterPlacement, node) == 4 && offset_of(ForceFieldPlacement, node) == 4)
+
+@(private = "file")
+placed_row :: proc(self: ^Renderer, kind: PlacedKind, row: u32) -> ^[2]u32 {
+  t := POOLS[PLACED[kind].pool].table
+  return (^[2]u32)(&self.tables[t][int(row) * TABLES[t].stride])
+}
 
 // the shadow pass draws these; the material type must also be in GBUFFER_TYPES
 @(private)
 SHADOW_CASTER_FLAGS :: NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
 
 // The zero record is an empty slot: mesh and material 0 are none. When .SKINNED is set,
-// attachment_data_index is the first bone of its palette `bones` in the bone table and
-// skin_vertex_base the first of its skinned vertices (pass_skin.odin).
+// attachment_data_index is the first bone of its palette in the bone table and
+// skin_vertex_base the first of its skinned vertices (pass_skin.odin); when .LIGHT, .EMITTER or
+// .FORCE_FIELD is, attachment_data_index is the placement row.
 @(private)
 Node :: struct #packed {
   world_matrix:          matrix[4, 4]f32,
@@ -537,9 +565,7 @@ Node :: struct #packed {
   attachment_data_index: u32,
   flags:                 NodeFlagSet,
   skin_vertex_base:      u32,
-  // the palette attachment_data_index is the first bone of
-  bones:                 BonesHandle,
-  _:                     [2]u32,
+  _:                     [3]u32,
 }
 #assert(size_of(Node) == 96)
 
@@ -632,40 +658,19 @@ release_slot :: proc(self: ^Renderer, slot: u32) {
   mark_dirty(self, .NODES, int(slot))
 }
 
-// A placement table holds at most one row per slot. The live row of the pool's table placed at
-// `slot`.
-@(private = "file")
-placed_at :: proc(self: ^Renderer, pool: Pool, $T: typeid, slot: u32) -> (index: u32, ok: bool) {
-  rows := write_table(self, POOLS[pool].table, T)
-  c: u32
-  for i in containers.slots_next(&self.slots[pool], &c) {
-    // no attachment owns a burst's row
-    when T == EmitterPlacement do if rows[i].burst != 0 do continue
-    if rows[i].node == slot do return i, true
-  }
-  return
-}
-
-// Frees the slot's placement row of `pool`, if any.
-@(private = "file")
-unplace :: proc(self: ^Renderer, pool: Pool, $T: typeid, slot: u32) {
-  i := placed_at(self, pool, T, slot) or_else 0
-  if i == 0 do return
-  containers.slots_free(&self.slots[pool], i)
-  clear_entry(self, POOLS[pool].table, i)
-}
-
-// Drops the slot's light, emitter and force field. Caller holds the render mutex.
+// Drops the slot's light, emitter or force field, freeing its placement row. Caller holds the
+// render mutex.
 @(private = "file")
 unbind :: proc(self: ^Renderer, slot: u32) {
   if slot >= self.node_count do return
   node := &write_table(self, .NODES, Node)[slot]
-  if .PLACED not_in node.flags do return
-  node.flags -= {.PLACED}
-  mark_dirty(self, .NODES, int(slot))
-  unplace(self, .LIGHT_PLACEMENTS, LightPlacement, slot)
-  unplace(self, .EMITTER_PLACEMENTS, EmitterPlacement, slot)
-  unplace(self, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement, slot)
+  for p in PLACED do if p.flag in node.flags {
+    containers.slots_free(&self.slots[p.pool], node.attachment_data_index)
+    clear_entry(self, POOLS[p.pool].table, node.attachment_data_index)
+    node.flags -= {p.flag}
+    node.attachment_data_index = 0
+    mark_dirty(self, .NODES, int(slot))
+  }
 }
 
 // Stores `value` in a free row of the pool's table; the row is the resource's handle (or a
@@ -712,7 +717,7 @@ release_bones :: proc(self: ^Renderer, slot: u32) {
   if .SKINNED not_in node.flags do return
   skin_own(self, node.skin_vertex_base, 0)
   containers.ranges_free(&self.skin_ranges, node.skin_vertex_base)
-  node.attachment_data_index, node.skin_vertex_base, node.bones = 0, 0, 0
+  node.attachment_data_index, node.skin_vertex_base = 0, 0
   node.flags -= {.SKINNED}
   mark_dirty(self, .NODES, int(slot))
 }
@@ -725,9 +730,10 @@ MAX_BONE_PALETTES :: 4096
 
 // bones_create makes a palette of `count` bones (one per animated character, shared by every
 // skinned mesh of it, MeshAttachment.bones), at rest until stage_bones; it lives until
-// bones_destroy or teardown. false past MAX_BONES bones in all.
+// bones_destroy or teardown. false for no bones or past MAX_BONES bones in all.
 bones_create :: proc(self: ^Renderer, count: u32) -> (handle: BonesHandle, ok: bool) #optional_ok {
   guard(self)
+  if count == 0 do return 0, false
   i := containers.slots_alloc(&self.slots[.BONES]) or_return
   first, has_room := containers.ranges_alloc(&self.bone_ranges, count)
   if !has_room {
@@ -757,8 +763,10 @@ stage_bones :: proc(self: ^Renderer, bones: BonesHandle, matrices: []matrix[4, 4
 bones_destroy :: proc(self: ^Renderer, bones: BonesHandle) {
   guard(self)
   if !containers.slots_free(&self.slots[.BONES], u32(bones)) do return
+  // a live palette is the only one starting at its first bone
+  first := self.bone_first[bones]
   nodes := write_table(self, .NODES, Node)
-  for i in 0 ..< self.node_count do if nodes[i].bones == bones do release_bones(self, i)
+  for i in 0 ..< self.node_count do if .SKINNED in nodes[i].flags && nodes[i].attachment_data_index == first do release_bones(self, i)
   containers.ranges_free(&self.bone_ranges, self.bone_first[bones])
 }
 
@@ -774,32 +782,37 @@ attach :: proc(self: ^Renderer, slot: $H, attachment: Attachment) {
   batch_leave(self, slot)
   node.mesh_id, node.material_id = 0, 0
   node.flags -= {.CASTS_SHADOW}
-  bones: BonesHandle
   switch a in attachment {
   case MeshAttachment:
     node.mesh_id, node.material_id = u32(a.mesh), u32(a.material)
     batch_join(self, slot, node.mesh_id, node.material_id)
     if a.cast_shadow do node.flags += {.CASTS_SHADOW}
-    bones = a.bones
+    skin(self, slot, a.bones)
   case LightHandle:
-    place_row(self, node, .LIGHT_PLACEMENTS, LightPlacement{light = a, node = slot}, "light")
+    place_row(self, slot, .LIGHT, u32(a))
   case EmitterHandle:
-    place_row(self, node, .EMITTER_PLACEMENTS, EmitterPlacement{emitter = a, node = slot}, "emitter")
+    place_row(self, slot, .EMITTER, u32(a))
   case ForceFieldHandle:
-    place_row(self, node, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement{force_field = a, node = slot}, "force field")
+    place_row(self, slot, .FORCE_FIELD, u32(a))
   }
-  skin(self, slot, bones)
   mark_dirty(self, .NODES, int(slot))
 }
 
-// Adds a placement row naming the slot.
+// Adds a placement row naming the slot and links the slot to it.
 @(private = "file")
-place_row :: proc(self: ^Renderer, node: ^Node, pool: Pool, row: $T, what: string) {
-  if _, placed := resource_create(self, pool, row); placed {
-    node.flags += {.PLACED}
-  } else {
-    log.warnf("No room for more than %d placed %ss; the %s is dropped", POOLS[pool].capacity - 1, what, what)
+place_row :: proc(self: ^Renderer, slot: u32, kind: PlacedKind, resource: u32) {
+  release_bones(self, slot)
+  p := PLACED[kind]
+  row, ok := containers.slots_alloc(&self.slots[p.pool])
+  if !ok {
+    log.warnf("No room for more than %d placed %ss; the %s is dropped", POOLS[p.pool].capacity - 1, p.name, p.name)
+    return
   }
+  clear_entry(self, POOLS[p.pool].table, row)
+  placed_row(self, kind, row)^ = {resource, slot}
+  node := &write_table(self, .NODES, Node)[slot]
+  node.flags += {p.flag}
+  node.attachment_data_index = row
 }
 
 // Gives a slot drawing a skinned mesh with a live palette its skinned vertices (keeping a range
@@ -823,7 +836,7 @@ skin :: proc(self: ^Renderer, slot: u32, bones: BonesHandle) {
     node.flags += {.SKINNED}
     skin_own(self, base, slot + 1)
   }
-  node.bones, node.attachment_data_index = bones, self.bone_first[bones]
+  node.attachment_data_index = self.bone_first[bones]
 }
 
 // attachment returns the attachment of type T at slot, e.g. attachment(r, slot, LightHandle).
@@ -839,22 +852,21 @@ attachment :: proc(
 ) #optional_ok {
   slot := slot_index(slot)
   guard(self)
+  if slot >= self.node_count do return
+  node := write_table(self, .NODES, Node)[slot]
   when T == MeshAttachment {
-    if slot >= self.node_count do return
-    node := write_table(self, .NODES, Node)[slot]
     if node.mesh_id == 0 do return
-    return {MeshHandle(node.mesh_id), MaterialHandle(node.material_id), .CASTS_SHADOW in node.flags, node.bones}, true
-  } else when T == LightHandle {
-    i := placed_at(self, .LIGHT_PLACEMENTS, LightPlacement, slot) or_return
-    return write_table(self, .LIGHT_PLACEMENTS, LightPlacement)[i].light, true
-  } else when T == EmitterHandle {
-    i := placed_at(self, .EMITTER_PLACEMENTS, EmitterPlacement, slot) or_return
-    return write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[i].emitter, true
-  } else when T == ForceFieldHandle {
-    i := placed_at(self, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement, slot) or_return
-    return write_table(self, .FORCE_FIELD_PLACEMENTS, ForceFieldPlacement)[i].force_field, true
+    att = {mesh = MeshHandle(node.mesh_id), material = MaterialHandle(node.material_id), cast_shadow = .CASTS_SHADOW in node.flags}
+    if .SKINNED not_in node.flags do return att, true
+    c: u32
+    for b in containers.slots_next(&self.slots[.BONES], &c) do if self.bone_first[b] == node.attachment_data_index do att.bones = BonesHandle(b)
+    return att, true
+  } else {
+    kind: PlacedKind = .LIGHT when T == LightHandle else .EMITTER when T == EmitterHandle else .FORCE_FIELD
+    #assert(T == LightHandle || T == EmitterHandle || T == ForceFieldHandle)
+    if PLACED[kind].flag not_in node.flags do return
+    return T(placed_row(self, kind, node.attachment_data_index)[0]), true
   }
-  return
 }
 
 // SPOT_LIGHT_INNER_RATIO is the default ratio of a spot light's full-intensity cone to its falloff cone.
@@ -1166,7 +1178,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
       layer           = v - SHADOW_VIEW_BASE,
       draw_list       = SHADOW_DRAW_SLOT_BASE + frame_index,
       list_capacity   = SHADOW_LIST_CAPACITY,
-      time            = self.time,
+      time            = f32(self.time),
     }
   }
   if sun_layers > 0 {
@@ -1237,9 +1249,8 @@ flush_particles :: proc(self: ^Renderer) {
   placements := write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[:self.slots[.EMITTER_PLACEMENTS].high_water]
   p := &self.particle_params
   p.emit_cursor = (p.emit_cursor + p.emit_total) % MAX_PARTICLES
-  t0 := self.particle_time
-  t1 := t0 + f64(p.delta_time)
-  self.particle_time = t1
+  t0, t1 := self.particle_time, self.time
+  p.delta_time = f32(t1 - t0)
   total: u32
   for &pl in placements {
     // a free row reads emitter 0, whose rate is 0
@@ -1290,7 +1301,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       // frame N builds pyramid N from N-1's depth and culls into N+1's lists
       draw_list           = camera_next_slot(i, frame_index),
       list_capacity       = CAMERA_LIST_CAPACITY,
-      time                = self.time,
+      time                = f32(self.time),
     }
     v.sun_radiance, v.sun_direction = sun_light(self.sun)
     for a in CameraImage do v.images[a] = u32(targets.images[a][frame_index])
@@ -1327,8 +1338,8 @@ frame :: proc(self: ^Renderer, framebuffer_size: [2]u32, dpi_scale: f32) -> bool
   self.ui_stale = true
   if submitted {
     gpu_frame_done(self)
-    // simulated: the next frame's time accumulates from zero
-    self.particle_params.delta_time = 0
+    // emitted and simulated up to now
+    self.particle_time = self.time
     // the backend has every write so far
     for bits in self.dirty do slice.zero(bits)
   }
@@ -1357,5 +1368,4 @@ destroy :: proc {
   buffer_destroy,
   compute_shader_destroy,
   draw_shader_destroy,
-  model_looks_destroy,
 }

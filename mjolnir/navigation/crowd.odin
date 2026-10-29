@@ -129,8 +129,6 @@ Agent_Internal :: struct {
 	target_replan_time: f32,
 	// yaw of the last velocity fast enough to face (agent_poses)
 	heading:            f32,
-	// bumped by agent_destroy; the slot's handles carry generation + 1, so the zero handle is none
-	generation:         u32,
 }
 
 // Crowd simulates many agents navigating one shared NavMesh.
@@ -140,7 +138,8 @@ Crowd :: struct {
 
 @(private)
 Crowd_State :: struct {
-	max_agents:                int,
+	// which agent indices are live; index 0 is never handed out
+	slots:                     containers.Slots,
 	// indexed by agent index; crowd_update moves them (agent reads a copy)
 	agents:                    []Agent,
 	// every agent's corridor path, DEFAULT_MAX_PATH each
@@ -150,7 +149,6 @@ Crowd_State :: struct {
 	obstacle_query:            Obstacle_Avoidance_Query,
 	grid:                      Proximity_Grid,
 	path_result:               []detour.Poly_Ref,
-	max_path_result:           int,
 	agent_placement_half_extents: [3]f32,
 	// the mesh the crowd walks, which outlives it: its filters
 	navmesh:                   ^NavMesh,
@@ -170,7 +168,7 @@ crowd_init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh
 	self^ = {}
 	self.navmesh = navmesh
 
-	self.max_agents = max_agents
+	containers.slots_init(&self.slots, u32(max_agents) + 1)
 	self.max_agent_radius = max_agent_radius
 	self.agent_placement_half_extents = {max_agent_radius*2.0, max_agent_radius*1.5, max_agent_radius*2.0}
 
@@ -181,15 +179,14 @@ crowd_init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh
 		return false
 	}
 
-	self.agents = make([]Agent, max_agents)
-	self.corridor_paths = make([]detour.Poly_Ref, max_agents * detour.DEFAULT_MAX_PATH)
+	self.agents = make([]Agent, max_agents + 1)
+	self.corridor_paths = make([]detour.Poly_Ref, len(self.agents) * detour.DEFAULT_MAX_PATH)
 	for &ag, i in self.agents {
 		path_corridor_init(&ag.corridor, self.corridor_paths[i * detour.DEFAULT_MAX_PATH:][:detour.DEFAULT_MAX_PATH])
 		local_boundary_init(&ag.boundary)
 	}
 
-	self.max_path_result = 256
-	self.path_result = make([]detour.Poly_Ref, self.max_path_result)
+	self.path_result = make([]detour.Poly_Ref, 256)
 
 	params := Obstacle_Avoidance_Params{
 		vel_bias = 0.4,
@@ -218,6 +215,7 @@ crowd_init :: proc(self: ^Crowd, max_agents: int, max_agent_radius: f32, navmesh
 
 // crowd_destroy frees all agent state.
 crowd_destroy :: proc(self: ^Crowd) {
+	containers.slots_destroy(&self.slots)
 	delete(self.agents)
 	delete(self.corridor_paths)
 	delete(self.path_result)
@@ -232,24 +230,18 @@ crowd_destroy :: proc(self: ^Crowd) {
 // agent_create places a new agent at the mesh point nearest pos and returns its handle; false when
 // the crowd is full or pos is off the mesh. `user` is its caller link (agent_poses).
 agent_create :: proc(self: ^Crowd, pos: [3]f32, params := DEFAULT_AGENT_PARAMS, user: Handle = {}) -> (agent: AgentHandle, ok: bool) #optional_ok {
-	idx := -1
-	for i in 0..<self.max_agents {
-		if self.agents[i].state == .INVALID {
-			idx = i
-			break
-		}
-	}
-
-	if idx == -1 do return {}, false
-
+	idx := containers.slots_alloc(&self.slots) or_return
 	ag := &self.agents[idx]
 	ag.params = params
 	ag.user = user
 	ag.heading = 0
 	ag.topology_opt_time = 0
-	if !snap(self, ag, pos) do return {}, false
+	if !snap(self, ag, pos) {
+		containers.slots_free(&self.slots, idx)
+		return {}, false
+	}
 	ag.state = .WALKING
-	return {u32(idx), ag.generation + 1}, true
+	return AgentHandle(containers.slots_handle(&self.slots, idx)), true
 }
 
 // Puts the agent at the mesh point nearest pos, at rest and without a goal; false when pos is
@@ -296,10 +288,7 @@ agent_filter :: #force_inline proc(self: ^Crowd, ag: ^Agent) -> ^detour.Query_Fi
 // The live agent behind handle; false when the handle is stale.
 @(private)
 agent_index :: proc(self: ^Crowd, handle: AgentHandle) -> (idx: int, ok: bool) {
-	idx = int(handle.index)
-	if idx >= self.max_agents do return
-	ag := &self.agents[idx]
-	return idx, ag.state != .INVALID && handle.generation == ag.generation + 1
+	return int(handle.index), containers.slots_valid(&self.slots, handle)
 }
 
 // agent_destroy deactivates the agent, freeing its slot; a stale handle is ignored.
@@ -307,12 +296,12 @@ agent_destroy :: proc(self: ^Crowd, handle: AgentHandle) {
 	idx, ok := agent_index(self, handle)
 	if !ok do return
 	self.agents[idx].state = .INVALID
-	self.agents[idx].generation += 1
+	containers.slots_free(&self.slots, u32(idx))
 }
 
 @(private)
 request_move_target :: proc(self: ^Crowd, idx: int, ref: detour.Poly_Ref, pos: [3]f32) -> bool {
-	if idx < 0 || idx >= self.max_agents do return false
+	if idx < 0 || idx >= len(self.agents) do return false
 	if ref == detour.INVALID_POLY_REF do return false
 
 	ag := &self.agents[idx]
@@ -351,9 +340,9 @@ stop :: proc(self: ^Crowd, handle: AgentHandle) {
 crowd_update :: proc(self: ^Crowd, dt: f32) {
 	self.velocity_sample_count = 0
 
-	active_agents := make([]^Agent, self.max_agents, context.temp_allocator)
+	active_agents := make([]^Agent, len(self.agents), context.temp_allocator)
 	nactive := 0
-	for i in 0..<self.max_agents {
+	for i in 0..<len(self.agents) {
 		ag := &self.agents[i]
 		if ag.state == .INVALID do continue
 		active_agents[nactive] = ag
@@ -550,7 +539,7 @@ update_move_request :: proc(self: ^Crowd, dt: f32) {
 	queue: [PATH_MAX_AGENTS]^Agent
 	nqueue := 0
 
-	for i in 0..<self.max_agents {
+	for i in 0..<len(self.agents) {
 		ag := &self.agents[i]
 		if ag.state == .INVALID do continue
 		if ag.target_state == .None || ag.target_state == .Velocity do continue
@@ -773,7 +762,7 @@ agent_poses :: proc(self: ^Crowd) -> []AgentPose {
 	clear(&self.poses)
 	for ag, i in self.agents {
 		if ag.state == .INVALID do continue
-		pose := AgentPose{AgentHandle{u32(i), ag.generation + 1}, ag.user, ag.position, linalg.quaternion_angle_axis_f32(ag.heading, {0, 1, 0})}
+		pose := AgentPose{AgentHandle(containers.slots_handle(&self.slots, u32(i))), ag.user, ag.position, linalg.quaternion_angle_axis_f32(ag.heading, {0, 1, 0})}
 		append(&self.poses, pose)
 	}
 	return self.poses[:]

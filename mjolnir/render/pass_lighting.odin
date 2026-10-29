@@ -57,15 +57,10 @@ lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32)
   group: rhi.BindGroup
   when !BINDLESS {
     output := images[.FINAL_IMAGE][f]
-    cached: bool
-    group, cached = self.lighting_output_groups[output]
-    if !cached {
-      resources := [1]rhi.BindResource{rhi.TextureView{output, 0}}
-      ok: bool
-      group, ok = dev.bind_group_create(&self.gpu, {layout = self.lighting_output_layout, resources = resources[:]})
-      if !ok do return
-      self.lighting_output_groups[output] = group
-    }
+    resources := [1]rhi.BindResource{rhi.TextureView{output, 0}}
+    ok: bool
+    group, ok = cached_group(self, output, self.lighting_output_layout, resources[:])
+    if !ok do return
   }
   push := LightingPush {
     camera_index     = cam,

@@ -3,16 +3,11 @@ package world
 import "../geometry"
 import "core:math/linalg"
 
-// Transform is a node's local position, rotation and scale; update derives its world
-// matrix (world_matrix reads it).
-Transform :: geometry.Transform
-
-// translate sets a node's local position:
-//   translate(w, node, x = 0, y = 0, z = 0)
-//   translate(w, node, v: [3]f32)
-translate :: proc {
-  translate_xyz,
-  translate_vec,
+// translate sets a node's local position.
+translate :: proc(self: ^World, handle: NodeHandle, v: [3]f32) {
+  node := edit(self, handle)
+  if node == nil do return
+  node.transform.position = v
 }
 
 // rotate sets a node's local rotation:
@@ -33,24 +28,10 @@ rotate_by :: proc {
 
 // scale sets a node's local scale:
 //   scale(w, node, s: f32) (uniform)
-//   scale(w, node, x, y, z: f32)
 //   scale(w, node, v: [3]f32)
 scale :: proc {
   scale_uniform,
-  scale_xyz,
   scale_vec,
-}
-
-@(private = "file")
-translate_xyz :: proc(self: ^World, handle: NodeHandle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
-  translate_vec(self, handle, {x, y, z})
-}
-
-@(private = "file")
-translate_vec :: proc(self: ^World, handle: NodeHandle, v: [3]f32) {
-  node := edit(self, handle)
-  if node == nil do return
-  node.transform.position = v
 }
 
 @(private = "file")
@@ -97,11 +78,6 @@ scale_vec :: proc(self: ^World, handle: NodeHandle, v: [3]f32) {
   node := edit(self, handle)
   if node == nil do return
   node.transform.scale = v
-}
-
-@(private = "file")
-scale_xyz :: proc(self: ^World, handle: NodeHandle, x, y, z: f32) {
-  scale_vec(self, handle, {x, y, z})
 }
 
 // set_local sets a node's whole local transform.

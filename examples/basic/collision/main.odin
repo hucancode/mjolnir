@@ -127,7 +127,7 @@ spawn_scene :: proc(app: ^App) {
   for &b in app.bodies {
     b.node = world.spawn(&app.scene, b.position)
     world.rotate(&app.scene, b.node, body_rotation(&b))
-    b.visual = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, body_mesh(b.shape), body_color(b.kind)), scale = body_visual_scale(&b), parent = b.node)
+    b.visual = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, body_mesh(b.shape), body_color(b.kind)), scale = body_visual_scale(&b), parent = b.node)
     if b.kind == .STATIC {
       b.handle = physics.body_create(&app.phys, b.position, body_rotation(&b), body_collider(&b))
     } else {
@@ -139,7 +139,7 @@ spawn_scene :: proc(app: ^App) {
 spawn_scenery_box :: proc(app: ^App, center, half_extents: [3]f32) {
   node := world.spawn(&app.scene, center)
   physics.body_create(&app.phys, center, collider = physics.BoxCollider{half_extents = half_extents}, user = world.Handle(node))
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), parent = node, scale = half_extents)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), parent = node, scale = half_extents)
 }
 
 body_collider :: proc(b: ^Body) -> physics.Collider {
@@ -217,10 +217,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if app.reset_pending {
     app.reset_pending = false
     physics.teardown(&app.phys)
@@ -242,7 +240,7 @@ update :: proc(app: ^App, dt: f32) {
   draw_contacts(app, dt)
   draw_selection(app)
   if !app.paused do physics.step(&app.phys, dt)
-  world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
+  mjolnir.sync_bodies(&app.scene, &app.phys)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
@@ -341,7 +339,8 @@ inspector :: proc(ctx: ^mu.Context, b: ^Body) {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
   if debugui.window(&app.debug, "Inspector", {940, 20, 320, 400}, {.RIGHT, .TOP}) {
     if app.selected == NO_SELECTION {
       mu.label(ctx, "Left-click an object to select it.")
@@ -349,7 +348,7 @@ debug_ui :: proc(app: ^App) {
       inspector(ctx, &app.bodies[app.selected])
     }
   }
-  if debugui.window(&app.debug, "Collision", {20, 20, 320, 180}, {}) {
+  if debugui.window(&app.debug, "Collision", {20, 20, 320, 180}) {
     mu.layout_row(ctx, {150, -1}, 0)
     if .SUBMIT in mu.button(ctx, "Reset Scene") do app.reset_pending = true
     if .SUBMIT in mu.button(ctx, "Resume" if app.paused else "Pause") do app.paused = !app.paused

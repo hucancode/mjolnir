@@ -1,6 +1,8 @@
 package mjolnir
 
 import "core:log"
+import "input"
+import "physics"
 import "platform"
 import "render"
 import "world"
@@ -34,4 +36,36 @@ update :: proc(w: ^world.World, r: ^render.Renderer, dt: f32) {
   world.update(w)
   render.stage_transforms(r, world.changes(w))
   render.update(r, dt)
+}
+
+// sync_bodies moves every body's node (its user link) to where physics put it, and destroys the
+// nodes of the bodies the last step killed for falling out of the world.
+sync_bodies :: proc(w: ^world.World, p: ^physics.World) {
+  for k in physics.killed(p) do world.destroy(w, world.NodeHandle(k.user))
+  world.set_world_poses(w, physics.body_poses(p))
+}
+
+// orbit_drag steers the orbit from a tick of input and places camera on it (render.camera_orbit),
+// unless a consumer captured the mouse: it turns by the mouse movement times speed while a
+// button of `rotate_with` is held ({} only zooms) and moves a step closer per scroll, keeping
+// pitch short of the poles and distance in range.
+orbit_drag :: proc(
+  self: ^render.Orbit,
+  camera: ^render.Camera,
+  s: ^input.State,
+  rotate_with: input.ButtonSet = {.LEFT},
+  speed: f32 = 0.02,
+  min_distance: f32 = 1,
+  max_distance: f32 = 200,
+) {
+  if !s.mouse_captured {
+    rotating := false
+    for b in rotate_with do rotating ||= input.mouse_down(s, b)
+    if rotating {
+      self.yaw += s.mouse_delta.x * speed
+      self.pitch = clamp(self.pitch + s.mouse_delta.y * speed, -1.5, 1.5)
+    }
+    self.distance = clamp(self.distance - s.scroll.y * 2, min_distance, max_distance)
+  }
+  render.camera_orbit(camera, self^)
 }

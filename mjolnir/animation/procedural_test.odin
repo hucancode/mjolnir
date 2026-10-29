@@ -2,6 +2,7 @@
 #+private
 package animation
 
+import "../geometry"
 import "core:math"
 import "core:math/linalg"
 import "core:testing"
@@ -10,7 +11,7 @@ import "core:testing"
 // identity rotations, temp-allocated.
 test_chain_pose :: proc(n: int, dir: [3]f32 = {0, 1, 0}) -> Pose {
   pose := Pose {
-    local      = make([]TRS, n, context.temp_allocator),
+    local      = make([]geometry.Transform, n, context.temp_allocator),
     positions  = make([][3]f32, n, context.temp_allocator),
     rotations  = make([]quaternion128, n, context.temp_allocator),
     scales     = make([][3]f32, n, context.temp_allocator),

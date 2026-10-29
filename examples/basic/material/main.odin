@@ -64,8 +64,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     app.sphere_materials[row][col] = mat
     x := f32(col) * SPACING - half
     y := f32(row) * SPACING - half
-    sphere := world.spawn(&app.scene, {x, y, 0})
-    render.attach(&app.renderer, sphere, render.primitive(&app.renderer, .SPHERE, mat))
+    mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, mat), {x, y, 0})
   }
 
   sun := &app.renderer.sun
@@ -96,10 +95,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.renderer.skybox_intensity = skybox_on ? 1 : 0
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
@@ -115,8 +112,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Material", {20, 20, 220, 360}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Material", {20, 20, 220, 360}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Sun intensity")
     mu.slider(ctx, &app.renderer.sun.intensity, 0, 20)

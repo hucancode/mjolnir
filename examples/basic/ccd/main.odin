@@ -72,7 +72,7 @@ shutdown :: proc(app: ^App) {
 spawn_box :: proc(app: ^App, position, half_extents: [3]f32, color: render.Color) {
   node := world.spawn(&app.scene, position)
   physics.body_create(&app.phys, position, collider = physics.BoxCollider{half_extents = half_extents}, user = world.Handle(node))
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, color), parent = node, scale = half_extents)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, color), parent = node, scale = half_extents)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -96,7 +96,7 @@ spawn_bullet :: proc(app: ^App, lane: int, color: render.Color) {
   position := [3]f32{START_X, BULLET_HEIGHT, wall_z(lane)}
   node := world.spawn(&app.scene, position)
   handle := physics.body_create(&app.phys, position, mass = BULLET_MASS, collider = physics.SphereCollider{radius = BULLET_RADIUS}, user = world.Handle(node))
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, color), parent = node, scale = BULLET_RADIUS)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, color), parent = node, scale = BULLET_RADIUS)
   params := physics.body_params(&app.phys, handle)
   params.linear_damping = 0
   params.angular_damping = 0
@@ -130,17 +130,15 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.volley_timer += dt
   if app.volley_timer >= VOLLEY_SECONDS do start_volley(app)
   previous: [WALL_COUNT][3]f32
   for bullet, i in app.bullets do previous[i] = physics.body(&app.phys, bullet).position
   physics.step(&app.phys, dt)
   draw_tracers(app, previous)
-  world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
+  mjolnir.sync_bodies(&app.scene, &app.phys)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
@@ -149,8 +147,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "CCD", {20, 20, 280, 120}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "CCD", {20, 20, 280, 120}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Velocity (m/s)")
     mu.slider(ctx, &app.speed, 1.0, 1000.0)

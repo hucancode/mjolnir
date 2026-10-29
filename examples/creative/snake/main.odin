@@ -3,7 +3,6 @@
 package main
 
 import "mjolnir"
-import "mjolnir/animation"
 import "mjolnir/debugui"
 import "mjolnir/input"
 import "mjolnir/platform"
@@ -43,7 +42,7 @@ App :: struct {
   phase:     f32,
   goal:      [2]f32,
   goals:     int,
-  chain:     animation.Chain([2]f32),
+  chain:     geometry.Chain([2]f32),
 }
 
 cruise_speed: f32 = 5.0
@@ -86,22 +85,22 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.head = world.spawn(&app.scene)
   render.attach(r, app.head, render.MeshAttachment{mesh = head, material = app.head_skin})
   for side in ([2]f32{-1, 1}) {
-    eye := mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .SPHERE, .WHITE), {side * 0.27, 0.44, -0.92}, parent = app.head, scale = 0.12)
-    mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .SPHERE, .BLACK), {side * 0.42, 0.12, -0.39}, parent = eye, scale = 0.5)
+    eye := mjolnir.spawn(&app.scene, r, render.primitive(r, .SPHERE, .WHITE), {side * 0.27, 0.44, -0.92}, parent = app.head, scale = 0.12)
+    mjolnir.spawn(&app.scene, r, render.primitive(r, .SPHERE, .BLACK), {side * 0.42, 0.12, -0.39}, parent = eye, scale = 0.5)
   }
-  animation.chain_init(&app.chain, {0, 0}, {0, 1}, SNAKE_LENGTH, CHAIN_STEP)
+  geometry.chain_init(&app.chain, {0, 0}, {0, 1}, SNAKE_LENGTH, CHAIN_STEP)
 
   grass := render.material_create(r, render.make_material(base_color_factor = {0.45, 0.7, 0.35, 1}, roughness_value = 0.9))
-  mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .QUAD_XZ, grass, cast_shadow = false), scale = ARENA + 4)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, grass, cast_shadow = false), scale = ARENA + 4)
   for i in 0 ..< 6 {
     angle := f32(i) / 6 * math.TAU + 0.4
-    mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .SPHERE, .GRAY), {math.cos(angle) * 9, 0.4, math.sin(angle) * 9}, scale = 0.8)
+    mjolnir.spawn(&app.scene, r, render.primitive(r, .SPHERE, .GRAY), {math.cos(angle) * 9, 0.4, math.sin(angle) * 9}, scale = 0.8)
   }
   return .READY
 }
 
 shutdown :: proc(app: ^App) {
-  animation.chain_destroy(&app.chain)
+  geometry.chain_destroy(&app.chain)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -113,12 +112,10 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   steer(app, dt)
   pose(app)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
@@ -155,7 +152,7 @@ steer :: proc(app: ^App, dt: f32) {
   course := app.heading + WEAVE * math.sin(app.phase)
   neck := app.chain.head + [2]f32{-math.sin(course), -math.cos(course)} * ds
   if linalg.length(neck) > ARENA do neck = linalg.normalize(neck) * ARENA
-  animation.chain_move(&app.chain, neck)
+  geometry.chain_move(&app.chain, neck)
   app.focus += (neck - app.focus) * min(dt * 5, 1)
 }
 
@@ -178,7 +175,7 @@ pose :: proc(app: ^App) {
   skin := render.material(&app.renderer, app.skin)
   skin.base_color_factor = head_skin.base_color_factor
   for i in 0 ..< SPINE_POINTS {
-    p := animation.chain_sample(app.chain, f32(i + 1) * SNAKE_LENGTH / SPINE_POINTS) - neck
+    p := geometry.chain_sample(app.chain, f32(i + 1) * SNAKE_LENGTH / SPINE_POINTS) - neck
     p.y = math.copy_sign(max(abs(p.y), 1e-3), p.y)
     skin.params[i / 4][i % 4] = transmute(f32)[2]f16{f16(p.x), f16(p.y)}
   }
@@ -193,8 +190,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Cartoon Snake", {20, 20, 260, 250}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Cartoon Snake", {20, 20, 260, 250}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "WASD / arrows slither")
     mu.checkbox(ctx, "Auto move", &auto_move)

@@ -39,21 +39,20 @@ Ragdoll :: struct {
 
 @(private)
 Ragdoll_State :: struct {
-  skeleton: ^animation.Skeleton,
   owner:    []int, // per bone, the block that carries it
+  rest_skin: []matrix[4, 4]f32, // per bone, its rest pose times its inverse bind
+  span:     []f32, // per block, rest distance from its start bone to its end bone
   dir:      [][3]f32, // per block, rest limb direction in model space
   pivot:    [][3]f32, // per block, rest position of its start bone
   rot:      []quaternion128, // per block, rest orientation: local Y along the limb
-  bodies:   []physics.BodyHandle,
+  bodies:   []physics.BodyHandle, // none until spawn
   masses:   []f32,
   joints:   [dynamic]physics.JointHandle,
-  spawned:  bool,
 }
 
-// init maps blocks onto skeleton, both of which must outlive the ragdoll; blocks must not
-// change in count. A bone follows the block of its nearest ancestor (or itself) that starts a
-// block; bones above every block follow block 0. Fails on bad bone indices or a block whose
-// two bones coincide.
+// init maps blocks onto skeleton; blocks must outlive the ragdoll and not change in count. A
+// bone follows the block of its nearest ancestor (or itself) that starts a block; bones above
+// every block follow block 0. Fails on bad bone indices or a block whose two bones coincide.
 init :: proc(self: ^Ragdoll, skeleton: ^animation.Skeleton, blocks: []Block) -> bool {
   n := len(blocks)
   bones := len(skeleton.bind)
@@ -63,9 +62,11 @@ init :: proc(self: ^Ragdoll, skeleton: ^animation.Skeleton, blocks: []Block) -> 
     blocks   = blocks,
     scale    = 1,
     density  = 600,
-    skeleton = skeleton,
   }
   self.owner = make([]int, bones)
+  self.rest_skin = make([]matrix[4, 4]f32, bones)
+  for &m, bone in self.rest_skin do m = skeleton.bind[bone] * skeleton.inverse_bind[bone]
+  self.span = make([]f32, n)
   self.dir = make([][3]f32, n)
   self.pivot = make([][3]f32, n)
   self.rot = make([]quaternion128, n)
@@ -79,6 +80,7 @@ init :: proc(self: ^Ragdoll, skeleton: ^animation.Skeleton, blocks: []Block) -> 
       destroy(self)
       return false
     }
+    self.span[i] = length
     self.dir[i] = d / length
     self.pivot[i] = from
     self.rot[i] = limb_rotation(self.dir[i])
@@ -101,6 +103,8 @@ init :: proc(self: ^Ragdoll, skeleton: ^animation.Skeleton, blocks: []Block) -> 
 // destroy frees the ragdoll's memory. Despawn it from its physics World first.
 destroy :: proc(self: ^Ragdoll) {
   delete(self.owner)
+  delete(self.rest_skin)
+  delete(self.span)
   delete(self.dir)
   delete(self.pivot)
   delete(self.rot)
@@ -127,8 +131,7 @@ limb_rotation :: proc(dir: [3]f32) -> quaternion128 {
 // back and extend. Use it to start editing Block.size from the skeleton.
 fit_length :: proc(self: ^Ragdoll, i: int) -> f32 {
   b := self.blocks[i]
-  span := linalg.length(self.skeleton.bind[b.end][3].xyz - self.skeleton.bind[b.start][3].xyz)
-  return 0.5 * (span + b.back + b.extend)
+  return 0.5 * (self.span[i] + b.back + b.extend)
 }
 
 @(private)
@@ -176,7 +179,6 @@ spawn :: proc(self: ^Ragdoll, world: ^physics.World, origin: [3]f32, simulate :=
       params.angular_damping = 0.4
     }
   }
-  self.spawned = true
   if !simulate do return
   for b, i in self.blocks do if b.parent >= 0 {
     anchor := origin + self.pivot[i] * s
@@ -199,16 +201,23 @@ spawn :: proc(self: ^Ragdoll, world: ^physics.World, origin: [3]f32, simulate :=
 
 // despawn destroys the ragdoll's bodies and joints in world. A ragdoll that is not spawned is left alone.
 despawn :: proc(self: ^Ragdoll, world: ^physics.World) {
-  if !self.spawned do return
+  if !spawned(self) do return
   for j in self.joints do physics.joint_destroy(world, j)
   clear(&self.joints)
-  for h in self.bodies do physics.body_destroy(world, h)
-  self.spawned = false
+  for &h in self.bodies {
+    physics.body_destroy(world, h)
+    h = {}
+  }
+}
+
+@(private)
+spawned :: proc(self: ^Ragdoll) -> bool {
+  return len(self.bodies) > 0 && self.bodies[0] != {}
 }
 
 // body returns the physics body of block i, none before spawn.
 body :: proc(self: ^Ragdoll, i: int) -> physics.BodyHandle {
-  return self.bodies[i] if self.spawned else {}
+  return self.bodies[i]
 }
 
 // mass returns the mass block i got at spawn: 0 for a static spawn.
@@ -217,8 +226,8 @@ mass :: proc(self: ^Ragdoll, i: int) -> f32 {
 }
 
 // block_of returns the block a physics body belongs to, for picking with physics.raycast.
-block_of :: proc(self: ^Ragdoll, handle: physics.BodyHandle) -> (block: int, ok: bool) {
-  if !self.spawned do return
+block_of :: proc(self: ^Ragdoll, handle: physics.BodyHandle) -> (block: int, ok: bool) #optional_ok {
+  if !spawned(self) do return
   for h, i in self.bodies do if h == handle do return i, true
   return
 }
@@ -234,7 +243,7 @@ block_pose :: proc(
   half_extents: [3]f32,
   ok: bool,
 ) {
-  if !self.spawned do return
+  if !spawned(self) do return
   b := physics.body(world, self.bodies[i]) or_return
   return b.position, b.rotation, half_size(self, i) * self.scale, true
 }
@@ -245,7 +254,7 @@ block_pose :: proc(
 // so the mesh bounds stay near the ragdoll. Fails, leaving palette alone, before spawn or
 // when the palette is shorter than the skeleton.
 sync :: proc(self: ^Ragdoll, world: ^physics.World, palette: []matrix[4, 4]f32) -> (origin: [3]f32, ok: bool) {
-  if !self.spawned || len(palette) < len(self.owner) do return
+  if !spawned(self) || len(palette) < len(self.owner) do return
   root := physics.body(world, self.bodies[0]) or_return
   s := [3]f32{self.scale, self.scale, self.scale}
   scale := linalg.matrix4_scale(s)
@@ -260,7 +269,7 @@ sync :: proc(self: ^Ragdoll, world: ^physics.World, palette: []matrix[4, 4]f32) 
     carry[i] = now * linalg.matrix4_inverse(rest)
   }
   for bone in 0 ..< len(self.owner) {
-    palette[bone] = carry[self.owner[bone]] * self.skeleton.bind[bone] * self.skeleton.inverse_bind[bone]
+    palette[bone] = carry[self.owner[bone]] * self.rest_skin[bone]
   }
   return origin, true
 }

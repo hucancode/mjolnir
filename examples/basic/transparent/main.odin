@@ -38,11 +38,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({6, 3, 6}, {0, 1, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 6.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 6.0)
 
   red := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.95, 0.15, 0.15, 1}, roughness_value = 0.4))
-  sphere_behind_glass := world.spawn(&app.scene, {0, 1, -2})
-  render.attach(&app.renderer, sphere_behind_glass, render.primitive(&app.renderer, .SPHERE, red))
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, red), {0, 1, -2})
 
   glass_colors := [4][4]f32{
     {0.2, 0.7, 1.0, 0.20},
@@ -52,7 +51,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   for color, i in glass_colors {
     glass := render.material_create(&app.renderer, render.make_material(.TRANSPARENT, base_color_factor = color))
-    mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, glass, cast_shadow = false), {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4}, scale = 0.8)
+    mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, glass, cast_shadow = false), {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4}, scale = 0.8)
   }
 
   return .READY
@@ -69,7 +68,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 

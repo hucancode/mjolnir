@@ -43,9 +43,9 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
 
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -1, 0}, scale = 20.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -1, 0}, scale = 20.0)
 
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .BLUE), {-6, 0, 0}, scale = 0.8)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .BLUE), {-6, 0, 0}, scale = 0.8)
 
   app.orbit = render.make_orbit({12, 8, 14}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
@@ -63,7 +63,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.time += dt
   t := app.time
   white := render.COLOR_RGB[.WHITE]

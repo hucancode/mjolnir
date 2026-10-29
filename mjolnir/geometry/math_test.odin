@@ -77,7 +77,7 @@ test_overlap_quantized_bounds :: proc(t: ^testing.T) {
   bmax1 := [3]i32{15, 15, 15}
   testing.expect(
     t,
-    overlap_quantized_bounds(amin1, amax1, bmin1, bmax1),
+    overlap_bounds(amin1, amax1, bmin1, bmax1),
     "Quantized bounds should overlap",
   )
   // Test non-overlapping quantized bounds
@@ -85,7 +85,7 @@ test_overlap_quantized_bounds :: proc(t: ^testing.T) {
   bmax2 := [3]i32{20, 20, 20}
   testing.expect(
     t,
-    !overlap_quantized_bounds(amin1, amax1, bmin2, bmax2),
+    !overlap_bounds(amin1, amax1, bmin2, bmax2),
     "Quantized bounds should not overlap",
   )
 }

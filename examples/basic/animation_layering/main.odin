@@ -75,7 +75,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({3, 2, 3}, {0, 1, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  app.target_cube = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .RED, cast_shadow = false), app.target, scale = 0.25)
+  app.target_cube = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .RED, cast_shadow = false), app.target, scale = 0.25)
 
   app.fox_model = gltf.model_create(&app.renderer, #load("assets/Fox2.glb"))
   app.fox = gltf.instance_create(&app.fox_model, &app.scene, &app.renderer)
@@ -108,18 +108,14 @@ update :: proc(app: ^App, dt: f32) {
   defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   t := app.time
   app.target = {math.cos(t) * TARGET_RADIUS, 4 + math.sin(t * 2), math.sin(t) * TARGET_RADIUS}
   world.translate(&app.scene, app.target_cube, app.target)
   blend_layers(app)
-  world.update(&app.scene)
+  mjolnir.update(&app.scene, &app.renderer, dt)
   gltf.animate(&app.fox, &app.fox_model, &app.scene, &app.renderer, dt)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
 }
 
 draw :: proc(app: ^App) -> bool {
@@ -146,8 +142,9 @@ set_walk_run :: proc(app: ^App) {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Animation", {20, 20, 260, 220}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Animation", {20, 20, 260, 220}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Walk <-> Run")
     if .CHANGE in mu.slider(ctx, &app.walk_run_blend, 0, 1) {

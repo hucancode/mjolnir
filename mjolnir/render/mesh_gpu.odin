@@ -68,43 +68,29 @@ free_mesh :: proc(self: ^Renderer, m: MeshData) {
   if .SKINNED in m.flags do containers.slab_free(&self.mesh_slabs[.SKINNING], m.skinning_offset)
 }
 
-// Fills entry `index` of the mesh table. On failure the ranges taken so far are freed.
-@(private)
-upload_mesh :: proc(self: ^Renderer, index: u32, g: geometry.Mesh) -> (ok: bool) {
-  m := &write_table(self, .MESHES, MeshData)[index]
-  aabb := geometry.aabb_from_vertices(g.vertices)
-  m^ = {aabb_min = aabb.min, aabb_max = aabb.max}
-  defer if !ok {
-    free_mesh(self, m^)
-    m^ = {}
-  }
-  defer mark_dirty(self, .MESHES, int(index))
-  offset := mesh_arena_upload(self, .VERTEX, g.vertices) or_return
-  m.vertex_offset, m.vertex_count = i32(offset), u32(len(g.vertices))
-  m.first_index = mesh_arena_upload(self, .INDEX, g.indices) or_return
-  m.index_count = u32(len(g.indices))
-  m.skinning_offset = mesh_arena_upload(self, .SKINNING, g.skinnings) or_return
-  if len(g.skinnings) > 0 do m.flags |= {.SKINNED}
-  return true
-}
-
 // mesh_create uploads a CPU mesh (geometry.make_cube, ...) to the GPU; it lives until
 // mesh_destroy or teardown. Ownership of `mesh` transfers: it is deleted.
 mesh_create :: proc(self: ^Renderer, mesh: geometry.Mesh) -> (handle: MeshHandle, ok: bool) #optional_ok {
   defer geometry.mesh_destroy(mesh)
-  return mesh_upload(self, mesh)
-}
-
-// mesh_create without taking the mesh.
-@(private)
-mesh_upload :: proc(self: ^Renderer, mesh: geometry.Mesh) -> (handle: MeshHandle, ok: bool) {
   guard(self)
   handle = MeshHandle(containers.slots_alloc(&self.slots[.MESHES]) or_return)
-  if !upload_mesh(self, u32(handle), mesh) {
+  m := &write_table(self, .MESHES, MeshData)[handle]
+  aabb := geometry.aabb_from_vertices(mesh.vertices)
+  m^ = {aabb_min = aabb.min, aabb_max = aabb.max}
+  defer mark_dirty(self, .MESHES, int(handle))
+  defer if !ok {
     log.errorf("Mesh %d upload failed", handle)
+    free_mesh(self, m^)
+    m^ = {}
     containers.slots_free(&self.slots[.MESHES], u32(handle))
-    return 0, false
+    handle = 0
   }
+  offset := mesh_arena_upload(self, .VERTEX, mesh.vertices) or_return
+  m.vertex_offset, m.vertex_count = i32(offset), u32(len(mesh.vertices))
+  m.first_index = mesh_arena_upload(self, .INDEX, mesh.indices) or_return
+  m.index_count = u32(len(mesh.indices))
+  m.skinning_offset = mesh_arena_upload(self, .SKINNING, mesh.skinnings) or_return
+  if len(mesh.skinnings) > 0 do m.flags |= {.SKINNED}
   return handle, true
 }
 

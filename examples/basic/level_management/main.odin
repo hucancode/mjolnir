@@ -131,10 +131,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.countdown -= dt
   if app.auto_switch && app.countdown <= 0 && app.requested < 0 do app.requested = (app.current + 1) % len(LEVELS)
   if app.requested >= 0 {
@@ -165,8 +163,9 @@ run_test_step :: proc(app: ^App) {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Level Management", {20, 20, 320, 380}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Level Management", {20, 20, 320, 380}) {
     levels := LEVELS
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, fmt.tprintf("Level:     %s", levels[app.current].name if app.current >= 0 else "none"))

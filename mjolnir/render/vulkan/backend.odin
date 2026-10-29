@@ -18,11 +18,6 @@ BINDLESS :: true
 // One pass renders into several layers of a texture (rhi.PassDesc.layer_count).
 LAYERED_RENDERING :: true
 
-// Depth pyramids and draw lists live in slots render assigns: a pyramid and a draw-list slot
-// per camera and frame in flight, plus a draw-list slot per frame for the shadow views.
-MAX_PYRAMID_SLOTS :: rhi.MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
-MAX_DRAW_LIST_SLOTS :: (rhi.MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
-
 // Backend is every Vulkan object the renderer draws with. render keeps it opaque and goes
 // through PROCS (rhi.odin) and the procs below; textures are indexed by render's TextureHandle.
 Backend :: struct {
@@ -43,7 +38,9 @@ Backend :: struct {
   // kept until shutdown: there are a handful
   pipeline_layouts: map[PipelineLayoutKey]vk.PipelineLayout,
   // the views bindless_write made for the storage image array, by index
-  storage_views:    [MAX_STORAGE_IMAGES]vk.ImageView,
+  storage_views:    []vk.ImageView,
+  // init's sizes of the bindless arrays
+  bindless_sizes:   [rhi.BindlessArray]u32,
   set_pool:         vk.DescriptorPool,
   // per recording thread, queue and frame slot: the lists' pool, reset whole by frame_wait
   cmd_pools:        [rhi.MAX_RECORD_THREADS][rhi.Queue][FRAMES_IN_FLIGHT]CmdPool,
@@ -66,8 +63,9 @@ WindowHandle :: glfw.WindowHandle
 
 // init brings Vulkan up on window: instance, surface, device, swapchain and the bindless
 // arrays. Paired with shutdown.
-init :: proc(b: ^Backend, window: WindowHandle) -> bool {
+init :: proc(b: ^Backend, window: WindowHandle, bindless: [rhi.BindlessArray]u32) -> bool {
   b.window = window
+  b.bindless_sizes = bindless
   return check(init_vulkan(b), "Vulkan init")
 }
 
@@ -101,8 +99,10 @@ init_vulkan :: proc(b: ^Backend) -> vk.Result {
   b.textures = make([]Image, rhi.MAX_TEXTURES)
   // the pool of the one set the backend itself makes, the bindless arrays (a type may repeat);
   // rhi's bind groups have a pool of their own
-  sizes: [len(BINDLESS_BINDINGS)]vk.DescriptorPoolSize
-  for binding, i in BINDLESS_BINDINGS do sizes[i] = {binding.type, binding.count}
+  b.storage_views = make([]vk.ImageView, bindless_sizes(b)[.STORAGE_IMAGES])
+  bindings := bindless_bindings(b)
+  sizes: [len(bindings)]vk.DescriptorPoolSize
+  for binding, i in bindings do sizes[i] = {binding.type, binding.count}
   pool_info := vk.DescriptorPoolCreateInfo {
     sType         = .DESCRIPTOR_POOL_CREATE_INFO,
     poolSizeCount = len(sizes),

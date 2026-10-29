@@ -33,8 +33,6 @@ static const uint NODE_FLAG_VISIBLE = 1;
 static const uint NODE_FLAG_CASTS_SHADOW = 2;
 // the node holds a bone range; only set on a skinned mesh
 static const uint NODE_FLAG_SKINNED = 4;
-// a light, emitter or force field is attached (render's alone)
-static const uint NODE_FLAG_PLACED = 8;
 
 static const uint SAMPLER_NEAREST_CLAMP = 0;
 static const uint SAMPLER_LINEAR_CLAMP = 1;
@@ -80,13 +78,13 @@ struct Node {
     float4x4 world_matrix;
     uint material_id;
     uint mesh_id;
-    // first bone of the node's palette when skinned
+    // first bone of the node's palette when skinned, its placement row when a light, emitter or
+    // force field is placed
     uint attachment_data_index;
     uint flags;
     // first of the node's skinned vertices when skinned
     uint skin_vertex_base;
-    // the palette attachment_data_index is the first bone of
-    uint bones;
+    uint _node_pad0;
     uint _node_pad1;
     uint _node_pad2;
 }

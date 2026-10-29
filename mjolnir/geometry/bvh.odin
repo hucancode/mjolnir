@@ -287,11 +287,7 @@ bvh_query_aabb :: proc(self: ^BVH($T), query_bounds: Aabb, results: ^[dynamic]T)
 // Slab test with a precomputed inverse direction; hit when near <= far, near <= max_dist and far >= 0.
 @(private = "file")
 ray_hits :: #force_inline proc "contextless" (origin, inv_dir: [3]f32, box: Aabb, max_dist: f32) -> bool {
-  t1 := (box.min - origin) * inv_dir
-  t2 := (box.max - origin) * inv_dir
-  lo, hi := linalg.min(t1, t2), linalg.max(t1, t2)
-  t_near := max(lo.x, lo.y, lo.z)
-  t_far := min(hi.x, hi.y, hi.z)
+  t_near, t_far := ray_aabb_intersection(origin, inv_dir, box)
   return t_near <= t_far && t_near <= max_dist && t_far >= 0
 }
 

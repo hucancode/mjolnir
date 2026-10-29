@@ -119,13 +119,13 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !ok do return .FAIL
 
   sand := render.material_create(r, render.make_material(base_color_factor = {0.76, 0.66, 0.45, 1}, roughness_value = 0.9))
-  mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .QUAD_XZ, sand, cast_shadow = false), scale = 40)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, sand, cast_shadow = false), scale = 40)
   rock := render.material_create(r, render.make_material(base_color_factor = {0.35, 0.38, 0.4, 1}, roughness_value = 0.8))
   for i in 0 ..< 7 {
     angle := f32(i) / 7 * math.TAU
-    mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .SPHERE, rock), {math.cos(angle) * 9, 0, math.sin(angle) * 9}, scale = {1.6, 1.1 + f32(i % 3) * 0.6, 1.4})
+    mjolnir.spawn(&app.scene, r, render.primitive(r, .SPHERE, rock), {math.cos(angle) * 9, 0, math.sin(angle) * 9}, scale = {1.6, 1.1 + f32(i % 3) * 0.6, 1.4})
   }
-  app.shark = mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .SPHERE, .RED), scale = 0.6)
+  app.shark = mjolnir.spawn(&app.scene, r, render.primitive(r, .SPHERE, .RED), scale = 0.6)
 
   sun := &r.sun
   sun.color = {0.75, 0.9, 1}
@@ -147,10 +147,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, {.RIGHT})
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, {.RIGHT})
   if !app.input.mouse_captured && input.mouse_pressed(&app.input, .LEFT) do drop_food(app)
   app.time += dt
   app.feeding = max(app.feeding - dt, 0)
@@ -196,8 +194,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Fish School", {20, 20, 300, 420}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Fish School", {20, 20, 300, 420}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Left click: drop food   Right drag: orbit")
     mu.label(ctx, fmt.tprintf("Drawn: %d   feeding: %d", app.stats[0].instance_count, app.stats[0].feeding))

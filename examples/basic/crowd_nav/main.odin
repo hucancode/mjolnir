@@ -110,11 +110,11 @@ build_level :: proc(app: ^App) -> bool {
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
   ground_material := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8))
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, ground_material, cast_shadow = false), scale = WORLD_HALF * 2)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, ground_material, cast_shadow = false), scale = WORLD_HALF * 2)
   bake.append_box(&builder, {0, -0.5, 0}, {WORLD_HALF * 2, 0.5, WORLD_HALF * 2})
   obstacle_material := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6))
   for box in OBSTACLES {
-    mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, obstacle_material), box.center, scale = box.half_extents)
+    mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, obstacle_material), box.center, scale = box.half_extents)
     bake.append_box(&builder, box.center, box.half_extents, area = bake.AREA_BLOCKED)
   }
   data := bake.build(&builder, allocator = context.temp_allocator) or_return
@@ -125,8 +125,7 @@ show_navmesh :: proc(app: ^App) {
   positions, indices := nav.debug_triangles(&app.navmesh, context.temp_allocator)
   mesh := render.mesh_create(&app.renderer, geometry.make_mesh_from_triangles(positions, indices))
   material := render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7}))
-  overlay := world.spawn(&app.scene, {0, NAVMESH_OVERLAY_LIFT, 0})
-  render.attach(&app.renderer, overlay, render.MeshAttachment{mesh = mesh, material = material})
+  mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = mesh, material = material}, {0, NAVMESH_OVERLAY_LIFT, 0})
 }
 
 spawn_agents :: proc(app: ^App) {
@@ -143,8 +142,7 @@ spawn_agents :: proc(app: ^App) {
     angle := f32(i) / AGENT_COUNT * math.TAU
     position := (SPAWN_RADIUS - 4) * [3]f32{math.cos(angle), 0, math.sin(angle)}
     node := world.spawn(&app.scene, position)
-    body := world.spawn(&app.scene, {0, AGENT_HEIGHT * 0.5, 0}, parent = node)
-    render.attach(&app.renderer, body, render.MeshAttachment{mesh = capsule, material = materials[i % len(PALETTE)], cast_shadow = true})
+    mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = capsule, material = materials[i % len(PALETTE)], cast_shadow = true}, {0, AGENT_HEIGHT * 0.5, 0}, parent = node)
     a.handle, a.placed = nav.agent_create(&app.crowd, position, params, user = world.Handle(node))
     a.color = PALETTE[i % len(PALETTE)]
   }
@@ -185,10 +183,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if !app.input.mouse_captured && input.mouse_pressed(&app.input, .RIGHT) {
     ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
     if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do send_all_to(app, goal)
@@ -215,8 +211,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Crowd", {20, 20, 260, 230}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Crowd", {20, 20, 260, 230}) {
     mu.label(ctx, fmt.tprintf("Agents: %d", AGENT_COUNT))
     mu.label(ctx, "Right-click: set all goals")
     mu.layout_row(ctx, {-1}, 0)

@@ -1,4 +1,4 @@
-package animation
+package geometry
 
 import "base:intrinsics"
 import "core:math"
@@ -195,13 +195,13 @@ spline_build_arc_table :: proc(self: ^Spline($T), samples := 200) {
     arc_lengths = make([]f32, samples),
     times       = make([]f32, samples),
   }
-  arc_fill(self^, table.arc_lengths, table.times, slice.first(self.times), slice.last(self.times))
+  spline_arc_fill(self^, table.arc_lengths, table.times, slice.first(self.times), slice.last(self.times))
   self.arc_table = table
 }
 
-// Fill an arc-length table (one entry per sample) over spline times [t_start, t_end].
-@(private)
-arc_fill :: proc(spline: Spline($T), arc_lengths, times: []f32, t_start, t_end: f32) {
+// spline_arc_fill fills an arc-length table of caller memory (one entry per sample) over spline
+// times [t_start, t_end], for spline.arc_table.
+spline_arc_fill :: proc(spline: Spline($T), arc_lengths, times: []f32, t_start, t_end: f32) {
   samples := len(arc_lengths)
   prev := spline_sample(spline, t_start)
   total := f32(0)
@@ -252,19 +252,19 @@ spline_init_closed :: proc(self: ^Spline([3]f32), base: [][3]f32, samples := 200
   n := len(base)
   if n < 3 do return false
   self^ = {points = make([][3]f32, n + 3), times = make([]f32, n + 3)}
-  closed_points(base, self.points, self.times)
+  spline_closed_points(base, self.points, self.times)
   table := SplineArcTable([3]f32) {
     arc_lengths = make([]f32, samples),
     times       = make([]f32, samples),
   }
-  arc_fill(self^, table.arc_lengths, table.times, 0, f32(n))
+  spline_arc_fill(self^, table.arc_lengths, table.times, 0, f32(n))
   self.arc_table = table
   return true
 }
 
-// The control points (len(base) + 3) and times of a closed loop through `base`.
-@(private)
-closed_points :: proc(base: [][3]f32, points: [][3]f32, times: []f32) {
+// spline_closed_points fills caller memory with the control points (len(base) + 3) and times of
+// a closed loop through `base`, as spline_init_closed lays them out.
+spline_closed_points :: proc(base: [][3]f32, points: [][3]f32, times: []f32) {
   n := len(base)
   points[0] = base[n - 1]
   times[0] = -1

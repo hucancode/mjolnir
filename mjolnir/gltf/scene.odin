@@ -1,5 +1,6 @@
 package gltf
 
+import "../geometry"
 import "../animation"
 import "../asset"
 import "../render"
@@ -25,13 +26,18 @@ SkinnedNode :: struct {
   rig:  RigHandle,
 }
 
-// Model is a glTF loaded once (model_create): its render looks (meshes, materials, textures and
-// lights, in the file's units), its rigs, and the node tree every instance_create spawns. It must
-// outlive its instances.
+// Model is a glTF loaded once (model_create), by the file's indices: meshes[i] draws mesh i,
+// one attachment per primitive (none for a mesh no node uses); materials[i] is material i;
+// lights[i] is light i, 0 for a directional one; textures are the images the materials sample;
+// rigs are one per skin a mesh node uses, with every animation as a clip. It holds the node
+// tree every instance_create spawns, and must outlive its instances.
 Model :: struct {
-  rigs:     [dynamic]animation.Rig, // one per skin a mesh node uses, with every animation as a clip
-  using looks: render.ModelLooks,
-  using _:  Model_Nodes,
+  rigs:      [dynamic]animation.Rig,
+  meshes:    [][]render.MeshAttachment,
+  materials: []render.MaterialHandle,
+  lights:    []render.LightHandle,
+  textures:  [dynamic]render.TextureHandle,
+  using _:   Model_Nodes,
 }
 
 @(private)
@@ -47,7 +53,7 @@ Model_Nodes :: struct {
 ModelNode :: struct {
   name:      string, // world borrows it
   parent:    int, // -1 for a root
-  transform: world.Transform,
+  transform: geometry.Transform,
   look:      render.MeshAttachment, // mesh 0 draws nothing
   rig:       int, // the rig deforming its mesh, -1 for none
   light:     render.LightHandle,
@@ -73,18 +79,21 @@ Instance :: struct {
 }
 
 // model_create loads a glTF held in memory, a .glb or a glTF whose buffers and images are all
-// embedded (asset.load_gltf), into render (render.model_upload) and animation (one rig per skin
-// a mesh node uses, animation.rig_from). Spawn it with instance_create.
+// embedded (asset.load_gltf), into render and animation (one rig per skin a mesh node uses).
+// Spawn it with instance_create.
 model_create :: proc(r: ^render.Renderer, data: []u8) -> (model: Model, ok: bool) #optional_ok {
   file := asset.load_gltf(data) or_return
   defer asset.destroy(&file)
-  model.looks = render.model_upload(r, &file) or_return
+  if !upload(&model, r, &file) {
+    model_destroy(&model, r)
+    return {}, false
+  }
   // rig index per skin; -1 when no mesh node uses the skin or it failed to load
   skin_rigs := make([]int, len(file.skins), context.temp_allocator)
   for &rig in skin_rigs do rig = -2
   for n in file.nodes do if n.mesh >= 0 && n.skin >= 0 do skin_rigs[n.skin] = -1
   for &rig, skin in skin_rigs do if rig == -1 {
-    if built, built_ok := animation.rig_from(&file, skin); built_ok {
+    if built, built_ok := rig_from(&file, skin); built_ok {
       rig = len(model.rigs)
       append(&model.rigs, built)
     } else {
@@ -106,7 +115,7 @@ model_create :: proc(r: ^render.Renderer, data: []u8) -> (model: Model, ok: bool
     append(&model.nodes, node)
     // a mesh's further primitives, each with its own material, hang under the node
     for look in prims[min(1, len(prims)):] {
-      append(&model.nodes, ModelNode{name = strings.clone(n.name), parent = template[i], transform = world.Transform{rotation = 1, scale = 1}, look = look, rig = node.rig})
+      append(&model.nodes, ModelNode{name = strings.clone(n.name), parent = template[i], transform = geometry.Transform{rotation = 1, scale = 1}, look = look, rig = node.rig})
     }
   }
   for s, skin in file.skins do if rig := skin_rigs[skin]; rig >= 0 {
@@ -117,7 +126,7 @@ model_create :: proc(r: ^render.Renderer, data: []u8) -> (model: Model, ok: bool
 
 // model_destroy frees the model's render resources and rigs. Destroy its instances first.
 model_destroy :: proc(self: ^Model, r: ^render.Renderer) {
-  render.model_looks_destroy(r, &self.looks)
+  unload(self, r)
   for &rig in self.rigs do animation.rig_destroy(&rig)
   for n in self.nodes do delete(n.name)
   delete(self.rigs)
@@ -206,7 +215,7 @@ instance_destroy :: proc(self: ^Instance, w: ^world.World, r: ^render.Renderer) 
 @(private = "file")
 pose_joints :: proc(self: ^Instance, w: ^world.World, model: ^Model, rig: RigHandle, animator: ^animation.Animator) {
   skeleton := &model.rigs[rig].skeleton
-  locals := make([]animation.TRS, len(skeleton.parents), context.temp_allocator)
+  locals := make([]geometry.Transform, len(skeleton.parents), context.temp_allocator)
   animation.bone_locals(animator, skeleton, locals)
   for j in self.joints do if j.rig == rig {
     l := locals[j.bone]

@@ -83,9 +83,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), scale = {20, 0.2, 20})
-  light := world.spawn(&app.scene, {0, 12, 6})
-  render.attach(&app.renderer, light, render.light_create(&app.renderer, render.make_point_light(intensity = 500, radius = 25)))
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), scale = {20, 0.2, 20})
+  mjolnir.spawn(&app.scene, &app.renderer, render.light_create(&app.renderer, render.make_point_light(intensity = 500, radius = 25)), {0, 12, 6})
 
   app.model = gltf.model_create(&app.renderer, #load("assets/spider_leg.glb"))
   app.leg = gltf.instance_create(&app.model, &app.scene, &app.renderer)
@@ -126,15 +125,11 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   solve(app, dt)
-  world.update(&app.scene)
+  mjolnir.update(&app.scene, &app.renderer, dt)
   gltf.animate(&app.leg, &app.model, &app.scene, &app.renderer, dt)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
 }
 
 solve :: proc(app: ^App, dt: f32) {
@@ -186,8 +181,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "IK", {20, 20, 300, 380}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "IK", {20, 20, 300, 380}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Scenario")
     mu.layout_row(ctx, {68, 68, 68, 68}, 0)

@@ -43,7 +43,7 @@ Animator_State :: struct {
   bones:     [dynamic]u32,
   state:     [dynamic]f32,
   // per bone, one allocation: the pose and the joint limits
-  local:     []TRS,
+  local:     []geometry.Transform,
   positions: [][3]f32,
   rotations: []quaternion128,
   scales:    [][3]f32,
@@ -54,7 +54,7 @@ Animator_State :: struct {
 animator_init :: proc(self: ^Animator, rig: ^Rig) -> bool {
   skel := &rig.skeleton
   n := bone_count(skel)
-  size := n * (size_of(matrix[4, 4]f32) + size_of(quaternion128) + 2 * size_of([3]f32) + size_of(TRS) + size_of(JointLimit))
+  size := n * (size_of(matrix[4, 4]f32) + size_of(quaternion128) + 2 * size_of([3]f32) + size_of(geometry.Transform) + size_of(JointLimit))
   base, err := mem.alloc(max(size, 1), 16)
   if err != nil do return false
   p := uintptr(base)
@@ -62,8 +62,8 @@ animator_init :: proc(self: ^Animator, rig: ^Rig) -> bool {
   p += uintptr(n * size_of(matrix[4, 4]f32))
   self.rotations = ([^]quaternion128)(rawptr(p))[:n]
   p += uintptr(n * size_of(quaternion128))
-  self.local = ([^]TRS)(rawptr(p))[:n]
-  p += uintptr(n * size_of(TRS))
+  self.local = ([^]geometry.Transform)(rawptr(p))[:n]
+  p += uintptr(n * size_of(geometry.Transform))
   self.positions = ([^][3]f32)(rawptr(p))[:n]
   p += uintptr(n * size_of([3]f32))
   self.scales = ([^][3]f32)(rawptr(p))[:n]
@@ -226,7 +226,7 @@ bone_matrix :: proc(self: ^Animator, bone: u32) -> matrix[4, 4]f32 {
 
 // bone_locals writes each bone's transform after every layer relative to its parent bone (what
 // the palette shows, as a scene node under the parent's would hold it) into out.
-bone_locals :: proc(self: ^Animator, skel: ^Skeleton, out: []TRS) {
+bone_locals :: proc(self: ^Animator, skel: ^Skeleton, out: []geometry.Transform) {
   for i in 0 ..< min(len(out), len(self.positions), len(skel.parents)) {
     m := bone_matrix(self, u32(i))
     if p := skel.parents[i]; p >= 0 do m = linalg.inverse(bone_matrix(self, u32(p))) * m
@@ -478,12 +478,11 @@ leg_foot :: proc(self: ^Animator, layer: LayerHandle) -> (foot: [3]f32, ok: bool
   return leg_state(range_of(self.state[:], l.state)).foot, true
 }
 
-// destroy frees an animator, rig, skeleton, clip or spline, or an animator's layer, as its *_destroy does.
+// destroy frees an animator, rig, skeleton or clip, or an animator's layer, as its *_destroy does.
 destroy :: proc {
   animator_destroy,
   rig_destroy,
   skeleton_destroy,
   clip_destroy,
-  spline_destroy,
   layer_destroy,
 }

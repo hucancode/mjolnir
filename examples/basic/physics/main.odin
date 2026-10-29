@@ -71,12 +71,12 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   ground_half_extents := [3]f32{PLANE_WIDTH, 0.5, PLANE_HEIGHT}
   ground := world.spawn(&app.scene, ground_position)
   physics.body_create(&app.phys, ground_position, collider = physics.BoxCollider{half_extents = ground_half_extents}, user = world.Handle(ground))
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), parent = ground, scale = ground_half_extents)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), parent = ground, scale = ground_half_extents)
 
   ball_position := [3]f32{2.5, SPHERE_RADIUS, 0}
   ball := world.spawn(&app.scene, ball_position)
   physics.body_create(&app.phys, ball_position, collider = physics.SphereCollider{radius = SPHERE_RADIUS}, user = world.Handle(ball))
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .MAGENTA), parent = ball, scale = SPHERE_RADIUS)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .MAGENTA), parent = ball, scale = SPHERE_RADIUS)
 
   for x in 0 ..< NX do for y in 0 ..< NY do for z in 0 ..< NZ {
     pos := [3]f32{f32(x - NX/2) * 3.0, f32(y) * 3.0 + 10.0, f32(z - NZ/2) * 3.0}
@@ -90,7 +90,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     }
     node := world.spawn(&app.scene, pos)
     physics.body_create(&app.phys, pos, mass = 50.0, collider = collider, user = world.Handle(node))
-    mjolnir.spawn_mesh(&app.scene, &app.renderer, look, parent = node)
+    mjolnir.spawn(&app.scene, &app.renderer, look, parent = node)
   }
   log.infof("Created %d physics objects", PIECE_COUNT)
   app.orbit = render.make_orbit({10, 15, 10}, {0, 5, 0})
@@ -102,10 +102,9 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   physics.step(&app.phys, dt)
-  for k in physics.killed(&app.phys) do world.destroy(&app.scene, world.NodeHandle(k.user))
-  world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
+  mjolnir.sync_bodies(&app.scene, &app.phys)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 

@@ -29,12 +29,9 @@ ENVIRONMENTS := [?]Model{
   {"Overcast", #load("mjolnir/render/assets/environment.hdr")},
 }
 
-dir_intensity: f32 = 1.0
 rotate_speed: f32 = 0.5
 spinning: bool = true
-ibl_intensity: f32 = 1.0
 skybox_on: bool = true
-skybox_blur: f32 = 0.25
 
 App :: struct {
   platform:    platform.Platform,
@@ -75,11 +72,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({0, 0.24, 4.2}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  app.renderer.sun = {enabled = true, cast_shadow = true, color = {1, 0.98, 0.95}, intensity = dir_intensity, direction = {0, 0, -1}, shadow_distance = 15}
+  app.renderer.sun = {enabled = true, cast_shadow = true, color = {1, 0.98, 0.95}, intensity = 1, direction = {0, 0, -1}, shadow_distance = 15}
 
   app.turntable = world.spawn(&app.scene)
   app.mount = world.spawn(&app.scene, parent = app.turntable)
-  world.translate(&app.scene, app.mount, 0, -1, 0)
+  world.translate(&app.scene, app.mount, {0, -1, 0})
   show_model(app, 0)
   show_environment(app, 0)
   return .READY
@@ -112,14 +109,9 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
-  app.renderer.sun.intensity = dir_intensity
-  app.renderer.ibl_intensity = ibl_intensity
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.renderer.skybox_intensity = skybox_on ? 1 : 0
-  app.renderer.skybox_blur = skybox_blur
   if spinning do world.rotate_by(&app.scene, app.turntable, dt * rotate_speed, linalg.VECTOR3F32_Y_AXIS)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
@@ -129,16 +121,17 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "PBR Lighting", {20, 20, 220, 440}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "PBR Lighting", {20, 20, 220, 440}) {
   mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Sun intensity")
-    mu.slider(ctx, &dir_intensity, 0.0, 20.0)
+    mu.slider(ctx, &app.renderer.sun.intensity, 0.0, 20.0)
     mu.label(ctx, "IBL intensity")
-    mu.slider(ctx, &ibl_intensity, 0.0, 2.0)
+    mu.slider(ctx, &app.renderer.ibl_intensity, 0.0, 2.0)
     mu.checkbox(ctx, "Skybox", &skybox_on)
     mu.label(ctx, "Skybox blur")
-    mu.slider(ctx, &skybox_blur, 0.0, 1.0)
+    mu.slider(ctx, &app.renderer.skybox_blur, 0.0, 1.0)
     mu.checkbox(ctx, "Spinning", &spinning)
     mu.label(ctx, "Model:")
     mu.layout_row(ctx, {-1}, 0)

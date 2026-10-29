@@ -80,8 +80,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     weight            = 0.2,
     weight_spread     = 0.1,
   ))
-  emitter_node := world.spawn(&app.scene, {0, 2, 0})
-  render.attach(&app.renderer, emitter_node, app.emitter)
+  mjolnir.spawn(&app.scene, &app.renderer, app.emitter, {0, 2, 0})
   return .READY
 }
 
@@ -97,10 +96,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
@@ -109,11 +106,12 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
   em := render.emitter(&app.renderer, app.emitter)
   if em == nil do return
 
-  if debugui.window(&app.debug, "Particles", {20, 20, 320, 570}, {}) {
+  if debugui.window(&app.debug, "Particles", {20, 20, 320, 570}) {
     half := (mu.get_current_container(ctx).body.w - 3 * ctx.style.spacing) / 2
     mu.layout_row(ctx, {half, -1}, 0)
     for file, i in TEXTURE_FILES {

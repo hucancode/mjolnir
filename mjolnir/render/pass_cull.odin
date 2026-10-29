@@ -36,11 +36,6 @@ DRAW_WORDS :: 5
 @(private = "file")
 DRAW_BYTES :: DRAW_WORDS * size_of(u32)
 
-// Types whose shaders pull vertices from the index buffer (WebGPU): the draw is non-indexed,
-// two vertices per triangle edge for wireframe, one per index for random color.
-@(private)
-PULLED_TYPES :: bit_set[MaterialType]{.WIREFRAME, .RANDOM_COLOR}
-
 // A draw-list slot: one buffer. Compacted: DRAW_LIST_HEADER counts, then per list `capacity`
 // draws. Batched: per list a count (padded to 4 words), then per list MAX_BATCHES draws, then
 // per list `capacity` instance indices. Offsets are in words.
@@ -101,7 +96,7 @@ cull_init :: proc(self: ^Renderer) -> bool {
     self.reduce_pipeline = dev.compute_pipeline_create(&self.gpu, {shader_source("depth_reduce"), layout}) or_return
     self.pyramid_counters = dev.buffer_create(&self.gpu, {size = MAX_PYRAMID_SLOTS * size_of(u32), usage = {.STORAGE}}) or_return
     dev.buffer_write(&self.gpu, self.pyramid_counters, 0, make([]u8, MAX_PYRAMID_SLOTS * size_of(u32), context.temp_allocator))
-    dev.bindless_write(&self.gpu, .PYRAMID_COUNTERS, 0, rhi.BufferRange{buffer = self.pyramid_counters})
+    dev.bindless_write(&self.gpu, .EXTRA_BUFFERS, 0, rhi.BufferRange{buffer = self.pyramid_counters})
   } else {
     stages := bit_set[rhi.ShaderStage]{.COMPUTE}
     cull_entries := [?]rhi.BindEntry{{kind = .STORAGE_BUFFER, stages = stages}, {kind = .TEXTURE_UNFILTERABLE, stages = stages}}
@@ -148,15 +143,6 @@ pyramids_bind :: proc(self: ^Renderer, f: u32) {
   }
 }
 
-// Drops the bind groups of the cull and the pyramid build, made again on use.
-@(private)
-cull_groups_clear :: proc(self: ^Renderer) {
-  for _, g in self.cull_groups do dev.bind_group_retire(&self.gpu, g)
-  clear(&self.cull_groups)
-  for _, g in self.reduce_groups do dev.bind_group_retire(&self.gpu, g)
-  clear(&self.reduce_groups)
-}
-
 // draw_list_create makes draw-list slot `slot`, a camera's or the shadow views'. Compacted by
 // multi-draw: a camera DRAW_LISTS lists, one per material_list key, of CAMERA_LIST_CAPACITY
 // draws, the shadow views one list. Batched: one list per view (the shadow slot has a view per
@@ -184,7 +170,7 @@ draw_list_create :: proc(self: ^Renderer, slot: u32, shadow: bool) -> bool {
   dl.bytes = int(words) * size_of(u32)
   dl.buffer = dev.buffer_create(&self.gpu, {size = dl.bytes, usage = {.STORAGE, .INDIRECT, .VERTEX, .COPY_SRC, .COPY_DST}}) or_return
   self.draw_lists[slot] = dl
-  when BINDLESS do dev.bindless_write(&self.gpu, .DRAW_LISTS, slot, rhi.BufferRange{buffer = dl.buffer})
+  when BINDLESS do dev.bindless_write(&self.gpu, .STORAGE_BUFFERS, slot, rhi.BufferRange{buffer = dl.buffer})
   return true
 }
 
@@ -195,7 +181,7 @@ draw_list_destroy :: proc(self: ^Renderer, slot: u32) {
   if dl.buffer == 0 do return
   dev.buffer_retire(&self.gpu, dl.buffer)
   dl^ = {}
-  cull_groups_clear(self)
+  groups_clear(self)
 }
 
 // Zeroes slot's counts: the compacted cull appends to them, the batched adds to them. Without
@@ -284,16 +270,10 @@ pyramid_build_groups :: proc(self: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
   zero: u32
   pipeline_bind(self, cmd, self.reduce_pipeline, .NONE, 0, &zero, .NONE)
   for mip in 0 ..< mips {
-    key := ReduceKey{slot, mip, prev_depth if mip == 0 else 0}
-    group, cached := self.reduce_groups[key]
-    if !cached {
-      src := rhi.TextureView{prev_depth, -1} if mip == 0 else rhi.TextureView{pyramid, i32(mip - 1)}
-      resources := [2]rhi.BindResource{src, rhi.TextureView{pyramid, i32(mip)}}
-      ok: bool
-      group, ok = dev.bind_group_create(&self.gpu, {layout = self.reduce_layout, resources = resources[:]})
-      if !ok do return
-      self.reduce_groups[key] = group
-    }
+    src := rhi.TextureView{prev_depth, -1} if mip == 0 else rhi.TextureView{pyramid, i32(mip - 1)}
+    resources := [2]rhi.BindResource{src, rhi.TextureView{pyramid, i32(mip)}}
+    group := cached_group(self, ReduceKey{slot, mip, prev_depth if mip == 0 else 0}, self.reduce_layout, resources[:]) or_else 0
+    if group == 0 do return
     dev.cmd_bind_group(&self.gpu, cmd, 3, group)
     size := [2]u32{max(extent.x >> mip, 1), max(extent.y >> mip, 1)}
     dev.cmd_dispatch(&self.gpu, cmd, (size.x + 7) / 8, (size.y + 7) / 8, 1)
@@ -305,18 +285,12 @@ pyramid_build_groups :: proc(self: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
 @(private = "file")
 cull_batched :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, first_view, views: u32, pyramid: TextureHandle) {
   dl := &self.draw_lists[slot]
-  key := CullKey{slot, pyramid}
-  group, cached := self.cull_groups[key]
-  if !cached {
-    resources := [2]rhi.BindResource {
-      rhi.BufferRange{buffer = dl.buffer},
-      rhi.TextureView{texture = pyramid if pyramid != 0 else self.white, mip = -1},
-    }
-    ok: bool
-    group, ok = dev.bind_group_create(&self.gpu, {layout = self.cull_layout, resources = resources[:]})
-    if !ok do return
-    self.cull_groups[key] = group
+  resources := [2]rhi.BindResource {
+    rhi.BufferRange{buffer = dl.buffer},
+    rhi.TextureView{texture = pyramid if pyramid != 0 else self.white, mip = -1},
   }
+  group := cached_group(self, CullKey{slot, pyramid}, self.cull_layout, resources[:]) or_else 0
+  if group == 0 do return
   push := BatchPush {
     node_count      = self.node_count,
     first_view      = first_view,
@@ -383,6 +357,7 @@ draw_batches :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, key
   material_table := write_table(self, .MATERIALS, Material)
   dl := &self.draw_lists[slot]
   first_instance := dev.caps(&self.gpu).indirect_first_instance
+  types := material_types()
   if first_instance do dev.cmd_bind_vertex(&self.gpu, cmd, 1, dl.buffer, 0)
   for key, t in keys {
     // this key's entries
@@ -412,7 +387,7 @@ draw_batches :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, key
         dev.cmd_bind_vertex(&self.gpu, cmd, 1, dl.buffer, instances)
       }
       draw := int(dl.draws_base + (list * dl.draws_stride + id) * DRAW_WORDS) * size_of(u32)
-      if material_table[batch.material_id].type in PULLED_TYPES {
+      if types[material_table[batch.material_id].type].pulled {
         dev.cmd_draw_indirect(&self.gpu, cmd, dl.buffer, draw, u32(run), DRAW_BYTES)
       } else {
         dev.cmd_draw_indexed_indirect(&self.gpu, cmd, dl.buffer, draw, u32(run), DRAW_BYTES)

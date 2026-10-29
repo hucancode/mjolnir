@@ -11,11 +11,6 @@ import vk "vendor:vulkan"
 
 
 
-// Storage image slots: the pyramids' mips (MAX_PYRAMID_SLOTS), then the IBL precompute targets,
-// then the cameras' lit images, one per pyramid slot.
-@(private)
-MAX_STORAGE_IMAGES :: MAX_PYRAMID_SLOTS * rhi.MAX_DEPTH_MIPS + rhi.PRECOMPUTE_TARGETS + MAX_PYRAMID_SLOTS
-
 @(private)
 SCENE_STAGES :: vk.ShaderStageFlags{.VERTEX, .FRAGMENT, .COMPUTE}
 
@@ -26,18 +21,35 @@ BINDING_TEXTURES :: 0 // [MAX_TEXTURES] sampled images, 2D and cube
 @(private)
 BINDING_SAMPLERS :: 1 // one sampler per rhi.SamplerType
 @(private)
-BINDING_STORAGE_IMAGES :: 2 // [MAX_STORAGE_IMAGES] depth pyramid mips, IBL precompute targets, lit images
+BINDING_STORAGE_IMAGES :: 2 // [rhi.BindlessArray.STORAGE_IMAGES] storage images
 @(private)
-BINDING_DRAW_LISTS :: 3 // [MAX_DRAW_LIST_SLOTS] indirect draw list buffers
+BINDING_STORAGE_BUFFERS :: 3 // [rhi.BindlessArray.STORAGE_BUFFERS] storage buffers
 @(private)
-BINDING_PYRAMID_COUNTERS :: 4 // one u32 per depth pyramid
+BINDING_EXTRA_BUFFERS :: 4 // [rhi.BindlessArray.EXTRA_BUFFERS] storage buffers
 @(private)
-BINDLESS_BINDINGS := [?]DescriptorBinding {
-  BINDING_TEXTURES         = {.SAMPLED_IMAGE, rhi.MAX_TEXTURES, SCENE_STAGES},
-  BINDING_SAMPLERS         = {.SAMPLER, len(rhi.SamplerType), SCENE_STAGES},
-  BINDING_STORAGE_IMAGES   = {.STORAGE_IMAGE, MAX_STORAGE_IMAGES, {.COMPUTE}},
-  BINDING_DRAW_LISTS       = {.STORAGE_BUFFER, MAX_DRAW_LIST_SLOTS, {.COMPUTE}},
-  BINDING_PYRAMID_COUNTERS = {.STORAGE_BUFFER, 1, {.COMPUTE}},
+BINDLESS_ARRAY_BINDINGS := [rhi.BindlessArray]u32 {
+  .STORAGE_IMAGES  = BINDING_STORAGE_IMAGES,
+  .STORAGE_BUFFERS = BINDING_STORAGE_BUFFERS,
+  .EXTRA_BUFFERS   = BINDING_EXTRA_BUFFERS,
+}
+
+// init's sizes, each at least 1: Vulkan takes no empty binding.
+@(private)
+bindless_sizes :: proc(b: ^Backend) -> (sizes: [rhi.BindlessArray]u32) {
+  for n, a in b.bindless_sizes do sizes[a] = max(n, 1)
+  return
+}
+
+@(private)
+bindless_bindings :: proc(b: ^Backend) -> [5]DescriptorBinding {
+  sizes := bindless_sizes(b)
+  return {
+    BINDING_TEXTURES        = {.SAMPLED_IMAGE, rhi.MAX_TEXTURES, SCENE_STAGES},
+    BINDING_SAMPLERS        = {.SAMPLER, len(rhi.SamplerType), SCENE_STAGES},
+    BINDING_STORAGE_IMAGES  = {.STORAGE_IMAGE, sizes[.STORAGE_IMAGES], {.COMPUTE}},
+    BINDING_STORAGE_BUFFERS = {.STORAGE_BUFFER, sizes[.STORAGE_BUFFERS], {.COMPUTE}},
+    BINDING_EXTRA_BUFFERS   = {.STORAGE_BUFFER, sizes[.EXTRA_BUFFERS], {.COMPUTE}},
+  }
 }
 
 @(private = "file")
@@ -78,7 +90,8 @@ USAGES := [rhi.TextureUsage]vk.ImageUsageFlags {
 @(private)
 bindless_init :: proc(b: ^Backend) -> vk.Result {
   gctx := &b.gctx
-  b.bindless_layout = create_descriptor_layout(gctx, ..BINDLESS_BINDINGS[:]) or_return
+  bindings := bindless_bindings(b)
+  b.bindless_layout = create_descriptor_layout(gctx, ..bindings[:]) or_return
   for &sampler, type in b.samplers {
     desc := SAMPLERS[type]
     info := vk.SamplerCreateInfo {

@@ -99,8 +99,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
       weight            = 0.0,
       weight_spread     = 0.0,
     )
-    n := world.spawn(&app.scene, {0, 2, 0})
-    render.attach(&app.renderer, n, render.emitter_create(&app.renderer, em))
+    mjolnir.spawn(&app.scene, &app.renderer, render.emitter_create(&app.renderer, em), {0, 2, 0})
   }
 
   app.repel = spawn_field(app, 2.5, -15.0, 8.0, 4.0, {0.1, 0.5, 1.0, 1}, 1.2, 1.0)
@@ -124,15 +123,11 @@ update :: proc(app: ^App, dt: f32) {
   defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   for f in ([]^Field{&app.repel, &app.attract}) do world.rotate(&app.scene, f.pivot, app.time * f.spin_speed * f.spin_dir, linalg.VECTOR3F32_Y_AXIS)
-  world.update(&app.scene)
+  mjolnir.update(&app.scene, &app.renderer, dt)
   for f in ([]^Field{&app.repel, &app.attract}) do draw_field_marker(app, f)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
 }
 
 draw :: proc(app: ^App) -> bool {
@@ -157,8 +152,9 @@ field_panel :: proc(app: ^App, ctx: ^mu.Context, name: string, f: ^Field) {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Forcefields", {20, 20, 300, 550}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Forcefields", {20, 20, 300, 550}) {
     field_panel(app, ctx, "Repel (blue)", &app.repel)
     field_panel(app, ctx, "Attract (green)", &app.attract)
   }

@@ -1,4 +1,4 @@
-// Secondary camera rendered into a bindless texture.
+// A second camera rendered into a texture that a screen in the scene shows.
 package main
 
 import "mjolnir"
@@ -47,7 +47,7 @@ shutdown :: proc(app: ^App) {
 }
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, position: [3]f32, scale_factor: f32 = 1, cast_shadow := true) -> world.NodeHandle {
-  return mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, color, cast_shadow), position, scale = scale_factor)
+  return mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, color, cast_shadow), position, scale = scale_factor)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -64,7 +64,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   app.top_down_camera = render.camera_create(&app.renderer, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
   app.screen_material = render.material_create(&app.renderer, render.make_material())
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, app.screen_material, cast_shadow = false), {0, 2.5, -3.5}, scale = 3.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, app.screen_material, cast_shadow = false), {0, 2.5, -3.5}, scale = 3.0)
   return .READY
 }
 
@@ -73,13 +73,11 @@ update :: proc(app: ^App, dt: f32) {
   defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   world.rotate(&app.scene, app.spinner, app.time, linalg.VECTOR3F32_Y_AXIS)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
+  mjolnir.update(&app.scene, &app.renderer, dt)
   screen := render.material(&app.renderer, app.screen_material)
   screen.albedo_texture = render.camera_image(&app.renderer, app.top_down_camera, .FINAL_IMAGE, previous_frame = true)
-  render.update(&app.renderer, dt)
 }
 
 draw :: proc(app: ^App) -> bool {

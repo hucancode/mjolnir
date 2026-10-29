@@ -5,14 +5,8 @@ import "core:math/linalg"
 import "core:slice"
 import "core:strings"
 
-// TRS is the local transform of one bone.
-TRS :: geometry.Transform
-
-// TRS_IDENTITY is the transform that leaves a bone unchanged.
-TRS_IDENTITY :: geometry.TRANSFORM_IDENTITY
-
 // trs_matrix returns t as a 4x4 matrix.
-trs_matrix :: #force_inline proc "contextless" (t: TRS) -> matrix[4, 4]f32 {
+trs_matrix :: #force_inline proc "contextless" (t: geometry.Transform) -> matrix[4, 4]f32 {
   return linalg.matrix4_from_trs(t.position, t.rotation, t.scale)
 }
 
@@ -25,7 +19,7 @@ Skeleton :: struct {
   order:        []u32, // every parent appears before its children
   inverse_bind: []matrix[4, 4]f32,
   bind:         []matrix[4, 4]f32, // skeleton-space rest pose
-  rest:         []TRS, // local rest pose
+  rest:         []geometry.Transform, // local rest pose
   lengths:      []f32, // rest distance to parent (0 for roots)
   depths:       []u32, // root = 0
 }
@@ -38,7 +32,7 @@ skeleton_init :: proc(
   parents: []i32,
   inverse_bind: []matrix[4, 4]f32,
   names: []string = nil,
-  rest: []TRS = nil,
+  rest: []geometry.Transform = nil,
 ) -> bool {
   n := len(parents)
   if len(inverse_bind) != n do return false
@@ -68,7 +62,7 @@ skeleton_init :: proc(
     return false
   }
   self.bind = make([]matrix[4, 4]f32, n)
-  self.rest = make([]TRS, n)
+  self.rest = make([]geometry.Transform, n)
   self.lengths = make([]f32, n)
   for i in 0 ..< n do self.bind[i] = linalg.matrix4_inverse(inverse_bind[i])
   for i in self.order {

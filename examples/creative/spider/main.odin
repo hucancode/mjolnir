@@ -97,7 +97,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({0, 20, 20}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), scale = {GROUND_SIZE, 0.2, GROUND_SIZE})
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), scale = {GROUND_SIZE, 0.2, GROUND_SIZE})
   light := world.spawn(&app.scene, {0, 8, 0})
   render.attach(&app.renderer, light, render.light_create(&app.renderer, render.make_point_light(intensity = 1200, radius = 80)))
 
@@ -132,16 +132,12 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   walk(app, dt)
-  world.update(&app.scene)
+  mjolnir.update(&app.scene, &app.renderer, dt)
   if app.grounded do pose_legs(app, dt)
   else do ground_body(app)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
 }
 
 ground_body :: proc(app: ^App) {
@@ -202,8 +198,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Spider Legs", {20, 20, 300, 350}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Spider Legs", {20, 20, 300, 350}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Move: WASD")
     mu.checkbox(ctx, "Autopilot", &app.autopilot)

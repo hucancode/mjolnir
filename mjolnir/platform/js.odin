@@ -115,7 +115,7 @@ fail :: proc() {
 sleep :: proc(ms: f64) {}
 
 // read_file fails: the web has no file system. #load the bytes instead.
-read_file :: proc(path: string, allocator := context.allocator) -> (data: []u8, ok: bool) {
+read_file :: proc(path: string, allocator := context.allocator) -> (data: []u8, ok: bool) #optional_ok {
   log.errorf("Failed to read '%s': no file system on the web", path)
   return nil, false
 }

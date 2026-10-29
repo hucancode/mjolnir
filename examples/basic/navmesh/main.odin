@@ -72,10 +72,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GREEN, cast_shadow = false), scale = GROUND_HALF_SIZE)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GREEN, cast_shadow = false), scale = GROUND_HALF_SIZE)
   bake.append_box(&builder, {0, -0.5, 0}, {GROUND_HALF_SIZE, 0.5, GROUND_HALF_SIZE})
   for box in OBSTACLES {
-    mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .RED), box.center, scale = box.half_extents)
+    mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .RED), box.center, scale = box.half_extents)
     bake.append_box(&builder, box.center, box.half_extents, area = bake.AREA_BLOCKED)
   }
   data, baked := bake.build(&builder, allocator = context.temp_allocator)
@@ -86,8 +86,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   show_navmesh(app)
 
   app.agent_position = {-20, 0, -20}
-  app.agent = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CYLINDER, .BLUE), app.agent_position + {0, AGENT_HALF_HEIGHT, 0}, scale = {0.5, AGENT_HALF_HEIGHT, 0.5})
-  app.goal_marker = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .YELLOW), scale = 0.3)
+  app.agent = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CYLINDER, .BLUE), app.agent_position + {0, AGENT_HALF_HEIGHT, 0}, scale = {0.5, AGENT_HALF_HEIGHT, 0.5})
+  app.goal_marker = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .YELLOW), scale = 0.3)
   go_to(app, {20, 0, 20})
   return .READY
 }
@@ -96,8 +96,7 @@ show_navmesh :: proc(app: ^App) {
   positions, indices := nav.debug_triangles(&app.navmesh, context.temp_allocator)
   mesh := render.mesh_create(&app.renderer, geometry.make_mesh_from_triangles(positions, indices))
   material := render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {1.0, 0.8, 0.3, 0.3}))
-  overlay := world.spawn(&app.scene)
-  render.attach(&app.renderer, overlay, render.MeshAttachment{mesh = mesh, material = material})
+  mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = mesh, material = material})
 }
 
 shutdown :: proc(app: ^App) {
@@ -122,7 +121,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if !app.input.mouse_captured && input.mouse_pressed(&app.input, .RIGHT) {
     ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
     if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do go_to(app, goal)

@@ -9,7 +9,6 @@ import "core:math/linalg"
 import "core:math/rand"
 import mu "vendor:microui"
 import "mjolnir"
-import "mjolnir/animation"
 import "mjolnir/debugui"
 import "mjolnir/geometry"
 import "mjolnir/input"
@@ -119,7 +118,7 @@ App :: struct {
   debug:     debugui.Context,
   input:     input.State,
   orbit:     render.Orbit,
-  loop:      animation.Spline([3]f32),
+  loop:      geometry.Spline([3]f32),
   total:     f32,
   meshes:    map[Unit]render.MeshHandle,
   materials: [len(PALETTE)]render.MaterialHandle,
@@ -150,8 +149,8 @@ main :: proc() {
   if !platform.init(&app.platform, 1280, 720, "Dragon") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
-  if !animation.spline_init_closed(&app.loop, LOOP[:], 2048) do return
-  app.total = animation.spline_arc_length(app.loop)
+  if !geometry.spline_init_closed(&app.loop, LOOP[:], 2048) do return
+  app.total = geometry.spline_arc_length(app.loop)
   mjolnir.run(
     mjolnir.Loop(App) {
       app = app,
@@ -172,7 +171,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(r) do return .WAIT
   if !debugui.init(&app.debug, r) do return .FAIL
 
-  mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .CUBE, .GRAY), {0, -0.05, 0}, scale = {24, 0.05, 24})
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .CUBE, .GRAY), {0, -0.05, 0}, scale = {24, 0.05, 24})
   lamp := world.spawn(&app.scene, {0, 4, 0})
   render.attach(r, lamp, render.light_create(r, render.make_point_light(color = {1, 0.95, 0.85}, intensity = 40, radius = 20)))
 
@@ -194,7 +193,7 @@ shutdown :: proc(app: ^App) {
   delete(app.pieces)
   delete(app.bones)
   delete(app.links)
-  animation.spline_destroy(&app.loop)
+  geometry.spline_destroy(&app.loop)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
   render.shutdown(&app.renderer)
@@ -206,12 +205,10 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   panel(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   dragging := !app.input.mouse_captured && input.mouse_down(&app.input, .LEFT)
   if !dragging do app.orbit.yaw += app.spin * dt * 0.5
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
 
   if app.autoplay do app.pose.offset = math.mod(app.pose.offset + dt / LAP_SECONDS, 1)
   build_step(app, dt)
@@ -233,8 +230,9 @@ place :: proc(app: ^App) {
 }
 
 panel :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Dragon", {20, 20, 290, 180}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Dragon", {20, 20, 290, 180}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Autoplay", &app.autoplay)
     mu.layout_row(ctx, {110, -1}, 0)
@@ -463,7 +461,7 @@ ride :: proc(app: ^App, pose: Pose) {
 }
 
 position_at :: proc(app: ^App, s: f32) -> [3]f32 {
-  return animation.spline_sample_uniform(app.loop, s - math.floor(s / app.total) * app.total)
+  return geometry.spline_sample_uniform(app.loop, s - math.floor(s / app.total) * app.total)
 }
 
 tangent_at :: proc(app: ^App, s: f32) -> [3]f32 {

@@ -10,7 +10,7 @@ import "core:slice"
 // (a view valid for that call); fill one over arrays of your own to run ik_solve, aim_bone or
 // pose_blend on a pose you hold.
 Pose :: struct {
-  local:      []TRS,
+  local:      []geometry.Transform,
   positions:  [][3]f32,
   rotations:  []quaternion128,
   scales:     [][3]f32,

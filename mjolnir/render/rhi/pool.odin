@@ -1,6 +1,7 @@
 package rhi
 
 // Pool is the storage behind a backend's handles: index 0 is none, released slots are reused.
+// Not containers.Slots: rhi is Layer 0 too, so it imports no package of the engine.
 Pool :: struct($T: typeid) {
   items: [dynamic]T,
   free:  [dynamic]u32,

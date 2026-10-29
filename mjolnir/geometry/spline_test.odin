@@ -1,6 +1,6 @@
 #+build !js
 #+private
-package animation
+package geometry
 
 import "core:math"
 import "core:math/linalg"
@@ -8,6 +8,11 @@ import "core:testing"
 import "core:log"
 import "core:time"
 import "base:runtime"
+
+@(private = "file")
+almost_equal_quaternion :: proc(a, b: quaternion128, eps: f32 = 1e-5) -> bool {
+  return abs(a.x - b.x) <= eps && abs(a.y - b.y) <= eps && abs(a.z - b.z) <= eps && abs(a.w - b.w) <= eps
+}
 
 @(test)
 test_spline_scalar_interpolation :: proc(t: ^testing.T) {

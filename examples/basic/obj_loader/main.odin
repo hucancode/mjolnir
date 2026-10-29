@@ -93,10 +93,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
@@ -111,7 +109,7 @@ show_model :: proc(app: ^App, index: int) {
 
   cam_dist := radius
   cam := render.main_camera(&app.renderer)
-  render.camera_set_perspective(cam, 1.2, max(0.1, cam_dist * 0.01), cam_dist * 5.0)
+  cam.projection, cam.near, cam.far = render.PerspectiveProjection{1.2}, max(0.1, cam_dist * 0.01), cam_dist * 5.0
   app.orbit = render.make_orbit({cam_dist, cam_dist * 0.7, cam_dist}, {0, 0, 0})
   render.camera_orbit(cam, app.orbit)
 }
@@ -127,8 +125,9 @@ attach_model :: proc(app: ^App) {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "OBJ Loader", {20, 20, 260, 200}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "OBJ Loader", {20, 20, 260, 200}) {
     labels := OBJ_LABELS
     mu.label(ctx, fmt.tprintf("Current: %s", labels[app.current]))
     mu.label(ctx, "")

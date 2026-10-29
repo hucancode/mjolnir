@@ -131,16 +131,14 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
   app.fps += (1 / max(dt, 1e-4) - app.fps) * FPS_SMOOTHING
 
   size := platform.framebuffer_size(&app.platform)
   aspect := f32(size.x) / f32(max(size.y, 1))
   app.half = {VIEW_HEIGHT * aspect, VIEW_HEIGHT} / 2
   cam := render.main_camera(&app.renderer)
-  render.camera_set_orthographic(cam, VIEW_HEIGHT)
+  cam.projection = render.OrthographicProjection{VIEW_HEIGHT}
   render.camera_look_at(cam, {0, 0, 10}, {0, 0, 0})
 
   if input.mouse_down(&app.input, .LEFT) && !app.input.mouse_captured {
@@ -164,7 +162,7 @@ update :: proc(app: ^App, dt: f32) {
       b.position.y = limit.y
       b.velocity.y = 0
     }
-    world.translate(&app.scene, b.node, b.position.x, b.position.y, 0)
+    world.translate(&app.scene, b.node, {b.position.x, b.position.y, 0})
   }
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
@@ -184,8 +182,9 @@ spawn :: proc(app: ^App, at: [2]f32) {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Bunnymark", {20, 20, 200, 120}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Bunnymark", {20, 20, 200, 120}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, fmt.tprintf("Bunnies %d", len(app.bunnies)))
     mu.label(ctx, fmt.tprintf("FPS %.0f", app.fps))

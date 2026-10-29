@@ -412,7 +412,7 @@ query_polygons_in_tile_bv :: proc(
     node := &tile.bv_tree[node_index]
     node_min := [3]i32{i32(node.bmin[0]), i32(node.bmin[1]), i32(node.bmin[2])}
     node_max := [3]i32{i32(node.bmax[0]), i32(node.bmax[1]), i32(node.bmax[2])}
-    overlap := geometry.overlap_quantized_bounds(
+    overlap := geometry.overlap_bounds(
       iqmin,
       iqmax,
       node_min,

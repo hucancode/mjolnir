@@ -494,7 +494,7 @@ enter_level :: proc(app: ^App) {
   defer bake.destroy(&builder)
   bake.append_box(&builder, {0, -0.5, 0}, {ARENA * 2, 0.5, ARENA * 2})
   for box in LEVELS[level].obstacles {
-    mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), box.center, scale = box.half_extents)
+    mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), box.center, scale = box.half_extents)
     append(&app.bodies, physics.body_create(&app.phys, box.center, collider = physics.BoxCollider{half_extents = box.half_extents}))
     bake.append_box(&builder, box.center, box.half_extents, area = bake.AREA_BLOCKED)
   }
@@ -517,10 +517,8 @@ enter_level :: proc(app: ^App) {
   for &emitter, effect in app.emitters do emitter = render.emitter_create(&app.renderer, effect_emitter(app, effect))
   torch_light := render.light_create(&app.renderer, render.make_point_light({1, 0.55, 0.2}, 30, 9, cast_shadow = false))
   for corner in ([4][3]f32{{-1, 0, -1}, {1, 0, -1}, {1, 0, 1}, {-1, 0, 1}}) {
-    torch := world.spawn(&app.scene, corner * (ARENA - 2) + {0, 0.2, 0})
-    render.attach(&app.renderer, torch, app.emitters[.FIRE])
-    glow := world.spawn(&app.scene, {0, 1, 0}, parent = torch)
-    render.attach(&app.renderer, glow, torch_light)
+    torch := mjolnir.spawn(&app.scene, &app.renderer, app.emitters[.FIRE], corner * (ARENA - 2) + {0, 0.2, 0})
+    mjolnir.spawn(&app.scene, &app.renderer, torch_light, {0, 1, 0}, parent = torch)
   }
   fire_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {1, 0.4, 0.1, 1}, emissive_value = 1.5))
   app.fireball = render.primitive(&app.renderer, .SPHERE, fire_material, cast_shadow = false)
@@ -559,7 +557,7 @@ enter_level :: proc(app: ^App) {
 }
 
 spawn_ground :: proc(app: ^App) {
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = ARENA * 2)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = ARENA * 2)
   append(&app.bodies, physics.body_create(&app.phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {ARENA, 0.5, ARENA}}))
 }
 
@@ -667,10 +665,8 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.platform, &app.input)
   if input.key_pressed(&app.input, .F1) do app.show_debug = !app.show_debug
   fsm.update(&app.screen, SCREENS, app, dt)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
   draw_hud(app)
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 update_select :: proc(app: ^App, dt: f32) -> Screen {
@@ -680,7 +676,7 @@ update_select :: proc(app: ^App, dt: f32) -> Screen {
     app.hero = (app.hero + step + len(HEROES)) % len(HEROES)
     actor_play(&app.lineup[app.hero], .CHEER)
   }
-  world.translate(&app.scene, app.spotlight, f32(app.hero) * 2.2 - 4.4, 5, 3)
+  world.translate(&app.scene, app.spotlight, {f32(app.hero) * 2.2 - 4.4, 5, 3})
   for &a, i in app.lineup {
     actor_move(&a, false)
     gltf.animate(&a.instance, &app.heroes[i], &app.scene, &app.renderer, dt)
@@ -694,14 +690,14 @@ update_select :: proc(app: ^App, dt: f32) -> Screen {
 update_level :: proc(app: ^App, dt: f32) -> Screen {
   update_player(app, dt)
   physics.step(&app.phys, dt)
-  world.set_world_poses(&app.scene, physics.body_poses(&app.phys))
+  mjolnir.sync_bodies(&app.scene, &app.phys)
   nav.crowd_update(&app.crowd, dt)
   world.set_world_poses(&app.scene, nav.agent_poses(&app.crowd))
   update_enemies(app, dt)
   update_projectiles(app, dt)
   update_pickups(app, dt)
   app.orbit.target = feet(app) + {0, 1.8, 0}
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, {.RIGHT}, min_distance = 4, max_distance = 20)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, {.RIGHT}, min_distance = 4, max_distance = 20)
   if app.show_debug do draw_debug(app)
   if app.result_timer == 0 && len(app.enemies) == 0 && app.player.health > 0 {
     actor_play(&app.player, .CHEER)

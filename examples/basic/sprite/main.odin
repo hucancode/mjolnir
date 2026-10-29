@@ -120,7 +120,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   node, node_ok := world.spawn(&app.scene, {0, 1.5, 0})
   if !node_ok do return .FAIL
   render.attach(&app.renderer, node, render.primitive(&app.renderer, .QUAD_XY, app.sprite, cast_shadow = false))
-  world.scale(&app.scene, node, SPRITE_HEIGHT * CELL_ASPECT, SPRITE_HEIGHT, 1)
+  world.scale(&app.scene, node, {SPRITE_HEIGHT * CELL_ASPECT, SPRITE_HEIGHT, 1})
 
   return .READY
 }
@@ -129,10 +129,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {})
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {})
   app.elapsed += dt
   clip := ACTION_CLIPS[app.action] if app.acting else STATE_CLIPS[app.state]
   step := u32(app.elapsed * FPS)
@@ -147,8 +145,9 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Animation", {20, 20, 200, 450}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Animation", {20, 20, 200, 450}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "State")
     for state in State {

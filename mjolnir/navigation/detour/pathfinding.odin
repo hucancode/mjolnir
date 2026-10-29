@@ -370,7 +370,9 @@ find_path :: proc(
     }
   }
   if best_node == nil do return {.Invalid_Param}, 0
-  return get_path_to_node(query, best_node, path, max_path)
+  status, path_count = get_path_to_node(query, best_node, path, max_path)
+  if best_node.id != end_ref do status |= {.Partial_Result}
+  return
 }
 
 @(private)

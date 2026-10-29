@@ -348,7 +348,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(r) do return .WAIT
   if !debugui.init(&app.debug, r) do return .FAIL
 
-  mjolnir.spawn_mesh(&app.scene, r, render.primitive(r, .CUBE, .GRAY), {0, -0.05, 0}, scale = {20, 0.05, 20})
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .CUBE, .GRAY), {0, -0.05, 0}, scale = {20, 0.05, 20})
 
   disc_r := shoulder_disc_radius()
   app.meshes = {
@@ -406,10 +406,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   panel(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
 
   if app.dancing do choreo_step(&app.choreo, dt * app.tempo * PERIOD / 60, &app.pose)
   step := MAX_JOINT_SPEED * dt
@@ -469,8 +467,9 @@ recolor :: proc(app: ^App) {
 }
 
 panel :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Settings", {20, 20, 290, 245}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Settings", {20, 20, 290, 245}) {
     mu.layout_row(ctx, {90, -1}, 0)
     mu.checkbox(ctx, "Dance", &app.dancing)
     if .CHANGE in mu.checkbox(ctx, "Mirror", &app.choreo.mirror) do choreo_rewire(&app.choreo)

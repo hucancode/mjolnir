@@ -17,11 +17,6 @@ BINDLESS :: false
 // A pass renders into one layer.
 LAYERED_RENDERING :: false
 
-// Depth pyramids and draw lists live in slots render assigns: a pyramid and a draw-list slot
-// per camera and frame in flight, plus a draw-list slot per frame for the shadow views.
-MAX_PYRAMID_SLOTS :: rhi.MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
-MAX_DRAW_LIST_SLOTS :: (rhi.MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
-
 
 
 
@@ -72,10 +67,10 @@ Backend :: struct {
   cmds:                       [MAX_CMDS]Cmd,
 }
 
-// init brings WebGPU up on window: instance, surface, then adapter and device, which the web
+// init brings WebGPU up on window, which has no bindless arrays: instance, surface, then adapter and device, which the web
 // hands over asynchronously; once they are there it makes the samplers and the push group
 // (ready). Paired with shutdown.
-init :: proc(b: ^Backend, window: WindowHandle) -> bool {
+init :: proc(b: ^Backend, window: WindowHandle, _: [rhi.BindlessArray]u32) -> bool {
   b.context_ = context
   b.window = window
   b.instance = wgpu.CreateInstance(nil)

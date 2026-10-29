@@ -39,7 +39,7 @@ test_set_world_pose_under_moved_root :: proc(t: ^testing.T) {
   w: World
   init(&w)
   defer shutdown(&w)
-  translate(&w, w.root, 10, 0, 0)
+  translate(&w, w.root, {10, 0, 0})
   child, ok := node_create(&w)
   testing.expect(t, ok)
   update(&w)
@@ -84,7 +84,7 @@ test_node_translate :: proc(t: ^testing.T) {
   child, ok := node_create(&w, parent = parent_handle)
   child_ptr := node(&w, child)
   testing.expectf(t, ok, "failed to spawn child node")
-  translate(&w, child, 4, 5, 6)
+  translate(&w, child, {4, 5, 6})
   update(&w)
   actual := world_matrix(&w, child)
   expected := matrix[4, 4]f32{
@@ -105,7 +105,7 @@ test_node_rotate :: proc(t: ^testing.T) {
   child_ptr := node(&w, child)
   testing.expectf(t, ok, "failed to spawn node")
   rotate(&w, child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
-  translate(&w, child, 1, 0, 0)
+  translate(&w, child, {1, 0, 0})
   update(&w)
   actual := world_matrix(&w, child)
   expected := matrix[4, 4]f32{
@@ -127,7 +127,7 @@ test_node_scale :: proc(t: ^testing.T) {
   child, child_ok := node_create(&w, parent = parent_handle)
   child_ptr := node(&w, child)
   testing.expectf(t, child_ok, "failed to spawn child node")
-  scale(&w, child, 5, 6, 7)
+  scale(&w, child, {5, 6, 7})
   update(&w)
   actual := world_matrix(&w, child)
   expected := matrix[4, 4]f32{
@@ -149,7 +149,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   testing.expectf(t, node_ok, "failed to spawn node")
   scale(&w, n, 2)
   rotate(&w, n, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
-  translate(&w, n, 3, 4, 5)
+  translate(&w, n, {3, 4, 5})
   update(&w)
   actual := world_matrix(&w, n)
   // Expected matrix after applying scale, rotation, and translation
@@ -176,7 +176,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   node3_handle, node3_ok := node_create(&w, parent = node2_handle)
   node3 := node(&w, node3_handle)
   testing.expectf(t, node3_ok, "failed to spawn node3")
-  translate(&w, node1_handle, x = 1)
+  translate(&w, node1_handle, {1, 0, 0})
   rotate(&w, node2_handle, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   scale(&w, node3_handle, 2)
   update(&w)
@@ -220,7 +220,7 @@ create_scene :: proc(self: ^World, max_node: int, max_depth: int) {
     current := pop_front(&queue)
     if current.depth < max_depth {
       child_handle := node_create(self, parent = current.handle) or_continue
-      translate(self, child_handle, f32(n % 10) * 0.1, 0, 0)
+      translate(self, child_handle, {f32(n % 10) * 0.1, 0, 0})
       rotate(
         self,
         child_handle,
@@ -230,7 +230,7 @@ create_scene :: proc(self: ^World, max_node: int, max_depth: int) {
       append(&queue, QueueEntry{child_handle, current.depth + 1})
     } else {
       child_handle := node_create(self) or_continue
-      translate(self, child_handle, f32(n % 10) * 0.1, 0, 0)
+      translate(self, child_handle, {f32(n % 10) * 0.1, 0, 0})
       rotate(
         self,
         child_handle,
@@ -445,7 +445,7 @@ test_update_walks_only_touched_subtrees :: proc(t: ^testing.T) {
   for &n, i in nodes do n = spawn(&w, {f32(i), 0, 0})
   child := spawn(&w, {0, 1, 0}, parent = nodes[42])
   update(&w)
-  translate(&w, nodes[42], 0, 0, 5)
+  translate(&w, nodes[42], {0, 0, 5})
   update(&w)
   feed := changes(&w)
   testing.expect_value(t, len(feed), 2)

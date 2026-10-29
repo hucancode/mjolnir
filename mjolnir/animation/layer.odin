@@ -1,5 +1,6 @@
 package animation
 
+import "../geometry"
 import "../containers"
 
 import "core:math"
@@ -67,7 +68,7 @@ BlendMode :: enum {
 // REPLACE/OVERRIDE weight so far is `acc_w`. `rest` is the bone's rest pose, the
 // reference ADD offsets are measured from.
 @(private)
-blend_sample :: proc(acc: ^TRS, acc_w: ^f32, s, rest: TRS, w: f32, mode: BlendMode) {
+blend_sample :: proc(acc: ^geometry.Transform, acc_w: ^f32, s, rest: geometry.Transform, w: f32, mode: BlendMode) {
   id := linalg.QUATERNIONF32_IDENTITY
   w := min(w, 1)
   switch mode {

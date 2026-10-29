@@ -82,10 +82,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   fill_grid(app)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
@@ -95,7 +93,8 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
   if debugui.window(&app.debug, "Grid", {1020, 20, 240, 200}, {.RIGHT, .TOP}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, fmt.tprintf("Cubes: %d / %d", len(app.cubes), app.size * app.size))
@@ -103,7 +102,7 @@ debug_ui :: proc(app: ^App) {
       if .SUBMIT in mu.button(ctx, fmt.tprintf("%dx%d", n, n)) && n != app.size do select_size(app, n)
     }
   }
-  if debugui.window(&app.debug, "GPU", {20, 20, 240, 250}, {}) {
+  if debugui.window(&app.debug, "GPU", {20, 20, 240, 250}) {
     timings := render.gpu_timings(&app.renderer)
     if len(timings) == 0 do mu.label(ctx, "No GPU timers on this device")
     mu.layout_row(ctx, {150, -1}, 0)

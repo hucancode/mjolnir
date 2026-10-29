@@ -41,6 +41,9 @@ build-wgpu: shader
 # EXAMPLE picks one (cube when unset); record takes all of them when unset.
 example_dir = $(firstword $(wildcard examples/*/$(1)))
 EXAMPLES := $(notdir $(patsubst %/main.odin,%,$(wildcard examples/*/*/main.odin)))
+# examples/modules/<module>_only use one module alone; they skip the web site's builds.
+MODULE_EXAMPLES := $(notdir $(patsubst %/main.odin,%,$(wildcard examples/modules/*/main.odin)))
+WEB_EXAMPLES := $(filter-out $(MODULE_EXAMPLES),$(EXAMPLES))
 ONE_EXAMPLE = $(or $(EXAMPLE),cube)
 
 example: shader
@@ -73,7 +76,7 @@ doc: shader
 	mkdir -p docs/build
 	cp -R docs/site/. docs/build/
 	$(web_runtime)
-	@for name in $(EXAMPLES); do \
+	@for name in $(WEB_EXAMPLES); do \
 		echo "wasm: $$name"; \
 		odin build $$(ls -d examples/*/$$name) $(WASM_FLAGS) -out:$(WEB_OUT)/$$name.wasm >/dev/null 2>&1 \
 			|| echo "  skipped $$name (no web build)"; \
@@ -84,6 +87,20 @@ doc: shader
 # docs/site/videos/<example>.mp4 and docs/site/posters/<example>.jpg (see examples/record.sh).
 record: shader
 	./examples/record.sh $(RECORD_ARGS) $(EXAMPLE)
+
+# Runs every modules example (windowed ones for MODULE_FRAMES frames), writing artifacts/modules/,
+# after checking each imports no root package and Layer 2+ packages of one module only.
+MODULE_FRAMES ?= 120
+modules: shader
+	@for d in examples/modules/*/; do \
+		name=$$(basename $$d); \
+		imports=$$(grep -ho '"mjolnir[^"]*"' $$d*.odin | tr -d '"' | sort -u); \
+		if echo "$$imports" | grep -qx mjolnir; then echo "$$name imports the root package"; exit 1; fi; \
+		families=$$(for i in $$imports; do grep -q "^// Layer [23]" $$i/doc.odin 2>/dev/null && echo $$i | cut -d/ -f2; done | sort -u); \
+		if [ $$(echo "$$families" | grep -c .) -gt 1 ]; then echo "$$name uses more than one module: $$families"; exit 1; fi; \
+		echo "== $$name"; \
+		odin run $$d -out:bin/$$name -define:FRAMES=$(MODULE_FRAMES) || exit 1; \
+	done
 
 clean:
 	rm -rf bin/*
@@ -119,4 +136,4 @@ compare-physics:
 	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt
 	perf report -i perf.data --stdio --no-children -n --percent-limit 1 >perf_report_after.txt
 
-.PHONY: run debug build build-debug shader run-wgpu build-wgpu example example-wgpu web doc record clean long-proc long-file long-example compare-physics
+.PHONY: run debug build build-debug shader run-wgpu build-wgpu example example-wgpu web doc record modules clean long-proc long-file long-example compare-physics

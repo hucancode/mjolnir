@@ -136,10 +136,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = ARENA)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = ARENA)
   bake.append_box(&builder, {0, -0.5, 0}, {ARENA, 0.5, ARENA})
   for wall in WALLS {
-    mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .WHITE), wall.center, scale = wall.half_extents)
+    mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .WHITE), wall.center, scale = wall.half_extents)
     bake.append_box(&builder, wall.center, wall.half_extents, area = bake.AREA_BLOCKED)
   }
   data, baked := bake.build(&builder, allocator = context.temp_allocator)
@@ -148,14 +148,14 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     return .FAIL
   }
 
-  app.intruder.node = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .MAGENTA), scale = 0.6)
+  app.intruder.node = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, .MAGENTA), scale = 0.6)
 
   for &g, i in app.guards {
     g.app = app
     g.route = ROUTES[i]
     g.position = g.route[0]
     g.node = world.spawn(&app.scene, g.position + {0, HALF_HEIGHT, 0})
-    world.scale(&app.scene, g.node, [3]f32{0.5, HALF_HEIGHT, 0.5})
+    world.scale(&app.scene, g.node, {0.5, HALF_HEIGHT, 0.5})
     fsm.start(&g.machine, MODES, &g, .PATROL)
   }
   respawn_intruder(app)
@@ -176,7 +176,7 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if !app.input.mouse_captured && input.mouse_pressed(&app.input, .RIGHT) {
     ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
     if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do walk_to(app, &app.intruder, goal)

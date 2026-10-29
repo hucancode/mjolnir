@@ -1,4 +1,4 @@
-// Hierarchical transforms and traversal.
+// Hierarchical transforms: a sun, its planets and a moon, each spinning its children along.
 package main
 
 import "mjolnir"
@@ -50,18 +50,18 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({0, 10, 4}, {0, 0, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -2, 0}, scale = 20.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -2, 0}, scale = 20.0)
 
   sun_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.8, 0.2, 1.0}, emissive_value = 2.0))
-  app.sun = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, sun_material), scale = 1.2)
+  app.sun = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, sun_material), scale = 1.2)
 
   planet_colors := [3]render.Color{.CYAN, .GREEN, .MAGENTA}
   planet_distances := [3]f32{3.5, 6.0, 9.0}
   for &planet, i in app.planets {
-    planet = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, planet_colors[i]), {planet_distances[i], 0, 0}, scale = 0.5, parent = app.sun)
+    planet = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, planet_colors[i]), {planet_distances[i], 0, 0}, scale = 0.5, parent = app.sun)
   }
 
-  app.moon = mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .WHITE), {1.5, 0, 0}, scale = 0.3, parent = app.planets[2])
+  app.moon = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .WHITE), {1.5, 0, 0}, scale = 0.3, parent = app.planets[2])
   return .READY
 }
 
@@ -77,10 +77,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.phase += dt * orbit_speed
   world.rotate(&app.scene, app.sun, app.phase * 0.3)
   for planet, i in app.planets {
@@ -95,8 +93,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Scene Graph", {20, 20, 260, 180}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Scene Graph", {20, 20, 260, 180}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Hierarchy: sun > planets > moon")
     mu.label(ctx, "Orbit speed")

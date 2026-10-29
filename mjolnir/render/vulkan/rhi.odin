@@ -198,6 +198,7 @@ rhi_shutdown :: proc(b: ^Backend) {
   delete(b.timings)
   for &buf in b.buffers.items do if buf.buffer != 0 do buffer_destroy(&b.gctx, &buf)
   for view in b.storage_views do if view != 0 do vk.DestroyImageView(device, view, nil)
+  delete(b.storage_views)
   for &g in b.groups.items {
     for v in g.views do vk.DestroyImageView(device, v, nil)
     delete(g.views)
@@ -278,12 +279,11 @@ rhi_bindless_write :: proc(b: ^Backend, array: rhi.BindlessArray, index: u32, re
     if !check(res, "rhi storage view") do return
     b.storage_views[index] = view
     write_descriptor(&b.gctx, set, BINDING_STORAGE_IMAGES, index, .STORAGE_IMAGE, vk.DescriptorImageInfo{imageView = view, imageLayout = .GENERAL})
-  case .DRAW_LISTS, .PYRAMID_COUNTERS:
+  case .STORAGE_BUFFERS, .EXTRA_BUFFERS:
     range, ok := resource.(rhi.BufferRange)
     if !ok do return
     buffer := &b.buffers.items[range.buffer]
-    binding: u32 = BINDING_DRAW_LISTS if array == .DRAW_LISTS else BINDING_PYRAMID_COUNTERS
-    write_descriptor(&b.gctx, set, binding, index, .STORAGE_BUFFER, vk.DescriptorBufferInfo{buffer = buffer.buffer, range = buffer.size})
+    write_descriptor(&b.gctx, set, BINDLESS_ARRAY_BINDINGS[array], index, .STORAGE_BUFFER, vk.DescriptorBufferInfo{buffer = buffer.buffer, range = buffer.size})
   }
 }
 

@@ -91,23 +91,26 @@ from_anchor_rect :: proc(r: anchor.Rect) -> mu.Rect {
   return {i32(math.round(r.pos.x)), i32(math.round(r.pos.y)), i32(math.round(r.size.x)), i32(math.round(r.size.y))}
 }
 
-// begin returns the microui context for this tick, opening it on the first call. Build
-// widgets with it in update after feed, then hand end's commands to render.stage_overlay.
-begin :: proc(self: ^Context) -> ^mu.Context {
+// begin returns the microui context for this tick. Its first call of a tick feeds it the tick's
+// input and r's window size, and captures the mouse and keyboard the UI uses
+// (input.State.mouse_captured / keyboard_captured): call it before your other input consumers,
+// build the widgets, then call end.
+begin :: proc(self: ^Context, s: ^input.State, r: ^render.Renderer) -> ^mu.Context {
   if !self.open {
+    feed(self, s, r)
     mu.begin(&self.mu)
     self.open = true
   }
   return &self.mu
 }
 
-// end closes this tick's UI and returns it as overlay commands drawn over everything else;
-// none when begin was not called. Valid until the next end.
-end :: proc(self: ^Context) -> []render.RenderCommand {
+// end closes this tick's UI and stages it on r over everything else (render.stage_overlay);
+// nothing when begin was not called.
+end :: proc(self: ^Context, r: ^render.Renderer) {
   clear(&self.vertices)
   clear(&self.indices)
   clear(&self.commands)
-  if !self.open do return nil
+  if !self.open do return
   mu.end(&self.mu)
   self.open = false
   // one mesh command per clip rect; the vertices are sliced once they stop growing
@@ -169,7 +172,7 @@ end :: proc(self: ^Context) -> []render.RenderCommand {
       clip = run.clip,
     })
   }
-  return self.commands[:]
+  render.stage_overlay(r, self.commands[:])
 }
 
 @(private = "file")
@@ -190,9 +193,9 @@ quad :: proc(self: ^Context, dst, src: mu.Rect, color: mu.Color) {
   append(&self.indices, base, base + 1, base + 2, base, base + 2, base + 3)
 }
 
-// feed passes one input tick to the debug UI, reads r's window size (which windows keep to their
-// edges in) and captures the mouse and keyboard it uses (input.State.mouse_captured /
-// keyboard_captured). Call it first among input consumers on the update tick.
+// Passes one input tick to the debug UI and reads r's window size (which windows keep to their
+// edges in).
+@(private = "file")
 feed :: proc(self: ^Context, s: ^input.State, r: ^render.Renderer) {
   ctx := &self.mu
   hovered := ctx.hover_root != nil

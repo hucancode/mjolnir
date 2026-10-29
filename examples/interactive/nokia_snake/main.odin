@@ -86,9 +86,7 @@ draw_hud :: proc(app: ^App) {
 }
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, pos: [3]f32 = {}) -> world.NodeHandle {
-  n := world.spawn(&app.scene, pos)
-  render.attach(&app.renderer, n, render.primitive(&app.renderer, shape, color))
-  return n
+  return mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, color), pos)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -100,7 +98,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   wall_h :: 0.5
 
   floor := spawn_primitive(app, .CUBE, .GRAY, {0, -0.5, 0})
-  world.scale(&app.scene, floor, half, 0.5, half)
+  world.scale(&app.scene, floor, {half, 0.5, half})
 
   spawn_wall(app, {0, wall_h, half + wall_t}, half + wall_t * 2, wall_h, wall_t)
   spawn_wall(app, {0, wall_h, -(half + wall_t)}, half + wall_t * 2, wall_h, wall_t)
@@ -122,7 +120,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
 spawn_wall :: proc(app: ^App, pos: [3]f32, sx, sy, sz: f32) {
   h := spawn_primitive(app, .CUBE, .WHITE, pos)
-  world.scale(&app.scene, h, sx, sy, sz)
+  world.scale(&app.scene, h, {sx, sy, sz})
 }
 
 reset_game :: proc(app: ^App) {
@@ -184,12 +182,10 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {})
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {})
   step_game(app, dt)
-  world.update(&app.scene)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
   draw_hud(app)
-  render.update(&app.renderer, dt)
+  mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
 step_game :: proc(app: ^App, dt: f32) {

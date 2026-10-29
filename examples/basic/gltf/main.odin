@@ -78,7 +78,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({0, 1.6, 3.6}, {0, 0.6, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 6.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 6.0)
 
   app.duck_model = gltf.model_create(&app.renderer, #load("assets/Duck.glb"))
   duck_root := world.spawn(&app.scene, {-2, 0, 0})
@@ -117,10 +117,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
 
   for h in app.duck.roots do world.rotate_by(&app.scene, h, dt * math.PI * 0.25)
   app.since += dt
@@ -130,11 +128,9 @@ update :: proc(app: ^App, dt: f32) {
   animator := &app.fox.animators[app.fox_rig]
   if params, ok := animation.layer_params(animator, app.playing, animation.ClipParams); ok do params.speed = app.speed
 
-  world.update(&app.scene)
+  mjolnir.update(&app.scene, &app.renderer, dt)
   gltf.animate(&app.man, &app.man_model, &app.scene, &app.renderer, dt)
   gltf.animate(&app.fox, &app.fox_model, &app.scene, &app.renderer, dt)
-  render.stage_transforms(&app.renderer, world.changes(&app.scene))
-  render.update(&app.renderer, dt)
 }
 
 draw :: proc(app: ^App) -> bool {
@@ -142,8 +138,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Fox", {20, 20, 220, 200}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Fox", {20, 20, 220, 200}) {
     mu.layout_row(ctx, {-1}, 0)
     for clip, i in app.fox_model.rigs[app.fox_rig].clips {
       label := fmt.tprintf("%s%s", "> " if i == app.clip else "", clip.name)

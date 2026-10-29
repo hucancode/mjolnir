@@ -50,7 +50,7 @@ post_init :: proc(self: ^Renderer) -> bool {
   }
   for tag in 0 ..< POST_EFFECT_COUNT - 1 {
     pipelines := post_pipelines_create(self, sources[tag]) or_return
-    for p, is_last in pipelines do self.post_pipelines[is_last][tag] = p
+    self.post_pipelines[tag] = pipelines
   }
   return true
 }
@@ -77,6 +77,7 @@ post_pipelines_create :: proc(self: ^Renderer, source: rhi.ShaderSource) -> (pip
 // shader/post.slang; load it with #load("name." + SHADER_EXT). It reads render's time and the
 // image size (post_resolution).
 post_shader_create :: proc(self: ^Renderer, source: []u8) -> (shader: PostShader, ok: bool) #optional_ok {
+  guard(self)
   shader = PostShader(containers.slots_alloc(&self.slots[.POST_SHADERS]) or_return)
   self.custom_post_pipelines[shader], ok = post_pipelines_create(self, source)
   if !ok do post_shader_destroy(self, shader)
@@ -86,6 +87,7 @@ post_shader_create :: proc(self: ^Renderer, source: []u8) -> (shader: PostShader
 // post_shader_destroy frees a shader from post_shader_create; take its effects off the stack
 // first.
 post_shader_destroy :: proc(self: ^Renderer, shader: PostShader) {
+  guard(self)
   if !containers.slots_free(&self.slots[.POST_SHADERS], u32(shader)) do return
   for p in self.custom_post_pipelines[shader] do dev.pipeline_retire(&self.gpu, p)
   self.custom_post_pipelines[shader] = {}
@@ -146,10 +148,10 @@ post_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
         input_image_index    = u32(input),
         original_image_index = u32(original),
         pass                 = pass,
-        time                 = self.time,
+        time                 = f32(self.time),
         effect               = effect,
       }
-      pipeline := self.post_pipelines[int(is_last)][reflect.get_union_variant_raw_tag(effect)]
+      pipeline := self.post_pipelines[reflect.get_union_variant_raw_tag(effect)][int(is_last)]
       if custom, is_custom := effect.(CustomEffect); is_custom {
         pipeline = post_shader_pipeline(self, custom.shader, is_last)
       }
@@ -168,5 +170,5 @@ post_shader_pipeline :: proc(self: ^Renderer, shader: PostShader, is_last: bool)
   if containers.slots_live(&self.slots[.POST_SHADERS], u32(shader)) {
     if p := self.custom_post_pipelines[shader][int(is_last)]; p != 0 do return p
   }
-  return self.post_pipelines[int(is_last)][0]
+  return self.post_pipelines[0][int(is_last)]
 }

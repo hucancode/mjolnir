@@ -95,10 +95,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if input.key_pressed(&app.input, .W) do wireframe = !wireframe
   if input.key_pressed(&app.input, .P) do pop = !pop
   lines := f32(1) if wireframe else 0
@@ -118,8 +116,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Shield", {20, 20, 260, 400}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Shield", {20, 20, 260, 400}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Wireframe (W)", &wireframe)
     mu.checkbox(ctx, "Pop panels (P)", &pop)

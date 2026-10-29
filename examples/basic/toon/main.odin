@@ -55,7 +55,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     return .FAIL
   }
 
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 20.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 20.0)
 
   colors := [?][4]f32{{1.0, 0.45, 0.3, 1}, {0.35, 0.8, 0.45, 1}, {0.35, 0.55, 1.0, 1}, {1.0, 0.85, 0.3, 1}}
   shapes := [?]render.Primitive{.SPHERE, .CUBE, .SPHERE, .CUBE}
@@ -71,7 +71,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, material: render.MaterialHandle, position: [3]f32) {
-  mjolnir.spawn_mesh(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, material), position)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, material), position)
 }
 
 shutdown :: proc(app: ^App) {
@@ -87,10 +87,8 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debugui.feed(&app.debug, &app.input, &app.renderer)
   debug_ui(app)
-  render.stage_overlay(&app.renderer, debugui.end(&app.debug))
-  render.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   for h in app.materials {
     m := render.material(&app.renderer, h) or_continue
     m.params[0] = {bands, rim, shade, 0}
@@ -103,8 +101,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 debug_ui :: proc(app: ^App) {
-  ctx := debugui.begin(&app.debug)
-  if debugui.window(&app.debug, "Toon", {20, 20, 280, 230}, {}) {
+  ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
+  defer debugui.end(&app.debug, &app.renderer)
+  if debugui.window(&app.debug, "Toon", {20, 20, 280, 230}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Bands"); mu.slider(ctx, &bands, 1, 8, 1)
     mu.label(ctx, "Rim"); mu.slider(ctx, &rim, 0, 1)
