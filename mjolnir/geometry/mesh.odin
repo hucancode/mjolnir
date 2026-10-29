@@ -19,6 +19,14 @@ Vertex :: struct {
   tangent:  [4]f32, // xyz = tangent, w = handedness (for bitangent reconstruction)
 }
 
+// Vertex2D is a vertex of 2D screen-space geometry (a UI, an overlay): a pixel position, a
+// texture coordinate and a color.
+Vertex2D :: struct {
+  pos:   [2]f32,
+  uv:    [2]f32,
+  color: [4]u8,
+}
+
 // Mesh is a CPU triangle mesh; skinnings is empty or parallel to vertices.
 Mesh :: struct {
   vertices:  []Vertex,

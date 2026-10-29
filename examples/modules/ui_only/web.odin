@@ -30,7 +30,6 @@ step :: proc(dt: f64) -> bool {
   input.drain(&events, &state)
   r := js.get_bounding_client_rect("output")
   size := [2]f32{f32(max(r.width, 1)), f32(max(r.height, 1))}
-  tick(&state, size)
-  js.set_element_key_string("output", "innerHTML", svg(size))
+  if tick(&state, size) do js.set_element_key_string("output", "innerHTML", svg(size))
   return true
 }

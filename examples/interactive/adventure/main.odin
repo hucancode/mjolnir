@@ -1025,19 +1025,21 @@ draw_collider :: proc(app: ^App, body: physics.Body) {
 build_panel :: proc(app: ^App) {
   gui := &app.gui
   p := &app.panel
-  screen := ui.node_create(gui, {size = {{.PERCENT, 1}, {.PERCENT, 1}}, pin = {.STRETCH, .STRETCH}})
-  p.root = ui.node_create(gui, {parent = screen, position = .ABSOLUTE, anchor = {0.5, 0.5}, direction = .COLUMN, padding = {28, 24, 28, 24}, gap = 14, align = {.CENTER, .CENTER}, hidden = true})
+  screen := ui.node_create(gui, {size = {{.PERCENT, 1}, {.PERCENT, 1}}})
+  panel_style := ui.style_create(gui, {fill = {20, 20, 30, 230}})
+  p.root = ui.node_create(gui, {parent = screen, position = .ABSOLUTE, anchor = {0.5, 0.5}, direction = .COLUMN, padding = {28, 24, 28, 24}, gap = 14, align = {.CENTER, .CENTER}, hidden = true, style = panel_style})
   p.title = ui.node_create(gui, {parent = p.root, text = "Victory", font_size = 40})
   p.stats = ui.node_create(gui, {parent = p.root, font_size = 20})
   row := ui.node_create(gui, {parent = p.root, gap = 12})
-  button :: proc(gui: ^ui.UI, parent: ui.NodeHandle, label: string) -> ui.NodeHandle {
-    b := ui.node_create(gui, {parent = parent, size = {{.FIXED, 150}, {.FIXED, 44}}, align = {.CENTER, .CENTER}, interactive = true})
+  button_style := ui.style_create(gui, {fill = {150, 60, 45, 255}}, ui.Style{fill = {200, 90, 60, 255}})
+  button :: proc(gui: ^ui.UI, parent: ui.NodeHandle, label: string, style: ui.StyleHandle) -> ui.NodeHandle {
+    b := ui.node_create(gui, {parent = parent, size = {{.FIXED, 150}, {.FIXED, 44}}, align = {.CENTER, .CENTER}, interactive = true, style = style})
     ui.node_create(gui, {parent = b, text = label, font_size = 20})
     return b
   }
-  p.retry = button(gui, row, "Retry")
-  p.next = button(gui, row, "Next level")
-  p.heroes = button(gui, row, "Change hero")
+  p.retry = button(gui, row, "Retry", button_style)
+  p.next = button(gui, row, "Next level", button_style)
+  p.heroes = button(gui, row, "Change hero", button_style)
 }
 
 enter_result :: proc(app: ^App) {
@@ -1053,7 +1055,6 @@ exit_result :: proc(app: ^App) {
 }
 
 update_result :: proc(app: ^App, dt: f32) -> Screen {
-  ui.layout(&app.gui, render.window_size(&app.renderer), &app.font)
   ui.update_input(&app.gui, &app.input)
   gltf.animate(&app.player.instance, &app.heroes[app.hero], &app.scene, &app.renderer, dt)
   for &e in app.enemies do gltf.animate(&e.instance, &app.foes[e.kind], &app.scene, &app.renderer, dt)
@@ -1086,22 +1087,8 @@ draw_hud :: proc(app: ^App) {
   } else {
     hud(app, &commands)
   }
-  if app.screen.current == .RESULT {
-    for h, z in app.gui.draw_order {
-      r := ui.rect(&app.gui, h)
-      n := ui.node(&app.gui, h)
-      if h == app.panel.root do append(&commands, render.RenderCommand{shape = render.DrawQuadCommand{position = r.pos, size = r.size, color = {20, 20, 30, 230}}, z_order = i32(z) + 100})
-      if n.interactive {
-        color: [4]u8 = {200, 90, 60, 255} if ui.hovered(&app.gui, h) else {150, 60, 45, 255}
-        append(&commands, render.RenderCommand{shape = render.DrawQuadCommand{position = r.pos, size = r.size, color = color}, z_order = i32(z) + 100})
-      }
-      for line in ui.lines(&app.gui, h) {
-        label := render.DrawTextCommand{text = n.text[line.start:line.end], position = line.pos, size = line.size, color = 255}
-        append(&commands, render.RenderCommand{shape = label, z_order = i32(z) + 100})
-      }
-    }
-  }
   render.stage_overlay(&app.renderer, commands[:], &app.font)
+  mjolnir.stage_ui(&app.renderer, &app.gui, &app.font)
 }
 
 hud :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand) {

@@ -1,5 +1,7 @@
 package render
 
+import "../geometry"
+
 
 // The GPU data contract: the budgets, vertex formats, material and light types, effects and
 // tables render writes and its shaders (in both backends) read.
@@ -109,11 +111,7 @@ LightType :: enum u32 {
 }
 
 // Vertex2D is one vertex of the 2D overlay.
-Vertex2D :: struct {
-  pos:        [2]f32,
-  uv:         [2]f32,
-  color:      [4]u8,
-}
+Vertex2D :: geometry.Vertex2D
 
 // UIBatch is a run of overlay indices drawn with one texture inside one scissor (x, y, w, h).
 @(private)

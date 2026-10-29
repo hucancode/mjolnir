@@ -9,7 +9,7 @@ pick :: proc(self: ^UI, point: [2]f32) -> NodeHandle {
   #reverse for h in self.draw_order {
     if !contains(self.rects[h.index], point) || !contains(self.clips[h.index], point) do continue
     for a := h; a != {}; {
-      n := lookup(self, a) or_break
+      n := node(self, a) or_break
       if n.interactive do return h
       a = n.parent
     }
@@ -39,7 +39,7 @@ update_input :: proc(self: ^UI, s: ^input.State) {
       if self.pressed == {} do self.pressed = self.hovered
       self.focused = {}
       for a := self.hovered; a != {}; {
-        n := lookup(self, a) or_break
+        n := node(self, a) or_break
         if n.focusable {
           self.focused = a
           break
@@ -50,7 +50,7 @@ update_input :: proc(self: ^UI, s: ^input.State) {
     if input.mouse_released(s, b) && within(self, self.hovered, self.pressed) do self.clicked = self.pressed
   }
   if !held do self.pressed = {}
-  if _, ok := lookup(self, self.focused); !ok do self.focused = {}
+  if _, ok := node(self, self.focused); !ok do self.focused = {}
   if self.hovered != {} || self.pressed != {} do s.mouse_captured = true
   if self.focused != {} do s.keyboard_captured = true
 }

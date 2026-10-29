@@ -90,6 +90,11 @@ glyphs :: proc(self: ^Font, text: string, origin: [2]f32, size: f32, out: ^[dyna
   }
 }
 
+// atlas_size returns the atlas's size in texels; it only grows. Divide Glyph uvs by it.
+atlas_size :: proc(self: ^Font) -> [2]u32 {
+  return {u32(self.ctx.width), u32(self.ctx.height)}
+}
+
 // atlas returns the R8 atlas pixels (size.x by size.y) and their version: it changes when glyphs
 // were rasterized or the atlas grew, and no two fonts share one, so a renderer re-uploads the
 // atlas whenever the version differs from the one it holds.

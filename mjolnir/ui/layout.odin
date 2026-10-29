@@ -3,6 +3,7 @@ package ui
 import "../anchor"
 import "../containers"
 import "../font"
+import "core:mem"
 import "core:slice"
 import "core:strings"
 
@@ -13,14 +14,48 @@ ALIGN_FACTOR := [Align]f32 {
   .END    = 1,
 }
 
-// layout lays every node out in the reference frame (init), then fits it to `window`: scaled
-// up or down until one axis matches, the other axis's leftover space going to the roots by
-// their pin. Rects, clips and lines come out in window pixels. Text is measured in f, which may
-// be nil for a tree without text.
+// update brings the layout and the mesh up to date for a window of `window` units
+// (render.window_size) at `dpi` framebuffer pixels per unit, with text measured and drawn in f
+// (nil for a tree without text; pass the same font every time). Every node is laid out in the
+// reference frame scaled up or down until one axis matches the window, so the window is the
+// reference widened on the other axis; roots sit in it as ABSOLUTE nodes do in their parent.
+// Rects, clips and lines come out in window pixels, the mesh in framebuffer pixels.
+// Only what changed since the last update is redone, found by comparing the nodes and styles
+// with how they were: nothing when no node, style, hover or press changed; the mesh alone when
+// only looks did (Node.style, active, image, the interactions). It returns what it redid.
+update :: proc(self: ^UI, window: [2]f32, f: ^font.Font, dpi: f32 = 1) -> (laid_out, painted: bool) {
+  n := int(self.slots.high_water)
+  frame := anchor.frame(self.reference, window)
+  atlas := font.atlas_size(f) if f != nil else {}
+  laid_out = self.dirty || frame != self.frame || dpi != self.dpi || n != len(self.last_nodes)
+  painted = laid_out || atlas != self.atlas_size || self.hovered != self.last_hovered || self.pressed != self.last_pressed
+  painted ||= len(self.styles) != len(self.last_styles) || mem.compare(slice.to_bytes(self.styles[:]), slice.to_bytes(self.last_styles[:])) != 0
+  if !laid_out && mem.compare(slice.to_bytes(self.nodes[:n]), slice.to_bytes(self.last_nodes[:])) != 0 {
+    painted = true
+    // the layout inputs are the bytes before the looks
+    for &last, i in self.last_nodes {
+      laid_out ||= mem.compare_ptrs(&self.nodes[i], &last, int(offset_of(Node, style))) != 0
+    }
+  }
+  if laid_out do layout(self, frame, f)
+  if !painted do return
+  paint(self, f, dpi)
+  self.dirty = false
+  self.dpi = dpi
+  self.atlas_size = font.atlas_size(f) if f != nil else {}
+  self.last_hovered, self.last_pressed = self.hovered, self.pressed
+  resize(&self.last_nodes, n)
+  copy(self.last_nodes[:], self.nodes[:n])
+  resize(&self.last_styles, len(self.styles))
+  copy(self.last_styles[:], self.styles[:])
+  return
+}
+
 // A fixed sequence of passes over the nodes in tree order: widths resolve before text wraps,
 // heights after.
-layout :: proc(self: ^UI, window: [2]f32, f: ^font.Font) {
-  self.frame = anchor.frame(self.reference, window)
+@(private = "file")
+layout :: proc(self: ^UI, frame: anchor.Frame, f: ^font.Font) {
+  self.frame = frame
   n := int(self.slots.high_water)
   resize(&self.rects, n)
   resize(&self.clips, n)
@@ -40,27 +75,15 @@ layout :: proc(self: ^UI, window: [2]f32, f: ^font.Font) {
   to_window(self)
 }
 
-// A root's rect fitted to the window frame by its pin.
-@(private = "file")
-fit_root :: proc(self: ^UI, i: u32) -> Rect {
-  nd := item(self, i)
-  return anchor.fit({nd.offset, self.rects[i].size}, nd.pin, self.reference, self.frame.size)
-}
-
-@(private = "file")
-item :: #force_inline proc(self: ^UI, i: u32) -> ^Node {
-  return &self.nodes[i]
-}
-
-@(private = "file")
+@(private)
 children_of :: #force_inline proc(self: ^UI, i: u32) -> []u32 {
   return self.children[self.child_first[i]:][:self.child_count[i]]
 }
 
 // Index of a node's parent, or -1 for a root (no parent, or a stale one).
-@(private = "file")
+@(private)
 parent_of :: proc(self: ^UI, i: u32) -> int {
-  p := item(self, i).parent
+  p := self.nodes[i].parent
   if !containers.slots_valid(&self.slots, p) do return -1
   return int(p.index)
 }
@@ -101,9 +124,9 @@ build_tree :: proc(self: ^UI) {
     self.children[self.child_first[p] + fill[p]] = i
     fill[p] += 1
   }
-  order :: proc(self: ^UI, i: u32) -> i32 {return item(self, i).order}
+  order :: proc(self: ^UI, i: u32) -> i32 {return self.nodes[i].order}
   sort_indices(self.topo[:], order, self)
-  for i in 0 ..< len(self.child_count) do sort_indices(children_of(self, u32(i)), order, self)
+  for count, i in self.child_count do if count > 1 do sort_indices(children_of(self, u32(i)), order, self)
   for k := 0; k < len(self.topo); k += 1 do append(&self.topo, ..children_of(self, self.topo[k]))
 }
 
@@ -126,18 +149,18 @@ flows :: proc(nd: ^Node) -> bool {
 
 // Content size along `axis`, children before parents: flow children summed
 // along the flow axis (plus gaps) or the largest across it, text, padding.
-// A FIXED child counts its size, a PERCENT one nothing.
+// A FIXED child counts its size, a PERCENT one nothing, a clipping one its least.
 @(private = "file")
 fit_axis :: proc(self: ^UI, f: ^font.Font, axis: int) {
   #reverse for i in self.topo {
-    nd := item(self, i)
+    nd := &self.nodes[i]
     main := flow_axis(nd) == axis
     content: f32
     count := 0
     for c in children_of(self, i) {
-      cn := item(self, c)
+      cn := &self.nodes[c]
       if !flows(cn) do continue
-      s := self.fit[c][axis]
+      s := least(self, c, axis)
       #partial switch cn.size[axis].kind {
       case .FIXED:
         s = cn.size[axis].value
@@ -150,8 +173,13 @@ fit_axis :: proc(self: ^UI, f: ^font.Font, axis: int) {
     if main && count > 1 do content += nd.gap * f32(count - 1)
     if len(nd.text) > 0 {
       if axis == 0 {
+        // wrapped text breaks down to its longest word
         text := nd.text
-        for line in strings.split_lines_iterator(&text) do content = max(content, font.measure(f, line, nd.font_size))
+        if nd.wrap {
+          for word in strings.fields_iterator(&text) do content = max(content, font.measure(f, word, nd.font_size))
+        } else {
+          for line in strings.split_lines_iterator(&text) do content = max(content, font.measure(f, line, nd.font_size))
+        }
       } else {
         content = max(content, f32(self.line_ranges[i][1]) * font.line_height(f, nd.font_size))
       }
@@ -160,10 +188,19 @@ fit_axis :: proc(self: ^UI, f: ^font.Font, axis: int) {
   }
 }
 
+// The least a node shrinks to along `axis` when it does not fit its content: a clipping node
+// scrolls what does not fit, so only its padding counts.
+@(private = "file")
+least :: proc(self: ^UI, i: u32, axis: int) -> f32 {
+  nd := &self.nodes[i]
+  if nd.clip && nd.size[axis].kind != .FIT do return padding(nd, axis)
+  return self.fit[i][axis]
+}
+
 // Size along `axis` against a parent content box of `space`; GROW fills it.
 @(private = "file")
 resolve :: proc(self: ^UI, i: u32, axis: int, space: f32) -> f32 {
-  s := item(self, i).size[axis]
+  s := self.nodes[i].size[axis]
   switch s.kind {
   case .FIT:
     return self.fit[i][axis]
@@ -172,22 +209,19 @@ resolve :: proc(self: ^UI, i: u32, axis: int, space: f32) -> f32 {
   case .PERCENT:
     return s.value * space
   case .GROW:
-    return max(space, self.fit[i][axis])
+    return max(space, least(self, i, axis))
   }
   return 0
 }
 
-// Sizes along `axis`, parents before children; roots stretch by their pin. Along a parent's flow axis
+// Sizes along `axis`, parents before children; roots against the window. Along a parent's flow axis
 // its GROW children share what the others leave, by weight; across it, and
 // for absolute children, GROW fills the content box.
 @(private = "file")
 size_axis :: proc(self: ^UI, axis: int) {
   for i in self.topo {
-    nd := item(self, i)
-    if parent_of(self, i) < 0 {
-      self.rects[i].size[axis] = resolve(self, i, axis, self.reference[axis])
-      self.rects[i].size[axis] = fit_root(self, i).size[axis]
-    }
+    nd := &self.nodes[i]
+    if parent_of(self, i) < 0 do self.rects[i].size[axis] = resolve(self, i, axis, self.frame.size[axis])
     space := self.rects[i].size[axis] - padding(nd, axis)
     kids := children_of(self, i)
     for c in kids do self.rects[c].size[axis] = resolve(self, c, axis, space)
@@ -196,11 +230,11 @@ size_axis :: proc(self: ^UI, axis: int) {
     weights: f32
     count := 0
     for c in kids {
-      cn := item(self, c)
+      cn := &self.nodes[c]
       if !flows(cn) do continue
       count += 1
       if cn.size[axis].kind == .GROW {
-        self.rects[c].size[axis] = self.fit[c][axis]
+        self.rects[c].size[axis] = least(self, c, axis)
         weights += cn.size[axis].value if cn.size[axis].value > 0 else 1
       }
       free -= self.rects[c].size[axis]
@@ -208,7 +242,7 @@ size_axis :: proc(self: ^UI, axis: int) {
     free -= nd.gap * f32(max(count - 1, 0))
     if weights == 0 || free <= 0 do continue
     for c in kids {
-      cn := item(self, c)
+      cn := &self.nodes[c]
       if !flows(cn) || cn.size[axis].kind != .GROW do continue
       w := cn.size[axis].value if cn.size[axis].value > 0 else 1
       self.rects[c].size[axis] += free * w / weights
@@ -222,7 +256,7 @@ size_axis :: proc(self: ^UI, axis: int) {
 wrap_text :: proc(self: ^UI, f: ^font.Font) {
   clear(&self.lines)
   for i in self.topo {
-    nd := item(self, i)
+    nd := &self.nodes[i]
     first := len(self.lines)
     width := self.rects[i].size.x - padding(nd, 0)
     start := 0
@@ -256,10 +290,10 @@ wrap_text :: proc(self: ^UI, f: ^font.Font) {
 @(private = "file")
 place :: proc(self: ^UI, f: ^font.Font) {
   for i in self.topo {
-    nd := item(self, i)
+    nd := &self.nodes[i]
     r := &self.rects[i]
     if parent_of(self, i) < 0 {
-      r.pos = fit_root(self, i).pos
+      r.pos = (self.frame.size - r.size) * nd.anchor + nd.offset
       self.clips[i] = {{}, self.frame.size}
       self.shown[i] = !nd.hidden
       self.depth_z[i] = nd.z
@@ -279,7 +313,7 @@ place :: proc(self: ^UI, f: ^font.Font) {
     total: f32
     count := 0
     kids := children_of(self, i)
-    for c in kids do if flows(item(self, c)) {
+    for c in kids do if flows(&self.nodes[c]) {
       total += self.rects[c].size[m]
       count += 1
     }
@@ -287,7 +321,7 @@ place :: proc(self: ^UI, f: ^font.Font) {
     cursor := (content_size[m] - total) * ALIGN_FACTOR[nd.align[m]]
     origin := content_pos - nd.scroll
     for c in kids {
-      cn := item(self, c)
+      cn := &self.nodes[c]
       cr := &self.rects[c]
       self.clips[c] = child_clip
       self.shown[c] = self.shown[i] && !cn.hidden
@@ -314,7 +348,7 @@ place :: proc(self: ^UI, f: ^font.Font) {
   slice.sort(keys)
   for key in keys {
     i := shown[u32(key)]
-    append(&self.draw_order, NodeHandle(containers.slots_handle(&self.slots, i)))
+    append(&self.draw_order, handle_of(self, i))
   }
 }
 
@@ -325,7 +359,7 @@ to_window :: proc(self: ^UI) {
   for i in self.topo {
     self.rects[i] = anchor.to_window(self.rects[i], self.frame)
     self.clips[i] = anchor.to_window(self.clips[i], self.frame)
-    size := item(self, i).font_size * s
+    size := self.nodes[i].font_size * s
     for &line in self.lines[self.line_ranges[i][0]:][:self.line_ranges[i][1]] {
       line.pos *= s
       line.width *= s

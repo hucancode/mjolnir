@@ -1,10 +1,12 @@
 package mjolnir
 
 import "core:log"
+import "font"
 import "input"
 import "physics"
 import "platform"
 import "render"
+import "ui"
 import "world"
 
 @(private = "file")
@@ -68,4 +70,18 @@ orbit_drag :: proc(
     self.distance = clamp(self.distance - s.scroll.y * 2, min_distance, max_distance)
   }
   render.camera_orbit(camera, self^)
+}
+
+// stage_ui brings gui up to date for r's window (ui.update) and stages its mesh over what is
+// staged so far (render.stage_overlay_mesh), glyphs sampled from render.font_texture. Restaging
+// an unchanged UI is a copy: layout and tessellation run only when it changed. It returns what
+// the update redid.
+stage_ui :: proc(r: ^render.Renderer, gui: ^ui.UI, f: ^font.Font) -> (laid_out, painted: bool) {
+  laid_out, painted = ui.update(gui, render.window_size(r), f, render.dpi_scale(r))
+  vertices, indices, batches := ui.mesh(gui)
+  for b in batches {
+    texture := render.font_texture(r, f) if b.texture == ui.FONT_TEXTURE else render.TextureHandle(b.texture)
+    render.stage_overlay_mesh(r, vertices[b.first_vertex:][:b.vertex_count], indices[b.first_index:][:b.index_count], texture, b.clip)
+  }
+  return
 }
