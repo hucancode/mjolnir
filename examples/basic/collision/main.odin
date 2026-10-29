@@ -1,10 +1,10 @@
-// Static and dynamic bodies of every shape, moved and reshaped live.
+// Collision scenarios to run, pause and step through one physics tick at a time.
 package main
 
 import "mjolnir"
 import "mjolnir/debugui"
-import "mjolnir/physics"
 import "mjolnir/input"
+import "mjolnir/physics"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
@@ -14,62 +14,55 @@ import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
 
-CIRCLE_RADIUS :: f32(4.0)
-CIRCLE_OMEGA :: f32(1.2)
-CIRCLE_STEERING :: f32(3.0)
-GROUND_HALF :: [3]f32{20, 0.5, 20}
-WALL_HEIGHT :: f32(2.0)
-WALL_THICK :: f32(0.5)
-NO_SELECTION :: -1
+STEP_DT :: f32(1.0 / 60.0)
+MAX_STEPS_PER_FRAME :: 4
+GRAVITY :: [3]f32{0, -9.81, 0}
 
-Shape :: enum {
-  SPHERE,
-  BOX,
-  CYLINDER,
+Scenario :: enum {
+  SPHERE_DROP,
+  BOX_FLAT,
+  BOX_ON_EDGE,
+  CYLINDERS,
+  HEAD_ON,
+  BOUNCE,
+  SLOPE,
+  STACK,
+  BULLET,
 }
 
-Kind :: enum {
-  STATIC,
-  DYNAMIC_STILL,
-  DYNAMIC_CIRCLE,
+EXPECTED := [Scenario]string {
+  .SPHERE_DROP = "The sphere lands with 1 contact point, stops and falls asleep.",
+  .BOX_FLAT    = "The box lands flat with 4 contact points and does not rotate.",
+  .BOX_ON_EDGE = "The box lands on a corner, tips over and settles flat with 4 points.",
+  .CYLINDERS   = "Upright: 4 cap points. Lying: 2 points along its side. Both fall asleep.",
+  .HEAD_ON     = "No gravity, restitution 1. Equal spheres swap velocities; momentum stays 0.",
+  .BOUNCE      = "Restitution 0 / 0.5 / 0.9 from left to right: higher bounces last longer.",
+  .SLOPE       = "Friction 1 box sticks to the 25 degree slope, friction 0.05 box slides off.",
+  .STACK       = "Five boxes stay stacked upright and fall asleep together.",
+  .BULLET      = "A 150 m/s pellet bounces off a 10 cm wall instead of tunneling through.",
 }
 
-Body :: struct {
-  kind:          Kind,
-  shape:         Shape,
-  size:          [3]f32,
-  position:      [3]f32,
-  euler_deg:     [3]f32,
-  mass:          f32,
-  node:          world.NodeHandle,
-  visual:        world.NodeHandle,
-  handle:        physics.BodyHandle,
-  shape_changed: bool,
-  pose_changed:  bool,
-  mass_changed:  bool,
+Tracked :: struct {
+  name:     string,
+  handle:   physics.BodyHandle,
+  collider: physics.Collider,
 }
 
 App :: struct {
-  platform:      platform.Platform,
-  scene:         world.World,
-  renderer:      render.Renderer,
-  debug:         debugui.Context,
-  input:         input.State,
-  orbit:         render.Orbit,
-  phys:          physics.World,
-  bodies:        [3]Body,
-  selected:      int,
-  circle_angle:  f32,
-  reset_pending: bool,
-  paused:        bool,
-}
-
-default_bodies :: proc() -> [3]Body {
-  return {
-    {kind = .STATIC, shape = .BOX, size = {1.5, 1.5, 1.5}, position = {0, 1.5, -4.5}, mass = 1},
-    {kind = .DYNAMIC_STILL, shape = .SPHERE, size = {1.2, 1.2, 1.2}, position = {0, 1.2, 4.5}, mass = 5},
-    {kind = .DYNAMIC_CIRCLE, shape = .SPHERE, size = {1.0, 1.0, 1.0}, position = {0, 1.5, 0}, mass = 3},
-  }
+  platform:  platform.Platform,
+  scene:     world.World,
+  renderer:  render.Renderer,
+  debug:     debugui.Context,
+  input:     input.State,
+  orbit:     render.Orbit,
+  phys:      physics.World,
+  scenario:  Scenario,
+  bodies:    [dynamic]Tracked,
+  steps:     int,
+  playing:   bool,
+  speed:     f32,
+  banked:    f32,
+  rewind_to: Maybe(int),
 }
 
 main :: proc() {
@@ -78,7 +71,8 @@ main :: proc() {
   if !platform.init(&app.platform, 1280, 720, "Collision") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
-  if !physics.init(&app.phys) do return
+  if !physics.init(&app.phys, thread_count = 1) do return
+  app.phys.rate = 0
   mjolnir.run(
     mjolnir.Loop(App) {
       app = app,
@@ -91,6 +85,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
+  delete(app.bodies)
   physics.shutdown(&app.phys)
   world.shutdown(&app.scene)
   debugui.shutdown(&app.debug)
@@ -107,266 +102,257 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   render.setup(&app.renderer)
-  app.orbit = render.make_orbit({16, 14, 16}, {0, 1.5, 0})
+  app.orbit = render.make_orbit({9, 7, 12}, {0, 1, 0})
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  spawn_scene(app)
+  app.speed = 1
+  load(app, .SPHERE_DROP)
   return .READY
 }
 
-spawn_scene :: proc(app: ^App) {
-
-  spawn_scenery_box(app, {0, -GROUND_HALF.y, 0}, GROUND_HALF)
-  spawn_scenery_box(app, {GROUND_HALF.x, WALL_HEIGHT, 0}, {WALL_THICK, WALL_HEIGHT, GROUND_HALF.z})
-  spawn_scenery_box(app, {-GROUND_HALF.x, WALL_HEIGHT, 0}, {WALL_THICK, WALL_HEIGHT, GROUND_HALF.z})
-  spawn_scenery_box(app, {0, WALL_HEIGHT, GROUND_HALF.z}, {GROUND_HALF.x, WALL_HEIGHT, WALL_THICK})
-  spawn_scenery_box(app, {0, WALL_HEIGHT, -GROUND_HALF.z}, {GROUND_HALF.x, WALL_HEIGHT, WALL_THICK})
-
-  app.bodies = default_bodies()
-  app.selected = NO_SELECTION
-  app.circle_angle = 0
-  for &b in app.bodies {
-    b.node = world.spawn(&app.scene, b.position)
-    world.rotate(&app.scene, b.node, body_rotation(&b))
-    b.visual = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, body_mesh(b.shape), body_color(b.kind)), scale = body_visual_scale(&b), parent = b.node)
-    if b.kind == .STATIC {
-      b.handle = physics.body_create(&app.phys, b.position, body_rotation(&b), body_collider(&b))
-    } else {
-      b.handle = physics.body_create(&app.phys, b.position, body_rotation(&b), body_collider(&b), b.mass, user = world.Handle(b.node))
+load :: proc(app: ^App, scenario: Scenario) {
+  physics.teardown(&app.phys)
+  world.teardown(&app.scene)
+  render.teardown(&app.renderer)
+  clear(&app.bodies)
+  app.scenario = scenario
+  app.steps = 0
+  app.banked = 0
+  app.phys.gravity = GRAVITY
+  ground := add(app, "ground", physics.BoxCollider{half_extents = {10, 0.5, 10}}, {0, -0.5, 0})
+  physics.body_params(&app.phys, ground).restitution = 0
+  switch scenario {
+  case .SPHERE_DROP:
+    add(app, "sphere", physics.SphereCollider{radius = 0.5}, {0, 3, 0}, 1, .MAGENTA)
+  case .BOX_FLAT:
+    add(app, "box", physics.BoxCollider{half_extents = 0.5}, {0, 3, 0}, 1, .RED)
+  case .BOX_ON_EDGE:
+    add(app, "box", physics.BoxCollider{half_extents = 0.5}, {0, 3, 0}, 1, .RED, turn(40, {1, 0, 1}))
+  case .CYLINDERS:
+    add(app, "upright", physics.CylinderCollider{radius = 0.5, half_height = 0.75}, {-1.5, 2, 0}, 1, .CYAN)
+    add(app, "lying", physics.CylinderCollider{radius = 0.5, half_height = 0.75}, {1.5, 2, 0}, 1, .ORANGE, turn(90, {1, 0, 0}))
+  case .HEAD_ON:
+    app.phys.gravity = {}
+    left := add(app, "left", physics.SphereCollider{radius = 0.5}, {-3, 2, 0}, 1, .MAGENTA, velocity = {4, 0, 0})
+    right := add(app, "right", physics.SphereCollider{radius = 0.5}, {3, 2, 0}, 1, .CYAN, velocity = {-4, 0, 0})
+    physics.body_params(&app.phys, left).restitution = 1
+    physics.body_params(&app.phys, right).restitution = 1
+  case .BOUNCE:
+    names := [3]string{"e = 0", "e = 0.5", "e = 0.9"}
+    for restitution, i in ([3]f32{0, 0.5, 0.9}) {
+      ball := add(app, names[i], physics.SphereCollider{radius = 0.4}, {f32(i - 1) * 1.5, 4, 0}, 1, .YELLOW)
+      physics.body_params(&app.phys, ball).restitution = restitution
     }
+  case .SLOPE:
+    slope := turn(25, {0, 0, 1})
+    add(app, "slope", physics.BoxCollider{half_extents = {4, 0.25, 2}}, {0, 2, 0}, 0, .GRAY, slope)
+    up := linalg.quaternion_mul_vector3(slope, [3]f32{0, 1, 0})
+    rough := add(app, "rough", physics.BoxCollider{half_extents = 0.4}, [3]f32{0, 2, -1} + up * 0.66, 1, .GREEN, slope)
+    slick := add(app, "slick", physics.BoxCollider{half_extents = 0.4}, [3]f32{0, 2, 1} + up * 0.66, 1, .BLUE, slope)
+    physics.body_params(&app.phys, rough).friction = 1
+    physics.body_params(&app.phys, slick).friction = 0.05
+  case .STACK:
+    names := [5]string{"box 0", "box 1", "box 2", "box 3", "box 4"}
+    for i in 0 ..< 5 {
+      add(app, names[i], physics.BoxCollider{half_extents = 0.5}, {0, 0.5 + f32(i) * 1.02, 0}, 1, .RED if i % 2 == 0 else .ORANGE)
+    }
+  case .BULLET:
+    app.phys.gravity = {}
+    add(app, "wall", physics.BoxCollider{half_extents = {0.05, 2, 2}}, {3, 2, 0}, 0, .GRAY)
+    add(app, "pellet", physics.SphereCollider{radius = 0.1}, {-4, 2, 0}, 0.1, .YELLOW, velocity = {150, 0, 0})
   }
 }
 
-spawn_scenery_box :: proc(app: ^App, center, half_extents: [3]f32) {
-  node := world.spawn(&app.scene, center)
-  physics.body_create(&app.phys, center, collider = physics.BoxCollider{half_extents = half_extents}, user = world.Handle(node))
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), parent = node, scale = half_extents)
+add :: proc(
+  app: ^App,
+  name: string,
+  collider: physics.Collider,
+  position: [3]f32,
+  mass: f32 = 0,
+  color := render.Color.GRAY,
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  velocity := [3]f32{},
+) -> physics.BodyHandle {
+  node := world.spawn(&app.scene, position)
+  world.rotate(&app.scene, node, rotation)
+  mesh, scale := look(collider)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, mesh, color), scale = scale, parent = node)
+  handle := physics.body_create(&app.phys, position, rotation, collider, mass, user = world.Handle(node))
+  if velocity != {} do physics.set_velocity(&app.phys, handle, velocity)
+  append(&app.bodies, Tracked{name, handle, collider})
+  return handle
 }
 
-body_collider :: proc(b: ^Body) -> physics.Collider {
-  switch b.shape {
-  case .SPHERE:   return physics.SphereCollider{radius = b.size.x}
-  case .BOX:      return physics.BoxCollider{half_extents = b.size}
-  case .CYLINDER: return physics.CylinderCollider{radius = b.size.x, half_height = b.size.y}
+turn :: proc(degrees: f32, axis: [3]f32) -> quaternion128 {
+  return linalg.quaternion_angle_axis_f32(degrees * math.RAD_PER_DEG, linalg.normalize(axis))
+}
+
+look :: proc(collider: physics.Collider) -> (render.Primitive, [3]f32) {
+  switch c in collider {
+  case physics.SphereCollider:   return .SPHERE, c.radius
+  case physics.BoxCollider:      return .CUBE, c.half_extents
+  case physics.CylinderCollider: return .CYLINDER, {c.radius, c.half_height, c.radius}
   }
-  return nil
+  return .SPHERE, 1
 }
 
-body_visual_scale :: proc(b: ^Body) -> [3]f32 {
-  switch b.shape {
-  case .SPHERE:
-    return b.size.x
-  case .BOX:
-    return b.size
-  case .CYLINDER:
-    return {b.size.x, b.size.y, b.size.x}
-  }
-  return 1
+advance :: proc(app: ^App) {
+  physics.step(&app.phys, STEP_DT)
+  mjolnir.sync_bodies(&app.scene, &app.phys)
+  app.steps += 1
 }
 
-body_mesh :: proc(shape: Shape) -> render.Primitive {
-  switch shape {
-  case .SPHERE:   return .SPHERE
-  case .BOX:      return .CUBE
-  case .CYLINDER: return .CYLINDER
-  }
-  return .SPHERE
-}
-
-body_color :: proc(kind: Kind) -> render.Color {
-  switch kind {
-  case .STATIC:        return .BLUE
-  case .DYNAMIC_STILL:  return .CYAN
-  case .DYNAMIC_CIRCLE: return .MAGENTA
-  }
-  return .WHITE
-}
-
-body_rotation :: proc(b: ^Body) -> quaternion128 {
-  r := b.euler_deg * math.RAD_PER_DEG
-  return linalg.quaternion_from_euler_angles_f32(r.y, r.x, r.z, .YXZ)
-}
-
-apply_shape :: proc(app: ^App, b: ^Body) {
-  physics.set_collider(&app.phys, b.handle, body_collider(b))
-  render.attach(&app.renderer, b.visual, render.primitive(&app.renderer, body_mesh(b.shape), body_color(b.kind)))
-  world.scale(&app.scene, b.visual, body_visual_scale(b))
-}
-
-apply_pose :: proc(app: ^App, b: ^Body) {
-  physics.set_pose(&app.phys, b.handle, b.position, body_rotation(b))
-  if b.kind == .STATIC {
-    world.translate(&app.scene, b.node, b.position)
-    world.rotate(&app.scene, b.node, body_rotation(b))
-    return
-  }
-  physics.set_velocity(&app.phys, b.handle, {})
-  physics.set_angular_velocity(&app.phys, b.handle, {})
-}
-
-drive_circle :: proc(app: ^App, b: ^Body) {
-  a := app.circle_angle
-  target := b.position + [3]f32{math.cos(a), 0, math.sin(a)} * CIRCLE_RADIUS
-  tangent := [3]f32{-math.sin(a), 0, math.cos(a)} * (CIRCLE_RADIUS * CIRCLE_OMEGA)
-  body, ok := physics.body(&app.phys, b.handle)
-  if !ok do return
-  desired := tangent + (target - body.position) * CIRCLE_STEERING
-  physics.apply_impulse(&app.phys, b.handle, (desired - body.velocity) * b.mass)
+rewind :: proc(app: ^App, steps: int) {
+  load(app, app.scenario)
+  for _ in 0 ..< steps do advance(app)
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debug_ui(app)
+  controls(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
-  if app.reset_pending {
-    app.reset_pending = false
-    physics.teardown(&app.phys)
-    world.teardown(&app.scene)
-    render.teardown(&app.renderer)
-    spawn_scene(app)
+  if steps, ok := app.rewind_to.?; ok {
+    app.rewind_to = nil
+    rewind(app, steps)
   }
-  if !app.paused do app.circle_angle += dt * CIRCLE_OMEGA
-
-  for &b in app.bodies {
-    if b.shape_changed do apply_shape(app, &b)
-    if b.mass_changed do physics.set_mass(&app.phys, b.handle, b.mass)
-    if b.pose_changed && b.kind != .DYNAMIC_CIRCLE do apply_pose(app, &b)
-    b.shape_changed, b.mass_changed, b.pose_changed = false, false, false
-    if b.kind == .DYNAMIC_CIRCLE && !app.paused do drive_circle(app, &b)
+  if app.playing {
+    app.banked = min(app.banked + dt * app.speed, STEP_DT * MAX_STEPS_PER_FRAME)
+    for app.banked >= STEP_DT {
+      app.banked -= STEP_DT
+      advance(app)
+    }
   }
-
-  handle_picking(app)
-  draw_contacts(app, dt)
-  draw_selection(app)
-  if !app.paused do physics.step(&app.phys, dt)
-  mjolnir.sync_bodies(&app.scene, &app.phys)
+  draw_contacts(app)
+  draw_velocities(app)
+  draw_colliders(app)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
-handle_picking :: proc(app: ^App) {
-  if app.input.mouse_captured || !input.mouse_pressed(&app.input, .LEFT) do return
-  ray, has_ray := render.cursor_ray(&app.renderer, app.input.cursor)
-  if !has_ray do return
-  hit := physics.raycast(&app.phys, ray)
-  app.selected = NO_SELECTION
-  if !hit.hit do return
-  for &b, i in app.bodies do if b.handle == hit.body do app.selected = i
-}
-
-draw_contacts :: proc(app: ^App, dt: f32) {
-  life := max(dt * 2.0, 0.04)
+draw_contacts :: proc(app: ^App) {
   for &c in physics.contacts(&app.phys) {
     for p in c.points[:c.count] {
-      penetration := -p.base_separation
-      render.debug_sphere(&app.renderer, p.point, 0.12, {1, 0.9, 0, 1}, life, true)
-      render.debug_arrow(&app.renderer, p.point, p.point + c.normal * 0.9, {0, 1, 1, 1}, life, true)
-      if penetration > 0 {
-        render.debug_segment(&app.renderer, p.point, p.point - c.normal * penetration, {1, 0, 1, 1}, life, true)
+      render.debug_point(&app.renderer, p.point, 0.08, {1, 0.9, 0, 1}, 0, true)
+      render.debug_arrow(&app.renderer, p.point, p.point + c.normal * 0.5, {0, 1, 1, 1}, 0, true)
+      if p.base_separation < 0 {
+        render.debug_segment(&app.renderer, p.point, p.point - c.normal * p.base_separation, {1, 0, 1, 1}, 0, true)
       }
-      if dt > 0 && p.normal_impulse > 0 {
-        force := p.normal_impulse / dt
-        force_arrow_length := clamp(force * 0.01, 0.1, 4.0)
-        render.debug_arrow(&app.renderer, p.point, p.point + c.normal * force_arrow_length, {1, 0.25, 0.2, 1}, life, true)
+      if p.normal_impulse > 0 {
+        length := clamp(p.normal_impulse / STEP_DT * 0.05, 0.1, 3)
+        render.debug_arrow(&app.renderer, p.point, p.point - c.normal * length, {1, 0.25, 0.2, 1}, 0, true)
       }
     }
   }
 }
 
-draw_selection :: proc(app: ^App) {
-  if app.selected == NO_SELECTION do return
-  b := &app.bodies[app.selected]
-  body, ok := physics.body(&app.phys, b.handle)
-  if !ok do return
-  pos, rot := body.position, body.rotation
-  render.debug_axes(&app.renderer, pos, rot, 1.8, 0, true)
-  green := [4]f32{0.2, 1, 0.3, 1}
-  switch b.shape {
-  case .SPHERE:
-    render.debug_sphere(&app.renderer, pos, b.size.x, green, 0, true)
-  case .BOX:
-    render.debug_cube(&app.renderer, pos, rot, b.size, green, 0, true)
-  case .CYLINDER:
-    axis := linalg.quaternion_mul_vector3(rot, [3]f32{0, 1, 0})
-    render.debug_circle(&app.renderer, pos + axis * b.size.y, axis, b.size.x, green, 0, true)
-    render.debug_circle(&app.renderer, pos - axis * b.size.y, axis, b.size.x, green, 0, true)
+draw_velocities :: proc(app: ^App) {
+  for t in app.bodies {
+    b := physics.body(&app.phys, t.handle) or_continue
+    if b.inv_mass == 0 || b.is_sleeping do continue
+    render.debug_arrow(&app.renderer, b.position, b.position + b.velocity * 0.25, {0.3, 1, 0.3, 1}, 0, true)
   }
 }
 
-slider_changed :: proc(ctx: ^mu.Context, value: ^f32, low, high: f32) -> bool {
-  return .CHANGE in mu.slider(ctx, value, low, high)
-}
-
-inspector :: proc(ctx: ^mu.Context, b: ^Body) {
-  mu.layout_row(ctx, {90, 90, 90}, 0)
-  for shape in Shape {
-    if .SUBMIT in mu.button(ctx, fmt.tprint(shape)) {
-      b.shape = shape
-      b.shape_changed = true
+draw_colliders :: proc(app: ^App) {
+  white := [4]f32{1, 1, 1, 1}
+  for t in app.bodies {
+    b := physics.body(&app.phys, t.handle) or_continue
+    render.debug_axes(&app.renderer, b.position, b.rotation, 1, 0, true)
+    switch c in t.collider {
+    case physics.SphereCollider:
+      render.debug_sphere(&app.renderer, b.position, c.radius, white, 0, true)
+    case physics.BoxCollider:
+      render.debug_cube(&app.renderer, b.position, b.rotation, c.half_extents, white, 0, true)
+    case physics.CylinderCollider:
+      axis := linalg.quaternion_mul_vector3(b.rotation, [3]f32{0, 1, 0})
+      render.debug_circle(&app.renderer, b.position + axis * c.half_height, axis, c.radius, white, 0, true)
+      render.debug_circle(&app.renderer, b.position - axis * c.half_height, axis, c.radius, white, 0, true)
     }
   }
-
-  mu.layout_row(ctx, {-1}, 0)
-  switch b.shape {
-  case .SPHERE:
-    mu.label(ctx, "Radius")
-    b.shape_changed |= slider_changed(ctx, &b.size.x, 0.2, 4.0)
-  case .BOX:
-    mu.label(ctx, "Half extents X / Y / Z")
-    b.shape_changed |= slider_changed(ctx, &b.size.x, 0.2, 4.0)
-    b.shape_changed |= slider_changed(ctx, &b.size.y, 0.2, 4.0)
-    b.shape_changed |= slider_changed(ctx, &b.size.z, 0.2, 4.0)
-  case .CYLINDER:
-    mu.label(ctx, "Radius / Half height")
-    b.shape_changed |= slider_changed(ctx, &b.size.x, 0.2, 4.0)
-    b.shape_changed |= slider_changed(ctx, &b.size.y, 0.2, 3.0)
-  }
-
-  mu.label(ctx, "Orbit center X / Y / Z" if b.kind == .DYNAMIC_CIRCLE else "Position X / Y / Z")
-  b.pose_changed |= slider_changed(ctx, &b.position.x, -12, 12)
-  b.pose_changed |= slider_changed(ctx, &b.position.y, 0, 12)
-  b.pose_changed |= slider_changed(ctx, &b.position.z, -12, 12)
-
-  mu.label(ctx, "Rotation X / Y / Z (deg)")
-  b.pose_changed |= slider_changed(ctx, &b.euler_deg.x, -180, 180)
-  b.pose_changed |= slider_changed(ctx, &b.euler_deg.y, -180, 180)
-  b.pose_changed |= slider_changed(ctx, &b.euler_deg.z, -180, 180)
-
-  if b.kind != .STATIC {
-    mu.label(ctx, "Mass")
-    b.mass_changed |= slider_changed(ctx, &b.mass, 0.5, 50)
-  }
 }
 
-debug_ui :: proc(app: ^App) {
+name_of :: proc(app: ^App, handle: physics.BodyHandle) -> string {
+  for t in app.bodies do if t.handle == handle do return t.name
+  return "?"
+}
+
+step_forward :: proc(app: ^App) {
+  app.playing = false
+  advance(app)
+}
+
+step_back :: proc(app: ^App) {
+  app.playing = false
+  app.rewind_to = max(app.steps - 1, 0)
+}
+
+controls :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
   defer debugui.end(&app.debug, &app.renderer)
-  if debugui.window(&app.debug, "Inspector", {940, 20, 320, 400}, {.RIGHT, .TOP}) {
-    if app.selected == NO_SELECTION {
-      mu.label(ctx, "Left-click an object to select it.")
-    } else {
-      inspector(ctx, &app.bodies[app.selected])
+  if !app.input.keyboard_captured {
+    if input.key_pressed(&app.input, .SPACE) do app.playing = !app.playing
+    if input.key_pressed(&app.input, .R) do app.rewind_to = 0
+    if input.key_pressed(&app.input, .RIGHT) || input.key_repeated(&app.input, .RIGHT) do step_forward(app)
+    if input.key_pressed(&app.input, .LEFT) || input.key_repeated(&app.input, .LEFT) do step_back(app)
+  }
+
+  if debugui.window(&app.debug, "Collision", {20, 20, 360, 330}) {
+    mu.layout_row(ctx, {110, 110, 110}, 0)
+    for s in Scenario {
+      if .SUBMIT in mu.button(ctx, fmt.tprint(s)) {
+        app.playing = false
+        load(app, s)
+      }
+    }
+    mu.layout_row(ctx, {-1}, 0)
+    mu.text(ctx, EXPECTED[app.scenario])
+    mu.layout_row(ctx, {80, 80, 80, -1}, 0)
+    if .SUBMIT in mu.button(ctx, "< Back") do step_back(app)
+    if .SUBMIT in mu.button(ctx, "Pause" if app.playing else "Play") do app.playing = !app.playing
+    if .SUBMIT in mu.button(ctx, "Step >") do step_forward(app)
+    if .SUBMIT in mu.button(ctx, "Restart") do app.rewind_to = 0
+    mu.layout_row(ctx, {60, -1}, 0)
+    mu.label(ctx, "Speed")
+    mu.slider(ctx, &app.speed, 0.05, 1)
+    mu.layout_row(ctx, {-1}, 0)
+    mu.label(ctx, fmt.tprintf("Step %d   t = %.3f s", app.steps, f32(app.steps) * STEP_DT))
+    mu.label(ctx, "Space play/pause, Left/Right step, R restart")
+    mu.label(ctx, "yellow point, cyan normal A->B, magenta depth")
+    mu.label(ctx, "red impulse on A, green velocity")
+  }
+
+  if debugui.window(&app.debug, "Bodies", {900, 20, 360, 280}, {.RIGHT, .TOP}) {
+    mu.layout_row(ctx, {-1}, 0)
+    momentum: [3]f32
+    energy: f32
+    for t in app.bodies {
+      b := physics.body(&app.phys, t.handle) or_continue
+      if b.inv_mass == 0 do continue
+      momentum += b.velocity / b.inv_mass
+      energy += 0.5 * linalg.length2(b.velocity) / b.inv_mass
+    }
+    mu.label(ctx, fmt.tprintf("Momentum (%.3f, %.3f, %.3f)", momentum.x, momentum.y, momentum.z))
+    mu.label(ctx, fmt.tprintf("Linear kinetic energy %.3f J", energy))
+    for t in app.bodies {
+      b := physics.body(&app.phys, t.handle) or_continue
+      if b.inv_mass == 0 do continue
+      mu.label(ctx, fmt.tprintf("[%s] mass %.2f%s", t.name, 1 / b.inv_mass, " sleeping" if b.is_sleeping else ""))
+      mu.label(ctx, fmt.tprintf("  position (%.3f, %.3f, %.3f)", b.position.x, b.position.y, b.position.z))
+      mu.label(ctx, fmt.tprintf("  velocity (%.3f, %.3f, %.3f)", b.velocity.x, b.velocity.y, b.velocity.z))
+      w := b.angular_velocity
+      mu.label(ctx, fmt.tprintf("  spin     (%.3f, %.3f, %.3f)", w.x, w.y, w.z))
     }
   }
-  if debugui.window(&app.debug, "Collision", {20, 20, 320, 180}) {
-    mu.layout_row(ctx, {150, -1}, 0)
-    if .SUBMIT in mu.button(ctx, "Reset Scene") do app.reset_pending = true
-    if .SUBMIT in mu.button(ctx, "Resume" if app.paused else "Pause") do app.paused = !app.paused
 
-    mu.label(ctx, fmt.tprintf("Contacts: %d", physics.perf(&app.phys).contact_count))
-
+  if debugui.window(&app.debug, "Contacts", {900, 320, 360, 380}, {.RIGHT, .TOP}) {
     mu.layout_row(ctx, {-1}, 0)
-    shown := physics.contacts(&app.phys)
-    for c in shown[:min(6, len(shown))] {
-      p := c.points[0]
-      mu.label(
-        ctx,
-        fmt.tprintf(
-          "%s Contact x%d (%.1f,%.1f,%.1f) pen %.2f J %.1f",
-          "Dynamic" if c.b_dynamic else "Static",
-          c.count, p.point.x, p.point.y, p.point.z, -p.base_separation, p.normal_impulse,
-        ),
-      )
+    contacts := physics.contacts(&app.phys)
+    if len(contacts) == 0 do mu.label(ctx, "No contacts")
+    for &c in contacts {
+      mu.label(ctx, fmt.tprintf("%s -> %s  n (%.2f, %.2f, %.2f)", name_of(app, c.body_a), name_of(app, c.body_b), c.normal.x, c.normal.y, c.normal.z))
+      for p, i in c.points[:c.count] {
+        mu.label(ctx, fmt.tprintf("  #%d  separation %+.4f  impulse %.4f", i, p.base_separation, p.normal_impulse))
+      }
     }
   }
 }
