@@ -52,6 +52,8 @@ Pool :: enum {
   GPU_SHADERS,
   POST_SHADERS,
   MATERIAL_SHADERS,
+  // draw batches (batches.odin), rows of Table.BATCHES
+  BATCHES,
 }
 
 // Each pool's capacity, first index and reuse grace; `kept` pools keep what was made before
@@ -83,6 +85,7 @@ POOLS := [Pool]struct {
   .GPU_SHADERS            = {MAX_GPU_SHADERS, 1, 0, false, {}},
   .POST_SHADERS           = {MAX_POST_SHADERS, 1, 0, false, {}},
   .MATERIAL_SHADERS       = {MAX_MATERIAL_SHADERS + 1, 1, 0, false, {}},
+  .BATCHES                = {MAX_BATCHES, 1, 0, false, .BATCHES},
 }
 
 // render's own pipelines, by what they run.
@@ -192,22 +195,17 @@ Renderer_State :: struct {
   pipelines:              [BuiltinPipeline]rhi.Pipeline,
   draw_lists:             [MAX_DRAW_LIST_SLOTS]GpuDrawList,
   // draws are batched per mesh and material where they are not compacted (batches.odin):
-  // (material, mesh) -> batch id, the freed ids, the ids below batch_high in use or free,
-  // and whether first_instance is stale
+  // (material, mesh) -> batch id (slots[.BATCHES]), and whether first_instance is stale
   batch_ids:              map[u64]u32,
-  batch_free:             [dynamic]u32,
-  batch_high:             u32,
   batch_stale:            bool,
   batch_warned:           bool,
   // this frame's live batches by draw list key, material and id: key << 44 | material << 20 | id
   batch_order:            [dynamic]u64,
-  material_pipelines:     [MaterialPass][len(MaterialType)]rhi.Pipeline,
-  // [tag][is_last] and [PostShader][is_last]: every pass writes an HDR ring image but the last,
-  // which writes the backbuffer
-  post_pipelines:         [POST_EFFECT_COUNT][2]rhi.Pipeline,
-  custom_post_pipelines:  [MAX_POST_SHADERS][2]rhi.Pipeline,
-  // by MaterialShader, 0 where free
-  custom_material_pipelines: [MAX_MATERIAL_SHADERS + 1]rhi.Pipeline,
+  // by MaterialType, your shaders' after the built-in ones; 0 where free
+  material_pipelines:     [MaterialPass][DRAW_LISTS]rhi.Pipeline,
+  // [post_index][is_last]: every pass writes an HDR ring image but the last, which writes the
+  // backbuffer; 0 where free
+  post_pipelines:         [POST_EFFECT_COUNT + MAX_POST_SHADERS][2]rhi.Pipeline,
   // the 2D overlay (overlay_renderer.odin): this frame's vertices and indices, at most
   // UI_MAX_VERTICES and UI_MAX_INDICES, in batches of one scissor and texture
   ui_vertices:            [dynamic]Vertex2D,
@@ -249,7 +247,7 @@ init :: proc(self: ^Renderer, window: WindowHandle) -> bool {
     self.dirty[i] = make([]u64, words)
     for &s in self.table_stale[i] do s = make([]u64, words)
   }
-  _, self.dpi_scale = dev.window_size(&self.gpu)
+  measure_window(self)
   if dev.ready(&self.gpu) do return ready(self)
   return true
 }
@@ -303,7 +301,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
 // as what init makes is kept. Call it once, after making application-lifetime resources and
 // before the first map; without it teardown frees everything made since init.
 setup :: proc(self: ^Renderer) {
-  guard(self)
+  lock(self)
   mark_resources(self)
 }
 
@@ -320,7 +318,7 @@ mark_resources :: proc(self: ^Renderer) {
 // force field and texture made since the last setup (or init) is freed, their handles stale; an
 // environment map among them gives way to the default one.
 teardown :: proc(self: ^Renderer) {
-  guard(self)
+  lock(self)
   // their render targets and draw lists retire, and go with the flushes below
   c := self.slots[.CAMERAS].mark
   for i in containers.slots_next(&self.slots[.CAMERAS], &c) do free_camera(self, CameraHandle(i))
@@ -377,7 +375,6 @@ shutdown :: proc(self: ^Renderer) {
   for bits in self.dirty do delete(bits)
   for frames in self.table_stale do for bits in frames do delete(bits)
   delete(self.batch_ids)
-  delete(self.batch_free)
   delete(self.batch_order)
   delete(self.ui_batches)
   delete(self.ui_vertices)
@@ -439,25 +436,19 @@ post_process_release_images :: proc(self: ^Renderer) {
   }
 }
 
-// lock holds off frame while another thread edits the scene. When your simulation runs on its
-// own thread, make its edits of a tick under
-//   render.lock(r); defer render.unlock(r)
-// so frame, on the main thread, sees whole ticks. The pointers material, light, emitter,
+// lock holds off frame until the end of the calling scope, while another thread edits the
+// scene. When your simulation runs on its own thread, call it first in each tick's update so
+// frame, on the main thread, sees whole ticks. The pointers material, light, emitter,
 // force_field and camera return are then valid for the tick. Single-threaded, the lock costs
-// nothing.
+// nothing; every render proc takes it too.
+@(deferred_in = unlock)
 lock :: proc(self: ^Renderer) {
   sync.recursive_mutex_lock(&self.mutex)
 }
 
-// unlock releases the lock taken by lock.
+@(private)
 unlock :: proc(self: ^Renderer) {
   sync.recursive_mutex_unlock(&self.mutex)
-}
-
-// guard holds the lock until the end of the calling scope.
-@(private, deferred_in = unlock)
-guard :: proc(self: ^Renderer) {
-  lock(self)
 }
 
 // The only place retirement advances; once per frame, so ticks follow frame_serial.
@@ -486,7 +477,7 @@ tick_resource_pools :: proc(self: ^Renderer) {
 // tick, after the tick's stage_* calls; the next frame emits and simulates everything
 // accumulated since the previous one.
 update :: proc(self: ^Renderer, delta_time: f32) {
-  guard(self)
+  lock(self)
   sync.mutex_lock(&self.debug_mutex)
   self.time += f64(max(delta_time, 0))
   sync.mutex_unlock(&self.debug_mutex)
@@ -605,21 +596,21 @@ slot_node :: proc(self: ^Renderer, slot: u32) -> ^Node {
 
 // place sets where a slot draws and whether it shows; a slot draws nothing until placed.
 place :: proc(self: ^Renderer, slot: $H, world_matrix: matrix[4, 4]f32, visible := true) {
-  guard(self)
+  lock(self)
   place_slot(self, slot_index(slot), world_matrix, visible)
 }
 
 // release empties a slot: it forgets its attachment and bone palette; meshes, materials and
 // what was attached stay.
 release :: proc(self: ^Renderer, slot: $H) {
-  guard(self)
+  lock(self)
   release_slot(self, slot_index(slot))
 }
 
 // stage_transforms applies a scene graph's change feed, place or release per entry: `changes` is
 // any struct with `index`, `world_matrix`, `visible` and `removed` fields, removals first.
 stage_transforms :: proc(self: ^Renderer, changes: []$T) {
-  guard(self)
+  lock(self)
   for &c in changes {
     if c.removed do release_slot(self, u32(c.index))
     else do place_slot(self, u32(c.index), c.world_matrix, c.visible)
@@ -667,7 +658,7 @@ unbind :: proc(self: ^Renderer, slot: u32) {
 // placement's row).
 @(private)
 resource_create :: proc(self: ^Renderer, pool: Pool, value: $T) -> (index: u32, ok: bool) {
-  guard(self)
+  lock(self)
   index = containers.slots_alloc(&self.slots[pool]) or_return
   write_table(self, POOLS[pool].table, T)[index] = value
   mark_dirty(self, POOLS[pool].table, int(index))
@@ -685,7 +676,7 @@ resource :: proc(self: ^Renderer, pool: Pool, $T: typeid, index: u32) -> (^T, bo
 // Frees a row; what still refers to it reads zeros.
 @(private)
 resource_destroy :: proc(self: ^Renderer, pool: Pool, index: u32) {
-  guard(self)
+  lock(self)
   if !containers.slots_free(&self.slots[pool], index) do return
   clear_entry(self, POOLS[pool].table, index)
 }
@@ -726,7 +717,7 @@ bones_first :: proc(self: ^Renderer, bones: BonesHandle) -> (first: u32, ok: boo
 // skinned mesh of it, MeshAttachment.bones), at rest until stage_bones; it lives until
 // bones_destroy or teardown. false for no bones or past MAX_BONES bones in all.
 bones_create :: proc(self: ^Renderer, count: u32) -> (handle: BonesHandle, ok: bool) #optional_ok {
-  guard(self)
+  lock(self)
   if count == 0 do return 0, false
   first, has_room := containers.ranges_alloc(&self.bone_ranges, count)
   if !has_room {
@@ -742,7 +733,7 @@ bones_create :: proc(self: ^Renderer, count: u32) -> (handle: BonesHandle, ok: b
 // bind, per bone, relative to each slot's world matrix): every skinned mesh attached with it
 // deforms by them. The matrices are copied, at most the palette's bone count.
 stage_bones :: proc(self: ^Renderer, bones: BonesHandle, matrices: []matrix[4, 4]f32) {
-  guard(self)
+  lock(self)
   first, live := bones_first(self, bones)
   if !live do return
   count := min(u32(len(matrices)), containers.ranges_size(&self.bone_ranges, first))
@@ -752,7 +743,7 @@ stage_bones :: proc(self: ^Renderer, bones: BonesHandle, matrices: []matrix[4, 4
 
 // bones_destroy frees the palette; its meshes draw unskinned.
 bones_destroy :: proc(self: ^Renderer, bones: BonesHandle) {
-  guard(self)
+  lock(self)
   first, live := bones_first(self, bones)
   if !live do return
   // a live palette is the only one starting at its first bone
@@ -766,7 +757,7 @@ bones_destroy :: proc(self: ^Renderer, bones: BonesHandle) {
 // kept while later attachments still fit in it.
 attach :: proc(self: ^Renderer, slot: $H, attachment: Attachment) {
   slot := slot_index(slot)
-  guard(self)
+  lock(self)
   node := slot_node(self, slot)
   if node == nil do return
   unbind(self, slot)
@@ -843,7 +834,7 @@ attachment :: proc(
   ok: bool,
 ) #optional_ok {
   slot := slot_index(slot)
-  guard(self)
+  lock(self)
   if slot >= self.node_count do return
   node := write_table(self, .NODES, Node)[slot]
   when T == MeshAttachment {
@@ -920,7 +911,7 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
   slot_count := self.slots[.CAMERAS].high_water
   slice.zero(views[CAMERA_VIEW_BASE:][:slot_count])
   mark_dirty(self, .VIEWS, CAMERA_VIEW_BASE, int(slot_count))
-  all_types := u32(1 << len(MaterialType) - 1)
+  all_types := u32(1 << DRAW_LISTS - 1)
   c: u32
   for i in containers.slots_next(&self.slots[.CAMERAS], &c) {
     cam, targets := &self.cameras[i], &self.camera_targets[i]
@@ -969,14 +960,21 @@ flush :: proc(self: ^Renderer, frame_index: u32) {
   if _, ok := main_camera(self); !ok do overlay_clear(self)
 }
 
+// The window's framebuffer size; keeps its DPI scale, 1 where the window reports none.
+@(private = "file")
+measure_window :: proc(self: ^Renderer) -> [2]u32 {
+  size, dpi_scale := dev.window_size(&self.gpu)
+  self.dpi_scale = dpi_scale if dpi_scale > 0 else 1
+  return size
+}
+
 // frame renders and presents one frame at the window's framebuffer size in pixels, measured
 // now with its DPI scale (pixels per window unit): an out-of-date swapchain is rebuilt to the
 // size. It returns false on a GPU error. Main thread.
 frame :: proc(self: ^Renderer) -> bool {
   frame_index := current_frame(self)
-  guard(self)
-  framebuffer_size, dpi_scale := dev.window_size(&self.gpu)
-  self.dpi_scale = dpi_scale if dpi_scale > 0 else 1
+  lock(self)
+  framebuffer_size := measure_window(self)
   tick_resource_pools(self)
   flush(self, frame_index)
   submitted, status := frame_run(self, framebuffer_size)

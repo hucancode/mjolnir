@@ -1,8 +1,7 @@
 // Vulkan: culls every node against a range of views in one dispatch: x covers nodes, y the
-// views from params.first_view. A visible node is appended to list key * view.list_stride of
-// the bindless draw lists view.draw_list, key its material type or, for a custom material,
-// CUSTOM + its shader - 1; list l keeps its count at counts[l] and its commands from
-// l * view.list_capacity.
+// views from params.first_view. A visible node is appended to list type * view.list_stride of
+// the bindless draw lists view.draw_list, type its material type; list l keeps its count at
+// counts[l] and its commands from l * view.list_capacity.
 // wgpu: tests node i (x) against view first_view + y and, when it is visible, counts it in its
 // batch's draw and lists it: draw list y of the slot's buffer. The buffer holds words:
 // per list the count of visible opaque nodes, then per list max_batches indirect draws
@@ -15,6 +14,8 @@ SCENE_BUFFER(MeshData, meshes, 2, 2)
 SCENE_BUFFER(Material, materials, 3, 3)
 
 static const float DEPTH_BIAS = 0.0001;
+// draw lists per view, one per material type (render.DRAW_LIST_HEADER)
+static const uint DRAW_LIST_HEADER = 8;
 
 #if BACKEND_WGPU
 SCENE_BUFFER(Batch, batches, 0, 4)
@@ -42,9 +43,6 @@ Texture2D pyramid_of(View view)
     return pyramid;
 }
 #else
-// MaterialType.CUSTOM, and the custom shaders the draw list header has room for
-// (render.MAX_MATERIAL_SHADERS)
-static const uint MAX_MATERIAL_SHADERS = 3;
 
 struct CullPush {
     uint node_count;
@@ -56,7 +54,6 @@ PUSH_BLOCK(CullPush, params)
 
 // bindless draw lists: DRAW_LIST_HEADER counts, then DrawCommands
 [vk::binding(3, 1)] RWByteAddressBuffer draw_lists[];
-static const uint DRAW_LIST_HEADER = 8;
 
 Texture2D pyramid_of(View view)
 {
@@ -193,7 +190,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 wid : SV_GroupID)
     // empty view (free camera slot): accepts nothing
     if (view.type_mask == 0) { return; }
     if ((node.flags & view.require_flags) != view.require_flags) { return; }
-    if (((view.type_mask >> material_type) & 1) == 0) { return; }
+    if (material_type >= DRAW_LIST_HEADER || ((view.type_mask >> material_type) & 1) == 0) { return; }
     if (!in_frustum_and_visible(view, node, material_type)) { return; }
     Batch batch = batches[id];
     uint slot = list[params.draws_base + (wid.y * params.max_batches + id) * 5 + 1].add(1);
@@ -216,9 +213,8 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 wid : SV_GroupID)
     if ((node.flags & view.require_flags) != view.require_flags) return;
     Material material = materials[node.material_id];
     uint type = material.material_type;
-    if (((view.type_mask >> type) & 1) == 0) return;
-    // a custom material without a valid shader draws nowhere
-    if (type == MATERIAL_CUSTOM && (material.shader == 0 || material.shader > MAX_MATERIAL_SHADERS)) return;
+    // a type past every draw list draws nowhere
+    if (type >= DRAW_LIST_HEADER || ((view.type_mask >> type) & 1) == 0) return;
 
     if (!in_frustum_and_visible(view, node, type)) return;
 
@@ -230,8 +226,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 wid : SV_GroupID)
     cmd.vertex_offset = mesh.vertex_offset;
     cmd.first_instance = node_id | view.instance_tag;
 
-    uint key = type == MATERIAL_CUSTOM ? MATERIAL_CUSTOM + material.shader - 1 : type;
-    uint list = key * view.list_stride;
+    uint list = type * view.list_stride;
     uint draw_index;
     draw_lists[view.draw_list].InterlockedAdd(list * 4, 1, draw_index);
     if (draw_index < view.list_capacity) {

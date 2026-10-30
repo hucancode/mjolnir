@@ -87,7 +87,8 @@ CAMERA_IMAGES :: [CameraImage]TextureDesc {
 }
 
 // How a material is drawn, in this order. PBR is opaque: lit, occlusion-culled and casting
-// shadows. The rest are drawn forward, alpha-blended over the lit image.
+// shadows. The rest are drawn forward, alpha-blended over the lit image. material_shader_create
+// adds types past these: your shaders.
 MaterialType :: enum u32 {
   PBR,
   TRANSPARENT,
@@ -96,8 +97,6 @@ MaterialType :: enum u32 {
   // camera-facing billboard showing one cell of the albedo sprite sheet, unlit; a negative scale
   // mirrors it, pixels under half alpha are cut out and depth orders overlapping sprites
   SPRITE,
-  // a user fragment shader (Material.shader, material_shader_create); one draw list per shader
-  CUSTOM,
 }
 
 @(private)

@@ -597,7 +597,6 @@ toggle_row :: proc(app: ^App, page: ui.NodeHandle, toggle: Toggle, text: string)
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   ui.update_input(&app.gui, &app.input)
   handle_windows(app)
@@ -610,7 +609,7 @@ update :: proc(app: ^App, dt: f32) {
   mjolnir.orbit_drag(&app.orbit, camera, &app.input, speed = 0.02 * app.values[.SENSITIVITY])
   if p, ok := &camera.projection.(render.PerspectiveProjection); ok do p.fov = math.to_radians(app.values[.FOV])
   start := time.tick_now()
-  laid_out, painted := mjolnir.stage_ui(&app.renderer, &app.gui, &app.font)
+  laid_out, painted := mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font)
   measure(app, time.tick_since(start), laid_out, painted, dt)
   gltf.animate(&app.hero, &app.knight, &app.scene, &app.renderer, dt)
   mjolnir.update(&app.scene, &app.renderer, dt)

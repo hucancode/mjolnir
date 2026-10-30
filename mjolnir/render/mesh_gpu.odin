@@ -72,7 +72,7 @@ free_mesh :: proc(self: ^Renderer, m: MeshData) {
 // mesh_destroy or teardown. Ownership of `mesh` transfers: it is deleted.
 mesh_create :: proc(self: ^Renderer, mesh: geometry.Mesh) -> (handle: MeshHandle, ok: bool) #optional_ok {
   defer geometry.mesh_destroy(mesh)
-  guard(self)
+  lock(self)
   handle = MeshHandle(containers.slots_alloc(&self.slots[.MESHES]) or_return)
   m := &write_table(self, .MESHES, MeshData)[handle]
   aabb := geometry.aabb_from_vertices(mesh.vertices)
@@ -97,7 +97,7 @@ mesh_create :: proc(self: ^Renderer, mesh: geometry.Mesh) -> (handle: MeshHandle
 // mesh_destroy frees the mesh; its handle is stale at once, and frames already submitted still
 // draw it.
 mesh_destroy :: proc(self: ^Renderer, handle: MeshHandle) {
-  guard(self)
+  lock(self)
   containers.slots_free(&self.slots[.MESHES], u32(handle))
 }
 

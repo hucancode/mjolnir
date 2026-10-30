@@ -33,7 +33,7 @@ fixture_init :: proc(f: ^Fixture) -> bool {
 
 @(private = "file")
 fixture_destroy :: proc(f: ^Fixture) {
-  despawn(&f.ragdoll, &f.world)
+  bodies_destroy(&f.ragdoll, &f.world)
   physics.shutdown(&f.world)
   destroy(&f.ragdoll)
   animation.skeleton_destroy(&f.skeleton)
@@ -62,15 +62,15 @@ test_init_rejects_bad_blocks :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_static_spawn_keeps_rest_pose :: proc(t: ^testing.T) {
+test_static_bodies_keep_rest_pose :: proc(t: ^testing.T) {
   f: Fixture
   testing.expect(t, fixture_init(&f))
   defer fixture_destroy(&f)
-  spawn(&f.ragdoll, &f.world, {3, 0, 0}, simulate = false)
+  bodies_create(&f.ragdoll, &f.world, {3, 0, 0}, simulate = false)
   palette: [3]matrix[4, 4]f32
   origin, ok := sync(&f.ragdoll, &f.world, palette[:])
   testing.expect(t, ok)
-  testing.expect(t, linalg.length(origin - [3]f32{3, 0, 0}) < 1e-4, "origin should be where it was spawned")
+  testing.expect(t, linalg.length(origin - [3]f32{3, 0, 0}) < 1e-4, "origin should be where its bodies were made")
   for m in palette do for c in 0 ..< 4 do for r in 0 ..< 4 {
     want: f32 = 1 if r == c else 0
     testing.expect(t, abs(m[r, c] - want) < 1e-4, "static ragdoll must leave the mesh in its rest pose")
@@ -84,7 +84,7 @@ test_simulated_pose_keeps_joint_closed :: proc(t: ^testing.T) {
   defer fixture_destroy(&f)
   f.world.gravity = {0, -9.81, 0}
   physics.body_create(&f.world, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {20, 0.5, 20}})
-  spawn(&f.ragdoll, &f.world, {0, ground_height(&f.ragdoll) + 1, 0})
+  bodies_create(&f.ragdoll, &f.world, {0, ground_height(&f.ragdoll) + 1, 0})
   palette: [3]matrix[4, 4]f32
   for _ in 0 ..< 90 do physics.step(&f.world, 1.0 / 60.0)
   _, ok := sync(&f.ragdoll, &f.world, palette[:])
@@ -98,20 +98,20 @@ test_simulated_pose_keeps_joint_closed :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_spawn_replaces_and_despawn_frees :: proc(t: ^testing.T) {
+test_bodies_create_replaces_and_bodies_destroy_frees :: proc(t: ^testing.T) {
   f: Fixture
   testing.expect(t, fixture_init(&f))
   defer fixture_destroy(&f)
-  spawn(&f.ragdoll, &f.world, {})
+  bodies_create(&f.ragdoll, &f.world, {})
   first := body(&f.ragdoll, 0)
-  spawn(&f.ragdoll, &f.world, {})
+  bodies_create(&f.ragdoll, &f.world, {})
   _, stale := physics.body(&f.world, first)
-  testing.expect(t, !stale, "a second spawn must free the first bodies")
+  testing.expect(t, !stale, "a second bodies_create must free the first bodies")
   handle := body(&f.ragdoll, 1)
   block, ok := block_of(&f.ragdoll, handle)
   testing.expect(t, ok && block == 1)
-  despawn(&f.ragdoll, &f.world)
+  bodies_destroy(&f.ragdoll, &f.world)
   _, alive := physics.body(&f.world, handle)
-  testing.expect(t, !alive, "despawn must free the bodies")
+  testing.expect(t, !alive, "bodies_destroy must free the bodies")
   testing.expect_value(t, body(&f.ragdoll, 0), physics.BodyHandle{})
 }

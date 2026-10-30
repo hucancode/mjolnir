@@ -661,7 +661,6 @@ feet :: proc(app: ^App) -> [3]f32 {
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   if input.key_pressed(&app.input, .F1) do app.show_debug = !app.show_debug
   fsm.update(&app.screen, SCREENS, app, dt)
@@ -1088,7 +1087,7 @@ draw_hud :: proc(app: ^App) {
     hud(app, &commands)
   }
   render.stage_overlay(&app.renderer, commands[:], &app.font)
-  mjolnir.stage_ui(&app.renderer, &app.gui, &app.font)
+  mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font)
 }
 
 hud :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand) {

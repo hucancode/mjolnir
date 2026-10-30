@@ -208,7 +208,6 @@ rewind :: proc(app: ^App, steps: int) {
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   controls(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
@@ -232,14 +231,14 @@ update :: proc(app: ^App, dt: f32) {
 draw_contacts :: proc(app: ^App) {
   for &c in physics.contacts(&app.phys) {
     for p in c.points[:c.count] {
-      render.debug_point(&app.renderer, p.point, 0.08, {1, 0.9, 0, 1}, 0, true)
-      render.debug_arrow(&app.renderer, p.point, p.point + c.normal * 0.5, {0, 1, 1, 1}, 0, true)
+      render.debug_point(&app.renderer, p.point, 0.08, {1, 0.9, 0, 1}, bypass_depth = true)
+      render.debug_arrow(&app.renderer, p.point, p.point + c.normal * 0.5, {0, 1, 1, 1}, bypass_depth = true)
       if p.base_separation < 0 {
-        render.debug_segment(&app.renderer, p.point, p.point - c.normal * p.base_separation, {1, 0, 1, 1}, 0, true)
+        render.debug_segment(&app.renderer, p.point, p.point - c.normal * p.base_separation, {1, 0, 1, 1}, bypass_depth = true)
       }
       if p.normal_impulse > 0 {
         length := clamp(p.normal_impulse / STEP_DT * 0.05, 0.1, 3)
-        render.debug_arrow(&app.renderer, p.point, p.point - c.normal * length, {1, 0.25, 0.2, 1}, 0, true)
+        render.debug_arrow(&app.renderer, p.point, p.point - c.normal * length, {1, 0.25, 0.2, 1}, bypass_depth = true)
       }
     }
   }
@@ -249,7 +248,7 @@ draw_velocities :: proc(app: ^App) {
   for t in app.bodies {
     b := physics.body(&app.phys, t.handle) or_continue
     if b.inv_mass == 0 || b.is_sleeping do continue
-    render.debug_arrow(&app.renderer, b.position, b.position + b.velocity * 0.25, {0.3, 1, 0.3, 1}, 0, true)
+    render.debug_arrow(&app.renderer, b.position, b.position + b.velocity * 0.25, {0.3, 1, 0.3, 1}, bypass_depth = true)
   }
 }
 
@@ -257,16 +256,16 @@ draw_colliders :: proc(app: ^App) {
   white := [4]f32{1, 1, 1, 1}
   for t in app.bodies {
     b := physics.body(&app.phys, t.handle) or_continue
-    render.debug_axes(&app.renderer, b.position, b.rotation, 1, 0, true)
+    render.debug_axes(&app.renderer, b.position, b.rotation, 1, bypass_depth = true)
     switch c in t.collider {
     case physics.SphereCollider:
-      render.debug_sphere(&app.renderer, b.position, c.radius, white, 0, true)
+      render.debug_sphere(&app.renderer, b.position, c.radius, white, bypass_depth = true)
     case physics.BoxCollider:
-      render.debug_cube(&app.renderer, b.position, b.rotation, c.half_extents, white, 0, true)
+      render.debug_cube(&app.renderer, b.position, b.rotation, c.half_extents, white, bypass_depth = true)
     case physics.CylinderCollider:
       axis := linalg.quaternion_mul_vector3(b.rotation, [3]f32{0, 1, 0})
-      render.debug_circle(&app.renderer, b.position + axis * c.half_height, axis, c.radius, white, 0, true)
-      render.debug_circle(&app.renderer, b.position - axis * c.half_height, axis, c.radius, white, 0, true)
+      render.debug_circle(&app.renderer, b.position + axis * c.half_height, axis, c.radius, white, bypass_depth = true)
+      render.debug_circle(&app.renderer, b.position - axis * c.half_height, axis, c.radius, white, bypass_depth = true)
     }
   }
 }

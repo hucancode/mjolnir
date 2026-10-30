@@ -105,7 +105,6 @@ clip_layer :: proc(app: ^App, name: string, speed: f32, bones: []u32 = nil, weig
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)

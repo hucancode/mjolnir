@@ -1,5 +1,6 @@
 package render
 
+import "../containers"
 import "core:log"
 import "core:slice"
 
@@ -32,16 +33,12 @@ batch_key :: #force_inline proc(mesh, material: u32) -> u64 {
 @(private)
 batch_join :: proc(self: ^Renderer, slot, mesh, material: u32) {
   when BINDLESS do return
-  self.batch_high = max(self.batch_high, 1)
   key := batch_key(mesh, material)
   id, found := self.batch_ids[key]
   if !found {
-    if len(self.batch_free) > 0 {
-      id = pop(&self.batch_free)
-    } else if self.batch_high < MAX_BATCHES {
-      id = self.batch_high
-      self.batch_high += 1
-    } else {
+    ok: bool
+    id, ok = containers.slots_alloc(&self.slots[.BATCHES])
+    if !ok {
       if !self.batch_warned do log.warnf("More than %d distinct (mesh, material) pairs; the nodes past them are not drawn", MAX_BATCHES - 1)
       self.batch_warned = true
       return
@@ -70,15 +67,14 @@ batch_leave :: proc(self: ^Renderer, slot: u32) {
   if entry.capacity > 0 do return
   delete_key(&self.batch_ids, batch_key(entry.mesh_id, entry.material_id))
   entry^ = {}
-  append(&self.batch_free, id)
+  containers.slots_free(&self.slots[.BATCHES], id)
 }
 
 // Forgets every batch, with every node's membership already zeroed.
 @(private)
 batches_reset :: proc(self: ^Renderer) {
   clear(&self.batch_ids)
-  clear(&self.batch_free)
-  self.batch_high = 0
+  containers.slots_rewind(&self.slots[.BATCHES])
   self.batch_stale = false
   clear_entry(self, .BATCHES, 0, MAX_BATCHES)
   clear_entry(self, .NODE_BATCH, 0, MAX_SLOTS)
@@ -86,7 +82,7 @@ batches_reset :: proc(self: ^Renderer) {
 
 // Before a frame: lays the batches' instance ranges end to end when membership changed, and
 // sorts the live batches by draw list key (material_list), then material, then id, for the
-// draw loop (materials may change their type or shader any tick).
+// draw loop (materials may change their type any tick).
 @(private)
 batches_flush :: proc(self: ^Renderer) {
   when BINDLESS do return
@@ -94,18 +90,18 @@ batches_flush :: proc(self: ^Renderer) {
   if self.batch_stale {
     self.batch_stale = false
     first: u32
-    for id in 1 ..< self.batch_high {
+    for id in 1 ..< self.slots[.BATCHES].high_water {
       entries[id].first_instance = first
       first += entries[id].capacity
     }
-    mark_dirty(self, .BATCHES, 0, int(self.batch_high))
+    mark_dirty(self, .BATCHES, 0, int(self.slots[.BATCHES].high_water))
   }
   materials := write_table(self, .MATERIALS, Material)
   clear(&self.batch_order)
   #assert(MAX_MATERIALS <= 1 << 24 && MAX_BATCHES <= 1 << 20)
-  for id in 1 ..< self.batch_high do if entries[id].capacity > 0 {
+  for id in 1 ..< self.slots[.BATCHES].high_water do if entries[id].capacity > 0 {
     key := material_list(materials[entries[id].material_id])
-    // a custom material without a shader is drawn by no one
+    // a type past every shader is drawn by no one
     if key == NO_DRAW_LIST do continue
     append(&self.batch_order, u64(key) << 44 | u64(entries[id].material_id) << 20 | u64(id))
   }

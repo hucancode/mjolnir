@@ -146,7 +146,7 @@ GpuLayoutKey :: struct {
 // pass make([]T, n)); false when it cannot be made.
 buffer_create :: proc(self: ^Renderer, data: []$T, usage: bit_set[BufferUsage] = {}) -> (handle: BufferHandle, ok: bool) #optional_ok {
   #assert(size_of(T) % 4 == 0)
-  guard(self)
+  lock(self)
   handle = BufferHandle(containers.slots_alloc(&self.slots[.GPU_BUFFERS]) or_return)
   defer if !ok do buffer_destroy(self, handle)
   size := len(data) * size_of(T)
@@ -165,7 +165,7 @@ buffer_create :: proc(self: ^Renderer, data: []$T, usage: bit_set[BufferUsage] =
 // buffer_write writes data at element `first` of the buffer; it lands before the next frame's
 // work.
 buffer_write :: proc(self: ^Renderer, handle: BufferHandle, data: []$T, first := 0) -> bool {
-  guard(self)
+  lock(self)
   b := gpu_buffer(self, handle) or_return
   offset, size := first * size_of(T), len(data) * size_of(T)
   if offset + size > b.size do return false
@@ -175,7 +175,7 @@ buffer_write :: proc(self: ^Renderer, handle: BufferHandle, data: []$T, first :=
 // buffer_read fills dst from element `first` of a READBACK buffer as a recent frame left it,
 // a frame or two behind; false before any frame copied it back.
 buffer_read :: proc(self: ^Renderer, handle: BufferHandle, dst: []$T, first := 0) -> bool {
-  guard(self)
+  lock(self)
   b := gpu_buffer(self, handle) or_return
   offset, size := first * size_of(T), len(dst) * size_of(T)
   if b.readback[0] == 0 || offset + size > b.size do return false
@@ -184,7 +184,7 @@ buffer_read :: proc(self: ^Renderer, handle: BufferHandle, dst: []$T, first := 0
 
 // buffer_destroy frees the buffer; frames already submitted still use it.
 buffer_destroy :: proc(self: ^Renderer, handle: BufferHandle) {
-  guard(self)
+  lock(self)
   b := gpu_buffer(self, handle) or_else nil
   if b == nil do return
   dev.buffer_retire(&self.gpu, b.buffer)
@@ -196,7 +196,7 @@ buffer_destroy :: proc(self: ^Renderer, handle: BufferHandle) {
 // compute_shader_create makes a compute shader (entry point main) binding `bindings`, from a
 // compiled shader: #load("name." + SHADER_EXT).
 compute_shader_create :: proc(self: ^Renderer, source: []u8, bindings: ..Binding) -> (shader: ComputeShader, ok: bool) #optional_ok {
-  guard(self)
+  lock(self)
   layout, group := gpu_bindings(self, bindings, compute = true) or_return
   pipeline := dev.compute_pipeline_create(&self.gpu, {source, pipeline_layout(self, .USER, user = layout)}) or_return
   return ComputeShader(gpu_shader_add(self, {pipeline = pipeline, group = group}) or_return), true
@@ -213,7 +213,7 @@ draw_shader_create :: proc(
   shader: DrawShader,
   ok: bool,
 ) #optional_ok {
-  guard(self)
+  lock(self)
   layout, group := gpu_bindings(self, bindings, compute = false) or_return
   desc := rhi.GraphicsPipelineDesc {
     shader        = source,
@@ -241,28 +241,28 @@ draw_shader_destroy :: proc(self: ^Renderer, shader: DrawShader) {
 
 // stage_clear queues zeroing the buffer, ordered with the dispatches around it.
 stage_clear :: proc(self: ^Renderer, buffer: BufferHandle) {
-  guard(self)
+  lock(self)
   if _, live := gpu_buffer(self, buffer); live do gpu_work_add(self, {clear = true, buffer = buffer})
 }
 
 // stage_dispatch queues the shader over `groups` workgroups with `params` (the shaders'
 // `params`, laid out as Params; at most GPU_PARAMS_BYTES).
 stage_dispatch :: proc(self: ^Renderer, shader: ComputeShader, groups: [3]u32, params: $T) {
-  guard(self)
+  lock(self)
   gpu_work_add(self, {shader = shader, groups = groups, push = gpu_push(params)})
 }
 
 // stage_dispatch_indirect queues the shader over the workgroup counts that three u32 at byte
 // `offset` of an INDIRECT buffer hold when it runs.
 stage_dispatch_indirect :: proc(self: ^Renderer, shader: ComputeShader, args: BufferHandle, offset: int, params: $T) {
-  guard(self)
+  lock(self)
   gpu_work_add(self, {shader = shader, buffer = args, offset = offset, push = gpu_push(params)})
 }
 
 // stage_draw draws `instances` of source with the shader in every camera's forward pass, over
 // the lit scene and depth-tested against it.
 stage_draw :: proc(self: ^Renderer, shader: DrawShader, source: DrawSource, instances: u32, params: $T) {
-  guard(self)
+  lock(self)
   gpu_draw_add(self, {shader = shader, source = source, instances = instances, push = gpu_push(params)})
 }
 
@@ -271,7 +271,7 @@ stage_draw :: proc(self: ^Renderer, shader: DrawShader, source: DrawSource, inst
 // {index_count, instance_count, first_index, vertex_offset, first_instance} for a mesh, its
 // indices and vertices counted from the mesh's first.
 stage_draw_indirect :: proc(self: ^Renderer, shader: DrawShader, source: DrawSource, args: BufferHandle, offset: int, params: $T) {
-  guard(self)
+  lock(self)
   gpu_draw_add(self, {shader = shader, source = source, args = args, offset = offset, push = gpu_push(params)})
 }
 
@@ -303,7 +303,7 @@ gpu_shader_add :: proc(self: ^Renderer, shader: GpuShader) -> (handle: u32, ok: 
 
 @(private = "file")
 gpu_shader_destroy :: proc(self: ^Renderer, handle: u32) {
-  guard(self)
+  lock(self)
   s := gpu_shader(self, handle) or_else nil
   if s == nil do return
   dev.pipeline_retire(&self.gpu, s.pipeline)

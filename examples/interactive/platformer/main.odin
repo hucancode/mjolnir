@@ -369,7 +369,6 @@ keep_one_way_contact :: proc "c" (shape_a, shape_b: b2.ShapeId, manifold: ^b2.Ma
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   read_controls(app)
   app.time += dt

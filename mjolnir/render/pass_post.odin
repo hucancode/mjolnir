@@ -77,9 +77,9 @@ post_pipelines_create :: proc(self: ^Renderer, source: rhi.ShaderSource) -> (pip
 // shader/post.slang; load it with #load("name." + SHADER_EXT). It reads render's time and the
 // image size (post_resolution).
 post_shader_create :: proc(self: ^Renderer, source: []u8) -> (shader: PostShader, ok: bool) #optional_ok {
-  guard(self)
+  lock(self)
   shader = PostShader(containers.slots_alloc(&self.slots[.POST_SHADERS]) or_return)
-  self.custom_post_pipelines[shader], ok = post_pipelines_create(self, source)
+  self.post_pipelines[post_index(shader)], ok = post_pipelines_create(self, source)
   if !ok do post_shader_destroy(self, shader)
   return
 }
@@ -87,10 +87,16 @@ post_shader_create :: proc(self: ^Renderer, source: []u8) -> (shader: PostShader
 // post_shader_destroy frees a shader from post_shader_create; take its effects off the stack
 // first.
 post_shader_destroy :: proc(self: ^Renderer, shader: PostShader) {
-  guard(self)
+  lock(self)
   if !containers.slots_free(&self.slots[.POST_SHADERS], u32(shader)) do return
-  for p in self.custom_post_pipelines[shader] do dev.pipeline_retire(&self.gpu, p)
-  self.custom_post_pipelines[shader] = {}
+  for p in self.post_pipelines[post_index(shader)] do dev.pipeline_retire(&self.gpu, p)
+  self.post_pipelines[post_index(shader)] = {}
+}
+
+// Where a post shader's pipelines are: after the built-in effects'.
+@(private = "file")
+post_index :: #force_inline proc(shader: PostShader) -> int {
+  return POST_EFFECT_COUNT + int(shader)
 }
 
 // make_custom_effect packs `params` into a CustomEffect of `shader`, laid out as the shader's push
@@ -151,10 +157,11 @@ post_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
         time                 = f32(self.time),
         effect               = effect,
       }
-      pipeline := self.post_pipelines[reflect.get_union_variant_raw_tag(effect)][int(is_last)]
-      if custom, is_custom := effect.(CustomEffect); is_custom {
-        pipeline = post_shader_pipeline(self, custom.shader, is_last)
-      }
+      index := int(reflect.get_union_variant_raw_tag(effect))
+      if custom, is_custom := effect.(CustomEffect); is_custom do index = post_index(custom.shader)
+      // the copy stands in for a shader that is gone
+      pipeline := self.post_pipelines[index][int(is_last)] if index < len(self.post_pipelines) else 0
+      if pipeline == 0 do pipeline = self.post_pipelines[0][int(is_last)]
       pipeline_bind(self, cmd, pipeline, .NONE, f, &push, .POST, input, original, normal, depth)
       dev.cmd_draw(&self.gpu, cmd, 3, 1, 0, 0)
       dev.cmd_end_pass(&self.gpu, cmd)
@@ -162,13 +169,4 @@ post_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
       i += 1
     }
   }
-}
-
-// A CustomEffect's pipeline; the copy pipeline stands in for a shader that is gone.
-@(private = "file")
-post_shader_pipeline :: proc(self: ^Renderer, shader: PostShader, is_last: bool) -> rhi.Pipeline {
-  if containers.slots_live(&self.slots[.POST_SHADERS], u32(shader)) {
-    if p := self.custom_post_pipelines[shader][int(is_last)]; p != 0 do return p
-  }
-  return self.post_pipelines[0][int(is_last)]
 }

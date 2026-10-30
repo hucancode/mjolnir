@@ -203,7 +203,6 @@ shutdown :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   panel(app)
   dragging := !app.input.mouse_captured && input.mouse_down(&app.input, .LEFT)

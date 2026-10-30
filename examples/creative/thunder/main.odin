@@ -152,7 +152,6 @@ shutdown :: proc(app: ^App) {
 update :: proc(app: ^App, dt: f32) {
   r := &app.renderer
   render.lock(r)
-  defer render.unlock(r)
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
   click_to_strike(app)

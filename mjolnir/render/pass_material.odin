@@ -4,8 +4,8 @@ import "../geometry"
 
 import "rhi"
 
-// Each MaterialType's pipeline is built against the targets of its pass; .CUSTOM has a
-// pipeline per user shader (material_shader_create), drawn after the built-in forward types.
+// Each MaterialType's pipeline is built against the targets of its pass; your shaders
+// (material_shader_create) are forward types after the built-in ones.
 @(private)
 MaterialPass :: enum {
   // writes the G-buffer and depth, lit by the lighting pass
@@ -23,7 +23,7 @@ MATERIAL_PASS_TARGETS := [MaterialPass][]CameraImage {
 @(private = "file")
 MATERIAL_PASS_TYPES := [MaterialPass][2]MaterialType {
   .GBUFFER = {MaterialType(0), FIRST_FORWARD_TYPE},
-  .FORWARD = {FIRST_FORWARD_TYPE, .CUSTOM},
+  .FORWARD = {FIRST_FORWARD_TYPE, MaterialType(DRAW_LISTS)},
 }
 
 // How a material shader draws, built-in or yours (material_shader_create): its source, face
@@ -41,7 +41,7 @@ MaterialShaderDesc :: struct {
   pulled:    bool,
 }
 
-// The built-in material types; .CUSTOM's shaders are yours.
+// The built-in material types.
 @(private)
 material_types :: proc() -> [MaterialType]MaterialShaderDesc {
   return #partial {
@@ -114,7 +114,7 @@ material_init :: proc(self: ^Renderer) -> bool {
   types := material_types()
   for pass in MaterialPass {
     range := MATERIAL_PASS_TYPES[pass]
-    for type in range[0] ..< range[1] {
+    for type in range[0] ..< min(range[1], MaterialType(len(MaterialType))) {
       self.material_pipelines[pass][int(type)] = material_pipeline_create(self, pass, types[type]) or_return
     }
   }
@@ -137,20 +137,15 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
     particles_draw(self, cmd, f, cam)
   }
   types := MATERIAL_PASS_TYPES[pass]
-  // a type's draw list key (material_list) is the type; custom shader i's is CUSTOM + i
+  // a type's draw list key (material_list) is the type; a free shader's has no pipeline
   keys: [DRAW_LISTS]u32
   pipelines: [DRAW_LISTS]rhi.Pipeline
   count := 0
   for t in types[0] ..< types[1] {
-    keys[count], pipelines[count] = u32(t), self.material_pipelines[pass][int(t)]
+    p := self.material_pipelines[pass][int(t)]
+    if p == 0 do continue
+    keys[count], pipelines[count] = u32(t), p
     count += 1
-  }
-  if pass == .FORWARD {
-    for p, i in self.custom_material_pipelines[1:] {
-      if p == 0 do continue
-      keys[count], pipelines[count] = u32(MaterialType.CUSTOM) + u32(i), p
-      count += 1
-    }
   }
   // every mesh draw reads the camera it draws for
   camera_index := cam

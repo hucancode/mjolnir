@@ -90,7 +90,6 @@ spawn_landmark :: proc(app: ^App, pos: [3]f32, color: render.Color) {
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
   app.time += dt

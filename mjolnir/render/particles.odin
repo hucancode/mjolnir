@@ -90,7 +90,7 @@ emitter :: proc(self: ^Renderer, handle: EmitterHandle) -> (^Emitter, bool) #opt
 // then emits nothing.
 emit :: proc(self: ^Renderer, emitter: EmitterHandle, slot: $H, count: u32) {
   if count == 0 do return
-  guard(self)
+  lock(self)
   append(&self.bursts, Burst{emitter = emitter, slot = slot_index(slot), count = count})
 }
 

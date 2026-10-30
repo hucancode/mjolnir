@@ -121,7 +121,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 shutdown :: proc(app: ^App) {
-  ragdoll.despawn(&app.rag, &app.phys)
+  ragdoll.bodies_destroy(&app.rag, &app.phys)
   ragdoll.destroy(&app.rag)
   gltf.destroy(&app.inst, &app.scene, &app.renderer)
   gltf.destroy(&app.model, &app.renderer)
@@ -138,7 +138,7 @@ respawn :: proc(app: ^App) {
   app.dirty = false
   app.grab = {}
   clear(&app.pins)
-  ragdoll.spawn(&app.rag, &app.phys, {0, ragdoll.ground_height(&app.rag), 0}, app.mode == .SIM)
+  ragdoll.bodies_create(&app.rag, &app.phys, {0, ragdoll.ground_height(&app.rag), 0}, app.mode == .SIM)
 }
 
 set_mode :: proc(app: ^App, mode: Mode) {
@@ -149,7 +149,6 @@ set_mode :: proc(app: ^App, mode: Mode) {
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
   if app.dirty do respawn(app)

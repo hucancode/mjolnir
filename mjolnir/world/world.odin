@@ -112,12 +112,13 @@ children :: proc(self: ^World, handle: NodeHandle) -> []NodeHandle {
 // find returns the first node named `name` under `root` (the whole world by default), searching
 // depth first; false when none is.
 find :: proc(self: ^World, name: string, root: NodeHandle = {}) -> (handle: NodeHandle, ok: bool) #optional_ok {
+  start := root if root != {} else self.root
   stack := make([dynamic]NodeHandle, context.temp_allocator)
-  append(&stack, root if root != {} else self.root)
+  append(&stack, start)
   for len(stack) > 0 {
     h := pop(&stack)
     n := lookup(self, h) or_continue
-    if n.name == name && h != root do return h, true
+    if n.name == name && h != start do return h, true
     append(&stack, ..children(self, h))
   }
   return
@@ -137,7 +138,7 @@ build_tree :: proc(self: ^World) {
   resize(&self.child_first, n + 1)
   slice.zero(self.child_first[:])
   for i in 0 ..< u32(n) {
-    if i == self.root.index || !containers.slots_live(&self.slots, i) do continue
+    if !containers.slots_live(&self.slots, i) do continue
     p := self.nodes[i].parent
     if containers.slots_valid(&self.slots, p) do self.child_first[p.index + 1] += 1
   }
@@ -145,7 +146,7 @@ build_tree :: proc(self: ^World) {
   resize(&self.children, int(self.child_first[n]))
   next := slice.clone(self.child_first[:n], context.temp_allocator)
   for i in 0 ..< u32(n) {
-    if i == self.root.index || !containers.slots_live(&self.slots, i) do continue
+    if !containers.slots_live(&self.slots, i) do continue
     p := self.nodes[i].parent
     if !containers.slots_valid(&self.slots, p) do continue
     self.children[next[p.index]] = NodeHandle(containers.slots_handle(&self.slots, i))
@@ -164,7 +165,7 @@ build_tree :: proc(self: ^World) {
   resize(&self.topo_first, n)
   resize(&self.topo_end, n)
   for i, k in self.topo do self.topo_first[i], self.topo_end[i] = u32(k), 1
-  #reverse for i in self.topo do if i != self.root.index do self.topo_end[self.nodes[i].parent.index] += self.topo_end[i]
+  #reverse for i in self.topo do self.topo_end[self.nodes[i].parent.index] += self.topo_end[i]
   for i in self.topo do self.topo_end[i] += self.topo_first[i]
   self.tree_stale = false
 }
@@ -206,8 +207,9 @@ init :: proc(self: ^World, max_nodes: u32 = 65536) -> bool {
   containers.slots_init(&self.slots, max_nodes, RETIRE_GRACE)
   self.nodes = make([]Node, max_nodes)
   self.cache = make([]Node_Cache, max_nodes)
+  // index 0 is never a node: the root's parent is the zero handle, whose cache is the identity
+  self.cache[0] = NODE_CACHE_INIT
   self.root = alloc_node(self, "root") or_return
-  self.nodes[self.root.index].parent = self.root
   self.tree_stale = true
   // the root outlives teardown
   containers.slots_mark(&self.slots)
@@ -262,7 +264,10 @@ teardown :: proc(self: ^World) {
   self.tree_stale = true
   clear(&self.pending_removed)
   clear(&self.feed)
-  clear(&self.touched)
+  // kept nodes edited since the last update: walk them next update as well
+  touched := self.touched[:]
+  resize(&self.touched, 0)
+  for i in touched do if containers.slots_live(&self.slots, i) do append(&self.touched, i)
 }
 
 // node_destroy removes a node and its descendants; changes reports them after the next update.
@@ -281,7 +286,7 @@ node_destroy :: proc(self: ^World, handle: NodeHandle) -> bool {
 set_parent :: proc(self: ^World, handle, parent: NodeHandle, keep_world := false) -> bool {
   if handle == self.root || !containers.slots_valid(&self.slots, handle) do return false
   if !containers.slots_valid(&self.slots, parent) do return false
-  for p := parent; p != self.root; p = self.nodes[p.index].parent do if p == handle do return false
+  for p := parent; p != {}; p = self.nodes[p.index].parent do if p == handle do return false
   node := edit(self, handle)
   if keep_world {
     local := linalg.matrix4_inverse(self.cache[parent.index].world_matrix) * self.cache[handle.index].world_matrix
@@ -331,15 +336,11 @@ traverse :: proc(self: ^World) {
 @(private = "file")
 refresh :: proc(self: ^World, i: u32, moved: []bool) {
   current_node, c := &self.nodes[i], &self.cache[i]
-  parent_moved, parent_visible := false, true
-  parent: ^Node_Cache
-  if i != self.root.index {
-    p := current_node.parent.index
-    parent = &self.cache[p]
-    parent_moved = moved[p]
-    parent_visible = parent.visible
-  }
-  visible := parent_visible && current_node.visible
+  // the root's parent is index 0: the identity, visible and never moved
+  p := current_node.parent.index
+  parent := &self.cache[p]
+  parent_moved := moved[p]
+  visible := parent.visible && current_node.visible
   visibility_changed := c.visible != visible
   c.visible = visible
   is_dirty := c.is_dirty
@@ -347,7 +348,7 @@ refresh :: proc(self: ^World, i: u32, moved: []bool) {
   if parent_moved || is_dirty {
     t := current_node.transform
     local := linalg.matrix4_from_trs(t.position, t.rotation, t.scale)
-    c.world_matrix = parent.world_matrix * local if parent != nil else local
+    c.world_matrix = parent.world_matrix * local
   }
   moved[i] = parent_moved || is_dirty
   if visibility_changed || moved[i] {
@@ -365,16 +366,11 @@ set_world_pose :: proc(
 ) {
   node := edit(self, handle)
   if node == nil do return
-  if handle == self.root {
-    node.transform.position = position
-    node.transform.rotation = rotation
-  } else {
-    parent_world := self.cache[node.parent.index].world_matrix
-    inv := linalg.matrix4_inverse(parent_world)
-    node.transform.position = (inv * [4]f32{position.x, position.y, position.z, 1}).xyz
-    _, parent_rotation, _ := geometry.decompose_matrix(parent_world)
-    node.transform.rotation = linalg.normalize(linalg.quaternion_inverse(parent_rotation) * rotation)
-  }
+  parent_world := self.cache[node.parent.index].world_matrix
+  inv := linalg.matrix4_inverse(parent_world)
+  node.transform.position = (inv * [4]f32{position.x, position.y, position.z, 1}).xyz
+  _, parent_rotation, _ := geometry.decompose_matrix(parent_world)
+  node.transform.rotation = linalg.normalize(linalg.quaternion_inverse(parent_rotation) * rotation)
 }
 
 // set_world_poses is set_world_pose for every pose of `poses`: any struct with
@@ -399,9 +395,9 @@ world_matrix :: proc(self: ^World, handle: NodeHandle) -> matrix[4, 4]f32 {
 // set_visible shows or hides a node and its subtree.
 set_visible :: proc(self: ^World, handle: NodeHandle, visible: bool) {
   node := lookup(self, handle)
-  if node == nil do return
-  if node.visible == visible do return
+  if node == nil || node.visible == visible do return
   node.visible = visible
+  // a node listed twice is walked once (traverse)
   append(&self.touched, handle.index)
 }
 

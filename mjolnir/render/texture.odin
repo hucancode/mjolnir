@@ -28,7 +28,7 @@ calculate_mip_levels :: proc(width, height: u32) -> u32 {
 // the render target range.
 @(private)
 allocate_texture :: proc(self: ^Renderer, desc: TextureDesc, data: []u8 = nil, target := false) -> (handle: TextureHandle, ok: bool) {
-  guard(self)
+  lock(self)
   pool := &self.slots[.TARGETS] if target else &self.slots[.TEXTURES]
   h := containers.slots_alloc(pool) or_return
   if !dev.texture_create(&self.gpu, TextureHandle(h), desc, data) {
@@ -41,7 +41,7 @@ allocate_texture :: proc(self: ^Renderer, desc: TextureDesc, data: []u8 = nil, t
 // texture_destroy frees the texture; its handle is stale at once, and frames already
 // submitted still sample it.
 texture_destroy :: proc(self: ^Renderer, handle: TextureHandle) {
-  guard(self)
+  lock(self)
   containers.slots_free(texture_pool(self, handle), u32(handle))
   if handle < MAX_TEXTURES do self.storage_formats[handle] = {}
 }
@@ -77,7 +77,7 @@ texture_create_pixels :: proc(
     log.errorf("A storage texture is RGBA8_UNORM, RGBA16F or R32F, not %v", format)
     return 0, false
   }
-  guard(self)
+  lock(self)
   handle = allocate_texture(self, {extent = size, format = format, usage = {.SAMPLED, .STORAGE}}, pixels) or_return
   self.storage_formats[handle] = format
   return handle, true

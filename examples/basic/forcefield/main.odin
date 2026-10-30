@@ -120,7 +120,6 @@ draw_field_marker :: proc(app: ^App, f: ^Field) {
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)

@@ -15,7 +15,6 @@ import "core:slice"
 @(private)
 upload :: proc(self: ^Model, r: ^render.Renderer, file: ^asset.Model) -> bool {
   render.lock(r)
-  defer render.unlock(r)
   // per image: the texture as color (sRGB) data and as linear data
   images := make([][2]render.TextureHandle, len(file.images), context.temp_allocator)
   texture :: proc(self: ^Model, r: ^render.Renderer, file: ^asset.Model, images: [][2]render.TextureHandle, image: int, srgb: bool) -> (handle: render.TextureHandle, ok: bool) {

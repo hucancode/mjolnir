@@ -239,7 +239,6 @@ touches_dragon :: proc(app: ^App, ray: geometry.Ray) -> bool {
 update :: proc(app: ^App, dt: f32) {
   r := &app.renderer
   render.lock(r)
-  defer render.unlock(r)
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
 

@@ -2,7 +2,7 @@ package render
 
 
 // bit t set for every G-buffer type t; views mask material types in a u32
-#assert(len(MaterialType) <= 32)
+#assert(DRAW_LISTS <= 32)
 @(private)
 GBUFFER_TYPES :: u32(1) << u32(FIRST_FORWARD_TYPE) - 1
 
@@ -30,16 +30,16 @@ Material :: struct {
   metallic_value:           f32,
   roughness_value:          f32,
   emissive_value:           f32,
-  // .CUSTOM: the user shader drawing it
-  shader:                   MaterialShader,
+  type:                     MaterialType,
   base_color_factor:        [4]f32,
   // .SPRITE: sheet size in cells and the cell shown, row-major and wrapped to the sheet; animate
   // by setting frame_index as time advances
   frame_columns:            u32,
   frame_rows:               u32,
   frame_index:              u32,
-  type:                     MaterialType,
-  // .CUSTOM: the shader's own values, read as m.params[i] (built-in types ignore them)
+  _:                        u32,
+  // your shader's own values (material_shader_create), read as m.params[i]; the built-in types
+  // ignore them
   params:                   [4][4]f32,
 }
 #assert(size_of(Material) == 128)
@@ -53,8 +53,9 @@ material :: proc(self: ^Renderer, handle: MaterialHandle) -> (^Material, bool) #
 // make_material returns a Material for material_create. type picks how it draws: .SPRITE
 // shows cell frame_index (row-major) of a frame_columns x frame_rows sheet in albedo_texture
 // on a camera-facing QUAD_XY (the node's x and y scale set its size, so scale non-square cells
-// by their aspect; a negative scale mirrors it; the nearer sprite covers the farther); .CUSTOM is drawn by shader (material_shader_create), which reads params (its own
-// values) and any other field.
+// by their aspect; a negative scale mirrors it; the nearer sprite covers the farther); a type
+// from material_shader_create is drawn by that shader, which reads params (its own values) and
+// any other field.
 make_material :: proc(
   type: MaterialType = .PBR,
   albedo_texture: TextureHandle = NO_TEXTURE,
@@ -68,7 +69,6 @@ make_material :: proc(
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
   frame_index: u32 = 0,
-  shader: MaterialShader = 0,
   params: [4][4]f32 = {},
 ) -> Material {
   return {
@@ -84,7 +84,6 @@ make_material :: proc(
     frame_columns              = frame_columns,
     frame_rows                 = frame_rows,
     frame_index                = frame_index,
-    shader                     = shader,
     params                     = params,
   }
 }

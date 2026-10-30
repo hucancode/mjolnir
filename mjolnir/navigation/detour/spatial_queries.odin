@@ -291,68 +291,6 @@ raycast :: proc(
 }
 
 @(private = "file")
-find_random_point :: proc(
-  query: ^Nav_Mesh_Query,
-  filter: ^Query_Filter,
-) -> (
-  ref: Poly_Ref,
-  pt: [3]f32,
-  ret: Status,
-) {
-  ref = INVALID_POLY_REF
-  for i in 0 ..< query.nav_mesh.max_tiles {
-    tile := &query.nav_mesh.tiles[i]
-    if tile.header == nil {
-      continue
-    }
-    for j in 0 ..< int(tile.header.poly_count) {
-      poly := &tile.polys[j]
-      ref := encode_poly_id(query.nav_mesh, tile.salt, u32(i), u32(j))
-      if query_filter_pass_filter(filter, ref, tile, poly) {
-        ref = ref
-        pt = calc_poly_center(tile, poly)
-        ret = {.Success}
-        return
-      }
-    }
-  }
-  ret = {.Invalid_Param}
-  return
-}
-
-@(private = "file")
-find_random_point_around_circle :: proc(
-  query: ^Nav_Mesh_Query,
-  start_ref: Poly_Ref,
-  start_pos: [3]f32,
-  max_radius: f32,
-  filter: ^Query_Filter,
-) -> (
-  ref: Poly_Ref,
-  pt: [3]f32,
-  ret: Status,
-) {
-  ref = INVALID_POLY_REF
-  pt = start_pos
-  if !is_valid_poly_ref(query.nav_mesh, start_ref) {
-    ret = {.Invalid_Param}
-    return
-  }
-  angle := math.PI * 2.0 * f64(rand.float32())
-  radius_factor := f32(math.sqrt(f64(rand.float32())))
-  radius := max_radius * radius_factor
-  offset := [3]f32 {
-    f32(math.cos(angle)) * radius,
-    0,
-    f32(math.sin(angle)) * radius,
-  }
-  target := start_pos + offset
-  half_extents := [3]f32{max_radius, max_radius, max_radius}
-  ret, ref, pt = find_nearest_poly(query, target, half_extents, filter)
-  return
-}
-
-@(private = "file")
 query_polygons_in_tile :: proc(
   nav_mesh: ^Nav_Mesh,
   tile: ^Mesh_Tile,

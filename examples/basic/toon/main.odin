@@ -17,7 +17,7 @@ App :: struct {
   debug:     debugui.Context,
   input:     input.State,
   orbit:     render.Orbit,
-  toon:      render.MaterialShader,
+  toon:      render.MaterialType,
   materials: [dynamic]render.MaterialHandle,
 }
 
@@ -60,7 +60,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   colors := [?][4]f32{{1.0, 0.45, 0.3, 1}, {0.35, 0.8, 0.45, 1}, {0.35, 0.55, 1.0, 1}, {1.0, 0.85, 0.3, 1}}
   shapes := [?]render.Primitive{.SPHERE, .CUBE, .SPHERE, .CUBE}
   for color, i in colors {
-    mat := render.material_create(&app.renderer, render.make_material(.CUSTOM, base_color_factor = color, shader = app.toon))
+    mat := render.material_create(&app.renderer, render.make_material(app.toon, base_color_factor = color))
     append(&app.materials, mat)
     spawn_primitive(app, shapes[i], mat, {f32(i) * 2.5 - 3.75, 1.0, 0})
   }
@@ -85,7 +85,6 @@ shutdown :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)

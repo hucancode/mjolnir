@@ -22,7 +22,6 @@ static const uint MATERIAL_TRANSPARENT = 1;
 static const uint MATERIAL_WIREFRAME = 2;
 static const uint MATERIAL_RANDOM_COLOR = 3;
 static const uint MATERIAL_SPRITE = 4;
-static const uint MATERIAL_CUSTOM = 5;
 
 // LightType
 static const uint LIGHT_POINT = 0;
@@ -109,15 +108,14 @@ struct Material {
     float metallic_value;
     float roughness_value;
     float emissive_value;
-    // MATERIAL_CUSTOM: the user shader drawing it
-    uint shader;
+    // MaterialType: a built-in one (MATERIAL_*) or a user shader's past them
+    uint material_type;
     float4 base_color_factor;
     uint frame_columns;
     uint frame_rows;
     uint frame_index;
-    // MaterialType
-    uint material_type;
-    // a .CUSTOM shader's own values
+    uint _pad;
+    // a user shader's own values
     float4 params[4];
 }
 

@@ -453,3 +453,36 @@ test_update_walks_only_touched_subtrees :: proc(t: ^testing.T) {
   update(&w)
   testing.expect_value(t, len(changes(&w)), 0)
 }
+
+@(test)
+test_kept_node_moves_after_teardown :: proc(t: ^testing.T) {
+  w: World
+  init(&w, 512)
+  defer shutdown(&w)
+  player := spawn(&w)
+  for _ in 0 ..< 100 do spawn(&w)
+  setup(&w)
+  spawn(&w)
+  update(&w)
+  translate(&w, player, {1, 0, 0})
+  teardown(&w)
+  update(&w)
+  translate(&w, player, {2, 0, 0})
+  update(&w)
+  testing.expect_value(t, world_matrix(&w, player)[3].xyz, [3]f32{2, 0, 0})
+}
+
+@(test)
+test_find_searches_below_root :: proc(t: ^testing.T) {
+  w: World
+  init(&w, 16)
+  defer shutdown(&w)
+  a := spawn(&w, name = "a")
+  b := spawn(&w, name = "b", parent = a)
+  update(&w)
+  _, found_root := find(&w, "root")
+  testing.expect(t, !found_root, "the start of the search is not below itself")
+  testing.expect_value(t, find(&w, "b"), b)
+  _, found_a := find(&w, "a", a)
+  testing.expect(t, !found_a, "a is not below a")
+}

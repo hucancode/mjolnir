@@ -76,7 +76,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   app.time += dt
   platform.read_input(&app.platform, &app.input)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)

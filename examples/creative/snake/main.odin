@@ -76,8 +76,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   body_shader, body_ok := render.material_shader_create(r, #load("snake_body." + render.SHADER_EXT), blend = .NONE)
   head_shader, head_ok := render.material_shader_create(r, #load("snake_head." + render.SHADER_EXT), blend = .NONE)
   if !body_ok || !head_ok do return .FAIL
-  app.skin = render.material_create(r, render.make_material(.CUSTOM, shader = body_shader))
-  app.head_skin = render.material_create(r, render.make_material(.CUSTOM, shader = head_shader))
+  app.skin = render.material_create(r, render.make_material(body_shader))
+  app.head_skin = render.material_create(r, render.make_material(head_shader))
   body := render.mesh_create(r, geometry.make_sphere(segments = 24, rings = 120, radius = SNAKE_LENGTH + 1))
   head := render.mesh_create(r, geometry.make_sphere(segments = 32, rings = 32))
   app.body = world.spawn(&app.scene)
@@ -110,7 +110,6 @@ shutdown :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
   steer(app, dt)

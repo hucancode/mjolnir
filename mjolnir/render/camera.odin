@@ -228,7 +228,7 @@ make_camera :: proc(
 // `size` pixels; it lives until camera_destroy or teardown. Every camera is drawn each frame;
 // the main camera is presented to the swapchain.
 camera_create :: proc(self: ^Renderer, size: [2]u32, c: Camera) -> (handle: CameraHandle, ok: bool) #optional_ok {
-  guard(self)
+  lock(self)
   handle = CameraHandle(containers.slots_alloc(&self.slots[.CAMERAS]) or_return)
   self.cameras[handle] = c
   self.camera_targets[handle] = {extent = size}
@@ -249,7 +249,7 @@ camera_create :: proc(self: ^Renderer, size: [2]u32, c: Camera) -> (handle: Came
 // camera_destroy frees the camera; its handle is stale at once. false for the main camera,
 // which lives as long as the renderer, or a stale handle.
 camera_destroy :: proc(self: ^Renderer, handle: CameraHandle) -> bool {
-  guard(self)
+  lock(self)
   if handle == self.main_camera do return false
   camera(self, handle) or_return
   free_camera(self, handle)
@@ -276,7 +276,7 @@ camera_image :: proc(
   texture: TextureHandle,
   ok: bool,
 ) #optional_ok {
-  guard(self)
+  lock(self)
   camera(self, handle) or_return
   f := current_frame(self)
   if previous_frame do f = (f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT

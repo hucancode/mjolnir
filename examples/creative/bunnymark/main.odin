@@ -129,7 +129,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
   app.fps += (1 / max(dt, 1e-4) - app.fps) * FPS_SMOOTHING

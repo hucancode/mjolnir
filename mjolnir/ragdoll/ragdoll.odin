@@ -13,7 +13,7 @@ JointKind :: enum {
 }
 
 // Block is one physics box of a ragdoll, spanning the bones start..end of its limb. You edit
-// blocks freely; the ragdoll only reads them, and picks up edits at the next spawn.
+// blocks freely; the ragdoll only reads them, and picks up edits at the next bodies_create.
 Block :: struct {
   name:   string,
   start:  u32, // bone the block begins at, where its joint to the parent sits
@@ -28,12 +28,12 @@ Block :: struct {
   size:   [3]f32, // half extents in model units: across, along the limb, front to back; along <= 0 spans the bones (fit_length)
 }
 
-// Ragdoll maps blocks onto the bones of one skeleton. init it, spawn it into a physics World,
-// step that world, then sync the bone pose from the blocks every tick.
+// Ragdoll maps blocks onto the bones of one skeleton. init it, make its bodies in a physics
+// World (bodies_create), step that world, then sync the bone pose from the blocks every tick.
 Ragdoll :: struct {
   blocks:  []Block, // fixed in count after init
-  scale:   f32, // model to world scale, applied at spawn and sync
-  density: f32, // kg per cubic world unit, sets the mass of each block at spawn
+  scale:   f32, // model to world scale, applied at bodies_create and sync
+  density: f32, // kg per cubic world unit, sets the mass of each block at bodies_create
   using _: Ragdoll_State,
 }
 
@@ -45,7 +45,7 @@ Ragdoll_State :: struct {
   dir:      [][3]f32, // per block, rest limb direction in model space
   pivot:    [][3]f32, // per block, rest position of its start bone
   rot:      []quaternion128, // per block, rest orientation: local Y along the limb
-  bodies:   []physics.BodyHandle, // none until spawn
+  bodies:   []physics.BodyHandle, // none until bodies_create
   masses:   []f32,
   joints:   [dynamic]physics.JointHandle,
 }
@@ -100,7 +100,7 @@ init :: proc(self: ^Ragdoll, skeleton: ^animation.Skeleton, blocks: []Block) -> 
   return true
 }
 
-// destroy frees the ragdoll's memory. Despawn it from its physics World first.
+// destroy frees the ragdoll's memory. Destroy its bodies (bodies_destroy) first.
 destroy :: proc(self: ^Ragdoll) {
   delete(self.owner)
   delete(self.rest_skin)
@@ -160,12 +160,12 @@ ground_height :: proc(self: ^Ragdoll) -> f32 {
   return -low * self.scale
 }
 
-// spawn creates the blocks as bodies of world, in the skeleton's rest pose with the model
-// origin at `origin`, replacing any earlier spawn. simulate = false makes them static, for
+// bodies_create creates the blocks as bodies of world, in the skeleton's rest pose with the model
+// origin at `origin`, replacing any earlier ones. simulate = false makes them static, for
 // picking and editing; true makes them dynamic and joins them with their joints.
 // Body user links are left to you. Edits to blocks, scale and density take effect here.
-spawn :: proc(self: ^Ragdoll, world: ^physics.World, origin: [3]f32, simulate := true) {
-  despawn(self, world)
+bodies_create :: proc(self: ^Ragdoll, world: ^physics.World, origin: [3]f32, simulate := true) {
+  bodies_destroy(self, world)
   s := self.scale
   for _, i in self.blocks {
     half := half_size(self, i) * s
@@ -199,9 +199,10 @@ spawn :: proc(self: ^Ragdoll, world: ^physics.World, origin: [3]f32, simulate :=
   }
 }
 
-// despawn destroys the ragdoll's bodies and joints in world. A ragdoll that is not spawned is left alone.
-despawn :: proc(self: ^Ragdoll, world: ^physics.World) {
-  if !spawned(self) do return
+// bodies_destroy destroys the ragdoll's bodies and joints in world. A ragdoll without bodies is
+// left alone.
+bodies_destroy :: proc(self: ^Ragdoll, world: ^physics.World) {
+  if !has_bodies(self) do return
   for j in self.joints do physics.joint_destroy(world, j)
   clear(&self.joints)
   for &h in self.bodies {
@@ -211,23 +212,23 @@ despawn :: proc(self: ^Ragdoll, world: ^physics.World) {
 }
 
 @(private)
-spawned :: proc(self: ^Ragdoll) -> bool {
+has_bodies :: proc(self: ^Ragdoll) -> bool {
   return len(self.bodies) > 0 && self.bodies[0] != {}
 }
 
-// body returns the physics body of block i, none before spawn.
+// body returns the physics body of block i, none before bodies_create.
 body :: proc(self: ^Ragdoll, i: int) -> physics.BodyHandle {
   return self.bodies[i]
 }
 
-// mass returns the mass block i got at spawn: 0 for a static spawn.
+// mass returns the mass block i got at bodies_create: 0 for static bodies.
 mass :: proc(self: ^Ragdoll, i: int) -> f32 {
   return self.masses[i]
 }
 
 // block_of returns the block a physics body belongs to, for picking with physics.raycast.
 block_of :: proc(self: ^Ragdoll, handle: physics.BodyHandle) -> (block: int, ok: bool) #optional_ok {
-  if !spawned(self) do return
+  if !has_bodies(self) do return
   for h, i in self.bodies do if h == handle do return i, true
   return
 }
@@ -243,7 +244,7 @@ block_pose :: proc(
   half_extents: [3]f32,
   ok: bool,
 ) {
-  if !spawned(self) do return
+  if !has_bodies(self) do return
   b := physics.body(world, self.bodies[i]) or_return
   return b.position, b.rotation, half_size(self, i) * self.scale, true
 }
@@ -251,10 +252,10 @@ block_pose :: proc(
 // sync writes the skinning palette (one matrix per bone) that poses the mesh like the blocks,
 // for a model drawn at the returned origin with uniform `scale` and no rotation: place the
 // model's node there and stage the palette (render.stage_bones). The origin follows block 0,
-// so the mesh bounds stay near the ragdoll. Fails, leaving palette alone, before spawn or
+// so the mesh bounds stay near the ragdoll. Fails, leaving palette alone, before bodies_create or
 // when the palette is shorter than the skeleton.
 sync :: proc(self: ^Ragdoll, world: ^physics.World, palette: []matrix[4, 4]f32) -> (origin: [3]f32, ok: bool) {
-  if !spawned(self) || len(palette) < len(self.owner) do return
+  if !has_bodies(self) || len(palette) < len(self.owner) do return
   root := physics.body(world, self.bodies[0]) or_return
   s := [3]f32{self.scale, self.scale, self.scale}
   scale := linalg.matrix4_scale(s)

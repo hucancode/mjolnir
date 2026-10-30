@@ -67,8 +67,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   ring_shader, ring_ok := render.material_shader_create(r, #load("ring." + render.SHADER_EXT))
   field_shader, field_ok := render.material_shader_create(r, #load("field." + render.SHADER_EXT), blend = .NONE, cull = .NONE)
   if !field_ok || !ring_ok do return .FAIL
-  app.field = render.material_create(r, render.make_material(.CUSTOM, shader = field_shader))
-  app.ring = render.material_create(r, render.make_material(.CUSTOM, shader = ring_shader))
+  app.field = render.material_create(r, render.make_material(field_shader))
+  app.ring = render.material_create(r, render.make_material(ring_shader))
 
   sphere := world.spawn(&app.scene, {0, RADIUS, 0})
   sphere_mesh := render.mesh_create(r, geometry.make_sphere(segments = SEGMENTS, rings = RINGS, radius = RADIUS, faceted = true))
@@ -93,7 +93,6 @@ shutdown :: proc(app: ^App) {
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
-  defer render.unlock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)

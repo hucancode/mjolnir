@@ -20,13 +20,12 @@ import "rhi"
 // counts at the head of a compacted draw list buffer, one per list; commands follow
 @(private)
 DRAW_LIST_HEADER :: 8
-// A camera's draw lists, one per key (material_list): a list per built-in type, then one per
-// custom material shader in the room the header leaves.
+// A camera has a draw list per material type (material_list): the built-in ones, then your
+// shaders in the room the header leaves.
 @(private)
 DRAW_LISTS :: DRAW_LIST_HEADER
 // MAX_MATERIAL_SHADERS is how many material shaders (material_shader_create) exist at once.
-MAX_MATERIAL_SHADERS :: 3
-#assert(int(MaterialType.CUSTOM) + MAX_MATERIAL_SHADERS == DRAW_LISTS)
+MAX_MATERIAL_SHADERS :: DRAW_LISTS - len(MaterialType)
 // Mip 0 texels a depth pyramid group reduces per side (shader/depth_reduce.slang).
 @(private = "file")
 PYRAMID_TILE :: 32
@@ -229,7 +228,7 @@ cull_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   } else {
     c = 0
     for i in containers.slots_next(&self.slots[.CAMERAS], &c) do if camera_ready(self, i) do pyramid_build_groups(self, cmd, i, f)
-    if self.batch_high == 0 do return
+    if self.slots[.BATCHES].high_water <= 1 do return
     c = 0
     for i in containers.slots_next(&self.slots[.CAMERAS], &c) {
       cull_batched(self, cmd, camera_next_slot(i, f), CAMERA_VIEW_BASE + i, 1, self.camera_targets[i].pyramid[f])
@@ -299,26 +298,23 @@ cull_batched :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, first_view, vi
     draws_base      = dl.draws_base,
     instances_base  = dl.instances_base,
     max_batches     = MAX_BATCHES,
-    batch_count     = self.batch_high,
+    batch_count     = self.slots[.BATCHES].high_water,
     first_instance  = u32(dev.caps(&self.gpu).indirect_first_instance),
   }
   pipeline_bind(self, cmd, self.pipelines[.CULL_DRAWS], .CULL, 0, &push, .NONE)
   dev.cmd_bind_group(&self.gpu, cmd, 3, group)
-  dev.cmd_dispatch(&self.gpu, cmd, (self.batch_high + 63) / 64, views, 1)
+  dev.cmd_dispatch(&self.gpu, cmd, (self.slots[.BATCHES].high_water + 63) / 64, views, 1)
   if self.node_count == 0 do return
   // same layout and push: the groups stay bound
   dev.cmd_bind_pipeline(&self.gpu, cmd, self.pipelines[.CULL])
   dev.cmd_dispatch(&self.gpu, cmd, (self.node_count + 63) / 64, views, 1)
 }
 
-// The draw list a material's draws go to: its type's, or for .CUSTOM its shader's after
-// the built-in types' (cull.comp computes the same). A custom material without a valid
-// shader goes to NO_DRAW_LIST, drawn by no one.
+// The draw list a material's draws go to: its type's (cull.slang computes the same). A type
+// past every shader goes to NO_DRAW_LIST, drawn by no one.
 @(private)
 material_list :: proc(m: Material) -> u32 {
-  if m.type != .CUSTOM do return u32(m.type)
-  if m.shader == 0 || int(m.shader) > MAX_MATERIAL_SHADERS do return NO_DRAW_LIST
-  return u32(MaterialType.CUSTOM) + u32(m.shader) - 1
+  return u32(m.type) if u32(m.type) < DRAW_LISTS else NO_DRAW_LIST
 }
 
 @(private)
@@ -388,7 +384,9 @@ draw_batches :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, key
         dev.cmd_bind_vertex(&self.gpu, cmd, 1, dl.buffer, instances)
       }
       draw := int(dl.draws_base + (list * dl.draws_stride + id) * DRAW_WORDS) * size_of(u32)
-      if types[material_table[batch.material_id].type].pulled {
+      // your shaders' types are past the built-in ones, and pull nothing
+      type := material_table[batch.material_id].type
+      if type < MaterialType(len(MaterialType)) && types[type].pulled {
         dev.cmd_draw_indirect(&self.gpu, cmd, dl.buffer, draw, u32(run), DRAW_BYTES)
       } else {
         dev.cmd_draw_indexed_indirect(&self.gpu, cmd, dl.buffer, draw, u32(run), DRAW_BYTES)
