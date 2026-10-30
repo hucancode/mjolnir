@@ -2,9 +2,9 @@
 package main
 
 import "core:log"
+import "vendor:glfw"
 import "mjolnir/font"
 import "mjolnir/render"
-import "vendor:glfw"
 
 FRAMES :: #config(FRAMES, 0)
 

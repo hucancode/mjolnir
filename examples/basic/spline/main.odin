@@ -1,15 +1,16 @@
 // Spline evaluation: the curve and its control points, and cubes travelling it at uniform speed.
 package main
 
+import "core:log"
+import "core:math"
+import "core:math/ease"
+import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/geometry"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:log"
-import "core:math"
-import "core:math/ease"
 
 CUBE_COUNT :: 16
 ANIMATION_DURATION :: 8.0
@@ -52,8 +53,9 @@ shutdown :: proc(app: ^App) {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   app.orbit = render.make_orbit({0, 7, 5.5}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   CONTROL_POINTS :: 10
   points: [CONTROL_POINTS][3]f32

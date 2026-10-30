@@ -256,6 +256,6 @@ assemble :: proc(app: ^App) {
 }
 
 show :: proc(app: ^App, p: Piece, x: geometry.Transform) {
-  world.set_local(&app.scene, p.node, x.position, x.rotation, x.scale)
+  world.set_local(&app.scene, p.node, x)
   world.set_visible(&app.scene, p.node, true)
 }

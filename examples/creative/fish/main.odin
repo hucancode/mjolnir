@@ -1,6 +1,13 @@
 // GPU programming: a school of fish simulated by a compute shader, drawn by a draw shader.
 package main
 
+import sa "core:container/small_array"
+import "core:fmt"
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import "core:math/rand"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/geometry"
@@ -8,11 +15,6 @@ import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:fmt"
-import "core:log"
-import "core:math"
-import "core:math/rand"
-import mu "vendor:microui"
 
 MAX_FISH :: 4096
 FISH_VERTICES :: render.VertexCount(16 * 10 * 6)
@@ -48,8 +50,15 @@ SchoolParams :: struct {
   tank_max:   [4]f32,
 }
 
+SUN_FORWARD :: [3]f32{-0.4, -1, -0.3}
+SUN_COLOR :: [3]f32{0.75, 0.9, 1}
+SUN_INTENSITY :: 2.5
+
 FishParams :: struct {
-  first: u32,
+  first:        u32,
+  _:            [3]u32,
+  toward_sun:   [4]f32,
+  sun_radiance: [4]f32,
 }
 
 App :: struct {
@@ -61,8 +70,8 @@ App :: struct {
   orbit:    render.Orbit,
   fish:     render.BufferHandle,
   counters: render.BufferHandle,
-  school:   render.ComputeShader,
-  draw:     render.DrawShader,
+  school:   render.ShaderHandle,
+  draw:     render.ShaderHandle,
   shark:    world.NodeHandle,
   food:     [3]f32,
   feeding:  f32,
@@ -100,7 +109,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(r) do return .WAIT
   if !debugui.init(&app.debug, r) do return .FAIL
   app.orbit = render.make_orbit({0, 9, 22}, {0, 3, 0})
-  render.camera_orbit(render.main_camera(r), app.orbit)
 
   fish := make([]Fish, 2 * MAX_FISH, context.temp_allocator)
   for &f in fish[:MAX_FISH] {
@@ -118,20 +126,19 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.draw, ok = render.draw_shader_create(r, #load("fish." + render.SHADER_EXT), render.DEFAULT_DRAW_STATE, app.fish)
   if !ok do return .FAIL
 
-  sand := render.material_create(r, render.make_material(base_color_factor = {0.76, 0.66, 0.45, 1}, roughness_value = 0.9))
+  sand := render.material_create(r, render.make_material(base_color_factor = {0.76, 0.66, 0.45, 1}, roughness_factor = 0.9))
   mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, sand, cast_shadow = false), scale = 40)
-  rock := render.material_create(r, render.make_material(base_color_factor = {0.35, 0.38, 0.4, 1}, roughness_value = 0.8))
+  rock := render.material_create(r, render.make_material(base_color_factor = {0.35, 0.38, 0.4, 1}, roughness_factor = 0.8))
   for i in 0 ..< 7 {
     angle := f32(i) / 7 * math.TAU
     mjolnir.spawn(&app.scene, r, render.primitive(r, .SPHERE, rock), {math.cos(angle) * 9, 0, math.sin(angle) * 9}, scale = {1.6, 1.1 + f32(i % 3) * 0.6, 1.4})
   }
   app.shark = mjolnir.spawn(&app.scene, r, render.primitive(r, .SPHERE, .RED), scale = 0.6)
 
-  sun := &r.sun
-  sun.color = {0.75, 0.9, 1}
-  sun.intensity = 2.5
+  sun := render.light_create(r, render.make_directional_light(SUN_COLOR, SUN_INTENSITY))
+  mjolnir.spawn(&app.scene, r, sun, rotation = linalg.quaternion_from_forward_and_up(SUN_FORWARD, [3]f32{0, 1, 0}))
   r.skybox_intensity = 0
-  append(&r.effect_stack, render.FogEffect{color = {0.05, 0.25, 0.35}, start = 2, end = 45})
+  sa.append(&render.main_camera(r).effects, render.make_effect(render.FogEffect{color = {0.05, 0.25, 0.35}, start = 2, end = 45}))
   return .READY
 }
 
@@ -183,9 +190,12 @@ simulate :: proc(app: ^App, dt: f32, shark: [3]f32) {
     tank_min = {TANK_MIN.x, TANK_MIN.y, TANK_MIN.z, 0},
     tank_max = {TANK_MAX.x, TANK_MAX.y, TANK_MAX.z, 0},
   }
+  toward_sun, sun_radiance: [4]f32
+  toward_sun.xyz = linalg.normalize(-SUN_FORWARD)
+  sun_radiance.rgb = SUN_COLOR * SUN_INTENSITY
   render.stage_clear(&app.renderer, app.counters)
   render.stage_dispatch(&app.renderer, app.school, {(count + 63) / 64, 1, 1}, params)
-  render.stage_draw_indirect(&app.renderer, app.draw, FISH_VERTICES, app.counters, 0, FishParams{first = (1 - src) * MAX_FISH})
+  render.stage_draw(&app.renderer, app.draw, FISH_VERTICES, app.counters, 0, FishParams{first = (1 - src) * MAX_FISH, toward_sun = toward_sun, sun_radiance = sun_radiance})
 }
 
 draw :: proc(app: ^App) -> bool {

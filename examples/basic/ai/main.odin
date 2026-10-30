@@ -1,6 +1,9 @@
 // Guards with a behavior tree for a brain and a state machine for a body: patrol, chase, search, return. Right-click to move the intruder.
 package main
 
+import "core:log"
+import "core:math/linalg"
+import "core:math/rand"
 import "mjolnir"
 import bt "mjolnir/behavior_tree"
 import "mjolnir/fsm"
@@ -11,9 +14,6 @@ import "mjolnir/navigation/bake"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:log"
-import "core:math/linalg"
-import "core:math/rand"
 
 ARENA :: 20
 HALF_HEIGHT :: 0.8
@@ -131,8 +131,9 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   app.orbit = render.make_orbit({0, 24, 17}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
@@ -154,8 +155,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     g.app = app
     g.route = ROUTES[i]
     g.position = g.route[0]
-    g.node = world.spawn(&app.scene, g.position + {0, HALF_HEIGHT, 0})
-    world.scale(&app.scene, g.node, {0.5, HALF_HEIGHT, 0.5})
+    g.node = world.spawn(&app.scene, g.position + {0, HALF_HEIGHT, 0}, scale = {0.5, HALF_HEIGHT, 0.5})
     fsm.start(&g.machine, MODES, &g, .PATROL)
   }
   respawn_intruder(app)

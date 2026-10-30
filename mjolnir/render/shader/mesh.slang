@@ -9,7 +9,12 @@ SCENE_BUFFER(Material, materials, 3, 3)
 // what the skinning pass wrote
 SCENE_BUFFER(SkinnedVertex, skinned, 16, 4)
 
-struct MeshPush { uint camera_index; }
+struct MeshPush {
+    uint camera_index;
+    // the sun's light and node (pass_material.odin), light 0 for none
+    uint sun_light;
+    uint sun_node;
+}
 PUSH_BLOCK(MeshPush, mesh_push)
 
 struct VertexIn {

@@ -1,17 +1,18 @@
 // Tetris in 3D.
 package main
 
+import "core:fmt"
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import "core:math/rand"
 import "mjolnir"
 import "mjolnir/font"
+import "mjolnir/geometry"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:fmt"
-import "core:log"
-import "core:math"
-import "core:math/rand"
-import "mjolnir/geometry"
 
 GRID_W :: 20
 GRID_H :: 20
@@ -93,9 +94,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 draw_hud :: proc(app: ^App) {
-  hud := [?]render.RenderCommand {
-    {shape = render.DrawTextCommand{text = fmt.tprintf("Score: %d", app.state.score), position = {20, 20}, size = 32, color = {255, 255, 255, 255}}},
-    {shape = render.DrawTextCommand{text = fmt.tprintf("High: %d", app.state.high_score), position = {20, 60}, size = 24, color = {255, 220, 100, 255}}},
+  hud := [?]render.OverlayCommand {
+    {shape = render.OverlayText{text = fmt.tprintf("Score: %d", app.state.score), position = {20, 20}, size = 32, color = {255, 255, 255, 255}}},
+    {shape = render.OverlayText{text = fmt.tprintf("High: %d", app.state.high_score), position = {20, 60}, size = 24, color = {255, 220, 100, 255}}},
   }
   render.stage_overlay(&app.renderer, hud[:], &app.font)
 }
@@ -109,18 +110,19 @@ cell_world_pos :: proc(col: i32, row: i32) -> [3]f32 {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
   app.renderer.skybox_intensity = 0
   ground := render.mesh_create(&app.renderer, geometry.make_cylinder(segments = 64, height = 0.2, radius = RADIUS * 3.0))
-  dark_mat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0}))
+  dark_mat := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.05, 0.05, 0.06, 1.0}))
   mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = ground, material = dark_mat}, {0, -0.1, 0})
   spot := mjolnir.spawn(&app.scene, &app.renderer, render.light_create(&app.renderer, render.make_spot_light({1, 1, 1}, 500, 16.0, math.PI * 0.35)), {0, 10, 0})
   world.rotate(&app.scene, spot, -math.PI * 0.45, {1, 0, 0})
   app.orbit = render.make_orbit({0, 17, 17}, {0, 10, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   for c, i in render.COLOR_RGB {
     app.state.transparent_material[i] = render.material_create(&app.renderer, render.make_material(type = .TRANSPARENT, base_color_factor = {c.r, c.g, c.b, PIECE_ALPHA}))
-    app.state.opaque_material[i] = render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = c))
+    app.state.opaque_material[i] = render.material_create(&app.renderer, render.make_material(base_color_factor = c))
   }
   reset_game(app)
   return .READY
@@ -148,10 +150,8 @@ spawn_piece :: proc(app: ^App) {
   if collides(app, app.state.active_piece, app.state.active_pos) { app.state.game_over = true; return }
   mat := app.state.transparent_material[app.state.active_piece.color]
   for i in 0 ..< PIECE_LEN {
-    h := world.spawn(&app.scene)
-    render.attach(&app.renderer, h, render.primitive(&app.renderer, .CUBE, mat))
+    h := mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, mat), scale = 0.5 * CELL)
     app.state.active_cells[i] = h
-    world.scale(&app.scene, h, 0.5 * CELL)
   }
   app.state.has_active = true
   refresh_active_visuals(app)

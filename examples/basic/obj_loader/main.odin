@@ -1,6 +1,10 @@
 // Wavefront OBJ import, shown solid or as a wireframe of its triangles.
 package main
 
+import "core:fmt"
+import "core:log"
+import "core:math/linalg"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/geometry"
@@ -8,10 +12,6 @@ import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:fmt"
-import "core:log"
-import "core:math/linalg"
-import mu "vendor:microui"
 
 obj_files := [3][]u8{#load("assets/nav_test.obj"), #load("assets/floor_with_5_obstacles.obj"), #load("assets/dungeon.obj")}
 OBJ_SCALES :: [3]f32{1.0, 1.0, 0.05}
@@ -56,6 +56,8 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   app.material = render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1}))

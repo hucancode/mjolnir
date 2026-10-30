@@ -10,8 +10,8 @@ import "../containers"
 // blended by `blend`, and writing depth unless `depth_write` is false (so nearer meshes hide
 // farther ones drawn after them; a blended shader that discards nothing may want it off). They
 // cast no shadow, are not occlusion-culled, are culled by the mesh's bounds (keep moved vertices
-// near them) and see only the sun (View.sun_direction,
-// sun_radiance). There is room for MAX_MATERIAL_SHADERS at once.
+// near them) and see only the sun: the brightest visible directional light (scene_sun() in
+// material.slang). There is room for MAX_MATERIAL_SHADERS at once.
 //
 // Write the shader in Slang against shader/material.slang, which declares the scene buffers, the
 // mesh vertex stage's outputs and the material's textures; load the compiled result with
@@ -50,7 +50,7 @@ material_shader_destroy :: proc(self: ^Renderer, type: MaterialType) {
 }
 
 // The material type of material shader slot `slot` (from 1).
-@(private = "file")
+@(private)
 shader_type :: #force_inline proc(slot: u32) -> MaterialType {
   return MaterialType(len(MaterialType) + slot - 1)
 }

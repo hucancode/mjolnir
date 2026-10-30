@@ -1,21 +1,21 @@
 // Crowd agents steering along navmesh paths around each other, each picking a new goal on arrival.
 package main
 
-import "mjolnir"
-import "mjolnir/debugui"
-import "mjolnir/input"
-import "mjolnir/platform"
-import "mjolnir/render"
-import "mjolnir/world"
-import nav "mjolnir/navigation"
-import "mjolnir/navigation/bake"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 import mu "vendor:microui"
+import "mjolnir"
+import "mjolnir/debugui"
 import "mjolnir/geometry"
+import "mjolnir/input"
+import nav "mjolnir/navigation"
+import "mjolnir/navigation/bake"
+import "mjolnir/platform"
+import "mjolnir/render"
+import "mjolnir/world"
 
 AGENT_COUNT :: 20
 AGENT_RADIUS :: f32(0.45)
@@ -79,9 +79,10 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({32, 28, 32}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   if !build_level(app) {
     log.error("navmesh build failed")
     return .FAIL
@@ -109,10 +110,10 @@ shutdown :: proc(app: ^App) {
 build_level :: proc(app: ^App) -> bool {
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
-  ground_material := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8))
+  ground_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_factor = 0.8))
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, ground_material, cast_shadow = false), scale = WORLD_HALF * 2)
   bake.append_box(&builder, {0, -0.5, 0}, {WORLD_HALF * 2, 0.5, WORLD_HALF * 2})
-  obstacle_material := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6))
+  obstacle_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_factor = 0.6))
   for box in OBSTACLES {
     mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, obstacle_material), box.center, scale = box.half_extents)
     bake.append_box(&builder, box.center, box.half_extents, area = bake.AREA_BLOCKED)
@@ -136,7 +137,7 @@ spawn_agents :: proc(app: ^App) {
   capsule := render.mesh_create(&app.renderer, geometry.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS))
   materials: [len(PALETTE)]render.MaterialHandle
   for color, i in PALETTE {
-    materials[i] = render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = color, emissive_value = 0.4))
+    materials[i] = render.material_create(&app.renderer, render.make_material(base_color_factor = color, emissive_factor = 0.4))
   }
   for &a, i in app.agents {
     angle := f32(i) / AGENT_COUNT * math.TAU

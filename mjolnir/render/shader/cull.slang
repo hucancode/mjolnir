@@ -190,6 +190,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 wid : SV_GroupID)
     // empty view (free camera slot): accepts nothing
     if (view.type_mask == 0) { return; }
     if ((node.flags & view.require_flags) != view.require_flags) { return; }
+    if (((view.hidden_layers >> node.layer) & 1) != 0) { return; }
     if (material_type >= DRAW_LIST_HEADER || ((view.type_mask >> material_type) & 1) == 0) { return; }
     if (!in_frustum_and_visible(view, node, material_type)) { return; }
     Batch batch = batches[id];
@@ -211,6 +212,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 wid : SV_GroupID)
     // 0 is none
     if (node.mesh_id == 0 || node.material_id == 0) return;
     if ((node.flags & view.require_flags) != view.require_flags) return;
+    if (((view.hidden_layers >> node.layer) & 1) != 0) return;
     Material material = materials[node.material_id];
     uint type = material.material_type;
     // a type past every draw list draws nowhere

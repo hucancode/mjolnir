@@ -64,10 +64,8 @@ SceneBuffer :: enum {
   // the shadow atlas, a texture; only in the scene set of a bindless device
   SHADOW_MAPS,
   // the 2D overlay's vertices and indices, per frame in flight
-  UI_VERTICES,
-  UI_INDICES,
-  // the main camera's visible opaque draws, copied out per frame in flight
-  DRAW_COUNT_READBACK,
+  OVERLAY_VERTICES,
+  OVERLAY_INDICES,
   // bindless: the pyramid build's per-slot counters
   PYRAMID_COUNTERS,
 }
@@ -116,7 +114,7 @@ SCENE_PASSES := [ScenePass]struct {
   writes:     bit_set[SceneBuffer],
 } {
   .NONE              = {},
-  .MESH              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .SKINNED_VERTICES, .VERTICES, .INDICES}, {.VERTEX, .FRAGMENT}, {}},
+  .MESH              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .SKINNED_VERTICES, .VERTICES, .INDICES, .LIGHTS}, {.VERTEX, .FRAGMENT}, {}},
   .LIGHTING          = {{.VIEWS, .LIGHTS, .NODES, .LIGHT_PLACEMENTS}, {.COMPUTE}, {}},
   .AMBIENT_OCCLUSION = {{.VIEWS}, {.COMPUTE}, {}},
   .SHADOW            = {{.VIEWS, .NODES, .MESHES, .SKINNED_VERTICES}, {.VERTEX}, {}},
@@ -199,9 +197,8 @@ resources_init :: proc(self: ^Renderer) -> bool {
   self.buffers[.PARTICLE_ALIVE][0] = dev.buffer_create(&self.gpu, {size = (PARTICLE_ALIVE_HEADER + MAX_PARTICLES) * size_of(u32), usage = {.STORAGE, .INDIRECT}}) or_return
   self.buffers[.PARTICLES][0] = dev.buffer_create(&self.gpu, {size = MAX_PARTICLES * size_of(Particle), usage = {.STORAGE}}) or_return
   for f in 0 ..< FRAMES_IN_FLIGHT {
-    self.buffers[.UI_VERTICES][f] = dev.buffer_create(&self.gpu, {size = UI_MAX_VERTICES * size_of(Vertex2D), usage = {.VERTEX}, memory = .UPLOAD}) or_return
-    self.buffers[.UI_INDICES][f] = dev.buffer_create(&self.gpu, {size = UI_MAX_INDICES * size_of(u32), usage = {.INDEX}, memory = .UPLOAD}) or_return
-    self.buffers[.DRAW_COUNT_READBACK][f] = dev.buffer_create(&self.gpu, {size = size_of(u32), usage = {.COPY_DST}, memory = .READBACK}) or_return
+    self.buffers[.OVERLAY_VERTICES][f] = dev.buffer_create(&self.gpu, {size = OVERLAY_MAX_VERTICES * size_of(Vertex2D), usage = {.VERTEX}, memory = .UPLOAD}) or_return
+    self.buffers[.OVERLAY_INDICES][f] = dev.buffer_create(&self.gpu, {size = OVERLAY_MAX_INDICES * size_of(u32), usage = {.INDEX}, memory = .UPLOAD}) or_return
   }
   return true
 }

@@ -1,15 +1,16 @@
 // PBR material parameter sweep.
 package main
 
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:log"
-import "core:math"
-import mu "vendor:microui"
 
 GRID :: 6
 SPACING :: 2.5
@@ -28,6 +29,7 @@ App :: struct {
   input:            input.State,
   orbit:            render.Orbit,
   sphere_materials: [GRID][GRID]render.MaterialHandle,
+  sun:              render.LightHandle,
 }
 
 main :: proc() {
@@ -53,13 +55,12 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   half := f32(GRID - 1) * 0.5 * SPACING
   app.orbit = render.make_orbit({0, 0, half * 2.4}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   base_color: [4]f32 = {0.85, 0.85, 0.9, 1}
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
     mat := render.material_create(&app.renderer, render.make_material(type = .PBR, base_color_factor = base_color,
-      metallic_value = m, roughness_value = r,
+      metallic_factor = m, roughness_factor = r,
     ))
     app.sphere_materials[row][col] = mat
     x := f32(col) * SPACING - half
@@ -67,11 +68,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, mat), {x, y, 0})
   }
 
-  sun := &app.renderer.sun
-  sun.color = {1, 0.97, 0.92}
-  sun.intensity = 5
-  sun.direction = {-0.3, -1, -0.5}
-  sun.shadow_distance = 12
+  app.sun = render.light_create(&app.renderer, render.make_directional_light({1, 0.97, 0.92}, 5, 12))
+  mjolnir.spawn(&app.scene, &app.renderer, app.sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.3, -1, -0.5}, [3]f32{0, 1, 0}))
   return .READY
 }
 
@@ -100,8 +98,8 @@ update :: proc(app: ^App, dt: f32) {
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
     mat := render.material(&app.renderer, app.sphere_materials[row][col]) or_continue
-    mat.metallic_value = m
-    mat.roughness_value = r
+    mat.metallic_factor = m
+    mat.roughness_factor = r
   }
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
@@ -116,7 +114,7 @@ debug_ui :: proc(app: ^App) {
   if debugui.window(&app.debug, "Material", {20, 20, 220, 360}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Sun intensity")
-    mu.slider(ctx, &app.renderer.sun.intensity, 0, 20)
+    mu.slider(ctx, &render.light(&app.renderer, app.sun).intensity, 0, 20)
     mu.label(ctx, "IBL intensity")
     mu.slider(ctx, &app.renderer.ibl_intensity, 0, 2)
     mu.checkbox(ctx, "Skybox", &skybox_on)

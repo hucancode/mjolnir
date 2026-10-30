@@ -81,6 +81,8 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), scale = {20, 0.2, 20})
@@ -107,7 +109,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   focus := app.root + {0, app.reach * 0.5, 0}
   app.orbit = render.make_orbit(focus + {0, app.reach * 0.6, app.reach * 2.2}, focus)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   return .READY
 }
 

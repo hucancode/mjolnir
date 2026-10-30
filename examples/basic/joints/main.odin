@@ -1,17 +1,17 @@
 // Joints: a pendulum, a hinged door with limits and a rope of ball joints. Click a body to push it.
 package main
 
-import "mjolnir"
-import "mjolnir/debugui"
-import "mjolnir/input"
-import "mjolnir/platform"
-import "mjolnir/render"
-import "mjolnir/world"
-import "mjolnir/physics"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
+import "mjolnir"
+import "mjolnir/debugui"
+import "mjolnir/input"
+import "mjolnir/physics"
+import "mjolnir/platform"
+import "mjolnir/render"
+import "mjolnir/world"
 
 PENDULUM_ANCHOR :: [3]f32{-5, 6, 0}
 BOB_RADIUS :: f32(0.5)
@@ -83,9 +83,10 @@ spawn_piece :: proc(app: ^App, position: [3]f32, collider: physics.Collider, loo
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 4, 10}, {0, 2.5, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   spawn_piece(app, {0, -0.5, 0}, physics.BoxCollider{half_extents = {9, 0.5, 4}}, render.primitive(&app.renderer, .CUBE, .GRAY), {9, 0.5, 4}, 0)
   spawn_piece(app, PENDULUM_ANCHOR, physics.BoxCollider{half_extents = 0.15}, render.primitive(&app.renderer, .CUBE, .WHITE), 0.15, 0)

@@ -8,7 +8,6 @@ import "mjolnir/asset"
 
 DEFAULT :: "assets/CesiumMan.glb"
 
-// inspect parses a self-contained glTF and describes what it holds.
 inspect :: proc(name: string, data: []u8) -> (report: string, ok: bool) {
   model := asset.load_gltf(data) or_return
   defer asset.destroy(&model)

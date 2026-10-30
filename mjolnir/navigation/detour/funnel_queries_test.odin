@@ -2,7 +2,6 @@
 #+private
 package detour
 
-import "core:math"
 import "core:testing"
 
 @(test)

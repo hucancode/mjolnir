@@ -29,6 +29,8 @@ Backend :: struct {
   surface:                    wgpu.Surface,
   // the surface's format, and the sRGB view of it every pass presents through
   surface_format:             wgpu.TextureFormat,
+  // the surface is a copy source (rhi.Caps.backbuffer_copy)
+  surface_copy:               bool,
   surface_view_format:        wgpu.TextureFormat,
   surface_extent:             [2]u32,
   frame_serial:               u64,
@@ -179,12 +181,13 @@ surface_configure :: proc(b: ^Backend, size: [2]u32) {
   }
   b.surface_view_format = .BGRA8UnormSrgb if b.surface_format == .BGRA8Unorm else .RGBA8UnormSrgb
   b.surface_extent = {max(size.x, 1), max(size.y, 1)}
+  b.surface_copy = .CopySrc in caps.usages
   wgpu.SurfaceConfigure(
     b.surface,
     &{
       device = b.device,
       format = b.surface_format,
-      usage = {.RenderAttachment},
+      usage = {.RenderAttachment, .CopySrc} if b.surface_copy else {.RenderAttachment},
       width = b.surface_extent.x,
       height = b.surface_extent.y,
       viewFormatCount = 1,
@@ -218,8 +221,11 @@ shutdown :: proc(b: ^Backend) {
   if b.instance != nil do wgpu.InstanceRelease(b.instance)
 }
 
-// wait_idle does nothing: WebGPU destroys nothing submitted work still uses.
-wait_idle :: proc(b: ^Backend) {}
+// wait_idle waits for submitted work and fires its callbacks, so READBACK buffers hold the last
+// frame (natively; the browser cannot block).
+wait_idle :: proc(b: ^Backend) {
+  if b.up do device_idle(b)
+}
 
 // tick does nothing: WebGPU retires what is freed on its own.
 tick :: proc(b: ^Backend) {}

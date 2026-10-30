@@ -97,7 +97,8 @@ step :: proc(r: ^Runner) -> bool {
     }
     r.started = true
     platform.ready()
-    r.last_update = time.now()
+    // due at once: the first frame draws what an update placed
+    r.last_update = time.time_add(time.now(), -time.Second / UPDATE_FPS)
     when USE_PARALLEL_UPDATE {
       r.active = true
       r.thread = thread.create(update_thread_proc)

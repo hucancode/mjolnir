@@ -4,6 +4,7 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/animation"
@@ -74,24 +75,24 @@ shutdown :: proc(app: ^App) {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 1.6, 3.6}, {0, 0.6, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 6.0)
 
   app.duck_model = gltf.model_create(&app.renderer, #load("assets/Duck.glb"))
-  duck_root := world.spawn(&app.scene, {-2, 0, 0})
-  app.duck = gltf.instance_create(&app.duck_model, &app.scene, &app.renderer, duck_root)
+  app.duck = gltf.instance_create(&app.duck_model, &app.scene, &app.renderer)
+  world.translate(&app.scene, app.duck.root, {-2, 0, 0})
 
   app.man_model = gltf.model_create(&app.renderer, #load("assets/CesiumMan.glb"))
-  man_root := world.spawn(&app.scene, {0, 0, 0})
-  app.man = gltf.instance_create(&app.man_model, &app.scene, &app.renderer, man_root)
+  app.man = gltf.instance_create(&app.man_model, &app.scene, &app.renderer)
   for &a, i in app.man.animators do animation.play(&a, &app.man_model.rigs[i], "Anim_0")
 
   app.fox_model = gltf.model_create(&app.renderer, #load("assets/Fox2.glb"))
-  fox_root := world.spawn(&app.scene, {2, 0, 0})
-  app.fox = gltf.instance_create(&app.fox_model, &app.scene, &app.renderer, fox_root)
+  app.fox = gltf.instance_create(&app.fox_model, &app.scene, &app.renderer)
+  world.translate(&app.scene, app.fox.root, {2, 0, 0})
   if len(app.fox.skinned) == 0 {
     log.error("Fox2.glb has no skinned mesh")
     return .FAIL
@@ -119,7 +120,7 @@ update :: proc(app: ^App, dt: f32) {
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
 
-  for h in app.duck.roots do world.rotate_by(&app.scene, h, dt * math.PI * 0.25)
+  world.rotate_by(&app.scene, app.duck.root, dt * math.PI * 0.25)
   app.since += dt
   if app.auto_switch && app.since >= AUTO_SWITCH_SECONDS {
     play_clip(app, (app.clip + 1) % len(app.fox_model.rigs[app.fox_rig].clips))

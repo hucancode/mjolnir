@@ -2,8 +2,8 @@
 // reads, the material's textures and the mesh vertex stage's outputs. A custom material is drawn
 // in the forward pass over the lit image, depth-tested and writing depth unless its shader was
 // made with depth_write = false. Read your own values from node_material(v).params
-// (render.Material.params), the time from camera_view().time, the sun from
-// camera_view().sun_direction and .sun_radiance and the image size from camera_view().extent.
+// (render.Material.params), the time from camera_view().time, the sun from scene_sun() and the
+// image size from camera_view().extent.
 //
 //     #include "material.slang"
 //     [shader("fragment")]
@@ -34,6 +34,30 @@ static const uint TEXTURE_EMISSIVE = 3;
 #else
 [vk::binding(0, TEXTURES_SET)] Texture2D textures[];
 #endif
+
+SCENE_BUFFER(Light, lights, 10, 7)
+
+// The sun as a custom material sees it: the brightest visible directional light. toward points
+// towards it; radiance is its color * intensity, 0 without one.
+struct Sun {
+    float3 toward;
+    float3 radiance;
+}
+
+Sun scene_sun()
+{
+    Sun sun;
+    sun.toward = float3(0.0, 1.0, 0.0);
+    sun.radiance = float3(0.0);
+    if (mesh_push.sun_light == 0) return sun;
+    Light light = lights[mesh_push.sun_light];
+    float4x4 m = nodes[mesh_push.sun_node].world_matrix;
+    // the light shines along its node's -Z
+    float3 z = float3(m[0][2], m[1][2], m[2][2]);
+    if (dot(z, z) > 1e-6) sun.toward = normalize(z);
+    sun.radiance = light.color * light.intensity;
+    return sun;
+}
 
 // The material of the drawn node.
 Material node_material(VertexOut v)

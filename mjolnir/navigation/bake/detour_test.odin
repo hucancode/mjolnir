@@ -163,7 +163,7 @@ test_detour_sliced_pathfinding_partial :: proc(t: ^testing.T) {
     "Sliced pathfinding init should succeed",
   )
   // Run only a few iterations to leave it incomplete
-  done_iters, update_status := detour.update_sliced_find_path(&query, 2)
+  done_iters, _ := detour.update_sliced_find_path(&query, 2)
   testing.expect(t, done_iters > 0, "Should have done some iterations")
   // Test partial finalization
   existing := []detour.Poly_Ref{start_ref}
@@ -215,7 +215,7 @@ test_detour_sliced_pathfinding_errors :: proc(t: ^testing.T) {
     "Init with invalid refs should fail",
   )
   // Test update without init
-  done_iters, update_status := detour.update_sliced_find_path(&query, 10)
+  _, update_status := detour.update_sliced_find_path(&query, 10)
   testing.expect(
     t,
     !detour.status_succeeded(update_status),
@@ -260,7 +260,7 @@ test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
     {{2.0, 0.0, 2.0}, {8.0, 0.0, 8.0}, "Diagonal path"},
   }
   half_extents := [3]f32{1.0, 1.0, 1.0}
-  for test_case, idx in test_cases {
+  for test_case in test_cases {
     // For each test case, verify pathfinding works correctly
     start_ref := detour.Poly_Ref(0)
     start_nearest: [3]f32
@@ -295,7 +295,7 @@ test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
     // Find path using the priority queue
     path := make([]detour.Poly_Ref, 128)
     defer delete(path)
-    status, path_count := detour.find_path(
+    path_status, path_count := detour.find_path(
       &query,
       start_ref,
       end_ref,
@@ -307,7 +307,7 @@ test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
     )
     testing.expect(
       t,
-      detour.status_succeeded(status),
+      detour.status_succeeded(path_status),
       "Pathfinding should succeed",
     )
     testing.expect(
@@ -631,7 +631,7 @@ test_detour_raycast_wall_hit :: proc(t: ^testing.T) {
   hit: detour.Raycast_Hit
   path := make([]detour.Poly_Ref, 32)
   defer delete(path)
-  raycast_status, hit_result, path_count := detour.raycast(
+  raycast_status, hit_result, _ := detour.raycast(
     &query,
     start_ref,
     start_nearest,
@@ -689,7 +689,7 @@ test_detour_raycast_with_costs :: proc(t: ^testing.T) {
   path := make([]detour.Poly_Ref, 32)
   defer delete(path)
   // Test with cost calculation enabled
-  raycast_status, hit, path_count := detour.raycast(
+  raycast_status, hit, _ := detour.raycast(
     &query,
     start_ref,
     start_nearest,
@@ -724,7 +724,6 @@ test_detour_raycast_errors :: proc(t: ^testing.T) {
   // Test invalid polygon reference
   invalid_ref := detour.INVALID_POLY_REF
   pos := [3]f32{1.0, 0.0, 1.0}
-  hit: detour.Raycast_Hit
   path := make([]detour.Poly_Ref, 32)
   defer delete(path)
   invalid_status, _, _ := detour.raycast(
@@ -854,7 +853,7 @@ test_detour_move_along_surface_cross_polygons :: proc(t: ^testing.T) {
   )
   visited := make([]detour.Poly_Ref, 16)
   defer delete(visited)
-  result_pos, visited_count, move_status := detour.move_along_surface(
+  _, visited_count, move_status := detour.move_along_surface(
     &query,
     start_ref,
     start_nearest,
@@ -910,7 +909,7 @@ test_detour_move_along_surface_blocked :: proc(t: ^testing.T) {
   )
   visited := make([]detour.Poly_Ref, 16)
   defer delete(visited)
-  result_pos, visited_count, move_status := detour.move_along_surface(
+  result_pos, _, move_status := detour.move_along_surface(
     &query,
     start_ref,
     start_nearest,
@@ -952,7 +951,7 @@ test_detour_move_along_surface_errors :: proc(t: ^testing.T) {
   pos := [3]f32{1.0, 0.0, 1.0}
   visited := make([]detour.Poly_Ref, 16)
   defer delete(visited)
-  result_pos, visited_count, invalid_status := detour.move_along_surface(
+  _, _, invalid_status := detour.move_along_surface(
     &query,
     invalid_ref,
     pos,
@@ -1097,7 +1096,7 @@ test_detour_error_handling_spatial_queries :: proc(t: ^testing.T) {
   testing.expect_value(t, poly_count, 0)
   // Test 3: Extreme positions (very large coordinates)
   extreme_pos := [3]f32{1e6, 1e6, 1e6}
-  extreme_status, extreme_ref, _ := detour.find_nearest_poly(
+  _, extreme_ref, _ := detour.find_nearest_poly(
     &query,
     extreme_pos,
     [3]f32{1, 1, 1},
@@ -1128,7 +1127,7 @@ test_detour_error_handling_filter_edge_cases :: proc(t: ^testing.T) {
   restrictive_filter.exclude_flags = 0xffff // Exclude all
   restrictive_filter.include_flags = 0x0000 // Include none
   pos := [3]f32{5.0, 0.0, 5.0}
-  restrict_status, restrict_ref, _ := detour.find_nearest_poly(
+  _, restrict_ref, _ := detour.find_nearest_poly(
     &query,
     pos,
     [3]f32{5, 5, 5},
@@ -1183,7 +1182,7 @@ test_detour_edge_cases_boundary_conditions :: proc(t: ^testing.T) {
     {5.0, 0.0, 0.0}, // Edge midpoint
     {0.0, 0.0, 5.0}, // Edge midpoint
   }
-  for boundary_pos, i in boundary_positions {
+  for boundary_pos in boundary_positions {
     boundary_status, boundary_ref, _ := detour.find_nearest_poly(
       &query,
       boundary_pos,
@@ -1673,7 +1672,6 @@ test_detour_stress_many_raycasts :: proc(t: ^testing.T) {
     detour.status_succeeded(start_status),
     "Should find start polygon",
   )
-  hit: detour.Raycast_Hit
   path := make([]detour.Poly_Ref, 32)
   defer delete(path)
   // Perform many raycasts in different directions
@@ -1688,7 +1686,7 @@ test_detour_stress_many_raycasts :: proc(t: ^testing.T) {
       f32(math.sin(angle)) * 5.0,
     }
     end_pos := start_nearest + direction
-    raycast_status, hit, path_count := detour.raycast(
+    raycast_status, _, _ := detour.raycast(
       &query,
       start_ref,
       start_nearest,
@@ -1727,7 +1725,7 @@ test_detour_memory_stress :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
   // Test creating and destroying many queries
   iterations := 5 // Much smaller number
-  for i in 0 ..< iterations {
+  for _ in 0 ..< iterations {
     nav_mesh := create_test_nav_mesh(t)
     query: detour.Nav_Mesh_Query
     status := detour.nav_mesh_query_init(&query, nav_mesh, 512)
@@ -1741,7 +1739,7 @@ test_detour_memory_stress :: proc(t: ^testing.T) {
     // Do some operations
     center_pos := [3]f32{5.0, 0.0, 5.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
-    poly_status, poly_ref, _ := detour.find_nearest_poly(
+    poly_status, _, _ := detour.find_nearest_poly(
       &query,
       center_pos,
       half_extents,

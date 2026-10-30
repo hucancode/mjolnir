@@ -26,7 +26,6 @@ on_key :: proc(e: js.Event) {
   show()
 }
 
-// show puts the text image, the atlas the glyphs came from and the layout report in the page.
 show :: proc() {
   defer free_all(context.temp_allocator)
   image, report := text_png()

@@ -1,14 +1,17 @@
 // Sandbox: the general test. The Warrior holds a Sponza courtyard: a sprite warrior idles, runs and strikes, a city hides behind the walls (occlusion culling), with torches, orbiting shadow casters, physics, particles, a portal and bloom.
 package main
 
+import sa "core:container/small_array"
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import "core:math/rand"
 import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/animation"
 import "mjolnir/debugui"
+import "mjolnir/geometry"
 import "mjolnir/gltf"
 import "mjolnir/input"
 import "mjolnir/physics"
@@ -59,7 +62,6 @@ SPRITE_SPEED :: 2.4
 
 Actor :: struct {
   model:    Model,
-  root:     world.NodeHandle,
   instance: gltf.Instance,
 }
 
@@ -101,6 +103,7 @@ App :: struct {
   bloom:         bool,
   spin_lights:   bool,
   sun_angle:     f32,
+  sun:           world.NodeHandle,
 }
 
 main :: proc() {
@@ -123,6 +126,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   r.ibl_intensity = 0.4
   app.sun_angle = 62
+  app.sun = mjolnir.spawn(&app.scene, r, render.light_create(r, render.make_directional_light({1, 0.92, 0.8}, 4, 45)))
   app.bloom = true
   app.spin_lights = true
   app.orbit = {VIEW_YAW, VIEW_PITCH, VIEW_DISTANCE, VIEW_TARGET}
@@ -140,11 +144,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 actor :: proc(app: ^App, model: Model, position: [3]f32, scale: f32 = 1, yaw: f32 = 0, clip := "") -> ^Actor {
-  root := world.spawn(&app.scene, position)
-  world.rotate(&app.scene, root, yaw)
-  world.scale(&app.scene, root, scale)
-  a := Actor{model = model, root = root}
-  a.instance = gltf.instance_create(&app.models[model], &app.scene, &app.renderer, root)
+  a := Actor{model = model, instance = gltf.instance_create(&app.models[model], &app.scene, &app.renderer)}
+  world.translate(&app.scene, a.instance.root, position)
+  world.rotate(&app.scene, a.instance.root, yaw)
+  world.scale(&app.scene, a.instance.root, scale)
   for &animator, i in a.instance.animators do animation.play(&animator, &app.models[model].rigs[i], clip)
   append(&app.actors, a)
   return &app.actors[len(app.actors) - 1]
@@ -152,12 +155,12 @@ actor :: proc(app: ^App, model: Model, position: [3]f32, scale: f32 = 1, yaw: f3
 
 mesh :: proc(app: ^App, look: render.MeshAttachment, position: [3]f32, scale: [3]f32 = 1, parent: world.NodeHandle = {}) -> world.NodeHandle {
   app.objects += 1
-  return mjolnir.spawn(&app.scene, &app.renderer, look, position, scale, parent)
+  return mjolnir.spawn(&app.scene, &app.renderer, look, position, scale = scale, parent = parent)
 }
 
 courtyard :: proc(app: ^App) {
   r := &app.renderer
-  stone := render.material_create(r, render.make_material(base_color_factor = {0.55, 0.52, 0.48, 1}, roughness_value = 0.7))
+  stone := render.material_create(r, render.make_material(base_color_factor = {0.55, 0.52, 0.48, 1}, roughness_factor = 0.7))
   pedestal := render.primitive(r, .CYLINDER, stone)
   mesh(app, pedestal, {0, 0.3, MID}, {1.2, 0.3, 1.2})
   app.hero = len(app.actors)
@@ -165,15 +168,15 @@ courtyard :: proc(app: ^App) {
   app.hero_intro = animation.play(&hero.instance.animators[0], &app.models[.WARRIOR].rigs[0], "intro", .ONCE)
   app.hammer = world.spawn(&app.scene, {0, 4.2, MID})
   hammer := actor(app, .HAMMER, {}, 0.6)
-  world.set_parent(&app.scene, hammer.root, app.hammer)
+  world.set_parent(&app.scene, hammer.instance.root, app.hammer)
   mesh(app, pedestal, {-17, 0.5, MID}, {0.9, 0.5, 0.9})
   helmet := actor(app, .DAMAGED_HELMET, {-17, 1, MID}, 0.6)
-  append(&app.spinners, helmet.root)
+  append(&app.spinners, helmet.instance.root)
   spot := world.spawn(&app.scene, {-17, 7, MID})
   world.rotate(&app.scene, spot, -math.PI / 2, {1, 0, 0})
   render.attach(r, spot, render.light_create(r, render.make_spot_light({1, 0.9, 0.75}, 400, 10, math.PI * 0.12)))
   suzanne := actor(app, .SUZANNE, {0, 9, MID}, 1.4)
-  append(&app.spinners, suzanne.root)
+  append(&app.spinners, suzanne.instance.root)
 }
 
 lights :: proc(app: ^App) {
@@ -189,7 +192,7 @@ lights :: proc(app: ^App) {
     angle := f32(i) / ORBIT_LIGHTS * 2 * math.PI
     color := [3]f32{0.5 + 0.5 * math.cos(angle), 0.5 + 0.5 * math.cos(angle + 2.1), 0.5 + 0.5 * math.cos(angle + 4.2)}
     lamp := mjolnir.spawn(&app.scene, r, render.light_create(r, render.make_point_light(color, 60, 10)), {math.cos(angle) * 12, 0, math.sin(angle) * 2}, parent = app.lights_root)
-    bulb := render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, emissive_value = 8))
+    bulb := render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, emissive_factor = 8))
     mesh(app, render.primitive(r, .SPHERE, bulb, cast_shadow = false), {0, 0.35, 0}, 0.12, lamp)
   }
 }
@@ -205,7 +208,7 @@ particles :: proc(app: ^App) {
   mjolnir.spawn(&app.scene, r, sparks, {0, 1.2, 0}, parent = app.hammer)
   fountain := render.emitter_create(r, render.make_emitter(star, 140, {0, 5, 0}, 0.6, {1, 0.9, 0.3, 1}, {1, 0.3, 0.6, 0}, 2.6, 0.15, 160, 60, 1))
   mjolnir.spawn(&app.scene, r, fountain, {-8, 0.2, MID})
-  render.attach(r, world.spawn(&app.scene, {-8, 3.5, MID}), render.force_field_create(r, render.make_force_field(3, 4, 6)))
+  mjolnir.spawn(&app.scene, r, render.force_field_create(r, render.make_force_field(3, 4, 6)), {-8, 3.5, MID})
 }
 
 crates :: proc(app: ^App) {
@@ -226,7 +229,7 @@ crates :: proc(app: ^App) {
 portal :: proc(app: ^App) {
   r := &app.renderer
   app.portal_camera = render.camera_create(r, {512, 512}, render.make_camera({0, 40, MID + 0.01}, {0, 0, MID}, 0.9, far = 100))
-  app.portal = render.material_create(r, render.make_material(emissive_value = 0.2))
+  app.portal = render.material_create(r, render.make_material(emissive_factor = 0.2))
   frame := render.primitive(r, .CUBE, .BLACK)
   mesh(app, frame, {-21.6, 3.2, MID}, {0.1, 2.3, 2.3})
   screen := mesh(app, render.primitive(r, .QUAD_XY, app.portal, cast_shadow = false), {-21.45, 3.2, MID}, {2.1, 2.1, 1})
@@ -254,8 +257,9 @@ hidden_city :: proc(app: ^App) {
 }
 
 set_effects :: proc(app: ^App) {
-  clear(&app.renderer.effect_stack)
-  if app.bloom do append(&app.renderer.effect_stack, render.BloomEffect{threshold = 1, intensity = 0.35, blur_radius = 24})
+  effects := &render.main_camera(&app.renderer).effects
+  sa.clear(effects)
+  if app.bloom do sa.append(effects, render.make_effect(render.BloomEffect{threshold = 1, intensity = 0.35, blur_radius = 24}))
 }
 
 shutdown :: proc(app: ^App) {
@@ -302,19 +306,13 @@ animate :: proc(app: ^App, dt: f32) {
   sprite_step(app, dt)
   if m, ok := render.material(r, app.portal); ok do m.albedo_texture = render.camera_image(r, app.portal_camera, .FINAL_IMAGE, previous_frame = true)
   elevation := app.sun_angle * math.RAD_PER_DEG
-  r.sun = {
-    enabled         = true,
-    cast_shadow     = true,
-    color           = {1, 0.92, 0.8},
-    intensity       = 4,
-    direction       = {-math.cos(elevation) * 0.35, -math.sin(elevation), -math.cos(elevation)},
-    shadow_distance = 45,
-  }
+  sun := [3]f32{-math.cos(elevation) * 0.35, -math.sin(elevation), -math.cos(elevation)}
+  world.rotate(&app.scene, app.sun, linalg.quaternion_from_forward_and_up(sun, [3]f32{0, 1, 0}))
 }
 
 shoot :: proc(app: ^App) {
   cam := render.main_camera(&app.renderer)
-  forward := render.camera_forward(cam)
+  forward := -geometry.qz(cam.rotation)
   if len(app.balls) == MAX_BALLS {
     physics.destroy(&app.phys, app.balls[0].body)
     world.destroy(&app.scene, app.balls[0].node)
@@ -331,7 +329,6 @@ panel :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
   defer debugui.end(&app.debug, &app.renderer)
   if debugui.window(&app.debug, "Sandbox", {20, 20, 280, 330}, {}, {.NO_CLOSE}) {
-    mu.label(ctx, fmt.tprintf("Opaque draws after culling: %d", render.draw_count(&app.renderer)))
     mu.label(ctx, fmt.tprintf("Meshes: %d   Actors: %d", app.objects, len(app.actors)))
     mu.label(ctx, fmt.tprintf("Lights: %d + sun   Balls: %d", len(TORCHES) + ORBIT_LIGHTS + 1, len(app.balls)))
     if .CHANGE in mu.checkbox(ctx, "Bloom", &app.bloom) do set_effects(app)

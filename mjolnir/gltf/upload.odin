@@ -2,7 +2,6 @@ package gltf
 
 import "../animation"
 import "../asset"
-import "../geometry"
 import "../render"
 import "core:log"
 import "core:slice"
@@ -11,7 +10,7 @@ import "core:slice"
 
 // Makes the meshes (taken from file), materials, textures and lights of file; a primitive
 // without a material draws white. Lights keep the file's units (lux, candela); a light without
-// a range reaches 10, a directional one is left out (the scene's sun is render's).
+// a range reaches 10, and a directional one's shadow reaches 20 in front of the main camera.
 @(private)
 upload :: proc(self: ^Model, r: ^render.Renderer, file: ^asset.Model) -> bool {
   render.lock(r)
@@ -51,7 +50,7 @@ upload :: proc(self: ^Model, r: ^render.Renderer, file: ^asset.Model) -> bool {
     light: render.Light
     switch l.type {
     case .DIRECTIONAL:
-      continue
+      light = render.make_directional_light(l.color, l.intensity)
     case .POINT:
       light = render.make_point_light(l.color, l.intensity, reach)
     case .SPOT:

@@ -7,8 +7,8 @@ import "core:fmt"
 import "core:math"
 import "core:math/linalg"
 import "core:strings"
-import "mjolnir/geometry"
 import stbi "vendor:stb/image"
+import "mjolnir/geometry"
 
 WIDTH :: 640
 HEIGHT :: 400
@@ -95,7 +95,6 @@ trace :: proc(mesh: geometry.Mesh) -> (image: []u8, hits: int) {
   return png(WIDTH, HEIGHT, 3, pixels), hits
 }
 
-// png encodes pixels as a PNG file in memory.
 png :: proc(w, h, channels: int, pixels: []u8) -> []u8 {
   out := make([dynamic]u8, context.temp_allocator)
   write :: proc "c" (ctx: rawptr, data: rawptr, size: c.int) {

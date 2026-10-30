@@ -7,6 +7,7 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
@@ -77,7 +78,6 @@ draw :: proc(app: ^App) -> bool {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
-  render.setup(&app.renderer)
   app.current = -1
   app.requested = -1
   if !build_level(app, 0) do return .FAIL
@@ -93,11 +93,10 @@ build_level :: proc(app: ^App, index: int) -> bool {
   app.level = gltf.instance_create(&app.model, &app.scene, &app.renderer) or_return
   app.orbit = render.make_orbit(l.target + {l.distance, l.distance * 0.1, 0}, l.target)
   render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
-  app.renderer.sun = render.DEFAULT_SUN
-  toward_sun, has_sun := l.sun.?
-  app.renderer.sun.enabled = has_sun
-  if has_sun do app.renderer.sun.direction = -toward_sun
-  app.renderer.sun.shadow_distance = l.shadow
+  if toward_sun, has_sun := l.sun.?; has_sun {
+    sun := render.light_create(&app.renderer, render.make_directional_light(shadow_distance = l.shadow))
+    mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up(-toward_sun, [3]f32{0, 1, 0}))
+  }
   for handle in app.model.lights {
     light := render.light(&app.renderer, handle) or_continue
     light.intensity *= l.scale
@@ -130,17 +129,19 @@ shutdown :: proc(app: ^App) {
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  debug_ui(app)
-  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.countdown -= dt
   if app.auto_switch && app.countdown <= 0 && app.requested < 0 do app.requested = (app.current + 1) % len(LEVELS)
   if app.requested >= 0 {
     index := app.requested
     app.requested = -1
     destroy_level(app)
+    debugui.shutdown(&app.debug)
+    if !debugui.init(&app.debug, &app.renderer) do log.error("debug UI could not be rebuilt")
     app.countdown = LEVEL_SECONDS
     if index < len(LEVELS) do build_level(app, index)
   }
+  debug_ui(app)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   when AUTOMATED_TEST do run_test_step(app)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }

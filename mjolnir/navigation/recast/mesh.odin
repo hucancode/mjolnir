@@ -830,8 +830,6 @@ build_poly_mesh :: proc(
   defer delete(edges)
   triangles := make([dynamic]i32, 0, max_polygons * 3)
   defer delete(triangles)
-  indices := make([]i32, nvp)
-  defer delete(indices)
   for i in 0 ..< len(cset.conts) {
     cont := &cset.conts[i]
     if len(cont.verts) < 3 {
@@ -851,7 +849,6 @@ build_poly_mesh :: proc(
       }
       continue
     }
-    verts_before := len(verts)
     for j in 0 ..< len(cont.verts) {
       v := cont.verts[j]
       vert_idx := add_vertex(u16(v.x), u16(v.y), u16(v.z), &verts, buckets)
@@ -862,7 +859,6 @@ build_poly_mesh :: proc(
         }
       }
     }
-    verts_after := len(verts)
     region_polys: [dynamic]Poly_Build
     defer {
       for &poly in region_polys {
@@ -890,9 +886,9 @@ build_poly_mesh :: proc(
         best_pb := -1
         best_ea := i32(-1)
         best_eb := i32(-1)
-        for i in 0 ..< len(region_polys) {
-          pa := &region_polys[i]
-          for j in i + 1 ..< len(region_polys) {
+        for ia in 0 ..< len(region_polys) {
+          pa := &region_polys[ia]
+          for j in ia + 1 ..< len(region_polys) {
             pb := &region_polys[j]
             ea, eb, merge_value := get_poly_merge_value(
               pa.verts[:],
@@ -901,7 +897,7 @@ build_poly_mesh :: proc(
               nvp,
             )
             if merge_value > best_merge_value {
-              best_pa = i
+              best_pa = ia
               best_pb = j
               best_ea = ea
               best_eb = eb

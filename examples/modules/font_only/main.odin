@@ -6,8 +6,8 @@ import "core:c"
 import "core:fmt"
 import "core:math"
 import "core:strings"
-import "mjolnir/font"
 import stbi "vendor:stb/image"
+import "mjolnir/font"
 
 WIDTH :: 900
 HEIGHT :: 200
@@ -38,7 +38,6 @@ teardown :: proc() {
   font.destroy(&hand)
 }
 
-// text_png draws every line centered into one image and returns it as a PNG, with what it laid out.
 text_png :: proc() -> (image: []u8, report: string) {
   pixels := make([]f32, WIDTH * HEIGHT * 3, context.temp_allocator)
   for &p, i in pixels do p = 0.08 if i % 3 != 2 else 0.12
@@ -79,7 +78,6 @@ blit :: proc(image: []f32, g: font.Glyph, atlas: []u8, size: [2]u32, color: [3]f
   }
 }
 
-// png encodes pixels as a PNG file in memory.
 png :: proc(w, h, channels: int, pixels: []u8) -> []u8 {
   out := make([dynamic]u8, context.temp_allocator)
   write :: proc "c" (ctx: rawptr, data: rawptr, size: c.int) {

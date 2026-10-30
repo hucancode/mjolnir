@@ -94,6 +94,7 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
   }
 
   err := time.benchmark(options)
+  testing.expect(t, err == .Okay, "bench failed")
   state := cast(^Physics_Raycast_State)raw_data(options.input)
   hit_rate := f32(state.hit_count) / f32(options.rounds) * 100
   log.infof(

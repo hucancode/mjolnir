@@ -49,8 +49,30 @@ should_close :: proc(self: ^Platform) -> bool {
   return false
 }
 
-// poll_events does nothing: the browser delivers events between animation frames.
-poll_events :: proc(self: ^Platform) {}
+// poll_events reads the gamepads with the standard mapping; the browser delivers the other
+// events between animation frames.
+poll_events :: proc(self: ^Platform) {
+  // standard mapping button indices, in GamepadButton order; 6 and 7 are the triggers
+  @(static, rodata) BUTTON_INDEX := [input.GamepadButton]int{
+    .A = 0, .B = 1, .X = 2, .Y = 3, .LEFT_BUMPER = 4, .RIGHT_BUMPER = 5, .BACK = 8, .START = 9,
+    .GUIDE = 16, .LEFT_THUMB = 10, .RIGHT_THUMB = 11, .DPAD_UP = 12, .DPAD_RIGHT = 15,
+    .DPAD_DOWN = 13, .DPAD_LEFT = 14,
+  }
+  for pad in 0 ..< input.MAX_GAMEPADS {
+    gp: js.Gamepad_State
+    if !js.get_gamepad_state(pad, &gp) || !gp.connected || gp.mapping != "standard" {
+      input.gamepad_event(&self.input, pad, false)
+      continue
+    }
+    buttons: input.GamepadButtonSet
+    for i, b in BUTTON_INDEX do if i < gp.button_count && gp.buttons[i].pressed do buttons += {b}
+    axes: input.GamepadAxes
+    for a in input.GamepadAxis.LEFT_X ..= input.GamepadAxis.RIGHT_Y do if int(a) < gp.axis_count do axes[a] = f32(gp.axes[int(a)])
+    axes[.LEFT_TRIGGER] = f32(gp.buttons[6].value)
+    axes[.RIGHT_TRIGGER] = f32(gp.buttons[7].value)
+    input.gamepad_event(&self.input, pad, true, buttons, axes)
+  }
+}
 
 // read_input takes this tick's input snapshot from the events received so far.
 read_input :: proc(self: ^Platform, s: ^input.State) {
@@ -99,6 +121,16 @@ foreign page {
   page_ready :: proc() ---
   @(link_name = "fail")
   page_fail :: proc() ---
+  @(link_name = "fullscreen")
+  page_fullscreen :: proc(on: bool) ---
+  @(link_name = "is_fullscreen")
+  page_is_fullscreen :: proc() -> bool ---
+  @(link_name = "cursor")
+  page_cursor :: proc(mode: CursorMode) ---
+  @(link_name = "cursor_locked")
+  page_cursor_locked :: proc() -> bool ---
+  @(link_name = "set_clipboard")
+  page_set_clipboard :: proc(text: string) ---
 }
 
 // ready tells the host page the first frame is coming, so it can drop its loading screen.
@@ -109,6 +141,38 @@ ready :: proc() {
 // fail tells the host page the app stopped on an error, so it can show the log.
 fail :: proc() {
   page_fail()
+}
+
+// set_fullscreen makes the canvas fill the screen, or leaves fullscreen. Browsers allow it
+// shortly after a key press or click only.
+set_fullscreen :: proc(self: ^Platform, on: bool) {
+  page_fullscreen(on)
+}
+
+// is_fullscreen reports whether the page is fullscreen.
+is_fullscreen :: proc(self: ^Platform) -> bool {
+  return page_is_fullscreen()
+}
+
+// set_cursor_mode shows, hides or locks the cursor over the canvas. Browsers lock it shortly
+// after a click only, and unlock it on Escape.
+set_cursor_mode :: proc(self: ^Platform, mode: CursorMode) {
+  page_cursor(mode)
+}
+
+// set_title sets the page's title.
+set_title :: proc(self: ^Platform, title: string) {
+  js.set_document_title(title)
+}
+
+// get_clipboard returns empty: browsers read the clipboard asynchronously only.
+get_clipboard :: proc(self: ^Platform, allocator := context.allocator) -> string {
+  return ""
+}
+
+// set_clipboard puts text on the clipboard.
+set_clipboard :: proc(self: ^Platform, text: string) {
+  page_set_clipboard(text)
 }
 
 // sleep does nothing: the browser paces the animation frames.
@@ -159,8 +223,13 @@ on_key :: proc(e: js.Event) {
 @(private = "file")
 on_mouse :: proc(e: js.Event) {
   self := cast(^Platform)e.user_data
-  rect := js.get_bounding_client_rect(CANVAS_ID)
-  input.cursor_event(&self.input, {f32(f64(e.mouse.client.x) - rect.x), f32(f64(e.mouse.client.y) - rect.y)})
+  // a locked pointer stays put and reports movements
+  if page_cursor_locked() {
+    input.cursor_event(&self.input, self.input.cursor + {f32(e.mouse.movement.x), f32(e.mouse.movement.y)})
+  } else {
+    rect := js.get_bounding_client_rect(CANVAS_ID)
+    input.cursor_event(&self.input, {f32(f64(e.mouse.client.x) - rect.x), f32(f64(e.mouse.client.y) - rect.y)})
+  }
   if e.kind == .Mouse_Move do return
   // DOM buttons are left, middle, right
   button: input.MouseButton

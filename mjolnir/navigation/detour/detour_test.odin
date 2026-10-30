@@ -2,12 +2,7 @@
 #+private
 package detour
 
-import "core:log"
-import "base:runtime"
-import "core:math"
-import "core:math/linalg"
 import "core:testing"
-import "core:time"
 
 @(test)
 test_detour_basic_types :: proc(t: ^testing.T) {

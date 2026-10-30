@@ -139,7 +139,7 @@ pyramids_bind :: proc(self: ^Renderer, f: u32) {
     for mip in 0 ..< mips {
       dev.bindless_write(&self.gpu, .STORAGE_IMAGES, slot * MAX_DEPTH_MIPS + mip, rhi.TextureView{targets.pyramid[f], i32(mip)})
     }
-    dev.bindless_write(&self.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + slot, rhi.TextureView{targets.images[.FINAL_IMAGE][f], 0})
+    dev.bindless_write(&self.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + slot, rhi.TextureView{targets.images[.LIT][f], 0})
     dev.bindless_write(&self.gpu, .STORAGE_IMAGES, AO_STORAGE_BASE + slot, rhi.TextureView{targets.images[.AMBIENT_OCCLUSION][f], 0})
   }
 }
@@ -395,13 +395,4 @@ draw_batches :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, key
       k += run
     }
   }
-}
-
-// draw_count is how many opaque draws the main camera's culling kept in a recent frame:
-// a statistic to show.
-draw_count :: proc(self: ^Renderer) -> u32 {
-  if _, ok := main_camera(self); !ok do return 0
-  value: [size_of(u32)]u8
-  dev.buffer_read(&self.gpu, self.buffers[.DRAW_COUNT_READBACK][current_frame(self)], 0, value[:])
-  return (^u32)(&value)^
 }

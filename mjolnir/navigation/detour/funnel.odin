@@ -243,7 +243,7 @@ get_portal_points :: proc(
     from,
   )
   if !status_succeeded(from_status) do return {}, {}, 0, from_status
-  to_tile, to_poly, to_status := get_tile_and_poly_by_ref(query.nav_mesh, to)
+  _, _, to_status := get_tile_and_poly_by_ref(query.nav_mesh, to)
   if !status_succeeded(to_status) do return {}, {}, 0, to_status
   link := from_poly.first_link
   for link != DT_NULL_LINK {
@@ -271,11 +271,11 @@ get_portal_points :: proc(
     }
     link = link_info.next
   }
-  from_salt, from_tile_idx, from_poly_idx := decode_poly_id(
+  _, from_tile_idx, _ := decode_poly_id(
     query.nav_mesh,
     from,
   )
-  to_salt, to_tile_idx, to_poly_idx := decode_poly_id(query.nav_mesh, to)
+  _, to_tile_idx, to_poly_idx := decode_poly_id(query.nav_mesh, to)
   if from_tile_idx == to_tile_idx {
     for i in 0 ..< int(from_poly.vert_count) {
       nei := from_poly.neis[i]
@@ -330,7 +330,7 @@ move_along_surface :: proc(
   visited_count = 0
   result_pos = start_pos
   if !is_valid_poly_ref(query.nav_mesh, start_ref) do return result_pos, visited_count, {.Invalid_Param}
-  tile, poly, tile_status := get_tile_and_poly_by_ref(
+  _, _, tile_status := get_tile_and_poly_by_ref(
     query.nav_mesh,
     start_ref,
   )

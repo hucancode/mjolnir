@@ -118,9 +118,9 @@ queue_image_write :: proc(
       src = src,
       offset = vk.DeviceSize(offset),
       image = img.image,
-      extent = img.extent,
-      aspect = infer_aspect_mask(img.format),
-      mip_levels = img.mip_levels,
+      extent = {img.desc.extent.x, img.desc.extent.y},
+      aspect = infer_aspect_mask(FORMATS[img.desc.format]),
+      mip_levels = img.desc.mip_levels,
     },
   )
   return .SUCCESS

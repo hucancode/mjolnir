@@ -1,14 +1,14 @@
 // Debug line primitives: segments, boxes, spheres, circles, arrows, axes; timed and depth-bypassing lines.
 package main
 
+import "core:log"
+import "core:math"
+import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:log"
-import "core:math"
-import "core:math/linalg"
 
 TRAIL_PERIOD :: 0.25
 TRAIL_LIFE :: 3.0
@@ -42,13 +42,14 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
 
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -1, 0}, scale = 20.0)
 
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .BLUE), {-6, 0, 0}, scale = 0.8)
 
   app.orbit = render.make_orbit({12, 8, 14}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   return .READY
 }
 
@@ -74,7 +75,7 @@ update :: proc(app: ^App, dt: f32) {
   render.debug_segment(&app.renderer, {8, 0, -8}, {8, 6, -8}, white)
   render.debug_segment(&app.renderer, {-8, 6, -8}, {8, 6, -8}, white)
 
-  render.debug_aabb(&app.renderer, {-7, -1, -1}, {-5, 1, 1}, render.COLOR_RGB[.GREEN])
+  render.debug_cube(&app.renderer, {-6, 0, 0}, half_extents = 1, color = render.COLOR_RGB[.GREEN])
 
   rot := linalg.quaternion_angle_axis_f32(t, {0, 1, 0})
   render.debug_cube(&app.renderer, {-2, 1, 0}, rotation = rot, half_extents = 0.75, color = render.COLOR_RGB[.MAGENTA])

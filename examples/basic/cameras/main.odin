@@ -1,17 +1,18 @@
 // Orbit, free-fly, follow and orthographic top-down cameras built from render camera primitives (orbit, look_at, lerp).
 package main
 
-import "mjolnir"
-import "mjolnir/debugui"
-import "mjolnir/input"
-import "mjolnir/platform"
-import "mjolnir/render"
-import "mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
+import "mjolnir"
+import "mjolnir/debugui"
+import "mjolnir/geometry"
+import "mjolnir/input"
+import "mjolnir/platform"
+import "mjolnir/render"
+import "mjolnir/world"
 
 CameraMode :: enum {ORBIT, FREE, FOLLOW, TOP}
 
@@ -59,6 +60,8 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 6, 12}, {0, 0, 0})
   cam := render.main_camera(&app.renderer)
@@ -153,22 +156,22 @@ orbit_camera :: proc(app: ^App, cam: ^render.Camera) {
 }
 
 follow_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
-  ease := 1 - math.exp(-follow_lerp * dt)
+  ease := geometry.exp_smooth(follow_lerp, dt)
   from := app.runner_pos + {0, follow_offset_y, follow_offset_back}
   render.camera_lerp_look_at(cam, from, app.runner_pos, ease)
 }
 
 free_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
   s := &app.input
-  move := render.camera_right(cam) * input.axis(s, .A, .D) + {0, 1, 0} * input.axis(s, .Q, .E) + render.camera_forward(cam) * input.axis(s, .S, .W)
+  move := geometry.qx(cam.rotation) * input.axis(s, .A, .D) + {0, 1, 0} * input.axis(s, .Q, .E) + -geometry.qz(cam.rotation) * input.axis(s, .S, .W)
   cam.position += move * free_speed * dt
   d := s.mouse_delta * 0.002
   cam.rotation = linalg.quaternion_angle_axis(-d.x, linalg.VECTOR3F32_Y_AXIS) * cam.rotation
-  cam.rotation = linalg.quaternion_angle_axis(-d.y, render.camera_right(cam)) * cam.rotation
+  cam.rotation = linalg.quaternion_angle_axis(-d.y, geometry.qx(cam.rotation)) * cam.rotation
 }
 
 top_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
   cam.projection = render.OrthographicProjection{top_view_height}
   up := [3]f32{math.sin(top_yaw), 0, -math.cos(top_yaw)}
-  render.camera_lerp_look_at(cam, {0, 30, 0}, {0, 0, 0}, 1 - math.exp(-follow_lerp * dt), up)
+  render.camera_lerp_look_at(cam, {0, 30, 0}, {0, 0, 0}, geometry.exp_smooth(follow_lerp, dt), up)
 }

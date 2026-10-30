@@ -37,7 +37,7 @@ tail_apply :: proc(pose: Pose, bones: []u32, state: []f32, params: TailParams, d
   n := len(bones)
   if n < 2 do return
   tail := ([^]TailBone)(raw_data(state))[:n]
-  delta_time := min(delta_time, TAIL_MAX_STEP)
+  dt := min(delta_time, TAIL_MAX_STEP)
   stiffness := TAIL_MAX_STIFFNESS * clamp(params.stiffness, 0.0, 1.0)
   damping := 2.0 * math.sqrt(stiffness) * params.damping
   for i in 1 ..< n {
@@ -49,8 +49,8 @@ tail_apply :: proc(pose: Pose, bones: []u32, state: []f32, params: TailParams, d
     up_world := linalg.normalize((pose.root_world * [4]f32{up.x, up.y, up.z, 0}).xyz)
     tip_world := parent_world + up_world * length
     if fresh do s.position = tip_world
-    s.velocity += ((tip_world - s.position) * stiffness - s.velocity * damping) * delta_time
-    s.position += s.velocity * delta_time
+    s.velocity += ((tip_world - s.position) * stiffness - s.velocity * damping) * dt
+    s.position += s.velocity * dt
     if !params.stretch {
       delta := s.position - parent_world
       if d := linalg.length(delta); d > 0.001 {

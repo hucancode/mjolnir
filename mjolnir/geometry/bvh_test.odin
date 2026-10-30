@@ -570,6 +570,7 @@ bvh_build_benchmark :: proc(t: ^testing.T) {
     bench = bench_proc,
   }
   err := time.benchmark(options)
+  testing.expect(t, err == .Okay, "bench failed")
   log.infof(
     "BVH build: %d items built %d times in %v (%.2f MB/s) | %.2f ms/build",
     item_count,
@@ -639,6 +640,7 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
     teardown = teardown_proc,
   }
   err := time.benchmark(options)
+  testing.expect(t, err == .Okay, "bench failed")
   log.infof(
     "BVH query: %d queries in %v (%.2f MB/s) | %.2f μs/query",
     options.rounds,
@@ -707,6 +709,7 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
     teardown = teardown_proc,
   }
   err := time.benchmark(options)
+  testing.expect(t, err == .Okay, "bench failed")
   log.infof(
     "BVH ray: %d rays in %v (%.2f MB/s) | %.2f μs/ray",
     options.rounds,
@@ -774,6 +777,7 @@ bvh_empty_query_benchmark :: proc(t: ^testing.T) {
     teardown = teardown_proc,
   }
   err := time.benchmark(options)
+  testing.expect(t, err == .Okay, "bench failed")
   log.infof(
     "BVH empty query: %d queries in %v (%.2f MB/s) | %.2f μs/query",
     options.rounds,
@@ -841,6 +845,7 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
     teardown = teardown_proc,
   }
   err := time.benchmark(options)
+  testing.expect(t, err == .Okay, "bench failed")
   log.infof(
     "BVH refit: %d refits in %v (%.2f MB/s) | %.2f ms/refit",
     options.rounds,

@@ -1,10 +1,12 @@
 package render
 
-import "../geometry"
 import "../containers"
+import "../geometry"
+import "core:container/small_array"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:slice"
 
 // PerspectiveProjection is a perspective projection of vertical field of view `fov` (radians);
 // the aspect ratio follows the camera's size.
@@ -60,6 +62,26 @@ Camera :: struct {
   // clip planes, shared by both projections
   near, far:         f32,
   ambient_occlusion: AmbientOcclusion,
+  anti_aliasing:     AntiAliasing,
+  // run in order over the camera's image (make_effect); without a ToneMapEffect it stays HDR
+  effects:           small_array.Small_Array(MAX_EFFECTS, Effect),
+  // the layers (MeshAttachment.layer) whose meshes it does not draw
+  hidden_layers:     Layers,
+}
+
+// MAX_EFFECTS is how many post-process effects a camera runs.
+MAX_EFFECTS :: 16
+
+// Layers is a set of mesh layers, each below MAX_LAYERS.
+Layers :: bit_set[0 ..< MAX_LAYERS; u32]
+
+MAX_LAYERS :: 32
+
+// AntiAliasing smooths the jagged edges of a camera's image. FXAA finds edges by brightness after
+// lighting and blends across them: it softens geometry edges, not shimmer from motion.
+AntiAliasing :: enum u32 {
+  NONE,
+  FXAA,
 }
 
 // AmbientOcclusion darkens the image-based light where nearby surfaces hide the sky: creases,
@@ -85,6 +107,8 @@ DEFAULT_AMBIENT_OCCLUSION :: AmbientOcclusion {
 CameraTargets :: struct {
   extent:        [2]u32, // width, height
   images:        [CameraImage][FRAMES_IN_FLIGHT]TextureHandle,
+  // the effects ping-pong through FINAL_IMAGE and these
+  post:          [FRAMES_IN_FLIGHT][2]TextureHandle,
   // the depth pyramid of each frame, and whether its storage views are in the bindless array
   pyramid:       [FRAMES_IN_FLIGHT]TextureHandle,
   pyramid_bound: [FRAMES_IN_FLIGHT]bool,
@@ -172,19 +196,9 @@ camera_orbit :: proc(self: ^Camera, orbit: Orbit) {
   camera_look_at(self, position, orbit.target, {-sp * cy, cp, -sp * sy})
 }
 
-// camera_forward returns the camera's world-space forward (-Z) axis.
-camera_forward :: proc(self: ^Camera) -> [3]f32 {
-  return linalg.quaternion_mul_vector3(self.rotation, [3]f32{0, 0, -1})
-}
-
-// camera_right returns the camera's world-space right (+X) axis.
-camera_right :: proc(self: ^Camera) -> [3]f32 {
-  return linalg.quaternion_mul_vector3(self.rotation, [3]f32{1, 0, 0})
-}
-
 // camera_lerp_look_at blends the camera toward one at from looking at to: position lerps,
-// rotation slerps the short arc. t = 1 snaps; pass 1 - exp(-speed * dt) every tick for
-// frame-rate independent smoothing.
+// rotation slerps the short arc. t = 1 snaps; pass geometry.exp_smooth(speed, dt) every tick
+// for frame-rate independent smoothing.
 camera_lerp_look_at :: proc(self: ^Camera, from, to: [3]f32, t: f32, up: [3]f32 = {0, 0, 0}) {
   goal := Camera{}
   camera_look_at(&goal, from, to, up)
@@ -229,6 +243,10 @@ main_camera :: proc(self: ^Renderer) -> (^Camera, bool) #optional_ok {
   return camera(self, self.main_camera)
 }
 
+// Where init places the main camera, looking at the origin.
+@(private)
+MAIN_CAMERA_POSITION :: [3]f32{3, 4, 3}
+
 // make_camera returns a perspective Camera at `position` looking at `target`, for camera_create.
 make_camera :: proc(
   position: [3]f32 = {0, 0, 3},
@@ -239,7 +257,7 @@ make_camera :: proc(
 ) -> (
   c: Camera,
 ) {
-  c = {projection = PerspectiveProjection{fov}, near = near, far = far, ambient_occlusion = DEFAULT_AMBIENT_OCCLUSION}
+  c = {projection = PerspectiveProjection{fov}, near = near, far = far, ambient_occlusion = DEFAULT_AMBIENT_OCCLUSION, anti_aliasing = .FXAA}
   camera_look_at(&c, position, target)
   return
 }
@@ -266,14 +284,12 @@ camera_create :: proc(self: ^Renderer, size: [2]u32, c: Camera) -> (handle: Came
   return handle, true
 }
 
-// camera_destroy frees the camera; its handle is stale at once. false for the main camera,
-// which lives as long as the renderer, or a stale handle.
-camera_destroy :: proc(self: ^Renderer, handle: CameraHandle) -> bool {
+// camera_destroy frees the camera; its handle is stale at once. The main camera, which lives as
+// long as the renderer, and a stale handle are ignored.
+camera_destroy :: proc(self: ^Renderer, handle: CameraHandle) {
   lock(self)
-  if handle == self.main_camera do return false
-  camera(self, handle) or_return
-  free_camera(self, handle)
-  return true
+  if handle == self.main_camera do return
+  if _, live := camera(self, handle); live do free_camera(self, handle)
 }
 
 @(private)
@@ -303,20 +319,19 @@ camera_image :: proc(
   return self.camera_targets[handle].images[image][f], true
 }
 
-// Resizes a camera's render targets; a perspective projection follows the new aspect ratio.
-@(private)
-camera_resize :: proc(
-  self: ^Renderer,
-  handle: CameraHandle,
-  width, height: u32,
-) -> bool {
+// camera_resize gives a camera render targets of `size` pixels; a perspective projection
+// follows the new aspect ratio. Nothing happens when the size is unchanged, so a camera sized
+// from the window can be resized every tick. Cameras the window's size are resized with it.
+// false for a stale handle or when the targets could not be made.
+camera_resize :: proc(self: ^Renderer, handle: CameraHandle, size: [2]u32) -> bool {
+  lock(self)
   camera(self, handle) or_return
   targets := &self.camera_targets[handle]
-  if targets.extent == {width, height} do return true
-  targets.extent = {width, height}
+  if targets.extent == size do return true
+  targets.extent = size
   destroy_targets(self, u32(handle))
   create_targets(self, u32(handle)) or_return
-  log.infof("Camera resized to %dx%d", width, height)
+  log.infof("Camera resized to %dx%d", size.x, size.y)
   return true
 }
 
@@ -353,13 +368,11 @@ View :: struct {
   list_capacity:   u32,
   // render's clock in seconds (render.update)
   time:            f32,
-  _:               [3]u32,
-  // Renderer.sun as seen by every view: color * intensity (0 when off), and the direction
-  // towards it
-  sun_radiance:    [4]f32,
-  sun_direction:   [4]f32,
+  // a node in one of these is not drawn (Camera.hidden_layers)
+  hidden_layers:   Layers,
+  _:               u32,
 }
-#assert(size_of(View) == 496)
+#assert(size_of(View) == 464)
 
 // A camera's images and depth pyramids, one set per frame in flight (pyramid_shape).
 @(private)
@@ -373,6 +386,9 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
       targets.images[a][frame] = allocate_texture(self, desc, target = true) or_return
     }
   }
+  post := images[.FINAL_IMAGE]
+  post.extent = targets.extent
+  for &frame in targets.post do for &p in frame do p = allocate_texture(self, post, target = true) or_return
   half, mips := pyramid_shape(targets.extent)
   pyramid := TextureDesc {
     extent     = half,
@@ -392,8 +408,50 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
 destroy_targets :: proc(self: ^Renderer, index: u32) {
   targets := &self.camera_targets[index]
   for frames in targets.images do for handle in frames do texture_destroy(self, handle)
+  for frame in targets.post do for handle in frame do texture_destroy(self, handle)
   for handle in targets.pyramid do texture_destroy(self, handle)
-  targets.images, targets.pyramid, targets.pyramid_bound = {}, {}, {}
+  targets.images, targets.post, targets.pyramid, targets.pyramid_bound = {}, {}, {}, {}
   groups_clear(self)
 }
 
+
+// Writes the camera views, in slot order.
+@(private)
+flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
+  views := write_table(self, .VIEWS, View)
+  // a slot without a camera keeps an empty view that draws no type
+  slot_count := self.slots[.CAMERAS].high_water
+  slice.zero(views[CAMERA_VIEW_BASE:][:slot_count])
+  mark_dirty(self, .VIEWS, CAMERA_VIEW_BASE, int(slot_count))
+  all_types := u32(1 << DRAW_LISTS - 1)
+  c: u32
+  for i in containers.slots_next(&self.slots[.CAMERAS], &c) {
+    cam, targets := &self.cameras[i], &self.camera_targets[i]
+    view := camera_view_matrix(cam)
+    projection := camera_projection_matrix(cam, targets.extent)
+    view_projection := projection * view
+    v := &views[CAMERA_VIEW_BASE + i]
+    v^ = {
+      view                = view,
+      projection          = projection,
+      view_projection     = view_projection,
+      inv_view_projection = linalg.inverse(view_projection),
+      planes              = geometry.make_frustum(view_projection).planes,
+      position            = {cam.position.x, cam.position.y, cam.position.z, 1},
+      extent              = {f32(targets.extent[0]), f32(targets.extent[1])},
+      near                = cam.near,
+      far                 = cam.far,
+      pyramid             = u32(targets.pyramid[frame_index]),
+      occlusion_mask      = GBUFFER_TYPES if camera_ready(self, i) else 0,
+      list_stride         = 1,
+      type_mask           = all_types,
+      require_flags       = {.VISIBLE},
+      // frame N builds pyramid N from N-1's depth and culls into N+1's lists
+      draw_list           = camera_next_slot(i, frame_index),
+      list_capacity       = CAMERA_LIST_CAPACITY,
+      time                = f32(self.time),
+      hidden_layers       = cam.hidden_layers,
+    }
+    for a in CameraImage do v.images[a] = u32(targets.images[a][frame_index])
+  }
+}

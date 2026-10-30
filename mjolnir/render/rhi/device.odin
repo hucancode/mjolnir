@@ -58,6 +58,11 @@ Caps :: struct {
 // The byte alignment of a row of the backbuffer copy.
 BACKBUFFER_PITCH :: 256
 
+// backbuffer_pitch is the bytes between rows of a backbuffer copy `width` texels wide.
+backbuffer_pitch :: proc "contextless" (width: u32) -> u32 {
+  return (width * 4 + BACKBUFFER_PITCH - 1) / BACKBUFFER_PITCH * BACKBUFFER_PITCH
+}
+
 // Threads that may record command lists at once: cmd_begin's `thread` is below it.
 MAX_RECORD_THREADS :: 8
 
@@ -94,7 +99,8 @@ BufferUsage :: enum {
 MemoryKind :: enum {
   GPU,
   UPLOAD,
-  // GPU-written, CPU-read (buffer_read)
+  // GPU-written (cmd_copy_buffer, cmd_copy_backbuffer), CPU-read (buffer_read); the backend
+  // rings the copies, so a frame copies into it while the CPU reads one a finished frame left
   READBACK,
 }
 
@@ -378,6 +384,8 @@ Procs :: struct($Device: typeid, $Window: typeid) {
   texture_create:                proc(d: ^Device, handle: TextureHandle, desc: TextureDesc, data: []u8) -> bool,
   // destroyed at once: the caller retires the handle first
   texture_destroy:               proc(d: ^Device, handle: TextureHandle),
+  // what the texture was made from; the zero desc for none
+  texture_desc:                  proc(d: ^Device, handle: TextureHandle) -> TextureDesc,
   buffer_create:                 proc(d: ^Device, desc: BufferDesc) -> (Buffer, bool),
   // destroyed once no frame in flight can use it
   buffer_retire:                 proc(d: ^Device, buffer: Buffer),
@@ -386,8 +394,9 @@ Procs :: struct($Device: typeid, $Window: typeid) {
   buffer_write:                  proc(d: ^Device, buffer: Buffer, offset: int, data: []u8) -> bool,
   // BINDLESS: the textures of texture_create are in their own array already
   bindless_write:                proc(d: ^Device, array: BindlessArray, index: u32, resource: BindResource),
-  // the last copy a READBACK buffer received from cmd_copy_buffer and a frame completed
-  buffer_read:                   proc(d: ^Device, buffer: Buffer, offset: int, dst: []u8) -> bool,
+  // the latest copy a finished frame left in a READBACK buffer, zeros before the first; frame
+  // is the frame_serial that copied it + 1, 0 for none
+  buffer_read:                   proc(d: ^Device, buffer: Buffer, offset: int, dst: []u8) -> (frame: u64, ok: bool),
   bind_layout_create:            proc(d: ^Device, desc: BindLayoutDesc) -> (BindLayout, bool),
   bind_group_create:             proc(d: ^Device, desc: BindGroupDesc) -> (BindGroup, bool),
   bind_group_retire:             proc(d: ^Device, group: BindGroup),

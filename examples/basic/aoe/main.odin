@@ -1,15 +1,15 @@
 // Area-of-effect query over static bodies.
 package main
 
-import "mjolnir"
-import "mjolnir/input"
-import "mjolnir/platform"
-import "mjolnir/render"
-import "mjolnir/world"
-import "mjolnir/physics"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "mjolnir"
+import "mjolnir/input"
+import "mjolnir/physics"
+import "mjolnir/platform"
+import "mjolnir/render"
+import "mjolnir/world"
 
 GRID_SIZE :: 50
 GRID_SPACING :: f32(1.0)
@@ -53,18 +53,18 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   cube := render.primitive(&app.renderer, .CUBE, .CYAN, cast_shadow = false)
   for x in 0 ..< GRID_SIZE do for z in 0 ..< GRID_SIZE {
     position := [3]f32{(f32(x) - GRID_SIZE * 0.5) * GRID_SPACING, 0.5, (f32(z) - GRID_SIZE * 0.5) * GRID_SPACING}
-    node := world.spawn(&app.scene, position) or_continue
+    node := world.spawn(&app.scene, position, scale = CUBE_HALF_EXTENT) or_continue
     render.attach(&app.renderer, node, cube)
-    world.scale(&app.scene, node, CUBE_HALF_EXTENT)
     physics.body_create(&app.phys, position, collider = physics.BoxCollider{half_extents = CUBE_HALF_EXTENT}, user = world.Handle(node))
   }
-  effector_material := render.material_create(&app.renderer, render.make_material(emissive_value = 5.0))
+  effector_material := render.material_create(&app.renderer, render.make_material(emissive_factor = 5.0))
   app.effector = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, effector_material, cast_shadow = false), scale = 0.5)
   app.orbit = render.make_orbit({10, 30, 10}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   log.infof("AOE test setup complete: %d cubes", GRID_SIZE * GRID_SIZE)
   return .READY
 }

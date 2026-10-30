@@ -9,7 +9,6 @@ main :: proc() {
   js.add_event_listener("output", .Click, nil, on_click)
 }
 
-// The map is a square viewBox fitted into the svg's box, centered.
 on_click :: proc(e: js.Event) {
   r := js.get_bounding_client_rect("map")
   side := min(r.width, r.height)

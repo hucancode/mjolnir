@@ -56,12 +56,12 @@ float4 fs_main(VertexOut v) : SV_Target0
     float3 belly = float3(1.0, 0.93, 0.65) * (1.0 - 0.3 * smoothstep(0.7, 0.95, frac(along * 5.0)));
     skin = lerp(skin, belly, 1.0 - smoothstep(-0.5, -0.2, up));
 
-    float3 sun = view.sun_direction.xyz;
+    Sun sun = scene_sun();
     float3 eye = normalize(view.position.xyz - v.position);
-    float light = floor(max(dot(n, sun), 0.0) * 3.0 + 0.5) / 3.0;
-    float3 color = skin * view.sun_radiance.rgb * lerp(0.45, 1.0, light);
-    float gloss = step(0.97, dot(n, normalize(sun + eye))) * (1.0 - d) * (1.0 - d);
-    color += 0.4 * gloss * view.sun_radiance.rgb;
+    float light = floor(max(dot(n, sun.toward), 0.0) * 3.0 + 0.5) / 3.0;
+    float3 color = skin * sun.radiance * lerp(0.45, 1.0, light);
+    float gloss = step(0.97, dot(n, normalize(sun.toward + eye))) * (1.0 - d) * (1.0 - d);
+    color += 0.4 * gloss * sun.radiance;
     color += 0.2 * step(0.7, 1.0 - max(dot(n, eye), 0.0));
     return float4(color, 1.0);
 }

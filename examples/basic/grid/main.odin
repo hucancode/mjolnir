@@ -1,15 +1,16 @@
 // Spawning + despawning at scale, with the GPU time of each render pass.
 package main
 
+import "core:fmt"
+import "core:log"
+import "core:math/linalg"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:fmt"
-import "core:log"
-import mu "vendor:microui"
 
 GRID_SIZES :: [3]int{5, 256, 300}
 
@@ -43,10 +44,11 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   app.orbit = render.make_orbit({14, 14, 14}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.size = GRID_SIZES[0]
   return .READY
 }

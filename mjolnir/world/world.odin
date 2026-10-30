@@ -5,6 +5,16 @@ import "../geometry"
 import "core:math/linalg"
 import "core:slice"
 
+// Handle is an untyped handle, for links stored outside world (e.g. a physics body's user).
+Handle :: containers.Handle
+
+// NodeHandle identifies a node; stale after node_destroy or teardown.
+NodeHandle :: distinct Handle
+
+// RETIRE_GRACE is how many updates a despawned slot stays reserved, so index-keyed consumers see the removal.
+@(private)
+RETIRE_GRACE :: 3
+
 // Node is one scene-graph entry: links, local transform and visibility.
 Node :: struct {
   parent:    NodeHandle,
@@ -69,8 +79,7 @@ World_State :: struct {
 }
 
 // node returns a copy of the node behind `handle`; false when stale. Change it with translate,
-// rotate, rotate_by, scale, set_local, set_local_matrix, set_world_pose, set_parent,
-// set_visible and set_name.
+// rotate, rotate_by, scale, set_local, set_world_pose, set_parent, set_visible and set_name.
 node :: proc(self: ^World, handle: NodeHandle) -> (n: Node, ok: bool) #optional_ok {
   p := lookup(self, handle) or_return
   return p^, true
@@ -104,7 +113,7 @@ edit :: #force_inline proc(self: ^World, handle: NodeHandle) -> ^Node {
 // Children despawned since the last update may still be listed, as stale handles (node
 // rejects them).
 children :: proc(self: ^World, handle: NodeHandle) -> []NodeHandle {
-  if !containers.slots_valid(&self.slots, handle) do return nil
+  if lookup(self, handle) == nil do return nil
   if self.tree_stale do build_tree(self)
   return children_of(self, handle.index)
 }
@@ -172,11 +181,14 @@ build_tree :: proc(self: ^World) {
 
 spawn :: node_create
 
-// node_create (or its alias spawn) creates a node under `parent`, the world root by default;
-// `name` is borrowed, not copied. false when `parent` is stale or no slot is free.
+// node_create (or its alias spawn) creates a node at a local position, rotation and scale under
+// `parent`, the world root by default; `name` is borrowed, not copied. false when `parent` is
+// stale or no slot is free.
 node_create :: proc(
   self: ^World,
   position: [3]f32 = {0, 0, 0},
+  rotation: quaternion128 = linalg.QUATERNIONF32_IDENTITY,
+  scale: [3]f32 = {1, 1, 1},
   name: string = "",
   parent: NodeHandle = {},
 ) -> (
@@ -188,7 +200,7 @@ node_create :: proc(
   handle = alloc_node(self, name) or_return
   node := edit(self, handle)
   node.parent = parent
-  node.transform.position = position
+  node.transform = {position, rotation, scale}
   self.tree_stale = true
   return handle, true
 }
@@ -196,13 +208,19 @@ node_create :: proc(
 @(private = "file")
 alloc_node :: proc(self: ^World, name: string) -> (handle: NodeHandle, ok: bool) {
   index := containers.slots_alloc(&self.slots) or_return
-  self.nodes[index] = {transform = geometry.TRANSFORM_IDENTITY, name = name, visible = true}
-  self.cache[index] = NODE_CACHE_INIT
+  alloc_node_at(self, index, name)
   return NodeHandle(containers.slots_handle(&self.slots, index)), true
 }
 
+@(private = "file")
+alloc_node_at :: proc(self: ^World, index: u32, name: string) {
+  self.nodes[index] = {transform = geometry.TRANSFORM_IDENTITY, name = name, visible = true}
+  self.cache[index] = NODE_CACHE_INIT
+}
+
 // init prepares the world for max_nodes nodes, its root among them: node indices stay below
-// max_nodes. false when it is too small for the root.
+// max_nodes, so a consumer keyed by index needs as many slots (render.MAX_SLOTS). false when it
+// is too small for the root.
 init :: proc(self: ^World, max_nodes: u32 = 65536) -> bool {
   containers.slots_init(&self.slots, max_nodes, RETIRE_GRACE)
   self.nodes = make([]Node, max_nodes)
@@ -248,32 +266,22 @@ shutdown :: proc(self: ^World) {
   delete(self.pending_removed)
 }
 
-// setup keeps every node made so far (and the root) through every later teardown: call it once
-// after making the nodes that outlive a level (a player, a camera rig).
-setup :: proc(self: ^World) {
-  containers.slots_mark(&self.slots)
-}
-
-// teardown drops every node made since setup (or init) at once, children of kept nodes among
-// them. Their indices are reused at once, so removals are not reported: a consumer keyed by
-// node index forgets every index it saw since setup itself, before the next level spawns.
+// teardown drops every node but the root at once, back to how init left the world. Their
+// indices are reused at once, so removals are not reported: a consumer keyed by node index
+// forgets every index it saw, before the next map spawns (render.teardown).
 teardown :: proc(self: ^World) {
-  slice.zero(self.nodes[self.slots.mark:self.slots.high_water])
-  slice.zero(self.cache[self.slots.mark:self.slots.high_water])
   containers.slots_rewind(&self.slots)
+  alloc_node_at(self, self.root.index, "root")
   self.tree_stale = true
+  clear(&self.touched)
   clear(&self.pending_removed)
   clear(&self.feed)
-  // kept nodes edited since the last update: walk them next update as well
-  touched := self.touched[:]
-  resize(&self.touched, 0)
-  for i in touched do if containers.slots_live(&self.slots, i) do append(&self.touched, i)
 }
 
 // node_destroy removes a node and its descendants; changes reports them after the next update.
 // false for the root or a stale handle.
 node_destroy :: proc(self: ^World, handle: NodeHandle) -> bool {
-  if handle == self.root || !containers.slots_valid(&self.slots, handle) do return false
+  if handle == self.root || lookup(self, handle) == nil do return false
   // removals need no rebuild: the lists hold handles, and freed ones go stale
   if self.tree_stale do build_tree(self)
   despawn_subtree(self, handle)
@@ -284,8 +292,7 @@ node_destroy :: proc(self: ^World, handle: NodeHandle) -> bool {
 // (as of the last update) by taking a new local transform; else its local transform now hangs
 // from the new parent. false for the root, a stale handle, or a parent inside the subtree.
 set_parent :: proc(self: ^World, handle, parent: NodeHandle, keep_world := false) -> bool {
-  if handle == self.root || !containers.slots_valid(&self.slots, handle) do return false
-  if !containers.slots_valid(&self.slots, parent) do return false
+  if handle == self.root || lookup(self, handle) == nil || lookup(self, parent) == nil do return false
   for p := parent; p != {}; p = self.nodes[p.index].parent do if p == handle do return false
   node := edit(self, handle)
   if keep_world {
@@ -357,7 +364,7 @@ refresh :: proc(self: ^World, i: u32, moved: []bool) {
 }
 
 // set_world_pose places a node at a world (position, rotation) whatever its parent, as the
-// parent was at the last update; scale is kept.
+// parent was at the last update; scale is kept. Exact only under uniformly scaled parents.
 set_world_pose :: proc(
   self: ^World,
   handle: NodeHandle,
@@ -373,22 +380,15 @@ set_world_pose :: proc(
   node.transform.rotation = linalg.normalize(linalg.quaternion_inverse(parent_rotation) * rotation)
 }
 
-// set_world_poses is set_world_pose for every pose of `poses`: any struct with
-// `user` (the node's Handle), `position` and `rotation` fields, such as
-// physics.BodyPose.
+// set_world_poses is set_world_pose for every pose of `poses`, a struct with a `user` field
+// holding the node's handle and `position` and `rotation` fields.
 set_world_poses :: proc(self: ^World, poses: []$T) {
   for &p in poses do set_world_pose(self, NodeHandle(p.user), p.position, p.rotation)
 }
 
-// set_local_matrix sets a node's local transform from a matrix (decomposed into TRS).
-set_local_matrix :: proc(self: ^World, handle: NodeHandle, m: matrix[4, 4]f32) {
-  position, rotation, scale := geometry.decompose_matrix(m)
-  set_local(self, handle, position, rotation, scale)
-}
-
 // world_matrix returns a node's world matrix as of the last update; identity when stale.
 world_matrix :: proc(self: ^World, handle: NodeHandle) -> matrix[4, 4]f32 {
-  if !containers.slots_valid(&self.slots, handle) do return linalg.MATRIX4F32_IDENTITY
+  if lookup(self, handle) == nil do return linalg.MATRIX4F32_IDENTITY
   return self.cache[handle.index].world_matrix
 }
 

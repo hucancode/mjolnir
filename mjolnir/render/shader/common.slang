@@ -26,12 +26,23 @@ static const uint MATERIAL_SPRITE = 4;
 // LightType
 static const uint LIGHT_POINT = 0;
 static const uint LIGHT_SPOT = 1;
+static const uint LIGHT_DIRECTIONAL = 2;
 
 // node flags
 static const uint NODE_FLAG_VISIBLE = 1;
 static const uint NODE_FLAG_CASTS_SHADOW = 2;
 // the node holds a bone range; only set on a skinned mesh
 static const uint NODE_FLAG_SKINNED = 4;
+
+// View.images indices (CameraImage)
+static const uint IMAGE_FINAL = 0;
+static const uint IMAGE_NORMAL = 1;
+static const uint IMAGE_ALBEDO = 2;
+static const uint IMAGE_METALLIC_ROUGHNESS = 3;
+static const uint IMAGE_EMISSIVE = 4;
+static const uint IMAGE_DEPTH = 5;
+static const uint IMAGE_AMBIENT_OCCLUSION = 6;
+static const uint IMAGE_LIT = 7;
 
 static const uint SAMPLER_NEAREST_CLAMP = 0;
 static const uint SAMPLER_LINEAR_CLAMP = 1;
@@ -53,7 +64,7 @@ struct View {
     float near;
     float far;
     // render's texture handles, by CameraImage (bound through a group on wgpu)
-    uint images[7];
+    uint images[8];
     uint pyramid;
     // bit t: material type t is tested against the pyramid
     uint occlusion_mask;
@@ -68,12 +79,9 @@ struct View {
     uint list_capacity;
     // render's clock in seconds
     float time;
-    uint _view_pad0;
+    // bit l: nodes of layer l are not drawn
+    uint hidden_layers;
     uint _view_pad1;
-    uint _view_pad2;
-    // Renderer.sun: color * intensity (0 when off), and the direction towards it
-    float4 sun_radiance;
-    float4 sun_direction;
 }
 
 struct Node {
@@ -86,7 +94,8 @@ struct Node {
     uint flags;
     // first of the node's skinned vertices when skinned
     uint skin_vertex_base;
-    uint _node_pad0;
+    // mesh layer: a view with it in hidden_layers skips the node
+    uint layer;
     uint _node_pad1;
     uint _node_pad2;
 }
@@ -108,9 +117,9 @@ struct Material {
     uint metallic_roughness_index;
     uint normal_index;
     uint emissive_index;
-    float metallic_value;
-    float roughness_value;
-    float emissive_value;
+    float metallic_factor;
+    float roughness_factor;
+    float emissive_factor;
     // MaterialType: a built-in one (MATERIAL_*) or a user shader's past them
     uint material_type;
     float4 base_color_factor;

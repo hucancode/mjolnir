@@ -4,6 +4,7 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import "core:strings"
 import "core:time"
 import "mjolnir"
@@ -276,14 +277,15 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
   app.sheet = render.texture_create(&app.renderer, #load("assets/kenney_pixel_platformer/Tilemap/tilemap_packed.png")) or_else 0
   ok: bool
   app.knight, ok = gltf.model_create(&app.renderer, #load("assets/kaykit_adventurers/Knight.glb"))
   if !ok do return .FAIL
-  root := world.spawn(&app.scene)
-  app.hero = gltf.instance_create(&app.knight, &app.scene, &app.renderer, root)
-  for name in KNIGHT_PROPS do if node, found := world.find(&app.scene, name, root); found do world.set_visible(&app.scene, node, false)
+  app.hero = gltf.instance_create(&app.knight, &app.scene, &app.renderer)
+  for name in KNIGHT_PROPS do if node, found := world.find(&app.scene, name, app.hero.root); found do world.set_visible(&app.scene, node, false)
   if len(app.hero.animators) > 0 do animation.play(&app.hero.animators[0], &app.knight.rigs[0], "Idle")
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 8)
   app.orbit = render.make_orbit({0, 2.2, 4.5}, {0, 1, 0})
@@ -611,8 +613,8 @@ update :: proc(app: ^App, dt: f32) {
   start := time.tick_now()
   laid_out, painted := mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font)
   measure(app, time.tick_since(start), laid_out, painted, dt)
-  gltf.animate(&app.hero, &app.knight, &app.scene, &app.renderer, dt)
   mjolnir.update(&app.scene, &app.renderer, dt)
+  gltf.animate(&app.hero, &app.knight, &app.scene, &app.renderer, dt)
 }
 
 draw :: proc(app: ^App) -> bool {

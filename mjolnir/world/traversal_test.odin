@@ -82,7 +82,6 @@ test_node_translate :: proc(t: ^testing.T) {
   parent_handle, parent_ok := node_create(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
   child, ok := node_create(&w, parent = parent_handle)
-  child_ptr := node(&w, child)
   testing.expectf(t, ok, "failed to spawn child node")
   translate(&w, child, {4, 5, 6})
   update(&w)
@@ -102,7 +101,6 @@ test_node_rotate :: proc(t: ^testing.T) {
   init(&w)
   defer shutdown(&w)
   child, ok := node_create(&w)
-  child_ptr := node(&w, child)
   testing.expectf(t, ok, "failed to spawn node")
   rotate(&w, child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   translate(&w, child, {1, 0, 0})
@@ -125,7 +123,6 @@ test_node_scale :: proc(t: ^testing.T) {
   parent_handle, parent_ok := node_create(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
   child, child_ok := node_create(&w, parent = parent_handle)
-  child_ptr := node(&w, child)
   testing.expectf(t, child_ok, "failed to spawn child node")
   scale(&w, child, {5, 6, 7})
   update(&w)
@@ -145,7 +142,6 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   init(&w)
   defer shutdown(&w)
   n, node_ok := node_create(&w)
-  node_ptr := node(&w, n)
   testing.expectf(t, node_ok, "failed to spawn node")
   scale(&w, n, 2)
   rotate(&w, n, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
@@ -174,7 +170,6 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   node2_handle, node2_ok := node_create(&w, parent = node1_handle)
   testing.expectf(t, node2_ok, "failed to spawn node2")
   node3_handle, node3_ok := node_create(&w, parent = node2_handle)
-  node3 := node(&w, node3_handle)
   testing.expectf(t, node3_ok, "failed to spawn node3")
   translate(&w, node1_handle, {1, 0, 0})
   rotate(&w, node2_handle, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
@@ -261,7 +256,6 @@ traverse_scene_benchmark :: proc(
   }
   count := node_count(scene)
   for _ in 0 ..< options.rounds {
-    ctx: Context
     traverse(scene)
     options.processed += size_of(Node) * count
   }
@@ -386,7 +380,7 @@ test_scene_memory_cleanup :: proc(t: ^testing.T) {
   scene: World
   init(&scene)
   defer shutdown(&scene)
-  for i in 0 ..< 1000 {
+  for _ in 0 ..< 1000 {
     node_create(&scene)
   }
   // expect no memory leaks in the test report
@@ -418,22 +412,19 @@ test_set_parent_moves_subtree :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_setup_keeps_nodes_through_teardown :: proc(t: ^testing.T) {
+test_teardown_drops_every_node :: proc(t: ^testing.T) {
   w: World
   init(&w, 64)
   defer shutdown(&w)
   player := spawn(&w, {1, 0, 0})
-  setup(&w)
-  level := spawn(&w, {2, 0, 0})
   held := spawn(&w, parent = player)
   update(&w)
   teardown(&w)
   update(&w)
-  _, kept := node(&w, player)
-  _, dropped := node(&w, level)
-  _, child_dropped := node(&w, held)
-  testing.expect(t, kept && !dropped && !child_dropped, "teardown keeps what setup marked, drops the rest")
-  testing.expect(t, len(children(&w, player)) == 0, "a kept node's later children go")
+  _, player_ok := node(&w, player)
+  _, held_ok := node(&w, held)
+  testing.expect(t, !player_ok && !held_ok, "teardown drops every node")
+  testing.expect_value(t, len(children(&w, w.root)), 0)
 }
 
 @(test)
@@ -455,21 +446,18 @@ test_update_walks_only_touched_subtrees :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_kept_node_moves_after_teardown :: proc(t: ^testing.T) {
+test_teardown_resets_root :: proc(t: ^testing.T) {
   w: World
-  init(&w, 512)
+  init(&w, 64)
   defer shutdown(&w)
-  player := spawn(&w)
-  for _ in 0 ..< 100 do spawn(&w)
-  setup(&w)
-  spawn(&w)
+  translate(&w, w.root, {5, 0, 0})
+  set_visible(&w, w.root, false)
   update(&w)
-  translate(&w, player, {1, 0, 0})
   teardown(&w)
+  n := spawn(&w, {1, 0, 0})
   update(&w)
-  translate(&w, player, {2, 0, 0})
-  update(&w)
-  testing.expect_value(t, world_matrix(&w, player)[3].xyz, [3]f32{2, 0, 0})
+  testing.expect_value(t, world_matrix(&w, n)[3].xyz, [3]f32{1, 0, 0})
+  testing.expect(t, node(&w, w.root).visible, "the root is shown again")
 }
 
 @(test)

@@ -29,12 +29,12 @@ setup :: proc() -> bool {
   labels := [?]string{"box 0", "box 1", "box 2", "box 3", "box 4"}
   colors := [?]string{"#4ea8de", "#56cfe1", "#72efdd", "#80ffdb", "#64dfdf"}
   for level in 0 ..< 5 {
-    box, _ := physics.body_create(&w, {0, 0.5 + f32(level), 0}, collider = physics.BoxCollider{{0.5, 0.5, 0.5}}, mass = 1)
+    box := physics.body_create(&w, {0, 0.5 + f32(level), 0}, collider = physics.BoxCollider{{0.5, 0.5, 0.5}}, mass = 1)
     append(&tracks, Track{body = box, label = labels[level], color = colors[level]})
   }
-  ball, _ = physics.body_create(&w, {0.3, 9, 0.2}, collider = physics.SphereCollider{0.4}, mass = 4)
+  ball = physics.body_create(&w, {0.3, 9, 0.2}, collider = physics.SphereCollider{0.4}, mass = 4)
   append(&tracks, Track{body = ball, label = "ball", color = "#ffd166"})
-  stray, _ := physics.body_create(&w, {5, 1, 0}, collider = physics.SphereCollider{0.3}, mass = 1)
+  stray := physics.body_create(&w, {5, 1, 0}, collider = physics.SphereCollider{0.3}, mass = 1)
   physics.set_velocity(&w, stray, {4, 0, 0})
   append(&tracks, Track{body = stray, label = "stray", color = "#e76f51"})
   return true

@@ -3,6 +3,7 @@ package main
 
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/animation"
@@ -76,9 +77,10 @@ shutdown :: proc(app: ^App) {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 4, -4}, {0, 1, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, GROUND_Y, 0}, scale = 20.0)
   app.snake_model = gltf.model_create(&app.renderer, #load("assets/stuffed_snake_rigged.glb"))
   app.snake = gltf.instance_create(&app.snake_model, &app.scene, &app.renderer)

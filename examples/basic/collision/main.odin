@@ -1,6 +1,11 @@
 // Collision scenarios to run, pause and step through one physics tick at a time.
 package main
 
+import "core:fmt"
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/input"
@@ -8,11 +13,6 @@ import "mjolnir/physics"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:fmt"
-import "core:log"
-import "core:math"
-import "core:math/linalg"
-import mu "vendor:microui"
 
 STEP_DT :: f32(1.0 / 60.0)
 MAX_STEPS_PER_FRAME :: 4
@@ -43,9 +43,8 @@ EXPECTED := [Scenario]string {
 }
 
 Tracked :: struct {
-  name:     string,
-  handle:   physics.BodyHandle,
-  collider: physics.Collider,
+  name:   string,
+  handle: physics.BodyHandle,
 }
 
 App :: struct {
@@ -100,24 +99,25 @@ draw :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  if !debugui.init(&app.debug, &app.renderer) do return .FAIL
-  render.setup(&app.renderer)
   app.orbit = render.make_orbit({9, 7, 12}, {0, 1, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.speed = 1
-  load(app, .SPHERE_DROP)
+  if !load(app, .SPHERE_DROP) do return .FAIL
   return .READY
 }
 
-load :: proc(app: ^App, scenario: Scenario) {
+load :: proc(app: ^App, scenario: Scenario) -> bool {
   physics.teardown(&app.phys)
   world.teardown(&app.scene)
   render.teardown(&app.renderer)
+  debugui.shutdown(&app.debug)
+  debugui.init(&app.debug, &app.renderer) or_return
   clear(&app.bodies)
   app.scenario = scenario
   app.steps = 0
   app.banked = 0
   app.phys.gravity = GRAVITY
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   ground := add(app, "ground", physics.BoxCollider{half_extents = {10, 0.5, 10}}, {0, -0.5, 0})
   physics.body_params(&app.phys, ground).restitution = 0
   switch scenario {
@@ -160,6 +160,7 @@ load :: proc(app: ^App, scenario: Scenario) {
     add(app, "wall", physics.BoxCollider{half_extents = {0.05, 2, 2}}, {3, 2, 0}, 0, .GRAY)
     add(app, "pellet", physics.SphereCollider{radius = 0.1}, {-4, 2, 0}, 0.1, .YELLOW, velocity = {150, 0, 0})
   }
+  return true
 }
 
 add :: proc(
@@ -172,13 +173,12 @@ add :: proc(
   rotation := linalg.QUATERNIONF32_IDENTITY,
   velocity := [3]f32{},
 ) -> physics.BodyHandle {
-  node := world.spawn(&app.scene, position)
-  world.rotate(&app.scene, node, rotation)
+  node := world.spawn(&app.scene, position, rotation)
   mesh, scale := look(collider)
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, mesh, color), scale = scale, parent = node)
   handle := physics.body_create(&app.phys, position, rotation, collider, mass, user = world.Handle(node))
   if velocity != {} do physics.set_velocity(&app.phys, handle, velocity)
-  append(&app.bodies, Tracked{name, handle, collider})
+  append(&app.bodies, Tracked{name, handle})
   return handle
 }
 
@@ -209,12 +209,12 @@ rewind :: proc(app: ^App, steps: int) {
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  controls(app)
-  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if steps, ok := app.rewind_to.?; ok {
     app.rewind_to = nil
     rewind(app, steps)
   }
+  controls(app)
+  mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if app.playing {
     app.banked = min(app.banked + dt * app.speed, STEP_DT * MAX_STEPS_PER_FRAME)
     for app.banked >= STEP_DT {
@@ -257,7 +257,7 @@ draw_colliders :: proc(app: ^App) {
   for t in app.bodies {
     b := physics.body(&app.phys, t.handle) or_continue
     render.debug_axes(&app.renderer, b.position, b.rotation, 1, bypass_depth = true)
-    switch c in t.collider {
+    switch c in b.collider {
     case physics.SphereCollider:
       render.debug_sphere(&app.renderer, b.position, c.radius, white, bypass_depth = true)
     case physics.BoxCollider:
@@ -300,7 +300,8 @@ controls :: proc(app: ^App) {
     for s in Scenario {
       if .SUBMIT in mu.button(ctx, fmt.tprint(s)) {
         app.playing = false
-        load(app, s)
+        app.scenario = s
+        app.rewind_to = 0
       }
     }
     mu.layout_row(ctx, {-1}, 0)

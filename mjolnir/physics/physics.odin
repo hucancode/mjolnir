@@ -635,7 +635,7 @@ step :: proc(self: ^World, dt: f32) -> (stepped: bool) {
     clear(&self.killed)
     return false
   }
-  dt := min(self.pending_dt, MAX_STEP_DT)
+  step_dt := min(self.pending_dt, MAX_STEP_DT)
   self.pending_dt = 0
   warmstart_prep_time, ccd_time, bvh_build_time: time.Duration
   refit_time, broadphase_time, prepare_time, substep_time, finalize_time: time.Duration
@@ -652,7 +652,7 @@ step :: proc(self: ^World, dt: f32) -> (stepped: bool) {
   }
 
   ccd_handled := make([]bool, body_range(self), context.temp_allocator)
-  ccd_bodies_tested, ccd_total_candidates := ccd(self, dt, ccd_handled)
+  ccd_bodies_tested, ccd_total_candidates := ccd(self, step_dt, ccd_handled)
   when PHYSICS_PERF_STATS {
     ccd_time = time.since(mark)
     mark = time.now()
@@ -703,7 +703,7 @@ step :: proc(self: ^World, dt: f32) -> (stepped: bool) {
       mark = time.now()
     }
 
-    run_substep_loop(self, dt / f32(NUM_SUBSTEPS), NUM_SUBSTEPS, ccd_handled)
+    run_substep_loop(self, step_dt / f32(NUM_SUBSTEPS), NUM_SUBSTEPS, ccd_handled)
     when PHYSICS_PERF_STATS {
       substep_time = time.since(mark)
       mark = time.now()
@@ -722,7 +722,7 @@ step :: proc(self: ^World, dt: f32) -> (stepped: bool) {
   step_sensors(self)
 
   when PHYSICS_PERF_STATS do mark = time.now()
-  awake_body_count, sleeping_body_count := step_island_sleep(self, dt)
+  awake_body_count, sleeping_body_count := step_island_sleep(self, step_dt)
   when PHYSICS_PERF_STATS {
     cleanup_time = time.since(mark)
     total_time = time.since(step_start)

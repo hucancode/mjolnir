@@ -105,8 +105,9 @@ test_shadow_views_in_placement_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, placements[2].shadow_map, SHADOW_VIEW_BASE + 1)
 	testing.expect_value(t, placements[3].shadow_map, SHADOW_VIEW_BASE + 1 + 6)
 	testing.expect_value(t, layers, 1 + 6 + 6)
-	// the sun's cascades come first
-	layers = assign_shadow_views(placements[:], lights[:], picked[:], SHADOW_CASCADES)
-	testing.expect_value(t, placements[0].shadow_map, SHADOW_VIEW_BASE + SHADOW_CASCADES)
-	testing.expect_value(t, layers, SHADOW_CASCADES + 1 + 6 + 6)
+	// a directional light takes one view per cascade
+	lights[1].type = .DIRECTIONAL
+	layers = assign_shadow_views(placements[:], lights[:], picked[:])
+	testing.expect_value(t, placements[2].shadow_map, SHADOW_VIEW_BASE + SHADOW_CASCADES)
+	testing.expect_value(t, layers, SHADOW_CASCADES + 6 + 6)
 }

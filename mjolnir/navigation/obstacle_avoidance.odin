@@ -396,7 +396,7 @@ obstacle_avoidance_sample_velocity_adaptive :: proc(query: ^Obstacle_Avoidance_Q
   res := [3]f32{dvel.x * query.params.vel_bias, 0, dvel.z * query.params.vel_bias}
   ns := 0
 
-  for k in 0..<depth {
+  for _ in 0..<depth {
     min_penalty := f32(math.F32_MAX)
     bvel := [3]f32{0, 0, 0}
 

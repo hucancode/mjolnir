@@ -93,17 +93,6 @@ debug_segment :: proc(
   debug_line_add(self, life, bypass_depth, {a = a, b = b, color = color})
 }
 
-// debug_aabb queues the wireframe of the box lo..hi.
-debug_aabb :: proc(
-  self: ^Renderer,
-  lo, hi: [3]f32,
-  color: [4]f32 = COLOR_RGB[.WHITE],
-  life: f32 = 0,
-  bypass_depth: bool = false,
-) {
-  debug_cube(self, (lo + hi) * 0.5, 1, (hi - lo) * 0.5, color, life, bypass_depth)
-}
-
 // debug_cube queues a wireframe box at center with the given rotation, half_extents along each
 // axis (as a cube primitive scaled by them).
 debug_cube :: proc(

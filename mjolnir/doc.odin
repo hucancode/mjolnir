@@ -1,5 +1,7 @@
 // Mjolnir is a game engine made of building blocks: each package does one job and your app glues
 // them together. This package runs the main loop: fill a Loop with your callbacks and call run.
+// The rest is optional glue for the usual case: spawn, update, frame, sync_bodies, orbit_drag
+// and stage_ui.
 package mjolnir
 
 // Layer 3: glue
@@ -13,10 +15,10 @@ package mjolnir
 //   0  core: containers, geometry math and the render hardware interface (rhi)
 //
 // API conventions, the same in every package:
-//   A module's init/shutdown own it for the application; setup/teardown keep and drop what a
-//   map made. make_x returns a value (make_point_light, make_material, make_cube); x_create
-//   stores one and returns a handle (light_create); x_init fills a struct the caller owns
-//   (spline_init, font.init); x_destroy frees either. A generational handle (world, physics, ui,
+//   A module's init/shutdown own it for the application; teardown drops what a map made.
+//   make_x returns a value (make_point_light, make_material, make_cube); x_create stores one
+//   and returns a handle (light_create); x_init fills a struct the caller owns (spline_init,
+//   font.init); x_destroy frees either. A generational handle (world, physics, ui,
 //   animation layers, navigation agents) that went stale is ignored; a plain u32 handle (render)
 //   is not checked, so never destroy one twice. A package's `destroy` group frees any of its
 //   kinds by argument type, and world.spawn is world.node_create.
@@ -24,6 +26,6 @@ package mjolnir
 //   (render.light, physics.body_params), and a copy when the system writes it too
 //   (world.node, physics.body, navigation.agent). A getter that may miss returns (x, ok)
 //   #optional_ok, so ok can be omitted.
-//   Maps: a module's init marks what it holds as kept; teardown frees everything made since
-//   the mark at once. render.setup moves render's mark past what the application made after
-//   init (shared textures, the debug UI atlas).
+//   Maps: teardown puts a module back to how init left it, freeing everything made since at
+//   once; the application then builds the next map from scratch, re-initing what keeps data
+//   in another module (debugui.init uploads its atlas to render).

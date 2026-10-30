@@ -2,7 +2,6 @@
 package main
 
 import "core:log"
-import "core:math/linalg"
 import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
@@ -46,6 +45,7 @@ App :: struct {
   instance:    gltf.Instance,
   model_index: int,
   environment: int,
+  sun:         render.LightHandle,
 }
 
 main :: proc() {
@@ -70,9 +70,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   app.orbit = render.make_orbit({0, 0.24, 4.2}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
-  app.renderer.sun = {enabled = true, cast_shadow = true, color = {1, 0.98, 0.95}, intensity = 1, direction = {0, 0, -1}, shadow_distance = 15}
+  app.sun = render.light_create(&app.renderer, render.make_directional_light({1, 0.98, 0.95}, 1, 15))
+  mjolnir.spawn(&app.scene, &app.renderer, app.sun)
 
   app.turntable = world.spawn(&app.scene)
   app.mount = world.spawn(&app.scene, parent = app.turntable)
@@ -111,7 +111,7 @@ update :: proc(app: ^App, dt: f32) {
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.renderer.skybox_intensity = skybox_on ? 1 : 0
-  if spinning do world.rotate_by(&app.scene, app.turntable, dt * rotate_speed, linalg.VECTOR3F32_Y_AXIS)
+  if spinning do world.rotate_by(&app.scene, app.turntable, dt * rotate_speed)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
@@ -125,7 +125,7 @@ debug_ui :: proc(app: ^App) {
   if debugui.window(&app.debug, "PBR Lighting", {20, 20, 220, 440}) {
   mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Sun intensity")
-    mu.slider(ctx, &app.renderer.sun.intensity, 0.0, 20.0)
+    mu.slider(ctx, &render.light(&app.renderer, app.sun).intensity, 0.0, 20.0)
     mu.label(ctx, "IBL intensity")
     mu.slider(ctx, &app.renderer.ibl_intensity, 0.0, 2.0)
     mu.checkbox(ctx, "Skybox", &skybox_on)

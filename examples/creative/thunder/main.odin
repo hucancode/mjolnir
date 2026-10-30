@@ -1,6 +1,12 @@
 // Thunder: lightning bolts strike out of the night onto Mjolnir. Click to strike, drag to look around. Ported from the storm on hucancode.com.
 package main
 
+import sa "core:container/small_array"
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import "core:math/rand"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/geometry"
@@ -9,11 +15,6 @@ import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:log"
-import "core:math"
-import "core:math/linalg"
-import "core:math/rand"
-import mu "vendor:microui"
 
 MOONLIGHT :: f32(0.5)
 FLASH_GAIN :: f32(1.5)
@@ -31,17 +32,18 @@ App :: struct {
   debug:    debugui.Context,
   input:    input.State,
   orbit:    render.Orbit,
+  sun:      render.LightHandle,
   storm:    Storm,
   model:    gltf.Model,
   hammer:   gltf.Instance,
   bolts:    render.BufferHandle,
-  bolt:     render.DrawShader,
+  bolt:     render.ShaderHandle,
   rod:      render.MeshHandle,
   impacts_buffer: render.BufferHandle,
   sparks:   [2]render.EmitterHandle,
   spark_nodes: [SPARK_SLOTS]world.NodeHandle,
   next_spark: int,
-  impact:   render.DrawShader,
+  impact:   render.ShaderHandle,
   lamps:    [MAX_LIGHTS]world.NodeHandle,
   lights:   [MAX_LIGHTS]render.LightHandle,
   pressed:  bool,
@@ -81,10 +83,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   app.model = gltf.model_create(r, #load("assets/Mjolnir.glb"))
   app.hammer = gltf.instance_create(&app.model, &app.scene, r)
-  if len(app.hammer.roots) == 0 do return .FAIL
-  world.translate(&app.scene, app.hammer.roots[0], {0, 0.106, 0})
+  world.translate(&app.scene, app.hammer.root, {0, 0.106, 0})
 
-  floor_material := render.material_create(r, render.make_material(base_color_factor = {0.02, 0.02, 0.035, 1}, roughness_value = 0.35))
+  floor_material := render.material_create(r, render.make_material(base_color_factor = {0.02, 0.02, 0.035, 1}, roughness_factor = 0.35))
   mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, floor_material, cast_shadow = false), scale = 400)
 
   for i in 0 ..< MAX_LIGHTS {
@@ -132,8 +133,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.storm.tint = color_a
   r.skybox_intensity = 0.05
   r.ibl_intensity = 0.1
-  r.sun = render.Sun{enabled = true, color = color_a, intensity = MOONLIGHT, direction = {-0.3, -1, -0.2}}
-  append(&r.effect_stack, render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32})
+  app.sun = render.light_create(r, render.make_directional_light(color_a, MOONLIGHT, cast_shadow = false))
+  mjolnir.spawn(&app.scene, r, app.sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.3, -1, -0.2}, [3]f32{0, 1, 0}))
+  sa.append(&render.main_camera(r).effects, render.make_effect(render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32}))
   return .READY
 }
 
@@ -167,9 +169,10 @@ update :: proc(app: ^App, dt: f32) {
     lamp.intensity = sample.intensity
     lamp.color = sample.color
   }
-  r.sun.color = app.storm.tint
-  r.sun.intensity = MOONLIGHT + min(app.storm.flash, 1) * FLASH_GAIN
-  r.effect_stack[0] = render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32}
+  moon := render.light(r, app.sun)
+  moon.color = app.storm.tint
+  moon.intensity = MOONLIGHT + min(app.storm.flash, 1) * FLASH_GAIN
+  sa.set(&render.main_camera(r).effects, 0, render.make_effect(render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32}))
 
   stage_bolts(app)
   stage_impacts(app)
@@ -203,7 +206,7 @@ stage_impacts :: proc(app: ^App) {
     node := app.spark_nodes[app.next_spark]
     app.next_spark = (app.next_spark + 1) % SPARK_SLOTS
     world.translate(&app.scene, node, i.position)
-    render.emit(r, app.sparks[1 if i.furious else 0], node, u32(SPARKS * i.power))
+    render.emit(r, node, app.sparks[1 if i.furious else 0], u32(SPARKS * i.power))
   }
   n := min(len(app.storm.impacts), MAX_IMPACTS)
   if n == 0 do return

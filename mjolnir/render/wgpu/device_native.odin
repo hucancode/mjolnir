@@ -31,6 +31,12 @@ device_wait :: proc(b: ^Backend) {
   for !b.up && !b.failed do wgpu.InstanceProcessEvents(b.instance)
 }
 
+@(private)
+device_idle :: proc(b: ^Backend) {
+  wgpu.DevicePoll(b.device, true)
+  events_process(b)
+}
+
 // Fires the callbacks of finished work (buffer maps).
 @(private)
 events_process :: proc(b: ^Backend) {

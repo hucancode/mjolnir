@@ -28,6 +28,8 @@ Platform_State :: struct {
   // guards input, size and dpi: poll_events (main thread) writes them, the update thread reads
   mutex:    sync.Mutex,
   context_: runtime.Context,
+  // where the window was before going fullscreen: x, y, width, height
+  windowed: [4]c.int,
 }
 
 // init opens a window `width` by `height` titled `title`; false on failure.
@@ -67,11 +69,26 @@ should_close :: proc(self: ^Platform) -> bool {
   return bool(glfw.WindowShouldClose(self.window))
 }
 
-// poll_events collects the window events read_input then reports. Main thread only.
+// poll_events collects the window events and gamepad states read_input then reports. Main
+// thread only.
 poll_events :: proc(self: ^Platform) {
   sync.guard(&self.mutex)
   glfw.PollEvents()
   query_window(self)
+  for pad in 0 ..< input.MAX_GAMEPADS {
+    gp: glfw.GamepadState
+    if !glfw.JoystickIsGamepad(c.int(pad)) || !glfw.GetGamepadState(c.int(pad), &gp) {
+      input.gamepad_event(&self.input, pad, false)
+      continue
+    }
+    buttons: input.GamepadButtonSet
+    for b in input.GamepadButton do if gp.buttons[b] == glfw.PRESS do buttons += {b}
+    axes := transmute(input.GamepadAxes)gp.axes
+    // GLFW triggers rest at -1
+    axes[.LEFT_TRIGGER] = (axes[.LEFT_TRIGGER] + 1) / 2
+    axes[.RIGHT_TRIGGER] = (axes[.RIGHT_TRIGGER] + 1) / 2
+    input.gamepad_event(&self.input, pad, true, buttons, axes)
+  }
 }
 
 // read_input takes this tick's input snapshot from the events polled so far; safe beside
@@ -92,6 +109,51 @@ framebuffer_size :: proc(self: ^Platform) -> [2]u32 {
 dpi_scale :: proc(self: ^Platform) -> f32 {
   sync.guard(&self.mutex)
   return self.dpi
+}
+
+// set_fullscreen covers the primary monitor with the window at its video mode, or puts the
+// window back where it was. Main thread only.
+set_fullscreen :: proc(self: ^Platform, on: bool) {
+  if on == is_fullscreen(self) do return
+  if !on {
+    w := self.windowed
+    glfw.SetWindowMonitor(self.window, nil, w.x, w.y, w.z, w.w, glfw.DONT_CARE)
+    return
+  }
+  monitor := glfw.GetPrimaryMonitor()
+  mode := glfw.GetVideoMode(monitor)
+  if mode == nil do return
+  x, y := glfw.GetWindowPos(self.window)
+  w, h := glfw.GetWindowSize(self.window)
+  self.windowed = {x, y, w, h}
+  glfw.SetWindowMonitor(self.window, monitor, 0, 0, mode.width, mode.height, mode.refresh_rate)
+}
+
+// is_fullscreen reports whether the window covers a monitor. Main thread only.
+is_fullscreen :: proc(self: ^Platform) -> bool {
+  return glfw.GetWindowMonitor(self.window) != nil
+}
+
+// set_cursor_mode shows, hides or locks the cursor over the window. Main thread only.
+set_cursor_mode :: proc(self: ^Platform, mode: CursorMode) {
+  glfw_mode := [CursorMode]c.int{.NORMAL = glfw.CURSOR_NORMAL, .HIDDEN = glfw.CURSOR_HIDDEN, .LOCKED = glfw.CURSOR_DISABLED}
+  glfw.SetInputMode(self.window, glfw.CURSOR, glfw_mode[mode])
+}
+
+// set_title sets the window's title. Main thread only.
+set_title :: proc(self: ^Platform, title: string) {
+  glfw.SetWindowTitle(self.window, strings.clone_to_cstring(title, context.temp_allocator))
+}
+
+// get_clipboard returns the clipboard's text, allocated; empty when it holds none. Main thread
+// only.
+get_clipboard :: proc(self: ^Platform, allocator := context.allocator) -> string {
+  return strings.clone(glfw.GetClipboardString(self.window), allocator)
+}
+
+// set_clipboard puts text on the clipboard. Main thread only.
+set_clipboard :: proc(self: ^Platform, text: string) {
+  glfw.SetClipboardString(self.window, strings.clone_to_cstring(text, context.temp_allocator))
 }
 
 // Reads the window's size and scale, which GLFW reports on the main thread only.

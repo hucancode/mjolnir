@@ -26,6 +26,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   caps                            = rhi_caps,
   texture_create                  = texture_create,
   texture_destroy                 = texture_destroy,
+  texture_desc                    = texture_desc,
   buffer_create                   = rhi_buffer_create,
   buffer_retire                   = rhi_buffer_retire,
   buffer_write                    = rhi_buffer_write,
@@ -74,12 +75,13 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
 
 
 // A READBACK buffer is a ring of mappable buffers, as a buffer cannot be copied into while it
-// maps; `data` is the last copy that came back. A retired one is freed, and its handle with
-// it, once no entry maps.
+// maps; `data` is the last copy that came back, from frame_serial `frame` - 1. A retired one is
+// freed, and its handle with it, once no entry maps.
 @(private)
 Readback :: struct {
   slots:   [READBACK_RING]ReadbackSlot,
   data:    []u8,
+  frame:   u64,
   retired: bool,
 }
 
@@ -93,6 +95,8 @@ ReadbackSlot :: struct {
   copied:  bool,
   // copied or mapping
   pending: bool,
+  // the frame_serial that copied into it + 1
+  frame:   u64,
 }
 
 // Command lists recorded at once: the frame's, plus a precompute's.
@@ -131,7 +135,11 @@ Cmd :: struct {
 MAX_GROUPS :: 4
 
 rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
-  return {indirect_first_instance = b.indirect_first_instance}
+  return {
+    indirect_first_instance = b.indirect_first_instance,
+    backbuffer_copy = b.surface_copy,
+    backbuffer_bgra = b.surface_format == .BGRA8Unorm,
+  }
 }
 
 rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, bool) {
@@ -153,11 +161,10 @@ rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, boo
 }
 
 // The last copy of a READBACK buffer that came back (zeros before the first).
-rhi_buffer_read :: proc(b: ^Backend, buffer: rhi.Buffer, offset: int, dst: []u8) -> bool {
-  rb, ok := b.readbacks[buffer]
-  if !ok do return false
+rhi_buffer_read :: proc(b: ^Backend, buffer: rhi.Buffer, offset: int, dst: []u8) -> (frame: u64, ok: bool) {
+  rb := b.readbacks[buffer] or_return
   copy(dst, rb.data[offset:])
-  return true
+  return rb.frame, true
 }
 
 // WebGPU has no bindless arrays: callers branch on BINDLESS.
@@ -188,7 +195,8 @@ readback_mapped :: proc "c" (status: wgpu.MapAsyncStatus, message: wgpu.StringVi
   rb := &b.readbacks[handle]
   slot := &rb.slots[u32(uintptr(userdata2)) % READBACK_RING]
   if status == .Success {
-    if !rb.retired {
+    if !rb.retired && slot.frame > rb.frame {
+      rb.frame = slot.frame
       bytes := wgpu.BufferGetConstMappedRangeSlice(slot.buffer, 0, len(rb.data), u8)
       copy(rb.data, bytes)
     }
@@ -762,21 +770,34 @@ rhi_cmd_fill_buffer :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffe
   wgpu.CommandEncoderClearBuffer(b.cmds[cmd].encoder, b.buffers.items[buffer], u64(offset), u64(size))
 }
 
-// Caps.backbuffer_copy is false: the surface is not a copy source.
-rhi_cmd_copy_backbuffer :: proc(b: ^Backend, cmd: rhi.CommandList, dst: rhi.Buffer) {}
+// Only where Caps.backbuffer_copy: the surface was configured as a copy source.
+rhi_cmd_copy_backbuffer :: proc(b: ^Backend, cmd: rhi.CommandList, dst: rhi.Buffer) {
+  target := copy_target(b, dst)
+  if target == nil do return
+  wgpu.CommandEncoderCopyTextureToBuffer(
+    b.cmds[cmd].encoder,
+    &{texture = b.surface_texture, aspect = .All},
+    &{layout = {bytesPerRow = rhi.backbuffer_pitch(b.surface_extent.x), rowsPerImage = b.surface_extent.y}, buffer = target},
+    &{b.surface_extent.x, b.surface_extent.y, 1},
+  )
+}
+
+// Where a copy into dst lands: a READBACK buffer's free ring entry, which it marks (nil when
+// every entry is still mapping: the copy is skipped).
+@(private = "file")
+copy_target :: proc(b: ^Backend, dst: rhi.Buffer) -> wgpu.Buffer {
+  rb, ok := &b.readbacks[dst]
+  if !ok do return b.buffers.items[dst]
+  for &s in rb.slots do if !s.pending {
+    s.pending, s.copied, s.frame = true, true, b.frame_serial + 1
+    return s.buffer
+  }
+  return nil
+}
 
 rhi_cmd_copy_buffer :: proc(b: ^Backend, cmd: rhi.CommandList, src: rhi.Buffer, src_offset: int, dst: rhi.Buffer, dst_offset, size: int) {
-  target := b.buffers.items[dst]
-  if dst in b.readbacks {
-    rb := &b.readbacks[dst]
-    for &s in rb.slots do if !s.pending {
-      target = s.buffer
-      s.pending, s.copied = true, true
-      break
-    }
-    // every entry is still mapping: skip this copy
-    if target == nil do return
-  }
+  target := copy_target(b, dst)
+  if target == nil do return
   wgpu.CommandEncoderCopyBufferToBuffer(
     b.cmds[cmd].encoder,
     b.buffers.items[src],

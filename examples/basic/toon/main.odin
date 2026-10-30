@@ -1,14 +1,15 @@
 // A user material shader: cel-shaded meshes beside PBR ones.
 package main
 
+import "core:log"
+import "core:math/linalg"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:log"
-import mu "vendor:microui"
 
 App :: struct {
   platform:  platform.Platform,
@@ -44,9 +45,10 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 4, 10}, {0, 1, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   ok: bool
   app.toon, ok = render.material_shader_create(&app.renderer, #load("toon." + render.SHADER_EXT), blend = .NONE)
@@ -64,7 +66,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     append(&app.materials, mat)
     spawn_primitive(app, shapes[i], mat, {f32(i) * 2.5 - 3.75, 1.0, 0})
   }
-  pbr := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.9, 0.95, 1}, roughness_value = 0.4))
+  pbr := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.9, 0.95, 1}, roughness_factor = 0.4))
   spawn_primitive(app, .SPHERE, pbr, {0, 1.0, -3.0})
 
   return .READY

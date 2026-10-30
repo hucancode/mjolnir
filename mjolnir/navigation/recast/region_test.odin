@@ -32,7 +32,7 @@ test_erode_walkable_area :: proc(t: ^testing.T) {
   testing.expect(t, chf != nil, "Building compact heightfield should succeed")
   // Erode with radius 1
   ok := erode_walkable_area(1, chf)
-  testing.expect(t, hf != nil, "Eroding walkable area should succeed")
+  testing.expect(t, ok, "Eroding walkable area should succeed")
   // Check that border areas were eroded
   for y in 0 ..< 10 {
     for x in 0 ..< 10 {
@@ -111,7 +111,6 @@ test_build_distance_field :: proc(t: ^testing.T) {
     return 0
   }
   // Test specific distance relationships for mathematical correctness
-  corner_dist := get_distance_at_grid(chf, 0, 0) // Far corner from hole
   edge_border_dist := get_distance_at_grid(chf, 0, 3) // Actual border cell (should be 0)
   hole_adjacent_dist := get_distance_at_grid(chf, 3, 3) // Adjacent to hole
   interior_dist := get_distance_at_grid(chf, 2, 2) // Interior cell

@@ -938,7 +938,7 @@ group_connected_spans :: proc(
   visited := make([]bool, len(span_indices))
   defer delete(visited)
   groups := make([dynamic][dynamic]i32, 0, 4)
-  for span_idx, i in span_indices {
+  for _, i in span_indices {
     if visited[i] do continue
     group := make([dynamic]i32, 0, 16)
     stack := make([dynamic]i32, 0, 16)
@@ -1011,7 +1011,7 @@ build_regions :: proc(
   ) {
     w := chf.width
     h := chf.height
-    start_level := start_level >> log_levels_per_stack
+    start_bucket := start_level >> log_levels_per_stack
     for &st in stacks {
       clear(&st)
     }
@@ -1023,7 +1023,7 @@ build_regions :: proc(
             continue
           }
           level := u16(chf.dist[i]) >> log_levels_per_stack
-          sid := i32(start_level) - i32(level)
+          sid := i32(start_bucket) - i32(level)
           if sid >= i32(len(stacks)) {
             continue
           }

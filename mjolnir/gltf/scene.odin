@@ -66,12 +66,13 @@ ModelJoint :: struct {
   bone: u32,
 }
 
-// Instance is one copy of a Model in the world (instance_create): the nodes under `roots`, the
+// Instance is one copy of a Model in the world (instance_create): the nodes under `root`, the
 // skinned ones, the joints of each rig, and per rig of the model (indexed by RigHandle) an
 // animator posing every skinned node and joint of that rig and the palette they deform by;
 // animate runs them.
 Instance :: struct {
-  roots:     [dynamic]world.NodeHandle,
+  // the node every glTF root hangs under: move, turn, scale or hide the instance through it
+  root:      world.NodeHandle,
   skinned:   [dynamic]SkinnedNode,
   joints:    [dynamic]Joint,
   animators: []animation.Animator,
@@ -135,9 +136,9 @@ model_destroy :: proc(self: ^Model, r: ^render.Renderer) {
   self^ = {}
 }
 
-// instance_create spawns one world node per glTF node of the model under `parent` (the world
-// root by default), each drawing its mesh, and an animator per rig at its rest pose: play
-// clips or add layers on them, and call animate each tick.
+// instance_create spawns a root node under `parent` (the world root by default) and, under it,
+// one world node per glTF node of the model, each drawing its mesh, and an animator per rig at
+// its rest pose: play clips or add layers on them, and call animate each tick.
 instance_create :: proc(
   model: ^Model,
   w: ^world.World,
@@ -147,7 +148,7 @@ instance_create :: proc(
   instance: Instance,
   ok: bool,
 ) #optional_ok {
-  root := parent if parent != {} else w.root
+  instance.root = world.spawn(w, parent = parent) or_return
   instance.animators = make([]animation.Animator, len(model.rigs))
   instance.bones = make([]render.BonesHandle, len(model.rigs))
   for &rig, i in model.rigs {
@@ -156,10 +157,9 @@ instance_create :: proc(
   }
   nodes := make([]world.NodeHandle, len(model.nodes), context.temp_allocator)
   for n, i in model.nodes {
-    handle := world.spawn(w, name = n.name, parent = root if n.parent < 0 else nodes[n.parent]) or_continue
+    handle := world.spawn(w, name = n.name, parent = instance.root if n.parent < 0 else nodes[n.parent]) or_continue
     nodes[i] = handle
-    world.set_local(w, handle, n.transform.position, n.transform.rotation, n.transform.scale)
-    if n.parent < 0 do append(&instance.roots, handle)
+    world.set_local(w, handle, n.transform)
     if n.light != 0 {
       // a light and a mesh share a slot only through a child node
       slot := handle
@@ -177,7 +177,7 @@ instance_create :: proc(
   for j in model.joints do if nodes[j.node] != {} {
     append(&instance.joints, Joint{node = nodes[j.node], rig = j.rig, bone = j.bone})
   }
-  return instance, len(instance.roots) > 0
+  return instance, true
 }
 
 // animate advances each rig's animator by dt, poses the rig's joints (what hangs under them
@@ -198,14 +198,13 @@ animate :: proc(self: ^Instance, model: ^Model, w: ^world.World, r: ^render.Rend
   for &a, i in self.animators do render.stage_bones(r, self.bones[i], a.palette)
 }
 
-// instance_destroy destroys the instance's nodes (roots and their descendants) and animators.
+// instance_destroy destroys the instance's nodes (its root and every descendant) and animators.
 instance_destroy :: proc(self: ^Instance, w: ^world.World, r: ^render.Renderer) {
-  for h in self.roots do world.destroy(w, h)
+  world.destroy(w, self.root)
   for &a in self.animators do animation.destroy(&a)
   for b in self.bones do render.destroy(r, b)
   delete(self.animators)
   delete(self.bones)
-  delete(self.roots)
   delete(self.skinned)
   delete(self.joints)
   self^ = {}
@@ -218,8 +217,7 @@ pose_joints :: proc(self: ^Instance, w: ^world.World, model: ^Model, rig: RigHan
   locals := make([]geometry.Transform, len(skeleton.parents), context.temp_allocator)
   animation.bone_locals(animator, skeleton, locals)
   for j in self.joints do if j.rig == rig {
-    l := locals[j.bone]
-    world.set_local(w, j.node, l.position, l.rotation, l.scale)
+    world.set_local(w, j.node, locals[j.bone])
   }
 }
 

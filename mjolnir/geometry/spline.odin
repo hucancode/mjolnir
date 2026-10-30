@@ -1,7 +1,7 @@
 package geometry
 
 import "base:intrinsics"
-import "core:math"
+@(require) import "core:math"
 import "core:math/linalg"
 import "core:slice"
 

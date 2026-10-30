@@ -27,7 +27,6 @@ walker := [3]f32{-8, 0, 8}
 next: int
 trail: [dynamic][3]f32
 
-// setup bakes the level, then saves the navmesh and loads it back as a game would ship it.
 setup :: proc() -> bool {
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)

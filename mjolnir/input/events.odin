@@ -9,7 +9,9 @@ import "core:unicode/utf8"
 // drain moves the accumulated events into this tick's State and clears their edges.
 drain :: proc(acc, s: ^State) {
   prev_cursor := s.cursor if s.primed else acc.cursor
+  prev_axes := s.gamepad_axes
   s^ = acc^
+  s.gamepad_axes_last = prev_axes
   s.mouse_delta = acc.cursor - prev_cursor
   s.primed = true
   acc.keys_pressed = {}
@@ -17,6 +19,8 @@ drain :: proc(acc, s: ^State) {
   acc.keys_repeated = {}
   acc.buttons_pressed = {}
   acc.buttons_released = {}
+  acc.gamepad_pressed = {}
+  acc.gamepad_released = {}
   acc.scroll = {}
   acc.text_len = 0
 }
@@ -64,4 +68,18 @@ char_event :: proc(acc: ^State, ch: rune) {
   if acc.text_len + size > TEXT_CAPACITY do return
   copy(acc.text_buf[acc.text_len:], bytes[:size])
   acc.text_len += size
+}
+
+// gamepad_event records gamepad `pad`'s polled state; a disconnected pad reads as released.
+// Buttons that changed since the last call are this tick's edges.
+gamepad_event :: proc(acc: ^State, pad: int, connected: bool, buttons: GamepadButtonSet = {}, axes: GamepadAxes = {}) {
+  if !pad_valid(pad) do return
+  buttons, axes := buttons, axes
+  if !connected do buttons, axes = {}, {}
+  old := acc.gamepad_buttons[pad]
+  acc.gamepad_pressed[pad] += buttons - old
+  acc.gamepad_released[pad] += old - buttons
+  acc.gamepad_buttons[pad] = buttons
+  acc.gamepad_axes[pad] = axes
+  acc.gamepads = acc.gamepads + {pad} if connected else acc.gamepads - {pad}
 }

@@ -20,10 +20,6 @@ struct AmbientOcclusionPush {
 }
 PUSH_BLOCK(AmbientOcclusionPush, ao_push)
 
-// View.images indices (CameraImage)
-static const uint IMAGE_NORMAL = 1;
-static const uint IMAGE_DEPTH = 5;
-
 #if BACKEND_WGPU
 [vk::binding(0, 1)] Texture2D normal_texture;
 [vk::binding(1, 1)] DepthTexture2D depth_texture;

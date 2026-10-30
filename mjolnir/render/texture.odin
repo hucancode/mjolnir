@@ -6,9 +6,10 @@ import "core:log"
 import "core:math"
 import stbi "vendor:stb/image"
 
-// Textures below MAX_RENDER_TARGETS are render targets (slots[.TARGETS]): camera attachments,
-// depth pyramids and the post-process ring, which the renderer reallocates on resize. The
-// rest are slots[.TEXTURES]: the renderer's own from init, then the map's.
+// Textures below MAX_RENDER_TARGETS (slots[.TARGETS]) are what the renderer reallocates itself
+// and teardown keeps: camera attachments, depth pyramids and the post-process ring, which follow
+// the window size, and the font atlas, which grows. The rest are slots[.TEXTURES]: the
+// renderer's own from init, then the map's.
 
 // The pool handing out handle's index.
 @(private)
@@ -43,7 +44,6 @@ allocate_texture :: proc(self: ^Renderer, desc: TextureDesc, data: []u8 = nil, t
 texture_destroy :: proc(self: ^Renderer, handle: TextureHandle) {
   lock(self)
   containers.slots_free(texture_pool(self, handle), u32(handle))
-  if handle < MAX_TEXTURES do self.storage_formats[handle] = {}
 }
 
 // NO_TEXTURE is the TextureHandle of none, as materials, emitters and draw2d commands hold it.
@@ -77,10 +77,7 @@ texture_create_pixels :: proc(
     log.errorf("A storage texture is RGBA8_UNORM, RGBA16F or R32F, not %v", format)
     return 0, false
   }
-  lock(self)
-  handle = allocate_texture(self, {extent = size, format = format, usage = {.SAMPLED, .STORAGE}}, pixels) or_return
-  self.storage_formats[handle] = format
-  return handle, true
+  return allocate_texture(self, {extent = size, format = format, usage = {.SAMPLED, .STORAGE}}, pixels)
 }
 
 @(private = "file")

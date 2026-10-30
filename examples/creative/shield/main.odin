@@ -2,17 +2,17 @@
 // a ring of fire, seen from above and below, from eroding layers of procedural noise.
 package main
 
-import "mjolnir"
-import "mjolnir/debugui"
-import "mjolnir/input"
-import "mjolnir/platform"
-import "mjolnir/render"
-import "mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
+import "mjolnir"
+import "mjolnir/debugui"
 import "mjolnir/geometry"
+import "mjolnir/input"
+import "mjolnir/platform"
+import "mjolnir/render"
+import "mjolnir/world"
 
 SEGMENTS :: 24
 RINGS :: 12
@@ -60,9 +60,10 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
+  sun := render.light_create(r, render.make_directional_light())
+  mjolnir.spawn(&app.scene, r, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, r) do return .FAIL
   app.orbit = render.make_orbit({0, 3.5, 6.5}, {0, 1.4, 0})
-  render.camera_orbit(render.main_camera(r), app.orbit)
 
   ring_shader, ring_ok := render.material_shader_create(r, #load("ring." + render.SHADER_EXT))
   field_shader, field_ok := render.material_shader_create(r, #load("field." + render.SHADER_EXT), blend = .NONE, cull = .NONE)

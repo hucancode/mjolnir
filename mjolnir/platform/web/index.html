@@ -62,9 +62,24 @@
       return URL.createObjectURL(new Blob(chunks, { type: "application/wasm" }));
     }
 
-    // what the engine calls (platform.ready, platform.fail; its log has the details)
+    // what the engine calls (platform.ready, platform.fail, the window controls; its log has the details)
     const ready = () => { statusElement.style.display = "none"; tell("ready"); };
-    const page = { ready, fail: () => fail("Stopped on an error, see the log.") };
+    const canvas = document.getElementById("canvas");
+    let mem;
+    const page = {
+      ready,
+      fail: () => fail("Stopped on an error, see the log."),
+      fullscreen: (on) => (on ? canvas.requestFullscreen() : document.fullscreenElement && document.exitFullscreen())?.catch(() => {}),
+      is_fullscreen: () => document.fullscreenElement !== null,
+      // CursorMode: normal, hidden, locked
+      cursor: (mode) => {
+        canvas.style.cursor = mode === 0 ? "" : "none";
+        if (mode === 2) canvas.requestPointerLock()?.catch?.(() => {});
+        else if (document.pointerLockElement) document.exitPointerLock();
+      },
+      cursor_locked: () => document.pointerLockElement === canvas,
+      set_clipboard: (ptr, len) => navigator.clipboard?.writeText(mem.loadString(ptr, len)).catch(() => {}),
+    };
     // an app that shows itself in #output is ready once it does
     const output = document.getElementById("output");
     new MutationObserver((_, observer) => { observer.disconnect(); ready(); }).observe(output, { childList: true });
@@ -79,7 +94,7 @@
     download(`${example}.wasm`).then(async (url) => {
       if (await needsMissingGpu(url)) return fail("This browser has no WebGPU.");
       statusElement.textContent = "Starting…";
-      const mem = new odin.WasmMemoryInterface();
+      mem = new odin.WasmMemoryInterface();
       const imports = { mjolnir: page };
       if (navigator.gpu) imports.wgpu = new odin.WebGPUInterface(mem).getInterface();
       return odin.runWasm(url, consoleElement, imports, mem);

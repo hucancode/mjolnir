@@ -2,7 +2,6 @@
 #+private
 package animation
 
-import "../geometry"
 import "core:math/linalg"
 import "core:slice"
 import "core:testing"

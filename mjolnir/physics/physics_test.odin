@@ -68,7 +68,7 @@ test_physics_world_static_body_collision :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, 0, 0}, thread_count = 1)
   defer shutdown(&physics_world)
-  body_static_handle, _ := body_create(&physics_world, collider = SphereCollider{radius = 1.0})
+  _, _ = body_create(&physics_world, collider = SphereCollider{radius = 1.0})
   body_dynamic_handle, _ := body_create(&physics_world, {1.5, 0, 0}, linalg.QUATERNIONF32_IDENTITY, SphereCollider{radius = 1.0}, mass = 1.0)
   body_dynamic, _ := lookup(&physics_world, body_dynamic_handle)
   body_dynamic.velocity = {-10, 0, 0}
@@ -175,7 +175,7 @@ test_sphere_sphere_collision_intersecting :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
-  point, normal, penetration, hit := test_sphere_sphere(
+  _, normal, penetration, hit := test_sphere_sphere(
     pos_a,
     sphere_a,
     pos_b,
@@ -335,7 +335,7 @@ test_sphere_box_collision_intersecting :: proc(t: ^testing.T) {
   // Penetration: 1.0 - 0.5 = 0.5
   pos_sphere := [3]f32{1.5, 0, 0}
   pos_box := [3]f32{0, 0, 0}
-  point, normal, penetration, hit := test_box_sphere(
+  _, normal, penetration, hit := test_box_sphere(
     pos_box,
     linalg.QUATERNIONF32_IDENTITY,
     box,
@@ -479,7 +479,7 @@ test_swept_sphere_sphere_miss :: proc(t: ^testing.T) {
   velocity := [3]f32{10, 0, 0}
   center_b := [3]f32{5, 5, 0}
   radius_b := f32(1.0)
-  toi, hit := swept_sphere_sphere(
+  _, hit := swept_sphere_sphere(
     center_a,
     center_b,
     radius_a,
@@ -526,7 +526,7 @@ test_swept_sphere_box_miss :: proc(t: ^testing.T) {
   center := [3]f32{0, 0, 0}
   radius := f32(1.0)
   velocity := [3]f32{-10, 0, 0}
-  toi, hit := swept_sphere_box(center, radius, velocity, {5, 0, 0}, linalg.QUATERNIONF32_IDENTITY, {1, 1, 1})
+  _, hit := swept_sphere_box(center, radius, velocity, {5, 0, 0}, linalg.QUATERNIONF32_IDENTITY, {1, 1, 1})
   testing.expect(t, !hit, "Should not hit box when moving away")
 }
 
@@ -751,7 +751,6 @@ test_resolve_contact_bias_correction :: proc(t: ^testing.T) {
     count       = 1,
     points      = {0 = {point = {0, 0, 0}, base_separation = -0.5}},
   }
-  dt := f32(1.0 / 60.0)
   prepare_contact(&contact, &body_a, &body_b)
   testing.expect(
     t,
@@ -960,7 +959,7 @@ test_rotated_body_with_offset_collision :: proc(t: ^testing.T) {
     linalg.VECTOR3F32_Z_AXIS,
   )
   dt := f32(1.0 / 60.0)
-  for i in 0 ..< 60 {
+  for _ in 0 ..< 60 {
     step(&physics_world, dt)
   }
   testing.expect(

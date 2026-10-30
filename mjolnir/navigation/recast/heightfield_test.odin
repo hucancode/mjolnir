@@ -31,7 +31,7 @@ test_compact_heightfield_spans :: proc(t: ^testing.T) {
   testing.expect(t, hf != nil, "Failed to create heightfield")
   // Add a span manually
   ok := add_span(hf, 0, 0, 0, 10, RC_WALKABLE_AREA, 1)
-  // testing.expect(t, ok, "Failed to add span")
+  testing.expect(t, ok, "Failed to add span")
   // Build compact heightfield
   chf := create_compact_heightfield(2, 1, hf)
   defer destroy_compact_heightfield(chf)
@@ -153,24 +153,6 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
   testing.expect(t, ok, "Failed to build distance field")
   // Validate distance field basic properties
   // Distance field should be built successfully and contain valid values
-  // Function to get distance at grid position
-  get_distance_at :: proc(chf: ^Compact_Heightfield, x, z: i32) -> u16 {
-    if x < 0 || x >= chf.width || z < 0 || z >= chf.height {
-      return 0
-    }
-    cell := &chf.cells[x + z * chf.width]
-    span_idx := cell.index
-    span_count := cell.count
-    if span_count > 0 && span_idx < u32(len(chf.spans)) {
-      return chf.dist[span_idx]
-    }
-    return 0
-  }
-  // Check various positions to ensure distance field has reasonable values
-  corner_dist := get_distance_at(chf, 0, 0) // Corner
-  edge_dist := get_distance_at(chf, 2, 0) // North edge
-  adjacent_dist := get_distance_at(chf, 1, 2) // West of center
-  center_neighbor := get_distance_at(chf, 1, 1) // Next to missing center
   // Basic validation - distance field should have been computed
   testing.expect(
     t,
@@ -436,7 +418,6 @@ test_heightfield_elevation_profile :: proc(t: ^testing.T) {
       span_count += 1
       current = current.next
     }
-    height_in_units := f32(max_height) * cell_height
   }
 }
 

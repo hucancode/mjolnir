@@ -1,16 +1,16 @@
 // Bunnymark: hold the mouse to spawn bouncing sprites and see how many the engine can move.
 package main
 
+import "core:fmt"
+import "core:log"
+import "core:math/rand"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:fmt"
-import "core:log"
-import "core:math/rand"
-import mu "vendor:microui"
 
 VIEW_HEIGHT :: 10.0
 BUNNY_SIZE :: 0.5

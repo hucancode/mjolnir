@@ -1,5 +1,6 @@
 package world
 
+import "../geometry"
 import "core:math/linalg"
 
 // translate sets a node's local position.
@@ -7,6 +8,13 @@ translate :: proc(self: ^World, handle: NodeHandle, v: [3]f32) {
   node := edit(self, handle)
   if node == nil do return
   node.transform.position = v
+}
+
+// translate_by moves a node's local position by v.
+translate_by :: proc(self: ^World, handle: NodeHandle, v: [3]f32) {
+  node := edit(self, handle)
+  if node == nil do return
+  node.transform.position += v
 }
 
 // rotate sets a node's local rotation:
@@ -80,16 +88,8 @@ scale_vec :: proc(self: ^World, handle: NodeHandle, v: [3]f32) {
 }
 
 // set_local sets a node's whole local transform.
-set_local :: proc(
-  self: ^World,
-  handle: NodeHandle,
-  position: [3]f32 = {0, 0, 0},
-  rotation: quaternion128 = linalg.QUATERNIONF32_IDENTITY,
-  scale: [3]f32 = {1, 1, 1},
-) {
+set_local :: proc(self: ^World, handle: NodeHandle, transform: geometry.Transform) {
   node := edit(self, handle)
   if node == nil do return
-  node.transform.position = position
-  node.transform.rotation = rotation
-  node.transform.scale = scale
+  node.transform = transform
 }

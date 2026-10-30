@@ -2,17 +2,17 @@
 // path its head slithers.
 package main
 
-import "mjolnir"
-import "mjolnir/debugui"
-import "mjolnir/input"
-import "mjolnir/platform"
-import "mjolnir/render"
-import "mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
+import "mjolnir"
+import "mjolnir/debugui"
 import "mjolnir/geometry"
+import "mjolnir/input"
+import "mjolnir/platform"
+import "mjolnir/render"
+import "mjolnir/world"
 
 SNAKE_LENGTH :: f32(6)
 SPINE_POINTS :: 8
@@ -69,9 +69,10 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
+  sun := render.light_create(r, render.make_directional_light())
+  mjolnir.spawn(&app.scene, r, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, r) do return .FAIL
   app.orbit = render.make_orbit({3, 6, 9}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(r), app.orbit)
 
   body_shader, body_ok := render.material_shader_create(r, #load("snake_body." + render.SHADER_EXT), blend = .NONE)
   head_shader, head_ok := render.material_shader_create(r, #load("snake_head." + render.SHADER_EXT), blend = .NONE)
@@ -80,17 +81,15 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.head_skin = render.material_create(r, render.make_material(head_shader))
   body := render.mesh_create(r, geometry.make_sphere(segments = 24, rings = 120, radius = SNAKE_LENGTH + 1))
   head := render.mesh_create(r, geometry.make_sphere(segments = 32, rings = 32))
-  app.body = world.spawn(&app.scene)
-  render.attach(r, app.body, render.MeshAttachment{mesh = body, material = app.skin})
-  app.head = world.spawn(&app.scene)
-  render.attach(r, app.head, render.MeshAttachment{mesh = head, material = app.head_skin})
+  app.body = mjolnir.spawn(&app.scene, r, render.MeshAttachment{mesh = body, material = app.skin})
+  app.head = mjolnir.spawn(&app.scene, r, render.MeshAttachment{mesh = head, material = app.head_skin})
   for side in ([2]f32{-1, 1}) {
     eye := mjolnir.spawn(&app.scene, r, render.primitive(r, .SPHERE, .WHITE), {side * 0.27, 0.44, -0.92}, parent = app.head, scale = 0.12)
     mjolnir.spawn(&app.scene, r, render.primitive(r, .SPHERE, .BLACK), {side * 0.42, 0.12, -0.39}, parent = eye, scale = 0.5)
   }
   geometry.chain_init(&app.chain, {0, 0}, {0, 1}, SNAKE_LENGTH, CHAIN_STEP)
 
-  grass := render.material_create(r, render.make_material(base_color_factor = {0.45, 0.7, 0.35, 1}, roughness_value = 0.9))
+  grass := render.material_create(r, render.make_material(base_color_factor = {0.45, 0.7, 0.35, 1}, roughness_factor = 0.9))
   mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, grass, cast_shadow = false), scale = ARENA + 4)
   for i in 0 ..< 6 {
     angle := f32(i) / 6 * math.TAU + 0.4
@@ -121,7 +120,7 @@ update :: proc(app: ^App, dt: f32) {
 steer :: proc(app: ^App, dt: f32) {
   s := &app.input
   move := linalg.clamp([2]f32{input.axis(s, .A, .D) + input.axis(s, .LEFT, .RIGHT), input.axis(s, .S, .W) + input.axis(s, .DOWN, .UP)}, -1, 1)
-  ahead := linalg.normalize0(render.camera_forward(render.main_camera(&app.renderer)).xz)
+  ahead := linalg.normalize0((-geometry.qz(render.main_camera(&app.renderer).rotation)).xz)
   want := ahead * move.y + [2]f32{-ahead.y, ahead.x} * move.x
   aim, target := f32(0), f32(0)
   if want != 0 {

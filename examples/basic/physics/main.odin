@@ -1,15 +1,16 @@
 // Rigid bodies of every collider shape (sphere, box, cylinder) falling and stacking.
 package main
 
+import "core:log"
+import "core:math/linalg"
+import "core:math/rand"
 import "mjolnir"
+import "mjolnir/geometry"
 import "mjolnir/input"
+import "mjolnir/physics"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "mjolnir/physics"
-import "core:log"
-import "core:math/rand"
-import "mjolnir/geometry"
 
 NX :: #config(NX, 4)
 NY :: #config(NY, 3)
@@ -56,6 +57,8 @@ shutdown :: proc(app: ^App) {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   app.renderer.skybox_intensity = 0
   rand_sphere := geometry.make_sphere()
   rand_cylinder := geometry.make_cylinder()
@@ -94,7 +97,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   log.infof("Created %d physics objects", PIECE_COUNT)
   app.orbit = render.make_orbit({10, 15, 10}, {0, 5, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   return .READY
 }
 

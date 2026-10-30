@@ -22,15 +22,15 @@ float4 fs_main(VertexOut v) : SV_Target0
     if (albedo.a < 0.001) {
         discard;
     }
-    float metallic = material.metallic_value;
-    float roughness = material.roughness_value;
+    float metallic = material.metallic_factor;
+    float roughness = material.roughness_factor;
     if (material.metallic_roughness_index != NO_TEXTURE) {
-        metallic = mr_sample.b * material.metallic_value;
-        roughness = mr_sample.g * material.roughness_value;
+        metallic = mr_sample.b * material.metallic_factor;
+        roughness = mr_sample.g * material.roughness_factor;
     }
-    float3 emissive = float3(material.emissive_value);
+    float3 emissive = float3(material.emissive_factor);
     if (material.emissive_index != NO_TEXTURE) {
-        emissive = emissive_sample.rgb * material.emissive_value;
+        emissive = emissive_sample.rgb * material.emissive_factor;
     }
     float3 n = normalize(v.normal);
     if (material.normal_index != NO_TEXTURE) {

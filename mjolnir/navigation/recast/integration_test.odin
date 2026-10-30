@@ -311,7 +311,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
   // 2. Validate region separation - floor and obstacle should be different regions
   region_heights: map[u16][dynamic]int
   defer {
-    for reg, heights in region_heights {
+    for _, heights in region_heights {
       delete(heights)
     }
     delete(region_heights)
@@ -337,7 +337,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
   // Validate height separation between regions
   found_ground_region := false
   found_elevated_region := false
-  for reg, heights in region_heights {
+  for _, heights in region_heights {
     avg_height := 0
     for h in heights {
       avg_height += h

@@ -715,25 +715,6 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
 @(test)
 test_simplify_contour_distance :: proc(t: ^testing.T) {
   // Test distance calculation algorithm
-  test_cases := []struct {
-    px, pz:      i32, // Point
-    ax, az:      i32, // Segment start
-    bx, bz:      i32, // Segment end
-    description: string,
-  } {
-    {5, 5, 0, 0, 10, 0, "Point (5,5) to horizontal segment (0,0)-(10,0)"},
-    {5, 5, 0, 0, 0, 10, "Point (5,5) to vertical segment (0,0)-(0,10)"},
-    {5, 0, 0, 0, 10, 0, "Point (5,0) on horizontal segment (0,0)-(10,0)"},
-    {
-      15,
-      5,
-      0,
-      0,
-      10,
-      0,
-      "Point (15,5) outside horizontal segment (0,0)-(10,0)",
-    },
-  }
   // Test case 1: No connections (all flags are 0)
   {
     test_verts := [][4]i32 {

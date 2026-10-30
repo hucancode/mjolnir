@@ -346,6 +346,8 @@ draw :: proc(app: ^App) -> bool {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
+  sun := render.light_create(r, render.make_directional_light())
+  mjolnir.spawn(&app.scene, r, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, r) do return .FAIL
 
   mjolnir.spawn(&app.scene, r, render.primitive(r, .CUBE, .GRAY), {0, -0.05, 0}, scale = {20, 0.05, 20})
@@ -361,7 +363,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     .HEEL_SLOPE    = render.mesh_create(r, geometry.make_wedge(0.7)),
   }
   for color, i in PALETTE {
-    app.materials[i] = render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, metallic_value = 0.2, roughness_value = 0.45))
+    app.materials[i] = render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, metallic_factor = 0.2, roughness_factor = 0.45))
   }
   build(app)
   stand(app)
@@ -377,16 +379,12 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
       speed  = (0.6 + 0.2 * f) * (1 if i % 2 == 0 else -1),
       phase  = f * math.TAU / len(ORB_COLORS),
     }
-    orb.node = world.spawn(&app.scene, orb_position(orb^, 0))
-    render.attach(r, orb.node, light)
-    marker := world.spawn(&app.scene, parent = orb.node)
-    material := render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, emissive_value = 5))
-    render.attach(r, marker, render.MeshAttachment{mesh = app.meshes[.SPHERE], material = material})
-    world.scale(&app.scene, marker, ORB_SIZE)
+    orb.node = mjolnir.spawn(&app.scene, r, light, orb_position(orb^, 0))
+    material := render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, emissive_factor = 5))
+    mjolnir.spawn(&app.scene, r, render.MeshAttachment{mesh = app.meshes[.SPHERE], material = material}, scale = ORB_SIZE, parent = orb.node)
   }
 
   app.orbit = {yaw = 0.7, pitch = 0.25, distance = 7, target = {0, 2.6, 0}}
-  render.camera_orbit(render.main_camera(r), app.orbit)
   return .READY
 }
 
@@ -529,7 +527,7 @@ part :: proc(app: ^App, name: string) {
 piece :: proc(app: ^App, f: Frame, mesh: Mesh, scale: [3]f32, position: [3]f32 = {}, rotation := linalg.QUATERNIONF32_IDENTITY, next := true) {
   node := world.spawn(&app.scene, parent = app.bones[f.bone].node)
   placed := geometry.transform_mul(f.place, {position, rotation, scale})
-  world.set_local(&app.scene, node, placed.position, placed.rotation, placed.scale)
+  world.set_local(&app.scene, node, placed)
   key := fmt.tprintf("%s %d", app.part, app.count)
   append(&app.pieces, Piece{node, mesh, hash.fnv32a(transmute([]u8)key)})
   if next do app.count += 1

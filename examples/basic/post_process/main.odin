@@ -1,14 +1,16 @@
 // Bloom, DoF, fog, tonemap, outline, crosshatch, and a user shader: vignette.
 package main
 
+import sa "core:container/small_array"
+import "core:log"
+import "core:math/linalg"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:log"
-import mu "vendor:microui"
 
 App :: struct {
   platform: platform.Platform,
@@ -17,7 +19,7 @@ App :: struct {
   debug:    debugui.Context,
   input:    input.State,
   orbit:    render.Orbit,
-  vignette: render.PostShader,
+  vignette: render.ShaderHandle,
 }
 
 VignetteParams :: struct {
@@ -43,6 +45,8 @@ tonemap_exposure: f32 = 1.0
 tonemap_gamma: f32 = 1.0
 fog_start: f32 = 5.0
 fog_end: f32 = 40.0
+fog_height: f32 = 1.0
+fog_height_falloff: f32 = 0.0
 outline_thickness: f32 = 1.5
 dof_focus: f32 = 8.0
 dof_range: f32 = 3.0
@@ -80,26 +84,27 @@ shutdown :: proc(app: ^App) {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({6, 5, 10}, {0, 1.0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   ok: bool
   app.vignette, ok = render.post_shader_create(&app.renderer, #load("vignette." + render.SHADER_EXT))
   if !ok do log.error("Failed to create the vignette shader")
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 30.0)
 
-  magenta_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.1, 0.8, 1}, emissive_value = 4.0))
+  magenta_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.1, 0.8, 1}, emissive_factor = 4.0))
   spawn_primitive(app, .SPHERE, magenta_emit, {-3.0, 1.2, 1.5})
-  cyan_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.1, 0.9, 1.0, 1}, emissive_value = 4.0))
+  cyan_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.1, 0.9, 1.0, 1}, emissive_factor = 4.0))
   spawn_primitive(app, .SPHERE, cyan_emit, {0.0, 1.2, 1.5})
-  yellow_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.9, 0.2, 1}, emissive_value = 4.0))
+  yellow_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.9, 0.2, 1}, emissive_factor = 4.0))
   spawn_primitive(app, .SPHERE, yellow_emit, {3.0, 1.2, 1.5})
 
-  metal := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.9, 0.95, 1}, metallic_value = 1.0, roughness_value = 0.15))
+  metal := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.9, 0.9, 0.95, 1}, metallic_factor = 1.0, roughness_factor = 0.15))
   spawn_primitive(app, .SPHERE, metal, {0.5, 1.0, -1.5})
-  rough := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.2, 0.6, 0.8, 1}, metallic_value = 0.0, roughness_value = 0.8))
+  rough := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.2, 0.6, 0.8, 1}, metallic_factor = 0.0, roughness_factor = 0.8))
   spawn_primitive(app, .CUBE, rough, {3.0, 1.0, -1.5})
-  orange := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.4, 0.1, 1}, emissive_value = 4.0))
+  orange := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.4, 0.1, 1}, emissive_factor = 4.0))
   spawn_primitive(app, .CUBE, orange, {-3.0, 1.0, -1.5})
   glass := render.material_create(&app.renderer, render.make_material(.TRANSPARENT, base_color_factor = {0.2, 0.9, 0.4, 0.4}))
   spawn_primitive(app, .SPHERE, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
@@ -119,18 +124,20 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
-  clear(&app.renderer.effect_stack)
-  if outline_on    do append(&app.renderer.effect_stack, render.OutlineEffect{thickness = outline_thickness})
-  if fog_on        do append(&app.renderer.effect_stack, render.FogEffect{color = {0.55, 0.6, 0.7}, start = fog_start, end = fog_end})
-  if dof_on        do append(&app.renderer.effect_stack, render.DoFEffect{focus_distance = dof_focus, focus_range = dof_range, blur_strength = dof_blur, bokeh_intensity = 0.5})
-  if bloom_on      do append(&app.renderer.effect_stack, render.BloomEffect{threshold = bloom_threshold, intensity = bloom_intensity, blur_radius = 32.0})
-  if blur_on       do append(&app.renderer.effect_stack, render.BlurEffect{radius = blur_radius, weight_falloff = 1.0})
-  if crosshatch_on do append(&app.renderer.effect_stack, render.CrossHatchEffect{hatch_offset_y = 5.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
-  if grayscale_on  do append(&app.renderer.effect_stack, render.GrayscaleEffect{strength = grayscale_strength})
-  if tonemap_on    do append(&app.renderer.effect_stack, render.ToneMapEffect{exposure = tonemap_exposure, gamma = tonemap_gamma})
+  if input.key_pressed(&app.input, .F12) do render.screenshot(&app.renderer, "post_process.png")
+  effects := &render.main_camera(&app.renderer).effects
+  sa.clear(effects)
+  if outline_on    do sa.append(effects, render.make_effect(render.OutlineEffect{thickness = outline_thickness}))
+  if fog_on        do sa.append(effects, render.make_effect(render.FogEffect{color = {0.55, 0.6, 0.7}, start = fog_start, end = fog_end, height = fog_height, height_falloff = fog_height_falloff}))
+  if dof_on        do sa.append(effects, render.make_effect(render.DoFEffect{focus_distance = dof_focus, focus_range = dof_range, blur_strength = dof_blur, bokeh_intensity = 0.5}))
+  if bloom_on      do sa.append(effects, render.make_effect(render.BloomEffect{threshold = bloom_threshold, intensity = bloom_intensity, blur_radius = 32.0}))
+  if blur_on       do sa.append(effects, render.make_effect(render.BlurEffect{radius = blur_radius, weight_falloff = 1.0}))
+  if crosshatch_on do sa.append(effects, render.make_effect(render.CrossHatchEffect{hatch_offset_y = 5.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}}))
+  if grayscale_on  do sa.append(effects, render.make_effect(render.GrayscaleEffect{strength = grayscale_strength}))
+  if tonemap_on    do sa.append(effects, render.make_effect(render.ToneMapEffect{exposure = tonemap_exposure, gamma = tonemap_gamma}))
   if vignette_on && app.vignette != 0 {
     params := VignetteParams{color = {0.02, 0.0, 0.05}, radius = vignette_radius, softness = vignette_softness, strength = vignette_strength}
-    append(&app.renderer.effect_stack, render.make_custom_effect(app.vignette, params))
+    sa.append(effects, render.make_effect(app.vignette, params))
   }
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
@@ -160,6 +167,8 @@ debug_ui :: proc(app: ^App) {
     if fog_on {
       mu.label(ctx, "Start"); mu.slider(ctx, &fog_start, 0.0, 50.0)
       mu.label(ctx, "End"); mu.slider(ctx, &fog_end, 1.0, 200.0)
+      mu.label(ctx, "Height"); mu.slider(ctx, &fog_height, -2.0, 10.0)
+      mu.label(ctx, "Height falloff"); mu.slider(ctx, &fog_height_falloff, 0.0, 2.0)
     }
     mu.checkbox(ctx, "Outline", &outline_on)
     if outline_on do mu.slider(ctx, &outline_thickness, 0.5, 5.0)

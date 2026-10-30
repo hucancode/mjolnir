@@ -145,3 +145,37 @@ Action :: enum i32 {
 
 // MAX_KEYS bounds Key values; KeySet has this many flags.
 MAX_KEYS :: 512
+
+// GamepadButton is a button of a gamepad in the standard layout (Xbox names). Values match
+// GLFW gamepad button indices.
+GamepadButton :: enum i32 {
+  A,
+  B,
+  X,
+  Y,
+  LEFT_BUMPER,
+  RIGHT_BUMPER,
+  BACK,
+  START,
+  GUIDE,
+  LEFT_THUMB,
+  RIGHT_THUMB,
+  DPAD_UP,
+  DPAD_RIGHT,
+  DPAD_DOWN,
+  DPAD_LEFT,
+}
+
+// GamepadAxis is an analog control of a gamepad: sticks in [-1, 1], +x right and +y down;
+// triggers in [0, 1], 0 released.
+GamepadAxis :: enum i32 {
+  LEFT_X,
+  LEFT_Y,
+  RIGHT_X,
+  RIGHT_Y,
+  LEFT_TRIGGER,
+  RIGHT_TRIGGER,
+}
+
+// MAX_GAMEPADS is the gamepads tracked, numbered 0 ..< MAX_GAMEPADS.
+MAX_GAMEPADS :: 4

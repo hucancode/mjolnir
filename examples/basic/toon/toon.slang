@@ -13,11 +13,12 @@ float4 fs_main(VertexOut v) : SV_Target0
     float3 n = normalize(v.normal);
     View view = camera_view();
     float3 e = normalize(view.position.xyz - v.position);
+    Sun sun = scene_sun();
 
     float bands = max(m.params[0].x, 1.0);
-    float ndl = max(dot(n, view.sun_direction.xyz), 0.0);
+    float ndl = max(dot(n, sun.toward), 0.0);
     float light = min(floor(ndl * bands + 0.5) / bands, 1.0);
-    float3 color = albedo * view.sun_radiance.rgb * lerp(m.params[0].z, 1.0, light);
+    float3 color = albedo * sun.radiance * lerp(m.params[0].z, 1.0, light);
 
     float rim = step(0.6, 1.0 - max(dot(n, e), 0.0)) * step(0.1, ndl);
     color += rim * m.params[0].y;

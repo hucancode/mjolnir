@@ -102,6 +102,11 @@ texture_destroy :: proc(b: ^Backend, handle: rhi.TextureHandle) {
   texture_release(&b.textures[handle])
 }
 
+// texture_desc is what handle's texture was made from.
+texture_desc :: proc(b: ^Backend, handle: rhi.TextureHandle) -> rhi.TextureDesc {
+  return b.textures[handle].desc
+}
+
 @(private)
 texture_release :: proc(t: ^Texture) {
   if t.texture == nil do return

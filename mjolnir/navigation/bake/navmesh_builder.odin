@@ -531,7 +531,7 @@ build_bv_node_recursive :: proc(
   if mid == start || mid == end {
     mid = start + poly_count / 2
   }
-  left_child := build_bv_node_recursive(poly_info, nodes, next_idx, start, mid)
+  build_bv_node_recursive(poly_info, nodes, next_idx, start, mid)
   right_child := build_bv_node_recursive(poly_info, nodes, next_idx, mid, end)
   if right_child >= 0 {
     node.i = -(right_child + 1)

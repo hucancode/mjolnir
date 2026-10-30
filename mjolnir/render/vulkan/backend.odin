@@ -3,8 +3,6 @@ package vulkan_backend
 import rhi "../rhi"
 
 import "core:log"
-import "core:mem"
-import "core:strings"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 
@@ -55,6 +53,10 @@ Backend :: struct {
   // per queue: the value the next submission signals, and per frame slot the last one signalled
   next_value:       [rhi.Queue]u64,
   slot_value:       [FRAMES_IN_FLIGHT][rhi.Queue]u64,
+  // READBACK buffers by handle (rhi.odin Readback)
+  readbacks:        map[rhi.Buffer]Readback,
+  // frames the GPU is known to have finished: frame_wait and wait_idle advance it
+  completed:        u64,
 }
 
 // WindowHandle is the window render draws into.
@@ -137,6 +139,7 @@ shutdown :: proc(b: ^Backend) {
 wait_idle :: proc(b: ^Backend) {
   if res := submit_uploads(&b.gctx); res != .SUCCESS do log.errorf("Upload submission failed: %v", res)
   vk.DeviceWaitIdle(b.gctx.device)
+  b.completed = b.gctx.frame_serial
   deferred_flush(&b.gctx)
 }
 

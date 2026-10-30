@@ -4,7 +4,8 @@
 // prefer scalars and float4, a float3 takes 16 bytes unless a float follows it), before
 // including this. Your bindings are set 1, binding i the index in the shader's bindings: a
 // buffer is a StructuredBuffer (RWStructuredBuffer in a compute shader), a texture a Texture2D,
-// an image an RWTexture2D<float4> of its format (rgba8, rgba16f, r32f, as made). A draw writes
+// an image a write-only WTexture2D<float4> with its [format(...)] (rgba8, rgba16f, r32f, as made),
+// written with image.Store(xy, value) (WebGPU rejects RWTexture2D). A draw writes
 // SV_Target0, the camera's HDR lit image. gpu.camera_index is the drawing camera (the main
 // camera's in a compute shader): views[gpu.camera_index].view_projection, .position, .time, ...
 //

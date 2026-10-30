@@ -1,10 +1,10 @@
 // Deferred lighting, tiled: a group shades a TILE x TILE tile of the camera's image. It finds
 // the tile's depth range and walks the light placements once, listing the visible placed
-// lights that reach the tile: the point and spot lights whose sphere meets the tile's box.
-// Then each invocation shades its pixel once: image-based ambient and emissive, the sun, then
-// the listed lights. The image-based light is scaled by the camera's ambient occlusion, when it
-// has any. The background gets the skybox, or black. A placed light is a Light at a
-// node's transform (scene.odin light_pose); the sun is not placed, the push holds it.
+// lights that reach the tile: the directional lights, and the point and spot lights whose
+// sphere meets the tile's box. Then each invocation shades its pixel once: image-based ambient
+// and emissive, then the listed lights. The image-based light is scaled by the camera's ambient
+// occlusion, when it has any. The background gets the skybox, or black. A placed light is a
+// Light at a node's transform (lights.odin light_pose).
 #include "common.slang"
 
 static const uint TILE = 16;
@@ -16,13 +16,6 @@ SCENE_BUFFER(Node, nodes, 1, 2)
 SCENE_BUFFER(Light, lights, 10, 1)
 SCENE_BUFFER(LightPlacement, placements, 18, 3)
 
-// View.images indices (CameraImage)
-static const uint IMAGE_NORMAL = 1;
-static const uint IMAGE_ALBEDO = 2;
-static const uint IMAGE_METALLIC_ROUGHNESS = 3;
-static const uint IMAGE_EMISSIVE = 4;
-static const uint IMAGE_DEPTH = 5;
-static const uint IMAGE_AMBIENT_OCCLUSION = 6;
 
 struct LightingPush {
     uint camera_index;
@@ -38,8 +31,6 @@ struct LightingPush {
     // rows of the placement table
     uint light_count;
     float ibl_intensity;
-    // view of the sun's first shadow cascade, 0 for none
-    uint sun_shadow_map;
     // 1: the camera's ambient occlusion image holds this frame's occlusion
     uint ambient_occlusion;
 }
@@ -139,7 +130,7 @@ float3 geometric_normal(View camera, int2 pixel, float3 frag_pos, float depth, f
 }
 
 // Where a placed light sits and shines: its node's translation and normalized forward (-Z)
-// axis, as scene.odin light_pose.
+// axis, as lights.odin light_pose.
 float3 light_position(LightPlacement p)
 {
     return float3(nodes[p.node].world_matrix[0][3], nodes[p.node].world_matrix[1][3], nodes[p.node].world_matrix[2][3]);
@@ -155,6 +146,7 @@ float3 light_forward(LightPlacement p)
 // Direction from the fragment towards the light.
 float3 light_direction(LightPlacement p, float3 frag_pos)
 {
+    if (lights[p.light].light_type == LIGHT_DIRECTIONAL) return -light_forward(p);
     return normalize(light_position(p) - frag_pos);
 }
 
@@ -163,7 +155,7 @@ static const float SHADOW_FLOOR = 0.1;
 // Shadow texels from a lookup to the farthest texel its filter reads: a 3x3
 // grid of 2x2 compare taps.
 static const float SHADOW_FILTER_RADIUS = 2.0;
-// Cascades of the sun's map, SHADOW_CASCADES in scene.odin.
+// Cascades of a directional light's map, SHADOW_CASCADES in lights.odin.
 static const uint SHADOW_CASCADES = 4;
 
 // Texels on a side of a shadow map.
@@ -178,14 +170,14 @@ float shadow_map_size()
 #endif
 }
 
-// The sun's cascade towards p: the finest whose box holds p, with room for the filter
-// (NO_FACE beyond the last).
-uint sun_face(float3 p)
+// The cascade of the directional light with shadow views from `first` towards p: the finest
+// whose box holds p, with room for the filter (NO_FACE beyond the last).
+uint cascade_face(uint first, float3 p)
 {
     // the normal offset moves p up to SHADOW_FILTER_RADIUS + 0.5 texels
     float edge = 1.0 - 2.0 * (2.0 * SHADOW_FILTER_RADIUS + 0.5) / shadow_map_size();
     for (uint c = 0; c < SHADOW_CASCADES; c++) {
-        float4 s = mul(views[lighting_push.sun_shadow_map + c].view_projection, float4(p, 1.0));
+        float4 s = mul(views[first + c].view_projection, float4(p, 1.0));
         // a cascade's box is no deeper than wide: with the light along
         // the view, far points project into the near cascades too
         if (abs(s.x) < edge && abs(s.y) < edge && s.z > 0.0 && s.z < 1.0) return c;
@@ -271,26 +263,22 @@ float shadow_lookup(View view, float3 p)
     return lerp(SHADOW_FLOOR, 1.0, lit / 9.0);
 }
 
-// Light of a point or spot light reaching frag_pos: 1 when lit, SHADOW_FLOOR when occluded.
+// Light of a placed light reaching frag_pos: 1 when lit, SHADOW_FLOOR when occluded. A
+// directional light's cascade sets the texel size, so it is picked before the offset.
 float calculate_shadow(LightPlacement placed, float3 frag_pos, float3 n, float3 l)
 {
     // no shadow map
     if (placed.shadow_map == 0) return 1.0;
+    if (lights[placed.light].light_type == LIGHT_DIRECTIONAL) {
+        uint face = cascade_face(placed.shadow_map, frag_pos);
+        if (face == NO_FACE) return 1.0;
+        View view = views[placed.shadow_map + face];
+        float3 p = frag_pos + n * (shadow_offset(n, l) * 2.0 / (view.projection[0][0] * shadow_map_size()));
+        return shadow_lookup(view, p);
+    }
     // the texel size doesn't depend on the face; the offset may cross one
     float3 p = frag_pos + n * (shadow_offset(n, l) * shadow_texel(placed, frag_pos));
     return shadow_lookup(views[placed.shadow_map + shadow_face(placed, p)], p);
-}
-
-// Light of the sun reaching frag_pos. The cascade sets the texel size, so it
-// is picked before the offset.
-float sun_shadow(float3 frag_pos, float3 n, float3 l)
-{
-    if (lighting_push.sun_shadow_map == 0) return 1.0;
-    uint face = sun_face(frag_pos);
-    if (face == NO_FACE) return 1.0;
-    View view = views[lighting_push.sun_shadow_map + face];
-    float3 p = frag_pos + n * (shadow_offset(n, l) * 2.0 / (view.projection[0][0] * shadow_map_size()));
-    return shadow_lookup(view, p);
 }
 
 // Inverse-square falloff windowed to reach zero, with zero slope, at radius.
@@ -304,6 +292,7 @@ float distance_falloff(float dist, float radius)
 float attenuation(LightPlacement placed, float3 frag_pos)
 {
     Light light = lights[placed.light];
+    if (light.light_type == LIGHT_DIRECTIONAL) return 1.0;
     float3 to_frag = frag_pos - light_position(placed);
     float dist = length(to_frag);
     float falloff = distance_falloff(dist, light.radius);
@@ -357,15 +346,6 @@ float3 direct_light(LightPlacement placed, Surface s)
     float atten = attenuation(placed, s.position);
     if (atten <= 0.0) return float3(0.0);
     return brdf(l, light.color * light.intensity * atten, s) * calculate_shadow(placed, s.position, s.geometric, l);
-}
-
-// The sun, shadowed.
-float3 sun_light(Surface s)
-{
-    View camera = views[lighting_push.camera_index];
-    float3 l = camera.sun_direction.xyz;
-    if (dot(s.normal, l) <= 0.0) return float3(0.0);
-    return brdf(l, camera.sun_radiance.rgb, s) * sun_shadow(s.position, s.geometric, l);
 }
 
 float prefilter_max_lod()
@@ -515,7 +495,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 group : SV_GroupID, uint local 
     }
     GroupMemoryBarrierWithGroupSync();
 
-    // the visible placed lights whose sphere meets the tile's box
+    // the visible directional lights, and the placed lights whose sphere meets the tile's box
     float depth_min = asfloat(tile_min_bits.load());
     float depth_max = asfloat(tile_max_bits.load());
     if (depth_min <= depth_max) {
@@ -533,7 +513,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 group : SV_GroupID, uint local 
             LightPlacement p = placements[i];
             if (p.light == 0 || (nodes[p.node].flags & NODE_FLAG_VISIBLE) == 0) continue;
             Light light = lights[p.light];
-            if (sphere_meets_box(light_position(p), light.radius, lo, hi)) {
+            if (light.light_type == LIGHT_DIRECTIONAL || sphere_meets_box(light_position(p), light.radius, lo, hi)) {
                 tile_lights[tile_light_count.add(1)] = i;
             }
         }
@@ -563,7 +543,6 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 group : SV_GroupID, uint local 
     float3 color = camera_image(camera, IMAGE_EMISSIVE, pixel).rgb;
     color += ambient_light(lighting_push.ibl_intensity, raw_normal, s, mr.g, ambient_visibility(camera, pixel, s));
     s.roughness = clamp(mr.g, 0.08, 1.0);
-    if (any(camera.sun_radiance.rgb > float3(0.0))) color += sun_light(s);
     uint listed = tile_light_count.load();
     for (uint i = 0; i < listed; i++) {
         color += direct_light(placements[tile_lights[i]], s);

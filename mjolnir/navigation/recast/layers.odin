@@ -568,8 +568,6 @@ build_single_layer :: proc(
   if span_count == 0 {
     return false
   }
-  layer_minx := border_size
-  layer_miny := border_size
   layer_bmin := chf.bmin
   layer_bmax := chf.bmax
   layer_bmin.x += f32(border_size) * chf.cs

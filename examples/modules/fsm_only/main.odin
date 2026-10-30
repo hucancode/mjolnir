@@ -1,9 +1,8 @@
-// FSM and behavior tree on their own: a guard on a line patrols, chases an intruder and returns as a state machine, while a worker gathers, delivers and eats by a behavior tree. Both report what each decides: the command line prints it, the web page shows it.
+// FSM on its own: a guard on a line patrols, chases an intruder and returns as a state machine, reporting what it decides. The command line prints it, the web page shows it.
 package main
 
 import "core:fmt"
 import "core:strings"
-import bt "mjolnir/behavior_tree"
 import "mjolnir/fsm"
 
 DT :: 0.5
@@ -50,55 +49,15 @@ say :: proc(g: ^Guard, what: string) {
   fmt.sbprintfln(&out, "  guard at %.1f %s", g.position, what)
 }
 
-Worker :: struct {
-  hunger, carried, delivered: int,
-}
-
-WORKER := bt.Behavior(Worker)(bt.Sequence(Worker){{
-  bt.Condition(Worker){"hungry", proc(w: ^Worker) -> bool {return w.hunger > 6}, {bt.Action(Worker){"eat", eat}}},
-  bt.Condition(Worker){"full hands", proc(w: ^Worker) -> bool {return w.carried >= 3}, {bt.Action(Worker){"deliver", deliver}}},
-  bt.Action(Worker){"gather", gather},
-}})
-
-eat :: proc(w: ^Worker) -> bt.Status {
-  w.hunger -= 3
-  return .RUNNING if w.hunger > 0 else .SUCCESS
-}
-
-deliver :: proc(w: ^Worker) -> bt.Status {
-  w.delivered += w.carried
-  w.carried = 0
-  return .SUCCESS
-}
-
-gather :: proc(w: ^Worker) -> bt.Status {
-  w.carried += 1
-  return .RUNNING
-}
-
-// run plays both for a while and returns what they decided.
 run :: proc() -> string {
   intruder := f32(-12)
   guard := Guard{heading = 1, intruder = &intruder}
   machine: fsm.Machine(GuardState)
-  fmt.sbprintln(&out, "guard (fsm):")
   fsm.start(&machine, GUARD, &guard, .PATROL)
   for _ in 0 ..< 120 {
     intruder += 0.6 * DT
     fsm.update(&machine, GUARD, &guard, DT)
   }
   fmt.sbprintfln(&out, "  after 60s: %v at %.1f, intruder at %.1f", machine.current, guard.position, intruder)
-
-  fmt.sbprintln(&out, "worker (behavior tree):")
-  worker: Worker
-  trace := make([dynamic]bt.Step, context.temp_allocator)
-  for tick in 0 ..< 12 {
-    clear(&trace)
-    worker.hunger += 1
-    status := bt.tick(WORKER, &worker, &trace)
-    fmt.sbprintf(&out, "  tick %d %v", tick, status)
-    for s in trace do fmt.sbprintf(&out, " %s:%v", s.name, s.status)
-    fmt.sbprintfln(&out, "  (hunger %d, carried %d, delivered %d)", worker.hunger, worker.carried, worker.delivered)
-  }
   return strings.to_string(out)
 }

@@ -47,3 +47,10 @@ aabb_face_normal :: proc "contextless" (aabb: Aabb, point: [3]f32) -> (normal: [
   normal[axis] = d[axis] < 0 ? -1 : 1
   return
 }
+
+// exp_smooth returns the lerp factor that moves a value toward its target at rate k per second
+// over dt, the same whatever the frame rate: x = lerp(x, target, exp_smooth(k, dt)). Easing
+// curves are core:math/ease's.
+exp_smooth :: proc "contextless" (k, dt: f32) -> f32 {
+  return 1 - math.exp(-k * dt)
+}

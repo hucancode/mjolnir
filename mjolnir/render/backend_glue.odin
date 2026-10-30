@@ -2,8 +2,8 @@
 package render
 
 import "rhi"
-import vulkan "vulkan"
-import wgpu "wgpu"
+@(require) import vulkan "vulkan"
+@(require) import wgpu "wgpu"
 
 // What render takes of the chosen backend: `dev` is its rhi.Procs (lifecycle included), a
 // constant, so calls through it cost no dispatch; the rest are its compile-time features

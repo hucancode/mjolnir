@@ -5,7 +5,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
-// Lights: the placed point and spot lights, the sun, and which of them get a shadow map each
+// Lights: the placed point, spot and directional lights, and which of them get a shadow map each
 // frame.
 
 // make_spot_light's ratio of the full-intensity cone to the falloff cone.
@@ -13,13 +13,16 @@ import "core:slice"
 SPOT_LIGHT_INNER_RATIO :: f32(0.75)
 
 // Light shines from every slot it is attached to, along the slot's -Z axis, as a glTF light does
-// (make_*_light fill one; light_create stores it). Point lights ignore the angles. The sun is not
-// a Light: Renderer.sun.
+// (make_*_light fill one; light_create stores it). Point lights ignore the angles. A directional
+// light (a sun) reaches everywhere at the same strength; the first-ranked one that casts shadows
+// gets cascaded shadows fitted to the main camera.
 Light :: struct #align(16) {
   color:              [3]f32,
-  // strength at 1 unit away, falling off by inverse square and fading smoothly to zero at radius
+  // strength at 1 unit away, falling off by inverse square and fading smoothly to zero at radius;
+  // a directional light's strength everywhere
   intensity:          f32,
-  // range of the light
+  // range of the light; for a directional light, how far in front of the main camera its
+  // shadow reaches
   radius:             f32,
   angle_inner:        f32, // spot cone angles
   angle_outer:        f32,
@@ -28,30 +31,6 @@ Light :: struct #align(16) {
   cast_shadow:        b32,
 }
 #assert(size_of(Light) == 48)
-
-// Sun is the scene's one directional light, owned by the renderer (Renderer.sun) and on by
-// default: it needs no node or attachment. Edit its fields any time, e.g. turn direction and
-// color over a day.
-Sun :: struct {
-  enabled:         bool,
-  cast_shadow:     bool,
-  color:           [3]f32,
-  intensity:       f32,
-  // the way the light travels; need not be normalized
-  direction:       [3]f32,
-  // how far in front of the main camera its shadow reaches; needs a main camera
-  shadow_distance: f32,
-}
-
-// DEFAULT_SUN is what the renderer starts with.
-DEFAULT_SUN :: Sun {
-  enabled         = true,
-  cast_shadow     = true,
-  color           = {1, 1, 1},
-  intensity       = 1,
-  direction       = {-0.4, -1, -0.3},
-  shadow_distance = 20,
-}
 
 // LightHandle identifies a light (light_create).
 LightHandle :: distinct u32
@@ -121,6 +100,18 @@ make_spot_light :: proc(
   }
 }
 
+// make_directional_light returns a sun for light_create: it shines along its slot's -Z axis
+// (e.g. rotation = linalg.quaternion_from_forward_and_up(direction, up)), its shadow reaching
+// shadow_distance in front of the main camera.
+make_directional_light :: proc(
+  color: [3]f32 = {1, 1, 1},
+  intensity: f32 = 1.0,
+  shadow_distance: f32 = 20.0,
+  cast_shadow: bool = true,
+) -> Light {
+  return {type = .DIRECTIONAL, color = color, intensity = intensity, radius = shadow_distance, cast_shadow = b32(cast_shadow)}
+}
+
 // matches SHADOW_CASCADES in the lighting shader
 @(private)
 SHADOW_CASCADES :: 4
@@ -131,8 +122,9 @@ SHADOW_CASCADE_LOG_WEIGHT :: 0.75
 // One shadow view and atlas layer per face.
 @(private)
 SHADOW_FACE_COUNT := [LightType]u32 {
-  .POINT = len(CUBE_FACES),
+  .POINT       = len(CUBE_FACES),
   .SPOT        = 1,
+  .DIRECTIONAL = SHADOW_CASCADES,
 }
 
 // (forward, up) per face, in the order the lighting shader's shadowFace picks them
@@ -203,6 +195,7 @@ shadow_face_matrices :: proc(l: Light, position, direction: [3]f32, face: int) -
     return rotation * linalg.matrix4_translate(-position), perspective(math.PI * 0.5, l.radius)
   case .SPOT:
     return light_look(position, direction), perspective(l.angle_outer * 2, l.radius)
+  case .DIRECTIONAL:
   }
   return
 }
@@ -246,11 +239,10 @@ cascade_matrices :: proc(shadow_distance: f32, direction: [3]f32, cascade: int, 
   return view, geometry.make_ortho_matrix(-r, r, -r, r, 0, 2 * r)
 }
 
-// The picked placements get consecutive shadow views in table order from first_layer on (view i
-// renders atlas layer i), the rest none. Returns the layer after the last.
+// The picked placements get consecutive shadow views in table order (view i renders atlas layer
+// i), the rest none. Returns the layer count.
 @(private)
-assign_shadow_views :: proc(placements: []LightPlacement, lights: []Light, picked: []bool, first_layer: u32 = 0) -> (layers: u32) {
-  layers = first_layer
+assign_shadow_views :: proc(placements: []LightPlacement, lights: []Light, picked: []bool) -> (layers: u32) {
   for &p, i in placements {
     p.shadow_map = 0
     if !picked[i] do continue
@@ -261,8 +253,9 @@ assign_shadow_views :: proc(placements: []LightPlacement, lights: []Light, picke
 }
 
 // Picks this frame's shadow casters among the visible placed lights and writes their shadow
-// views, after the sun's cascades. The sun casts shadows only with a main camera to fit to.
-// Caller holds the render mutex.
+// views. The brightest visible directional light is the sun custom materials see; the brightest
+// that casts shadows gets the cascades, given a main camera to fit them to. Caller holds the
+// render mutex.
 @(private)
 collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   views := write_table(self, .VIEWS, View)
@@ -274,10 +267,20 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   nodes := write_table(self, .NODES, Node)
   lights := write_table(self, .LIGHTS, Light)
   placements := write_table(self, .LIGHT_PLACEMENTS, LightPlacement)[:self.slots[.LIGHT_PLACEMENTS].high_water]
+  sun, cascaded := -1, -1
+  brighter :: proc(lights: []Light, placements: []LightPlacement, l: Light, than: int) -> bool {
+    return than < 0 || l.intensity > lights[placements[than].light].intensity
+  }
   for p, i in placements {
-    if p.light == 0 do continue
+    if p.light == 0 || .VISIBLE not_in nodes[p.node].flags do continue
     light := lights[p.light]
-    if !light.cast_shadow || .VISIBLE not_in nodes[p.node].flags do continue
+    if light.type == .DIRECTIONAL {
+      if light.intensity <= 0 do continue
+      if brighter(lights, placements, light, sun) do sun = i
+      if light.cast_shadow && has_eye && brighter(lights, placements, light, cascaded) do cascaded = i
+      continue
+    }
+    if !light.cast_shadow do continue
     // a spot light reuses the point light's sphere: loose but simple
     position, _ := light_pose(nodes[p.node].world_matrix)
     bounds := [4]f32{position.x, position.y, position.z, light.radius}
@@ -292,66 +295,46 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
     casters[caster_count] = {owner = u32(i) + 1, score = score}
     caster_count += 1
   }
+  self.sun = u32(sun + 1)
   slice.sort_by(casters[:caster_count], proc(a, b: Caster) -> bool {return a.score > b.score})
-  sun_layers: u32 = SHADOW_CASCADES if self.sun.enabled && self.sun.cast_shadow && self.sun.intensity > 0 && has_eye else 0
-  self.sun_shadow_map = SHADOW_VIEW_BASE if sun_layers > 0 else 0
   maps := &self.shadow_casters
   selected := select_shadow_casters(casters[:caster_count], maps, dev.frame_serial(&self.gpu))
   picked: [MAX_LIGHTS]bool
   for c in maps[:selected] do picked[c.owner - 1] = true
-  self.shadow_view_count = assign_shadow_views(placements, lights, picked[:len(placements)], sun_layers)
+  if cascaded >= 0 do picked[cascaded] = true
+  self.shadow_view_count = assign_shadow_views(placements, lights, picked[:len(placements)])
   mark_dirty(self, .LIGHT_PLACEMENTS, 0, len(placements))
   mark_dirty(self, .VIEWS, SHADOW_VIEW_BASE, int(self.shadow_view_count))
-  shadow_view :: proc(self: ^Renderer, views: []View, v: u32, view, projection: matrix[4, 4]f32, sun: bool, frame_index: u32) {
-    view_projection := projection * view
-    planes := geometry.make_frustum(view_projection).planes
-    // casters between the sun and its cascade's box still shadow it (the shadow pipeline
-    // clamps their depth)
-    if sun do planes[4] = {0, 0, 0, 1}
-    views[v] = {
-      view            = view,
-      projection      = projection,
-      view_projection = view_projection,
-      planes          = planes,
-      type_mask       = GBUFFER_TYPES,
-      require_flags   = SHADOW_CASTER_FLAGS,
-      instance_tag    = v << 16,
-      layer           = v - SHADOW_VIEW_BASE,
-      draw_list       = SHADOW_DRAW_SLOT_BASE + frame_index,
-      list_capacity   = SHADOW_LIST_CAPACITY,
-      time            = f32(self.time),
-    }
-  }
-  if sun_layers > 0 {
-    direction := sun_direction(self.sun)
-    for f in 0 ..< int(sun_layers) {
-      view, projection := cascade_matrices(self.sun.shadow_distance, direction, f, eye)
-      shadow_view(self, views, self.sun_shadow_map + u32(f), view, projection, true, frame_index)
-    }
-  }
   for p in placements {
     if p.shadow_map == 0 do continue
     light := lights[p.light]
     position, direction := light_pose(nodes[p.node].world_matrix)
     for f in 0 ..< SHADOW_FACE_COUNT[light.type] {
-      view, projection := shadow_face_matrices(light, position, direction, int(f))
-      shadow_view(self, views, p.shadow_map + f, view, projection, false, frame_index)
+      view, projection: matrix[4, 4]f32
+      if light.type == .DIRECTIONAL {
+        view, projection = cascade_matrices(light.radius, direction, int(f), eye)
+      } else {
+        view, projection = shadow_face_matrices(light, position, direction, int(f))
+      }
+      view_projection := projection * view
+      planes := geometry.make_frustum(view_projection).planes
+      // casters between a directional light and its cascade's box still shadow it (the shadow
+      // pipeline clamps their depth)
+      if light.type == .DIRECTIONAL do planes[4] = {0, 0, 0, 1}
+      v := p.shadow_map + f
+      views[v] = {
+        view            = view,
+        projection      = projection,
+        view_projection = view_projection,
+        planes          = planes,
+        type_mask       = GBUFFER_TYPES,
+        require_flags   = SHADOW_CASTER_FLAGS,
+        instance_tag    = v << 16,
+        layer           = v - SHADOW_VIEW_BASE,
+        draw_list       = SHADOW_DRAW_SLOT_BASE + frame_index,
+        list_capacity   = SHADOW_LIST_CAPACITY,
+        time            = f32(self.time),
+      }
     }
   }
-}
-
-// The sun's normalized direction of travel; straight down when it is zero.
-@(private)
-sun_direction :: proc(sun: Sun) -> [3]f32 {
-  d := sun.direction
-  return linalg.normalize(d) if linalg.dot(d, d) > 1e-12 else {0, -1, 0}
-}
-
-// The sun's radiance (color * intensity, 0 when off) and the direction towards it.
-@(private)
-sun_light :: proc(sun: Sun) -> (radiance, toward: [4]f32) {
-  if !sun.enabled || sun.intensity <= 0 do return
-  radiance.rgb = sun.color * sun.intensity
-  toward.xyz = -sun_direction(sun)
-  return
 }

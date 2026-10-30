@@ -397,7 +397,7 @@ test_navigation_edge_cases :: proc(t: ^testing.T) {
     // Test positions far outside the mesh
     far_pos := [3]f32{100, 0, 100}
     half_extents := [3]f32{2, 4, 2}
-    status, ref, nearest := detour.find_nearest_poly(
+    status, ref, _ := detour.find_nearest_poly(
       query,
       far_pos,
       half_extents,

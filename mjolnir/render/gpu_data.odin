@@ -19,14 +19,14 @@ SHADOW_VIEW_BASE :: MAX_ACTIVE_CAMERAS
 @(private)
 MAX_VIEWS :: MAX_ACTIVE_CAMERAS + MAX_SHADOW_VIEWS
 
-// MAX_SHADOW_MAPS is how many shadow-casting point and spot lights cast shadows at once; the
-// sun's shadow comes on top.
+// MAX_SHADOW_MAPS is how many shadow-casting point and spot lights cast shadows at once; one
+// directional light's cascades come on top.
 MAX_SHADOW_MAPS :: 16
 
 @(private)
 SHADOW_MAP_SIZE :: 512
 
-// a cube map renders six views, and the sun's cascades come on top
+// a cube map renders six views, and a directional light's cascades come on top
 @(private)
 MAX_SHADOW_VIEWS :: MAX_SHADOW_MAPS * 6 + SHADOW_CASCADES
 
@@ -41,12 +41,12 @@ MAX_SEGMENTS :: 65536
 @(private)
 DEBUG_RING :: MAX_SEGMENTS / 2
 
-// UI_MAX_VERTICES and UI_MAX_INDICES are the overlay's capacity per frame.
+// OVERLAY_MAX_VERTICES and OVERLAY_MAX_INDICES are the overlay's capacity per frame.
 @(private)
-UI_MAX_VERTICES :: 65536
+OVERLAY_MAX_VERTICES :: 65536
 
 @(private)
-UI_MAX_INDICES :: 98304
+OVERLAY_MAX_INDICES :: 98304
 
 // Batches (Table.BATCHES): runs of nodes sharing a mesh and material, drawn by one indirect
 // draw. Id 0 is none.
@@ -72,13 +72,15 @@ CameraImage :: enum {
   DEPTH              = 5,
   // how much ambient light reaches each pixel, 1 unoccluded (Camera.ambient_occlusion)
   AMBIENT_OCCLUSION  = 6,
+  // the lit image before anti-aliasing (Camera.anti_aliasing) makes FINAL_IMAGE of it
+  LIT                = 7,
 }
 
 // Each camera attachment's texture; pipelines drawing into an attachment take its format.
 @(private)
 CAMERA_IMAGES :: [CameraImage]TextureDesc {
-  // written whole by the lighting dispatch, then drawn over by the forward pass
-  .FINAL_IMAGE        = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED, .STORAGE}},
+  // written whole by the anti-aliasing pass
+  .FINAL_IMAGE        = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED}},
   .NORMAL             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
   .ALBEDO             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
   .METALLIC_ROUGHNESS = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
@@ -88,6 +90,8 @@ CAMERA_IMAGES :: [CameraImage]TextureDesc {
   .DEPTH              = {format = .D32F, usage = {.DEPTH_TARGET, .SAMPLED}, shared = true},
   // written by the ambient occlusion dispatch; RGBA8 is a storage format WebGPU can filter
   .AMBIENT_OCCLUSION  = {format = .RGBA8_UNORM, usage = {.SAMPLED, .STORAGE}},
+  // written whole by the lighting dispatch, then drawn over by the forward pass
+  .LIT                = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED, .STORAGE}},
 }
 
 // How a material is drawn, in this order. PBR is opaque: lit, occlusion-culled and casting
@@ -106,19 +110,20 @@ MaterialType :: enum u32 {
 @(private)
 FIRST_FORWARD_TYPE :: MaterialType.TRANSPARENT
 
-// LightType selects how a Light shines. The sun is Renderer.sun, the environment's light
-// Renderer.ibl_intensity.
+// LightType selects how a Light shines. The environment's light is Renderer.ibl_intensity.
 LightType :: enum u32 {
   POINT,
   SPOT,
+  // a sun: parallel rays along -Z, no falloff
+  DIRECTIONAL,
 }
 
 // Vertex2D is one vertex of the 2D overlay.
 Vertex2D :: geometry.Vertex2D
 
-// UIBatch is a run of overlay indices drawn with one texture inside one scissor (x, y, w, h).
+// OverlayBatch is a run of overlay indices drawn with one texture inside one scissor (x, y, w, h).
 @(private)
-UIBatch :: struct {
+OverlayBatch :: struct {
   first_index: u32,
   index_count: u32,
   scissor:     [4]i32,
@@ -219,11 +224,15 @@ OutlineEffect :: struct {
   thickness: f32,
 }
 
-// FogEffect blends toward color between depth start and end.
+// FogEffect blends toward color between view depth start and end. Above height (world y) it
+// thins by exp(-height_falloff * the distance above), averaged along the view ray; a
+// height_falloff of 0 keeps it even.
 FogEffect :: struct {
-  color: [3]f32,
-  start: f32,
-  end:   f32,
+  color:          [3]f32,
+  start:          f32,
+  end:            f32,
+  height:         f32,
+  height_falloff: f32,
 }
 
 // CrossHatchEffect hatches pixels darker than lum_thresholds[i] (tonemapped luminance) with
@@ -239,37 +248,6 @@ DoFEffect :: struct {
   focus_range:     f32, // Range where objects are in focus
   blur_strength:   f32, // Maximum blur radius
   bokeh_intensity: f32, // Bokeh effect intensity
-}
-
-// PostShader is a user fragment shader made by post_shader_create; 0 is none.
-PostShader :: distinct u32
-
-// MAX_POST_SHADERS is how many post shaders (post_shader_create) exist at once.
-MAX_POST_SHADERS :: 64
-
-// CUSTOM_EFFECT_PARAM_BYTES is the size of a CustomEffect's params.
-CUSTOM_EFFECT_PARAM_BYTES :: 80
-
-// CustomEffect runs a user fragment shader (post_shader_create) `passes` times (0 runs it
-// once), each pass reading the previous one's output; the shader tells them apart by the
-// pass it is in; make_custom_effect packs a struct into params.
-CustomEffect :: struct {
-  params: [CUSTOM_EFFECT_PARAM_BYTES]u8,
-  shader: PostShader,
-  passes: u32,
-}
-
-// PostprocessEffect is one entry of the effect stack; nil copies the input to the output unchanged.
-PostprocessEffect :: union {
-  GrayscaleEffect,
-  ToneMapEffect,
-  BlurEffect,
-  BloomEffect,
-  OutlineEffect,
-  FogEffect,
-  CrossHatchEffect,
-  DoFEffect,
-  CustomEffect,
 }
 
 @(private)

@@ -23,7 +23,7 @@ standalone :: proc(ttf: []u8) {
   CUBE, BALL, LAMP :: SlotHandle(0), SlotHandle(1), SlotHandle(2)
   attach(r, CUBE, primitive(r, .CUBE, .RED))
   ball := mesh_create(r, geometry.make_sphere())
-  attach(r, BALL, MeshAttachment{ball, material_create(r, make_material(base_color_factor = {0.2, 0.6, 1, 1})), true, 0})
+  attach(r, BALL, MeshAttachment{mesh = ball, material = material_create(r, make_material(base_color_factor = {0.2, 0.6, 1, 1})), cast_shadow = true})
   attach(r, LAMP, light_create(r, make_point_light()))
   place(r, LAMP, linalg.matrix4_translate([3]f32{0, 3, 0}))
   place(r, BALL, linalg.matrix4_translate([3]f32{2, 0, 0}))
@@ -34,7 +34,7 @@ standalone :: proc(ttf: []u8) {
     glfw.PollEvents()
     place(r, CUBE, linalg.matrix4_rotate(f32(frame_count) * 0.02, [3]f32{0, 1, 0}))
     debug_axes(r, {})
-    stage_overlay(r, {{shape = DrawTextCommand{"render only", {10, 10}, 20, {255, 255, 255, 255}}}}, &f)
+    stage_overlay(r, {{shape = OverlayText{"render only", {10, 10}, 20, {255, 255, 255, 255}}}}, &f)
     update(r, 1.0 / 60)
     frame(r)
   }

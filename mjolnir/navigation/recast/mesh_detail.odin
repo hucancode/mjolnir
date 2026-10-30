@@ -228,10 +228,10 @@ merge_poly_mesh_details :: proc(
   total_meshes := 0
   total_verts := 0
   total_tris := 0
-  for mesh in meshes do if mesh != nil {
-    total_meshes += len(mesh.meshes)
-    total_verts += len(mesh.verts)
-    total_tris += len(mesh.tris)
+  for src in meshes do if src != nil {
+    total_meshes += len(src.meshes)
+    total_verts += len(src.verts)
+    total_tris += len(src.tris)
   }
   if total_meshes == 0 do return false
   mesh.meshes = make([][4]u32, total_meshes)

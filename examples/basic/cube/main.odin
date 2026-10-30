@@ -2,6 +2,7 @@
 package main
 
 import "core:log"
+import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/input"
 import "mjolnir/platform"
@@ -35,10 +36,10 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
-  cube := world.spawn(&app.scene)
-  render.attach(&app.renderer, cube, render.primitive(&app.renderer, .CUBE, .RED))
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .RED))
   app.orbit = render.make_orbit({3, 2, 3}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   return .READY
 }
 

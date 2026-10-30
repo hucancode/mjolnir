@@ -332,7 +332,7 @@ merge_region_holes :: proc(reg: ^Contour_Region) {
     hole := &reg.holes[i]
     index := -1
     best_vertex := int(hole.leftmost)
-    for iter in 0 ..< len(hole.contour.verts) {
+    for _ in 0 ..< len(hole.contour.verts) {
       diags := make([dynamic]Potential_Diagonal, 0, len(reg.outline.verts))
       defer delete(diags)
       corner := hole.contour.verts[best_vertex]
@@ -482,7 +482,6 @@ build_contours :: proc(
         clear(&verts)
         clear(&simplified)
         walk_contour_boundary(i32(x), i32(y), i32(i), chf, flags[:], &verts)
-        raw_vert_count := len(verts)
         if len(verts) >= 3 {
           if max_error > 0.01 {
             simplify_contour(

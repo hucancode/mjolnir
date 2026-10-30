@@ -458,15 +458,15 @@ path_points :: proc(self: ^Animator, layer: LayerHandle, points: [][3]f32, close
   if !valid_layer(self, layer) || len(points) < 2 do return false
   l := &self.layers[layer.index]
   _ = l.params.(PathParams) or_return
-  closed := closed && len(points) >= 3
+  loop := closed && len(points) >= 3
   travelled := self.state[l.state.start]
   pool_remove(self, l.state, true)
-  size := path_state_size(len(points), closed)
+  size := path_state_size(len(points), loop)
   l.state = {u32(len(self.state)), u32(size)}
   resize(&self.state, len(self.state) + size)
   state := range_of(self.state[:], l.state)
   state[0] = travelled
-  path_fill(state, points, closed)
+  path_fill(state, points, loop)
   return true
 }
 

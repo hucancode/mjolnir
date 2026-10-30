@@ -35,16 +35,16 @@ GBufferOut fs_main(VertexOut v)
     } else {
         o.albedo = v.color * material.base_color_factor;
     }
-    float metallic = material.metallic_value;
-    float roughness = material.roughness_value;
+    float metallic = material.metallic_factor;
+    float roughness = material.roughness_factor;
     if (material.metallic_roughness_index != NO_TEXTURE) {
         metallic *= mr_sample.b;
         roughness *= mr_sample.g;
     }
     o.metallic_roughness = float4(metallic, roughness, 0.0, 1.0);
-    float3 emissive = float3(material.emissive_value);
+    float3 emissive = float3(material.emissive_factor);
     if (material.emissive_index != NO_TEXTURE) {
-        emissive = emissive_sample.rgb * material.emissive_value;
+        emissive = emissive_sample.rgb * material.emissive_factor;
     }
     o.emissive = float4(emissive, 1.0);
     return o;

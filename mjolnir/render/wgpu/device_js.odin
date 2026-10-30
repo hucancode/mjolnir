@@ -31,6 +31,9 @@ device_wait :: proc(b: ^Backend) {}
 @(private)
 events_process :: proc(b: ^Backend) {}
 
+@(private)
+device_idle :: proc(b: ^Backend) {}
+
 // wgpu.js hands out the canvas texture without a status: having one is success.
 @(private)
 surface_texture_get :: proc(b: ^Backend) -> wgpu.SurfaceTexture {

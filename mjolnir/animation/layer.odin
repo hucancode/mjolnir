@@ -64,13 +64,13 @@ BlendMode :: enum {
   OVERRIDE, // Replaces the accumulated pose (weight acts as a 0/1 gate at 0.5)
 }
 
-// Blend one bone's sample `s` (weight `w`) into the accumulated local pose `acc`, whose
+// Blend one bone's sample `s` (weight `weight`) into the accumulated local pose `acc`, whose
 // REPLACE/OVERRIDE weight so far is `acc_w`. `rest` is the bone's rest pose, the
 // reference ADD offsets are measured from.
 @(private)
-blend_sample :: proc(acc: ^geometry.Transform, acc_w: ^f32, s, rest: geometry.Transform, w: f32, mode: BlendMode) {
+blend_sample :: proc(acc: ^geometry.Transform, acc_w: ^f32, s, rest: geometry.Transform, weight: f32, mode: BlendMode) {
   id := linalg.QUATERNIONF32_IDENTITY
-  w := min(w, 1)
+  w := min(weight, 1)
   switch mode {
   case .REPLACE:
     // Earlier weight beyond what is left after this layer is given up, so weights

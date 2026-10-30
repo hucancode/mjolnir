@@ -1,15 +1,15 @@
 // Vortex force field dragging particles around it.
 package main
 
+import "core:log"
+import "core:math/linalg"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:log"
-import "core:math/linalg"
-import mu "vendor:microui"
 
 EMITTER_SIZE_START :: 100
 EMITTER_SIZE_END :: 30
@@ -79,9 +79,10 @@ spawn_field :: proc(
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 12, 3}, {0, 2, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.renderer.skybox_intensity = 0
 
   if tex, ok := render.texture_create(&app.renderer, #load("assets/particles/star_09.png")); ok {
@@ -124,7 +125,7 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
-  for f in ([]^Field{&app.repel, &app.attract}) do world.rotate(&app.scene, f.pivot, app.time * f.spin_speed * f.spin_dir, linalg.VECTOR3F32_Y_AXIS)
+  for f in ([]^Field{&app.repel, &app.attract}) do world.rotate(&app.scene, f.pivot, app.time * f.spin_speed * f.spin_dir)
   mjolnir.update(&app.scene, &app.renderer, dt)
   for f in ([]^Field{&app.repel, &app.attract}) do draw_field_marker(app, f)
 }

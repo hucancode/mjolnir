@@ -5,7 +5,7 @@
 // where the alpha is highest, falling off sharply to tone 2, which blends smoothly into tone 3
 // where the alpha is lowest. Reads
 //   params[0].x    1 draws the edges of the mesh's triangles instead, in the tones' colors
-//   params[0].y    the disc's segments (render.make_circle)
+//   params[0].y    the disc's segments (geometry.make_circle)
 //   params[0].z    where the fire starts, a fraction of the disc's radius
 //   params[0].w    the erosion threshold
 //   params[1].rgb  tone 2

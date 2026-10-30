@@ -408,7 +408,6 @@ test_calc_tri_normal :: proc(t: ^testing.T) {
 test_clamp_usage :: proc(t: ^testing.T) {
   // Test that clamp works correctly in our closest_point_on_segment_2d function
   // This tests the integration rather than the clamp function itself
-  p := [3]f32{5, 0, 0}
   a := [3]f32{0, 0, 0}
   b := [3]f32{10, 0, 0}
   // Point that would give t > 1 without clamping
@@ -427,4 +426,14 @@ test_clamp_usage :: proc(t: ^testing.T) {
     vec3_approx_equal(closest_before, a),
     "Point before segment should clamp to endpoint",
   )
+}
+
+@(test)
+test_exp_smooth_frame_rate_independent :: proc(t: ^testing.T) {
+  x60: f32 = 0
+  for _ in 0 ..< 60 do x60 += (1 - x60) * exp_smooth(5, 1.0 / 60)
+  x10: f32 = 0
+  for _ in 0 ..< 10 do x10 += (1 - x10) * exp_smooth(5, 1.0 / 10)
+  testing.expectf(t, math.abs(x60 - x10) < 1e-4, "60 fps %v vs 10 fps %v", x60, x10)
+  testing.expect(t, exp_smooth(5, 0) == 0, "no time, no motion")
 }

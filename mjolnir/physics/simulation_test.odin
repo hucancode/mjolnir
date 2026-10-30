@@ -42,7 +42,7 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
   }
   // Simulate 1000 steps at 60 FPS (dt = 1/60)
   dt :: 1.0 / 60.0
-  for i in 0 ..< 1000 {
+  for _ in 0 ..< 1000 {
     step(&physics_world, dt)
   }
   // Verify no body sinks through ground where ground exists.

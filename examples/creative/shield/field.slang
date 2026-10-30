@@ -1,5 +1,5 @@
 // Breaks up a forcefield: a random few of the faceted sphere's quads
-// (render.make_sphere(faceted = true)) stand out along their normal, by params[0].x (0 keeps
+// (geometry.make_sphere(faceted = true)) stand out along their normal, by params[0].x (0 keeps
 // the sphere whole). params[0].zw are the sphere's segments and rings.
 //
 // Lights a forcefield of solid glowing panels: each quad of the faceted sphere has a bright
@@ -7,7 +7,7 @@
 // the silhouette. Reads
 //   params[0].x    1 pops quads out
 //   params[0].y    1 draws the edges of the mesh's triangles instead
-//   params[0].zw   the sphere's segments and rings (render.make_sphere)
+//   params[0].zw   the sphere's segments and rings (geometry.make_sphere)
 //   params[2].rgb  the color of the field
 #define CUSTOM_VERTEX
 #include "material.slang"

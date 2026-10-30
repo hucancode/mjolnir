@@ -8,6 +8,7 @@ import "mjolnir/render"
 import "mjolnir/world"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import "core:math/rand"
 import b3 "vendor:box3d"
 import "mjolnir/geometry"
@@ -90,6 +91,8 @@ body_create :: proc(app: ^App, type: b3.BodyType, position: [3]f32) -> b3.BodyId
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   app.renderer.skybox_intensity = 0
   rand_sphere := geometry.make_sphere()
   rand_cylinder := geometry.make_cylinder()

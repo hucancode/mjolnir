@@ -3,11 +3,17 @@
 // Particle textures: Kenney Particle Pack (www.kenney.nl)
 package main
 
+import sa "core:container/small_array"
+import "core:fmt"
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import "core:math/rand"
 import "mjolnir"
 import "mjolnir/animation"
 import bt "mjolnir/behavior_tree"
-import "mjolnir/fsm"
 import "mjolnir/font"
+import "mjolnir/fsm"
 import "mjolnir/geometry"
 import "mjolnir/gltf"
 import "mjolnir/input"
@@ -18,11 +24,6 @@ import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/ui"
 import "mjolnir/world"
-import "core:fmt"
-import "core:log"
-import "core:math"
-import "core:math/linalg"
-import "core:math/rand"
 
 DEBUG :: #config(DEBUG, false)
 CREDITS :: "Characters & props: KayKit by Kay Lousberg (CC0)   Particles: Kenney (CC0)"
@@ -398,9 +399,6 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
-  if !load_assets(app) do return .FAIL
-  append(&app.renderer.effect_stack, render.OutlineEffect{thickness = 1.5}, render.CrossHatchEffect{hatch_offset_y = 5, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
-  render.setup(&app.renderer)
   ui.init(&app.gui, {1280, 720})
   build_panel(app)
   fsm.start(&app.screen, SCREENS, app, .SELECT)
@@ -414,12 +412,6 @@ shutdown :: proc(app: ^App) {
   delete(app.projectiles)
   delete(app.props)
   delete(app.bodies)
-  for &m in app.heroes do gltf.destroy(&m, &app.renderer)
-  for &m in app.foes do gltf.destroy(&m, &app.renderer)
-  for &pair in app.weapons do for &m in pair do gltf.destroy(&m, &app.renderer)
-  for &m in app.powers do gltf.destroy(&m, &app.renderer)
-  for &m in app.decor do gltf.destroy(&m, &app.renderer)
-  gltf.destroy(&app.arrow, &app.renderer)
   ui.shutdown(&app.gui)
   font.destroy(&app.font)
   physics.shutdown(&app.phys)
@@ -440,7 +432,13 @@ load_assets :: proc(app: ^App) -> bool {
   for data, power in POWER_MODELS do app.powers[power] = gltf.model_create(&app.renderer, data) or_return
   for data, i in DECOR do app.decor[i] = gltf.model_create(&app.renderer, data) or_return
   app.arrow = gltf.model_create(&app.renderer, ARROW_MODEL) or_return
+  sa.append(&render.main_camera(&app.renderer).effects, render.make_effect(render.OutlineEffect{thickness = 1.5}), render.make_effect(render.CrossHatchEffect{hatch_offset_y = 5, lum_thresholds = {0.6, 0.3, 0.15, 0.07}}))
   return true
+}
+
+new_scene :: proc(app: ^App) {
+  clear_scene(app)
+  if !load_assets(app) do log.error("cannot load the assets")
 }
 
 clear_scene :: proc(app: ^App) {
@@ -460,13 +458,19 @@ clear_scene :: proc(app: ^App) {
   clear(&app.bodies)
   nav.destroy(&app.crowd)
   nav.destroy(&app.navmesh)
+  for &m in app.heroes do gltf.destroy(&m, &app.renderer)
+  for &m in app.foes do gltf.destroy(&m, &app.renderer)
+  for &pair in app.weapons do for &m in pair do gltf.destroy(&m, &app.renderer)
+  for &m in app.powers do gltf.destroy(&m, &app.renderer)
+  for &m in app.decor do gltf.destroy(&m, &app.renderer)
+  gltf.destroy(&app.arrow, &app.renderer)
   physics.teardown(&app.phys)
   world.teardown(&app.scene)
   render.teardown(&app.renderer)
 }
 
 enter_select :: proc(app: ^App) {
-  clear_scene(app)
+  new_scene(app)
   spawn_ground(app)
   app.renderer.ibl_intensity = 0.1
   app.renderer.skybox_intensity = 0.05
@@ -475,15 +479,13 @@ enter_select :: proc(app: ^App) {
     app.lineup[i] = actor_create(app, &app.heroes[i], hero.attack, {f32(i) * 2.2 - 4.4, 0, 0})
     show_props(app, app.lineup[i], hero.props)
   }
-  app.spotlight = world.spawn(&app.scene)
-  world.rotate(&app.scene, app.spotlight, linalg.quaternion_between_two_vector3([3]f32{0, 0, -1}, linalg.normalize([3]f32{0, -4, -3})))
-  render.attach(&app.renderer, app.spotlight, render.light_create(&app.renderer, render.make_spot_light({1, 0.85, 0.6}, 500, 12, math.PI * 0.1)))
+  app.spotlight = mjolnir.spawn(&app.scene, &app.renderer, render.light_create(&app.renderer, render.make_spot_light({1, 0.85, 0.6}, 500, 12, math.PI * 0.1)), rotation = linalg.quaternion_between_two_vector3([3]f32{0, 0, -1}, linalg.normalize([3]f32{0, -4, -3})))
   actor_play(&app.lineup[app.hero], .CHEER)
   render.camera_look_at(render.main_camera(&app.renderer), {0, 3, 9}, {0, 1.2, 0})
 }
 
 enter_level :: proc(app: ^App) {
-  clear_scene(app)
+  new_scene(app)
   level := app.level
   app.result_timer = 0
   spawn_ground(app)
@@ -520,7 +522,7 @@ enter_level :: proc(app: ^App) {
     torch := mjolnir.spawn(&app.scene, &app.renderer, app.emitters[.FIRE], corner * (ARENA - 2) + {0, 0.2, 0})
     mjolnir.spawn(&app.scene, &app.renderer, torch_light, {0, 1, 0}, parent = torch)
   }
-  fire_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {1, 0.4, 0.1, 1}, emissive_value = 1.5))
+  fire_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {1, 0.4, 0.1, 1}, emissive_factor = 1.5))
   app.fireball = render.primitive(&app.renderer, .SPHERE, fire_material, cast_shadow = false)
 
   hero := HEROES[app.hero]
@@ -562,14 +564,8 @@ spawn_ground :: proc(app: ^App) {
 }
 
 spawn_sun :: proc(app: ^App, intensity: f32) {
-  app.renderer.sun = {
-    enabled         = true,
-    cast_shadow     = true,
-    color           = {1, 0.92, 0.85},
-    intensity       = intensity,
-    direction       = linalg.quaternion_mul_vector3(linalg.quaternion_angle_axis(-math.PI * 0.7, linalg.VECTOR3F32_X_AXIS), [3]f32{0, 0, -1}),
-    shadow_distance = 25,
-  }
+  sun := render.light_create(&app.renderer, render.make_directional_light({1, 0.92, 0.85}, intensity, 25))
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_angle_axis(-math.PI * 0.7, linalg.VECTOR3F32_X_AXIS))
 }
 
 spawn_enemy :: proc(app: ^App, kind: EnemyKind, position: [3]f32) {
@@ -742,8 +738,8 @@ update_player :: proc(app: ^App, dt: f32) {
 
 move_direction :: proc(app: ^App) -> [3]f32 {
   cam := render.main_camera(&app.renderer)
-  forward := render.camera_forward(cam) * {1, 0, 1}
-  right := render.camera_right(cam) * {1, 0, 1}
+  forward := -geometry.qz(cam.rotation) * {1, 0, 1}
+  right := geometry.qx(cam.rotation) * {1, 0, 1}
   return linalg.normalize0(forward * input.axis(&app.input, .S, .W) + right * input.axis(&app.input, .A, .D))
 }
 
@@ -768,20 +764,20 @@ player_strike :: proc(app: ^App, hero: Hero, damage: f32) {
 
 hurt_enemy :: proc(app: ^App, e: ^Enemy, damage: f32) {
   e.health -= damage
-  render.emit(&app.renderer, app.emitters[.HIT], e.chest, 40)
+  render.emit(&app.renderer, e.chest, app.emitters[.HIT], 40)
   if e.health > 0 {
     actor_play(e, .HIT)
     return
   }
   app.score += FOES[e.kind].score
-  render.emit(&app.renderer, app.emitters[.DEATH], e.model, 80)
+  render.emit(&app.renderer, e.model, app.emitters[.DEATH], 80)
 }
 
 hurt_player :: proc(app: ^App, damage: f32) {
   p := &app.player
   if p.health <= 0 || p.buffs[.SHIELD] > 0 do return
   p.health -= damage
-  render.emit(&app.renderer, app.emitters[.HIT], p.chest, 40)
+  render.emit(&app.renderer, p.chest, app.emitters[.HIT], 40)
   if p.health > 0 {
     if !actor_busy(p) do actor_play(p, .HIT)
     return
@@ -842,16 +838,14 @@ enemy_strike :: proc(app: ^App, e: ^Enemy) {
 }
 
 shoot :: proc(app: ^App, shot: Shot, from, direction: [3]f32, damage: f32, friendly: bool) {
-  node := world.spawn(&app.scene, from)
-  world.rotate(&app.scene, node, linalg.quaternion_between_two_vector3([3]f32{0, 1, 0}, direction))
+  node := world.spawn(&app.scene, from, linalg.quaternion_between_two_vector3([3]f32{0, 1, 0}, direction))
   instance: gltf.Instance
   if shot == .ARROW {
     instance = gltf.instance_create(&app.arrow, &app.scene, &app.renderer, parent = node)
   } else {
     render.attach(&app.renderer, node, app.fireball)
     world.scale(&app.scene, node, 0.25)
-    trail := world.spawn(&app.scene, parent = node)
-    render.attach(&app.renderer, trail, app.emitters[.MAGIC])
+    trail := mjolnir.spawn(&app.scene, &app.renderer, app.emitters[.MAGIC], parent = node)
   }
   append(&app.projectiles, Projectile{friendly = friendly, node = node, instance = instance, position = from, velocity = direction * 12, damage = damage, life = 2})
 }
@@ -983,7 +977,7 @@ update_pickups :: proc(app: ^App, dt: f32) {
     } else {
       app.player.buffs[pickup.power] = BUFF_TIME
     }
-    render.emit(&app.renderer, app.emitters[.PICKUP], app.player.chest, 60)
+    render.emit(&app.renderer, app.player.chest, app.emitters[.PICKUP], 60)
     gltf.destroy(&pickup.instance, &app.scene, &app.renderer)
     world.destroy(&app.scene, pickup.node)
     unordered_remove(&app.pickups, i)
@@ -1075,7 +1069,7 @@ draw :: proc(app: ^App) -> bool {
 }
 
 draw_hud :: proc(app: ^App) {
-  commands := make([dynamic]render.RenderCommand, context.temp_allocator)
+  commands := make([dynamic]render.OverlayCommand, context.temp_allocator)
   screen := render.window_size(&app.renderer)
   if app.screen.current == .SELECT {
     hero := HEROES[app.hero]
@@ -1090,7 +1084,7 @@ draw_hud :: proc(app: ^App) {
   mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font)
 }
 
-hud :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand) {
+hud :: proc(app: ^App, commands: ^[dynamic]render.OverlayCommand) {
   p := &app.player
   bar(commands, {40, 36}, {300, 22}, p.health / HEROES[app.hero].health, {220, 50, 50, 255})
   text(commands, fmt.tprintf("Level %d / %d    Score %d", app.level + 1, len(LEVELS), app.score), {40, 68}, 22)
@@ -1115,11 +1109,11 @@ hud :: proc(app: ^App, commands: ^[dynamic]render.RenderCommand) {
   }
 }
 
-text :: proc(commands: ^[dynamic]render.RenderCommand, s: string, position: [2]f32, size: f32, color: [4]u8 = 255) {
-  append(commands, render.RenderCommand{shape = render.DrawTextCommand{text = s, position = position, size = size, color = color}})
+text :: proc(commands: ^[dynamic]render.OverlayCommand, s: string, position: [2]f32, size: f32, color: [4]u8 = 255) {
+  append(commands, render.OverlayCommand{shape = render.OverlayText{text = s, position = position, size = size, color = color}})
 }
 
-bar :: proc(commands: ^[dynamic]render.RenderCommand, position, size: [2]f32, fraction: f32, color: [4]u8) {
-  append(commands, render.RenderCommand{shape = render.DrawQuadCommand{position = position, size = size, color = {0, 0, 0, 160}}})
-  append(commands, render.RenderCommand{shape = render.DrawQuadCommand{position = position + 2, size = {(size.x - 4) * clamp(fraction, 0, 1), size.y - 4}, color = color}})
+bar :: proc(commands: ^[dynamic]render.OverlayCommand, position, size: [2]f32, fraction: f32, color: [4]u8) {
+  append(commands, render.OverlayCommand{shape = render.OverlayQuad{position = position, size = size, color = {0, 0, 0, 160}}})
+  append(commands, render.OverlayCommand{shape = render.OverlayQuad{position = position + 2, size = {(size.x - 4) * clamp(fraction, 0, 1), size.y - 4}, color = color}})
 }

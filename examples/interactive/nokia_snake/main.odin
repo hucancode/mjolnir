@@ -1,15 +1,18 @@
 // Snake game in 3D.
 package main
 
+import "core:fmt"
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import "core:math/rand"
 import "mjolnir"
+import "mjolnir/audio"
 import "mjolnir/font"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:fmt"
-import "core:log"
-import "core:math/rand"
 
 GRID :: 15
 CELL :: 1.0
@@ -19,6 +22,10 @@ SEGMENT_SCALE :: 0.45 * CELL
 FOOD_SCALE :: 0.4 * CELL
 SEGMENT_Y :: SEGMENT_SCALE
 FOOD_Y :: FOOD_SCALE
+
+SAMPLE_RATE :: 48000
+eat_samples: [SAMPLE_RATE / 8]f32
+crash_samples: [SAMPLE_RATE * 2 / 5]f32
 
 Cell :: [2]i32
 
@@ -43,6 +50,9 @@ App :: struct {
   input:    input.State,
   font:     font.Font,
   orbit:    render.Orbit,
+  mixer:    audio.Audio,
+  eat:      audio.Sound,
+  crash:    audio.Sound,
   game:     Game,
 }
 
@@ -52,6 +62,7 @@ main :: proc() {
   if !platform.init(&app.platform, 1280, 720, "Snake 3D") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
+  if !audio.init(&app.mixer) do return
   mjolnir.run(
     mjolnir.Loop(App) {
       app = app,
@@ -67,6 +78,7 @@ shutdown :: proc(app: ^App) {
   delete(app.game.body)
   delete(app.game.body_nodes)
   font.destroy(&app.font)
+  audio.shutdown(&app.mixer)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
@@ -78,9 +90,9 @@ draw :: proc(app: ^App) -> bool {
 }
 
 draw_hud :: proc(app: ^App) {
-  hud := [?]render.RenderCommand {
-    {shape = render.DrawTextCommand{text = fmt.tprintf("Score: %d", app.game.score), position = {20, 20}, size = 28, color = {255, 255, 255, 255}}},
-    {shape = render.DrawTextCommand{text = fmt.tprintf("Best: %d", app.game.best), position = {20, 60}, size = 24, color = {255, 220, 100, 255}}},
+  hud := [?]render.OverlayCommand {
+    {shape = render.OverlayText{text = fmt.tprintf("Score: %d", app.game.score), position = {20, 20}, size = 28, color = {255, 255, 255, 255}}},
+    {shape = render.OverlayText{text = fmt.tprintf("Best: %d", app.game.best), position = {20, 60}, size = 24, color = {255, 220, 100, 255}}},
   }
   render.stage_overlay(&app.renderer, hud[:], &app.font)
 }
@@ -91,6 +103,8 @@ spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color,
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
   app.renderer.skybox_intensity = 0
   half := f32(GRID) * CELL * 0.5
@@ -106,16 +120,29 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   spawn_wall(app, {-(half + wall_t), wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
 
   app.orbit = render.make_orbit({0, 12, 3}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   app.game.head_node = spawn_primitive(app, .CUBE, .YELLOW)
   world.scale(&app.scene, app.game.head_node, SEGMENT_SCALE)
   app.game.food_node = spawn_primitive(app, .SPHERE, .RED)
   world.scale(&app.scene, app.game.food_node, FOOD_SCALE)
 
+  sweep(eat_samples[:], 600, 1200)
+  sweep(crash_samples[:], 220, 55)
+  app.eat = audio.sound_create(&app.mixer, eat_samples[:], 1, SAMPLE_RATE)
+  app.crash = audio.sound_create(&app.mixer, crash_samples[:], 1, SAMPLE_RATE)
+
   reset_game(app)
   log.info("Controls: WASD or arrows. Auto-restart on game over.")
   return .READY
+}
+
+sweep :: proc(samples: []f32, from, to: f32) {
+  phase: f32
+  for &s, i in samples {
+    t := f32(i) / f32(len(samples))
+    phase += math.TAU * math.lerp(from, to, t) / SAMPLE_RATE
+    s = 0.3 * math.sin(phase) * (1 - t)
+  }
 }
 
 spawn_wall :: proc(app: ^App, pos: [3]f32, sx, sy, sz: f32) {
@@ -206,12 +233,15 @@ step_game :: proc(app: ^App, dt: f32) {
   head := app.game.body[0]
   next := Cell{head.x + app.game.dir.x, head.y + app.game.dir.y}
 
-  if next.x < 0 || next.x >= GRID || next.y < 0 || next.y >= GRID {
-    app.game.alive = false; return
-  }
   ate := next == app.game.food
   limit := len(app.game.body) if ate else len(app.game.body) - 1
-  for i in 0 ..< limit do if app.game.body[i] == next { app.game.alive = false; return }
+  hit := next.x < 0 || next.x >= GRID || next.y < 0 || next.y >= GRID
+  for i in 0 ..< limit do hit ||= app.game.body[i] == next
+  if hit {
+    app.game.alive = false
+    audio.play(&app.mixer, app.crash)
+    return
+  }
 
   old_head := app.game.body[0]
   if ate {
@@ -219,6 +249,7 @@ step_game :: proc(app: ^App, dt: f32) {
     inject_at(&app.game.body_nodes, 0, new_node)
     inject_at(&app.game.body, 0, next)
     app.game.score += 1
+    audio.play(&app.mixer, app.eat, pitch = 1 + 0.03 * f32(app.game.score))
     place_food(app)
   } else if len(app.game.body_nodes) > 0 {
     tail_node := pop(&app.game.body_nodes)

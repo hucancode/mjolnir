@@ -36,7 +36,7 @@ setup :: proc() -> bool {
   for b, i in BODIES {
     parent := world.find(&w, b.parent) if b.parent != "" else {}
     pivots[i] = world.spawn(&w, parent = parent)
-    nodes[i] = world.spawn(&w, {b.distance, 0, 0}, b.name, pivots[i])
+    nodes[i] = world.spawn(&w, {b.distance, 0, 0}, name = b.name, parent = pivots[i])
   }
   return true
 }

@@ -69,13 +69,13 @@ test_rasterize_nearly_degenerate_triangles :: proc(t: ^testing.T) {
   ok := rasterize_triangles(vertices, indices, areas, hf, 1)
   testing.expect(
     t,
-    hf != nil,
+    ok,
     "Rasterization should succeed with nearly degenerate triangle",
   )
   // Check that at least the center cell got a span
   center_x, center_z := i32(2), i32(2)
   column_index := center_x + center_z * hf.width
-  span := hf.spans[column_index]
+  _ = hf.spans[column_index]
   // Span might be nil due to very small triangle, but shouldn't crash
 }
 
@@ -106,7 +106,7 @@ test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
   ok := rasterize_triangles(vertices, indices, areas, hf, 1)
   testing.expect(
     t,
-    hf != nil,
+    ok,
     "Sub-pixel triangle rasterization should succeed",
   )
   // Check that the triangle affected at least one cell
@@ -137,7 +137,7 @@ test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
     {0.01, 0.01}, // Near origin
     {8.99, 8.99}, // Near boundary
   }
-  for pos, i in test_positions {
+  for pos in test_positions {
     vertices := [][3]f32 {
       {pos.x, 1, pos.y},
       {pos.x + tiny_size, 1, pos.y},
@@ -146,7 +146,7 @@ test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
     indices := []i32{0, 1, 2}
     areas := []u8{RC_WALKABLE_AREA}
     ok := rasterize_triangles(vertices, indices, areas, hf, 1)
-    testing.expect(t, hf != nil, "Tiny triangle rasterization should succeed")
+    testing.expect(t, ok, "Tiny triangle rasterization should succeed")
   }
 }
 
@@ -164,7 +164,7 @@ test_rasterize_large_triangle_spanning_cells :: proc(t: ^testing.T) {
   indices := []i32{0, 1, 2}
   areas := []u8{RC_WALKABLE_AREA}
   ok := rasterize_triangles(vertices, indices, areas, hf, 1)
-  testing.expect(t, hf != nil, "Large triangle rasterization should succeed")
+  testing.expect(t, ok, "Large triangle rasterization should succeed")
   // Count affected cells
   affected_cells := 0
   for i in 0 ..< (hf.width * hf.height) {
@@ -197,7 +197,7 @@ test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
   ok := rasterize_triangles(vertices, indices, areas, hf, 1)
   testing.expect(
     t,
-    hf != nil,
+    ok,
     "Partial coverage triangle rasterization should succeed",
   )
   // Check that boundary cells are handled correctly
@@ -233,7 +233,7 @@ test_rasterize_floating_point_precision :: proc(t: ^testing.T) {
   ok := rasterize_triangles(vertices, indices, areas, hf, 1)
   testing.expect(
     t,
-    hf != nil,
+    ok,
     "Precision edge case rasterization should succeed",
   )
   // Should produce consistent results despite precision issues
@@ -278,7 +278,7 @@ test_rasterize_extreme_coordinates :: proc(t: ^testing.T) {
   ok := rasterize_triangles(vertices, indices, areas, hf, 1)
   testing.expect(
     t,
-    hf != nil,
+    ok,
     "Extreme coordinates rasterization should succeed",
   )
   // Check that the triangle was rasterized correctly
@@ -305,7 +305,7 @@ test_rasterize_sloped_triangles :: proc(t: ^testing.T) {
   indices := []i32{0, 1, 2}
   areas := []u8{RC_WALKABLE_AREA}
   ok := rasterize_triangles(vertices, indices, areas, hf, 1)
-  testing.expect(t, hf != nil, "Sloped triangle rasterization should succeed")
+  testing.expect(t, ok, "Sloped triangle rasterization should succeed")
   // Check that spans were created with appropriate heights
   affected_spans := 0
   height_sum := f32(0)
@@ -342,7 +342,7 @@ test_rasterize_vertical_triangles :: proc(t: ^testing.T) {
   ok := rasterize_triangles(vertices, indices, areas, hf, 1)
   testing.expect(
     t,
-    hf != nil,
+    ok,
     "Vertical triangle rasterization should succeed",
   )
   // Vertical triangles might not create spans in XZ plane
@@ -383,7 +383,7 @@ test_rasterize_many_tiny_triangles :: proc(t: ^testing.T) {
   ok := rasterize_triangles(vertices, indices, areas, hf, 1)
   testing.expect(
     t,
-    hf != nil,
+    ok,
     "Many tiny triangles rasterization should succeed",
   )
   // Count total spans created
@@ -413,7 +413,7 @@ test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
   testing.expect(t, hf != nil, "Failed to create heightfield")
   defer destroy_heightfield(hf)
   ok := rasterize_triangles(verts, tris, areas, hf, 1)
-  testing.expect(t, hf != nil, "Failed to rasterize triangle")
+  testing.expect(t, ok, "Failed to rasterize triangle")
   // Validate specific cells that should be covered by the triangle
   // The triangle should cover cells at grid positions based on its geometry
   check_cell_coverage :: proc(hf: ^Heightfield, x, z: i32) -> bool {

@@ -69,7 +69,7 @@ path_queue_update :: proc(queue: ^Path_Queue, max_iters: int) {
 
   iter_count := max_iters
 
-  for i in 0..<MAX_QUEUE {
+  for _ in 0..<MAX_QUEUE {
     q := &queue.queue[queue.queue_head % MAX_QUEUE]
 
     if q.ref == PATHQ_INVALID {
@@ -161,7 +161,7 @@ path_queue_get_path_result :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref,
   for i in 0..<MAX_QUEUE {
     if queue.queue[i].ref == ref {
       q := &queue.queue[i]
-      success_status, detail_status := detour.status_detail(q.status)
+      _, detail_status := detour.status_detail(q.status)
 
       q.ref = PATHQ_INVALID
       q.status = {}

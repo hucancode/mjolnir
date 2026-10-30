@@ -2,8 +2,8 @@
 package main
 
 import "core:log"
-import "mjolnir/render"
 import js "core:sys/wasm/js"
+import "mjolnir/render"
 
 frame := -1
 logger: log.Logger
@@ -15,8 +15,6 @@ main :: proc() {
   if !render.init(r, "#canvas") do page_fail()
 }
 
-// The canvas backing store follows its CSS box at the device pixel ratio; the first frame comes
-// once the renderer is ready, and the host page drops its loading screen then.
 @(export)
 step :: proc(dt: f64) -> bool {
   context.logger = logger
@@ -40,7 +38,6 @@ step :: proc(dt: f64) -> bool {
   return true
 }
 
-// The host page's imports (mjolnir/platform/web/index.html).
 foreign import page "mjolnir"
 
 @(default_calling_convention = "contextless")

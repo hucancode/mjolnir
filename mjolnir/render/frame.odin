@@ -22,7 +22,6 @@ Barrier :: enum {
   FORWARD_TO_COMPUTE,
   SHADOW_TO_LIGHTING,
   CULL_TO_INDIRECT,
-  CULL_TO_COPY,
   INDIRECT_TO_FILL,
   FILL_TO_CULL,
   // the previous simulation and this frame's draws use what the particle pass rewrites
@@ -74,10 +73,6 @@ BARRIERS := [Barrier]rhi.Barrier {
   .CULL_TO_INDIRECT = {
     src_stage = {.COMPUTE_SHADER}, dst_stage = {.DRAW_INDIRECT},
     src_access = {.SHADER_WRITE}, dst_access = {.INDIRECT_READ},
-  },
-  .CULL_TO_COPY = {
-    src_stage = {.COMPUTE_SHADER, .DRAW_INDIRECT}, dst_stage = {.TRANSFER},
-    src_access = {.SHADER_WRITE}, dst_access = {.TRANSFER_READ},
   },
   .INDIRECT_TO_FILL = {src_stage = {.DRAW_INDIRECT}, dst_stage = {.TRANSFER}},
   .FILL_TO_CULL = {
@@ -181,6 +176,12 @@ camera_passes :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, closing: ..
     c = 0
     for i in containers.slots_next(&self.slots[.CAMERAS], &c) do material_record(self, cmd, f, i, .FORWARD)
   }
+  barrier(self, cmd, .COLOR_TO_SAMPLE)
+  {
+    scope(self, cmd, "anti-aliasing")
+    c = 0
+    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do anti_aliasing_record(self, cmd, f, i)
+  }
   barrier(self, cmd, ..closing)
 }
 
@@ -191,7 +192,7 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
   // the frame slot's previous submissions are done: its per-frame buffers may be rewritten
   if !dev.frame_wait(&self.gpu) do return false, .ERROR
   f := current_frame(self)
-  dump_collect(self, f)
+  capture_collect(self)
   tables_sync(self, f)
   overlay_upload(self, f)
   if !shadow_atlas_reserve(self, f, self.shadow_view_count) do return false, .ERROR
@@ -229,19 +230,15 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
     scope(self, cmd, "shadows")
     shadow_record(self, cmd, f)
   }
+  camera_passes(self, cmd, f, .FORWARD_TO_COMPUTE, .COLOR_TO_SAMPLE)
+  {
+    scope(self, cmd, "post")
+    c: u32
+    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do post_record(self, cmd, f, i, i == main)
+  }
   if has_main {
-    camera_passes(self, cmd, f, .FORWARD_TO_COMPUTE, .CULL_TO_COPY)
-    // the lists the main camera drew: culled last frame (Vulkan) or this one (WebGPU)
-    slot := camera_slot(main) + f if BINDLESS else camera_next_slot(main, f)
-    dev.cmd_copy_buffer(&self.gpu, cmd, self.draw_lists[slot].buffer, 0, self.buffers[.DRAW_COUNT_READBACK][f], 0, size_of(u32))
-    barrier(self, cmd, .COLOR_TO_SAMPLE)
-    {
-      scope(self, cmd, "post")
-      post_record(self, cmd, f, main)
-    }
     debug_line_record(self, cmd, f, main)
   } else {
-    camera_passes(self, cmd, f, .FORWARD_TO_COMPUTE)
     // nothing else covers the presented image
     colors := [1]rhi.ColorTarget{{texture = BACKBUFFER, load = .CLEAR}}
     dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:]})
@@ -261,7 +258,7 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
     scope(self, compute, "cull")
     cull_record(self, compute, f)
   }}
-  dump_record(self, cmd, f)
+  capture_record(self, cmd)
   dev.cmd_end(&self.gpu, cmd)
   if !async {
     cmds := [2]rhi.CommandList{uploads, cmd}

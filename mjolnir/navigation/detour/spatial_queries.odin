@@ -3,7 +3,6 @@ package detour
 import "../../geometry"
 import "core:math"
 import "core:math/linalg"
-import "core:math/rand"
 
 // Query_Filter selects polygons by include/exclude flags and weighs traversal by per-area cost.
 Query_Filter :: struct {
@@ -210,7 +209,6 @@ raycast :: proc(
     if !status_succeeded(poly_status) do break
     next_ref := INVALID_POLY_REF
     next_t := ray_len
-    hit_edge := -1
     for i in 0 ..< int(poly.vert_count) {
       va := tile.verts[poly.verts[i]]
       vb := tile.verts[poly.verts[(i + 1) % int(poly.vert_count)]]
@@ -682,7 +680,7 @@ find_polys_around_circle :: proc(
         result_count += 1
       }
     }
-    cur_tile, cur_poly, cur_status := get_tile_and_poly_by_ref(
+    cur_tile, _, cur_status := get_tile_and_poly_by_ref(
       query.nav_mesh,
       current.id,
     )
@@ -793,7 +791,7 @@ find_polys_around_shape :: proc(
         result_count += 1
       }
     }
-    cur_tile, cur_poly, cur_status := get_tile_and_poly_by_ref(
+    cur_tile, _, cur_status := get_tile_and_poly_by_ref(
       query.nav_mesh,
       current.id,
     )
@@ -891,7 +889,6 @@ get_poly_wall_segments :: proc(
   segment_count = 0
   tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
   if !status_succeeded(poly_status) do return 0, poly_status
-  poly_idx := get_poly_index(query.nav_mesh, ref)
   for i in 0 ..< min(int(max_segments), int(poly.vert_count)) {
     va := tile.verts[poly.verts[i]]
     vb := tile.verts[poly.verts[(i + 1) % int(poly.vert_count)]]

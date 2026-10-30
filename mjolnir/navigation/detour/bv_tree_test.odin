@@ -3,7 +3,6 @@
 package detour
 
 import "core:math"
-import "core:slice"
 import "core:testing"
 
 @(test)

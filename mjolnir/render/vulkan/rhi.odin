@@ -26,6 +26,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   caps                            = rhi_caps,
   texture_create                  = texture_create,
   texture_destroy                 = texture_destroy,
+  texture_desc                    = texture_desc,
   buffer_create                   = rhi_buffer_create,
   buffer_retire                   = rhi_buffer_retire,
   buffer_write                    = rhi_buffer_write,
@@ -212,6 +213,7 @@ rhi_shutdown :: proc(b: ^Backend) {
   for _, layout in b.pipeline_layouts do vk.DestroyPipelineLayout(device, layout, nil)
   delete(b.pipeline_layouts)
   rhi.pool_destroy(&b.buffers)
+  delete(b.readbacks)
   rhi.pool_destroy(&b.layouts)
   rhi.pool_destroy(&b.groups)
   rhi.pool_destroy(&b.pipelines)
@@ -234,34 +236,68 @@ timestamps_supported :: proc(gctx: ^GPUContext) -> bool {
   return gctx.host_query_reset && gctx.timestamp_bits[0] > 0 && gctx.device_properties.limits.timestampPeriod > 0
 }
 
+// A READBACK buffer is a ring of READBACK_SLOTS copies, `size` bytes apart: frame n copies into
+// slot n % READBACK_SLOTS, and the one past the frames in flight keeps a finished copy to read.
+@(private)
+Readback :: struct {
+  size:   int,
+  // per slot: the frame that copied into it + 1, 0 for none
+  copied: [READBACK_SLOTS]u64,
+}
+
+@(private)
+READBACK_SLOTS :: FRAMES_IN_FLIGHT + 1
+
 rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, bool) {
   usage: vk.BufferUsageFlags
   for u in desc.usage do usage += {BUFFER_USAGES[u]}
+  size := max(desc.size, 16)
+  if desc.memory == .READBACK do size *= READBACK_SLOTS
   buffer, res := buffer_create(
     &b.gctx,
-    vk.DeviceSize(max(desc.size, 16)),
+    vk.DeviceSize(size),
     usage,
     host_visible = desc.memory != .GPU,
     host_cached = desc.memory == .READBACK,
     prefer_device_local = desc.memory == .UPLOAD,
   )
   if !check(res, "rhi buffer") do return 0, false
-  slot := rhi.pool_take(&b.buffers, buffer)
-  return rhi.Buffer(slot), true
+  slot := rhi.Buffer(rhi.pool_take(&b.buffers, buffer))
+  if desc.memory == .READBACK do b.readbacks[slot] = {size = max(desc.size, 16)}
+  return slot, true
+}
+
+// Where a copy into dst lands: a READBACK buffer's slot of this frame, which it marks.
+@(private = "file")
+copy_target :: proc(b: ^Backend, dst: rhi.Buffer, offset: int) -> vk.DeviceSize {
+  rb, ok := &b.readbacks[dst]
+  if !ok do return vk.DeviceSize(offset)
+  slot := int(b.gctx.frame_serial % READBACK_SLOTS)
+  rb.copied[slot] = b.gctx.frame_serial + 1
+  return vk.DeviceSize(slot * rb.size + offset)
 }
 
 // Destroyed RETIRE_GRACE frames on, once no frame in flight reads it.
 rhi_buffer_retire :: proc(b: ^Backend, handle: rhi.Buffer) {
   if handle == 0 do return
+  delete_key(&b.readbacks, handle)
   defer_destroy(&b.gctx, b.buffers.items[handle])
   rhi.pool_release(&b.buffers, u32(handle))
 }
 
-rhi_buffer_read :: proc(b: ^Backend, handle: rhi.Buffer, offset: int, dst: []u8) -> bool {
+// The latest copy a finished frame left in a READBACK buffer (zeros before the first).
+rhi_buffer_read :: proc(b: ^Backend, handle: rhi.Buffer, offset: int, dst: []u8) -> (frame: u64, ok: bool) {
+  rb := b.readbacks[handle] or_return
   mapped := allocation_mapped(&b.gctx, b.buffers.items[handle].memory)
-  if mapped == nil do return false
-  copy(dst, mapped[offset:][:len(dst)])
-  return true
+  if mapped == nil do return 0, false
+  slot: u64
+  for c, i in rb.copied do if c > frame && c <= b.completed do frame, slot = c, u64(i)
+  if frame == 0 {
+    for &v in dst do v = 0
+    return 0, true
+  }
+  copy(dst, mapped[int(slot) * rb.size + offset:][:len(dst)])
+  return frame, true
 }
 
 // Registers a resource in one of the bindless arrays; the caller guarantees no submitted work
@@ -300,7 +336,7 @@ rhi_buffer_write :: proc(b: ^Backend, handle: rhi.Buffer, offset: int, data: []u
 // A view of one mip: a cube's as its six layers, else one 2D level.
 @(private = "file")
 mip_view_create :: proc(b: ^Backend, img: ^Image, mip: u32) -> (vk.ImageView, vk.Result) {
-  if img.cube do return image_create_view(b.gctx.device, img, .D2_ARRAY, mip, 1, 0, 6)
+  if img.desc.cube do return image_create_view(b.gctx.device, img, .D2_ARRAY, mip, 1, 0, 6)
   return image_create_view(b.gctx.device, img, .D2, base_mip = mip)
 }
 
@@ -660,6 +696,8 @@ rhi_frame_wait :: proc(b: ^Backend) -> bool {
     }
     if !check(vk.WaitSemaphores(b.gctx.device, &info, math.max(u64)), "rhi frame wait") do return false
   }
+  // the frame that last used the slot is done, and every one before it
+  if b.gctx.frame_serial >= FRAMES_IN_FLIGHT do b.completed = max(b.completed, b.gctx.frame_serial - FRAMES_IN_FLIGHT + 1)
   // nothing of the slot is pending: its lists and timestamps start over
   for &thread in b.cmd_pools do for &queue in thread {
     p := &queue[slot]
@@ -838,7 +876,7 @@ attachment_view :: proc(b: ^Backend, cmd: ^Cmd, texture: rhi.TextureHandle) -> (
     return sc.views[sc.image_index], sc.extent
   }
   img := texture_image(b, texture)
-  return img.view, img.extent
+  return img.view, {img.desc.extent.x, img.desc.extent.y}
 }
 
 @(private = "file")
@@ -1034,7 +1072,7 @@ rhi_cmd_fill_buffer :: proc(b: ^Backend, handle: rhi.CommandList, buffer: rhi.Bu
 }
 
 rhi_cmd_copy_buffer :: proc(b: ^Backend, handle: rhi.CommandList, src: rhi.Buffer, src_offset: int, dst: rhi.Buffer, dst_offset, size: int) {
-  region := vk.BufferCopy{srcOffset = vk.DeviceSize(src_offset), dstOffset = vk.DeviceSize(dst_offset), size = vk.DeviceSize(size)}
+  region := vk.BufferCopy{srcOffset = vk.DeviceSize(src_offset), dstOffset = copy_target(b, dst, dst_offset), size = vk.DeviceSize(size)}
   vk.CmdCopyBuffer(cmd_get(b, handle).cb, b.buffers.items[src].buffer, b.buffers.items[dst].buffer, 1, &region)
 }
 
@@ -1062,8 +1100,9 @@ rhi_cmd_copy_backbuffer :: proc(b: ^Backend, handle: rhi.CommandList, dst: rhi.B
     pImageMemoryBarriers    = &barrier,
   }
   vk.CmdPipelineBarrier2(cmd.cb, &dep)
-  pitch := (sc.extent.width * 4 + rhi.BACKBUFFER_PITCH - 1) / rhi.BACKBUFFER_PITCH * rhi.BACKBUFFER_PITCH
+  pitch := rhi.backbuffer_pitch(sc.extent.width)
   region := vk.BufferImageCopy {
+    bufferOffset = copy_target(b, dst, 0),
     bufferRowLength = pitch / 4,
     imageSubresource = {aspectMask = {.COLOR}, layerCount = 1},
     imageExtent = {sc.extent.width, sc.extent.height, 1},
@@ -1118,7 +1157,7 @@ rhi_cmd_barrier :: proc(b: ^Backend, handle: rhi.CommandList, barriers: []rhi.Ba
   // an attachment
   for t, i in discards {
     img := texture_image(b, t)
-    aspect := infer_aspect_mask(img.format)
+    aspect := infer_aspect_mask(FORMATS[img.desc.format])
     images[i] = {img.image, aspect, {.COLOR_ATTACHMENT_WRITE, .SHADER_STORAGE_WRITE}, {.COLOR_ATTACHMENT_OUTPUT, .COMPUTE_SHADER}} if .COLOR in aspect else {img.image, aspect, {.DEPTH_STENCIL_ATTACHMENT_WRITE}, {.EARLY_FRAGMENT_TESTS}}
   }
   image_discards_fill(&dep, images)

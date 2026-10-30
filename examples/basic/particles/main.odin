@@ -1,26 +1,26 @@
 // Compute-driven particle system.
 package main
 
+import "core:fmt"
+import "core:log"
+import "core:math/linalg"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:fmt"
-import "core:log"
-import mu "vendor:microui"
 
 App :: struct {
-  platform:      platform.Platform,
-  scene:         world.World,
-  renderer:      render.Renderer,
-  debug:         debugui.Context,
-  input:         input.State,
-  orbit:         render.Orbit,
-  emitter:       render.EmitterHandle,
-  textures:      [len(TEXTURE_FILES)]render.TextureHandle,
-  emission_rate: f32,
+  platform: platform.Platform,
+  scene:    world.World,
+  renderer: render.Renderer,
+  debug:    debugui.Context,
+  input:    input.State,
+  orbit:    render.Orbit,
+  emitter:  render.EmitterHandle,
+  textures: [len(TEXTURE_FILES)]render.TextureHandle,
 }
 
 TEXTURE_FILES := [?]struct {
@@ -42,7 +42,6 @@ TEXTURE_FILES := [?]struct {
 main :: proc() {
   context.logger = log.create_console_logger()
   app := new(App)
-  app.emission_rate = 200
   if !platform.init(&app.platform, 1280, 720, "Particles") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
@@ -59,16 +58,17 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.renderer.skybox_intensity = 0
   app.orbit = render.make_orbit({0, 5, 7}, {0, 2, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   for file, i in TEXTURE_FILES do app.textures[i] = render.texture_create(&app.renderer, file.data)
 
   app.emitter = render.emitter_create(&app.renderer, render.make_emitter(
     texture           = app.textures[0],
-    emission_rate     = app.emission_rate,
+    emission_rate     = 200,
     initial_velocity  = {0, 3, 0},
     velocity_spread   = 1.5,
     color_start       = {1.0, 0.9, 0.4, 1.0},
@@ -119,7 +119,7 @@ debug_ui :: proc(app: ^App) {
     }
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Emission rate")
-    mu.slider(ctx, &app.emission_rate, 1, 300)
+    mu.slider(ctx, &em.emission_rate, 1, 300)
     mu.label(ctx, "Lifetime")
     mu.slider(ctx, &em.particle_lifetime, 0.1, 10)
     mu.label(ctx, "Size start / end")
@@ -143,5 +143,4 @@ debug_ui :: proc(app: ^App) {
     mu.label(ctx, "Position spread")
     mu.slider(ctx, &em.position_spread, 0, 4)
   }
-  em.emission_rate = app.emission_rate
 }

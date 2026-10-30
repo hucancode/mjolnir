@@ -1,6 +1,10 @@
 // Chain: a blocky dragon on a rope. Grab it and drag; the body follows, the whiskers swing after.
 package main
 
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/geometry"
@@ -8,10 +12,6 @@ import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:log"
-import "core:math"
-import "core:math/linalg"
-import mu "vendor:microui"
 
 MAX_BODY :: 40
 MAX_WHISKER :: 10
@@ -129,15 +129,17 @@ spawn_box :: proc(app: ^App, mesh: render.MeshHandle, material: render.MaterialH
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
+  sun := render.light_create(r, render.make_directional_light())
+  mjolnir.spawn(&app.scene, r, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, r) do return .FAIL
 
   mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -0.01, 0}, scale = 20)
 
   cube := render.mesh_create(r, geometry.make_cube())
   head := render.mesh_create(r, build_head())
-  ink := render.material_create(r, render.make_material(base_color_factor = {0.08, 0.1, 0.12, 1}, roughness_value = 0.6))
-  gold := render.material_create(r, render.make_material(base_color_factor = {0.95, 0.75, 0.2, 1}, metallic_value = 0.6, roughness_value = 0.3))
-  paint := render.material_create(r, render.make_material(roughness_value = 0.5))
+  ink := render.material_create(r, render.make_material(base_color_factor = {0.08, 0.1, 0.12, 1}, roughness_factor = 0.6))
+  gold := render.material_create(r, render.make_material(base_color_factor = {0.95, 0.75, 0.2, 1}, metallic_factor = 0.6, roughness_factor = 0.3))
+  paint := render.material_create(r, render.make_material(roughness_factor = 0.5))
   app.head = spawn_box(app, head, paint)
   for &n in app.body_nodes do n = spawn_box(app, cube, ink)
   for &side in app.whisker_nodes do for &n in side do n = spawn_box(app, cube, gold)
@@ -148,7 +150,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   shape_build(app, start, forward)
 
   app.orbit = render.make_orbit({0, 10, 3}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(r), app.orbit)
   return .READY
 }
 

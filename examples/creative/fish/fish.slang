@@ -4,6 +4,8 @@
 // rippling over the top.
 struct Params {
     uint first;
+    float4 toward_sun;
+    float4 sun_radiance;
 }
 #include "gpu.slang"
 
@@ -85,8 +87,8 @@ float4 fs_main(VertexOut v) : SV_Target0
     float3 color = lerp(hue(h), float3(1.0, 0.7, 0.3), 0.35);
     color *= lerp(1.0, 0.35, step(0.55, frac(v.body.x * 6.0)) * step(0.0, v.body.y));
     color = lerp(color, float3(0.85, 0.88, 0.92), smoothstep(-0.1, -0.5, v.body.y));
-    float sun = max(dot(n, view.sun_direction.xyz), 0.0);
+    float sun = max(dot(n, gpu.params.toward_sun.xyz), 0.0);
     float ripple = 0.5 + 0.5 * sin(v.position.x * 2.3 + view.time * 1.7) * sin(v.position.z * 2.1 - view.time * 1.3);
-    float3 lit = color * (view.sun_radiance.rgb * sun + 0.25) + pow(ripple, 4.0) * 0.5 * max(n.y, 0.0);
+    float3 lit = color * (gpu.params.sun_radiance.rgb * sun + 0.25) + pow(ripple, 4.0) * 0.5 * max(n.y, 0.0);
     return float4(lit, 1.0);
 }

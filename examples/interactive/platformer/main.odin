@@ -2,17 +2,17 @@
 // Art: Pixel Platformer by Kenney (www.kenney.nl, CC0). Physics: vendor:box2d.
 package main
 
+import "core:fmt"
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import b2 "vendor:box2d"
 import "mjolnir"
 import "mjolnir/font"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:fmt"
-import "core:log"
-import "core:math"
-import "core:math/linalg"
-import b2 "vendor:box2d"
 
 LEVEL := [?]string {
   "..........................................................................",
@@ -202,6 +202,8 @@ shutdown :: proc(app: ^App) {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
   tile_sheet := load_sheet(app, #load("assets/kenney_pixel_platformer/Tilemap/tilemap_packed.png"), 20, 9)
   character_sheet := load_sheet(app, #load("assets/kenney_pixel_platformer/Tilemap/tilemap-characters_packed.png"), 9, 3)
@@ -533,9 +535,9 @@ draw :: proc(app: ^App) -> bool {
 
 draw_hud :: proc(app: ^App) {
   white :: [4]u8{255, 255, 255, 255}
-  hud := [?]render.RenderCommand {
-    {shape = render.DrawTextCommand{text = fmt.tprintf("Coins: %d / %d", app.score, app.coin_count), position = {20, 20}, size = 28, color = white}},
-    {shape = render.DrawTextCommand{text = "You made it!" if app.won else "Arrows/WASD run, Space jumps", position = {20, 60}, size = 22, color = white}},
+  hud := [?]render.OverlayCommand {
+    {shape = render.OverlayText{text = fmt.tprintf("Coins: %d / %d", app.score, app.coin_count), position = {20, 20}, size = 28, color = white}},
+    {shape = render.OverlayText{text = "You made it!" if app.won else "Arrows/WASD run, Space jumps", position = {20, 60}, size = 22, color = white}},
   }
   render.stage_overlay(&app.renderer, hud[:], &app.font)
 }

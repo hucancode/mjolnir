@@ -48,7 +48,7 @@ sync_bodies :: proc(w: ^world.World, p: ^physics.World) {
 }
 
 // orbit_drag steers the orbit from a tick of input and places camera on it (render.camera_orbit),
-// unless a consumer captured the mouse: it turns by the mouse movement times speed while a
+// unless a consumer captured the mouse (call it after the UIs that may, e.g. debugui.begin): it turns by the mouse movement times speed while a
 // button of `rotate_with` is held ({} only zooms) and moves a step closer per scroll, keeping
 // pitch short of the poles and distance in range.
 orbit_drag :: proc(

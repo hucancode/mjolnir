@@ -71,7 +71,6 @@ add_wave_clip :: proc(rig: ^animation.Rig) {
   append(&rig.clips, clip)
 }
 
-// draw writes one pose of both figures, the arm above the tail, centered on x.
 draw :: proc(b: ^strings.Builder, x: f32) {
   S :: 30
   for f, row in ([]^Figure{&arm, &tail}) {

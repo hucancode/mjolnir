@@ -1,18 +1,18 @@
 // Point and spot lights, the sun + shadows.
 package main
 
-import "mjolnir"
-import "mjolnir/debugui"
-import "mjolnir/input"
-import "mjolnir/platform"
-import "mjolnir/render"
-import "mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 import mu "vendor:microui"
+import "mjolnir"
+import "mjolnir/debugui"
+import "mjolnir/input"
+import "mjolnir/platform"
+import "mjolnir/render"
+import "mjolnir/world"
 
 App :: struct {
   platform:        platform.Platform,
@@ -24,11 +24,22 @@ App :: struct {
   lights:          [dynamic]MovingLight,
   marker_material: render.MaterialHandle,
   elapsed:         f32,
+  groups:          [LightKind]LightGroup,
+  sun:             render.LightHandle,
+  sun_node:        world.NodeHandle,
+  sun_enabled:     bool,
 }
 
 LightKind :: enum {
   POINT,
   SPOT,
+}
+
+LightGroup :: struct {
+  enabled:   bool,
+  intensity: f32,
+  radius:    f32,
+  cone_deg:  f32,
 }
 
 MovingLight :: struct {
@@ -46,18 +57,6 @@ STARTUP_LIGHTS :: 3
 MARKER_SCALE :: 0.15
 MIN_LIGHT_HEIGHT :: 0.5
 SPOT_TARGET :: [3]f32{0, 0.5, 0}
-
-dir_enabled: bool = true
-dir_intensity: f32 = 1.0
-
-point_enabled: bool = true
-point_intensity: f32 = 25.0
-point_radius: f32 = 20.0
-
-spot_enabled: bool = true
-spot_intensity: f32 = 25.0
-spot_radius: f32 = 20.0
-spot_outer_deg: f32 = 28.0
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -81,7 +80,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({9, 8, 9}, {0, 1, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   app.renderer.ibl_intensity = 0.3
 
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 10.0)
@@ -97,10 +95,12 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .YELLOW), {0, 1.5, 0}, scale = 0.6)
 
-  app.renderer.sun.direction = {-6, -10, -6}
-  app.renderer.sun.shadow_distance = 12
+  app.sun = render.light_create(&app.renderer, render.make_directional_light(shadow_distance = 12))
+  app.sun_node = mjolnir.spawn(&app.scene, &app.renderer, app.sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-6, -10, -6}, [3]f32{0, 1, 0}))
+  app.sun_enabled = true
+  app.groups = {.POINT = {true, 25, 20, 0}, .SPOT = {true, 25, 20, 28}}
 
-  app.marker_material = render.material_create(&app.renderer, render.make_material(emissive_value = 4.0))
+  app.marker_material = render.material_create(&app.renderer, render.make_material(emissive_factor = 4.0))
 
   for i in 0 ..< STARTUP_LIGHTS do spawn_light(app, .SPOT if i == STARTUP_LIGHTS - 1 else .POINT)
   log.info("Lights: P spawns a point light, O a spot light, DELETE removes a random one")
@@ -130,10 +130,9 @@ spawn_light :: proc(app: ^App, kind: LightKind) {
   }
   l.amp.y = min(l.amp.y, l.base.y - MIN_LIGHT_HEIGHT)
   ok: bool
-  l.light, ok = render.light_create(&app.renderer, light_settings(l))
+  l.light, ok = render.light_create(&app.renderer, light_settings(app, l))
   if !ok do return
-  l.node = world.spawn(&app.scene, light_position(l, app.elapsed))
-  render.attach(&app.renderer, l.node, l.light)
+  l.node = mjolnir.spawn(&app.scene, &app.renderer, l.light, light_position(l, app.elapsed))
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, app.marker_material, cast_shadow = false), parent = l.node, scale = MARKER_SCALE)
   append(&app.lights, l)
 }
@@ -163,22 +162,17 @@ light_position :: proc(l: MovingLight, t: f32) -> [3]f32 {
   return l.base + l.amp * [3]f32{math.sin(l.freq.x * t + l.phase.x), math.sin(l.freq.y * t + l.phase.y), math.sin(l.freq.z * t + l.phase.z)}
 }
 
-light_settings :: proc(l: MovingLight) -> render.Light {
-  switch l.kind {
-  case .POINT:
-    return render.make_point_light(l.color, point_intensity, point_radius)
-  case .SPOT:
-    return render.make_spot_light(l.color, spot_intensity, spot_radius, math.to_radians(spot_outer_deg))
-  }
-  return {}
+light_settings :: proc(app: ^App, l: MovingLight) -> render.Light {
+  g := app.groups[l.kind]
+  if l.kind == .SPOT do return render.make_spot_light(l.color, g.intensity, g.radius, math.to_radians(g.cone_deg))
+  return render.make_point_light(l.color, g.intensity, g.radius)
 }
 
 apply_light_settings :: proc(app: ^App) {
-  app.renderer.sun.enabled = dir_enabled
-  app.renderer.sun.intensity = dir_intensity
+  world.set_visible(&app.scene, app.sun_node, app.sun_enabled)
   for l in app.lights {
-    world.set_visible(&app.scene, l.node, point_enabled if l.kind == .POINT else spot_enabled)
-    render.light(&app.renderer, l.light)^ = light_settings(l)
+    world.set_visible(&app.scene, l.node, app.groups[l.kind].enabled)
+    render.light(&app.renderer, l.light)^ = light_settings(app, l)
   }
 }
 
@@ -223,9 +217,10 @@ debug_ui :: proc(app: ^App) {
     if .SUBMIT in mu.button(ctx, "+Point [P]") do spawn_light(app, .POINT)
     if .SUBMIT in mu.button(ctx, "+Spot [O]") do spawn_light(app, .SPOT)
     if .SUBMIT in mu.button(ctx, "Remove [Del]") do remove_random_light(app)
-    light_block(ctx, "Sun light", &dir_enabled, &dir_intensity, 5, nil, nil)
-    light_block(ctx, "Point lights", &point_enabled, &point_intensity, 500, &point_radius, nil)
-    light_block(ctx, "Spot lights", &spot_enabled, &spot_intensity, 500, &spot_radius, &spot_outer_deg)
+    light_block(ctx, "Sun light", &app.sun_enabled, &render.light(&app.renderer, app.sun).intensity, 5, nil, nil)
+    point, spot := &app.groups[.POINT], &app.groups[.SPOT]
+    light_block(ctx, "Point lights", &point.enabled, &point.intensity, 500, &point.radius, nil)
+    light_block(ctx, "Spot lights", &spot.enabled, &spot.intensity, 500, &spot.radius, &spot.cone_deg)
   }
 }
 

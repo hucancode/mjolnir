@@ -1,8 +1,9 @@
-// The interface of a post-process fragment shader (render.post_shader_create): the fullscreen
-// vertex stage, the previous passes' images and the push block. Declare struct Effect, the
-// fields of the shader's params as render.make_custom_effect packs them, before including this
-// (std430: prefer float4 and scalars, a float3 takes 16 bytes unless a float follows it), in the
-// order of the Odin struct. `time` is render's clock and post_resolution() the image size:
+// The interface of a post shader (render.post_shader_create): the fullscreen vertex stage, the
+// previous passes' images and the push block. Declare struct Effect, the fields of the params
+// render.make_effect packs, before including this (std430: prefer float4 and scalars, a float3
+// takes 16 bytes unless a float follows it), in the order of the Odin struct. post_camera() is
+// the camera's View (its matrices, clip planes, and render's clock as .time) and
+// post_resolution() the image size:
 //
 //     struct Effect { float3 tint; float strength; }
 //     #include "post.slang"
@@ -12,19 +13,14 @@
 #include "common.slang"
 
 struct PostPush {
-    // camera clip planes, for effects that linearize depth
-    float camera_near;
-    float camera_far;
+    // the camera whose image this is: views[camera_index]
+    uint camera_index;
     // texture handles; Vulkan indexes with them, wgpu binds them as a group
-    uint normal_texture_index;
-    uint depth_texture_index;
     uint input_image_index;
     uint original_image_index;
     // this pass of the effect, 0 .. passes - 1
     uint pass_index;
-    // render's clock in seconds
-    float time;
-    // offset 32: the effect's params
+    // offset 16: the effect's params
     Effect effect;
 }
 PUSH_BLOCK(PostPush, post_push)
@@ -46,6 +42,9 @@ struct PostIn {
 #endif
 
 Effect effect() { return post_push.effect; }
+
+// The View of the camera whose image this is.
+View post_camera() { return views[post_push.camera_index]; }
 
 // A triangle covering the screen; uv follows framebuffer coordinates.
 [shader("vertex")]
@@ -98,7 +97,7 @@ float3 post_normal(float2 uv)
 #if BACKEND_WGPU
     return normal_texture.SampleLevel(nearest_clamp, uv, 0.0).xyz;
 #else
-    return textures[NonUniformResourceIndex(post_push.normal_texture_index)].SampleLevel(samplers[SAMPLER_NEAREST_CLAMP], uv, 0.0).xyz;
+    return textures[NonUniformResourceIndex(post_camera().images[IMAGE_NORMAL])].SampleLevel(samplers[SAMPLER_NEAREST_CLAMP], uv, 0.0).xyz;
 #endif
 }
 
@@ -111,14 +110,15 @@ float post_depth(float2 uv)
     int2 size = int2(w, h);
     return depth_texture.Load(int3(clamp(int2(uv * float2(size)), int2(0), size - 1), 0));
 #else
-    return textures[NonUniformResourceIndex(post_push.depth_texture_index)].Sample(samplers[SAMPLER_NEAREST_CLAMP], uv).r;
+    return textures[NonUniformResourceIndex(post_camera().images[IMAGE_DEPTH])].Sample(samplers[SAMPLER_NEAREST_CLAMP], uv).r;
 #endif
 }
 
 // Distance along the view axis of a depth from post_depth.
 float linearize_depth(float depth)
 {
-    return post_push.camera_near * post_push.camera_far / (post_push.camera_far - depth * (post_push.camera_far - post_push.camera_near));
+    View camera = post_camera();
+    return camera.near * camera.far / (camera.far - depth * (camera.far - camera.near));
 }
 
 float gaussian_weight(float distance, float sigma)

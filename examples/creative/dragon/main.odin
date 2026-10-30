@@ -169,19 +169,19 @@ draw :: proc(app: ^App) -> bool {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   r := &app.renderer
   if !render.ready(r) do return .WAIT
+  sun := render.light_create(r, render.make_directional_light())
+  mjolnir.spawn(&app.scene, r, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, r) do return .FAIL
 
   mjolnir.spawn(&app.scene, r, render.primitive(r, .CUBE, .GRAY), {0, -0.05, 0}, scale = {24, 0.05, 24})
-  lamp := world.spawn(&app.scene, {0, 4, 0})
-  render.attach(r, lamp, render.light_create(r, render.make_point_light(color = {1, 0.95, 0.85}, intensity = 40, radius = 20)))
+  mjolnir.spawn(&app.scene, r, render.light_create(r, render.make_point_light(color = {1, 0.95, 0.85}, intensity = 40, radius = 20)), {0, 4, 0})
 
   for color, i in PALETTE {
-    app.materials[i] = render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, metallic_value = 0.2, roughness_value = 0.45))
+    app.materials[i] = render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, metallic_factor = 0.2, roughness_factor = 0.45))
   }
   build(app)
 
   app.orbit = {yaw = 0.7, pitch = 0.25, distance = 20, target = {0, 3, 0}}
-  render.camera_orbit(render.main_camera(r), app.orbit)
   return .READY
 }
 
@@ -223,7 +223,7 @@ place :: proc(app: ^App) {
   }
   for p, i in app.pieces {
     x := app.live.pieces[i]
-    world.set_local(&app.scene, p.node, x.position, x.rotation, x.scale)
+    world.set_local(&app.scene, p.node, x)
     world.set_visible(&app.scene, p.node, true)
   }
 }

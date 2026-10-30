@@ -1,8 +1,8 @@
 package render
 
 import "rhi"
-import vulkan "vulkan"
-import wgpu "wgpu"
+@(require) import vulkan "vulkan"
+@(require) import wgpu "wgpu"
 
 // RENDER_BACKEND picks the GPU backend at compile time (-define:RENDER_BACKEND=...): vulkan, the
 // default, or wgpu, which also runs on the web.

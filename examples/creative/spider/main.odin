@@ -6,8 +6,8 @@ import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
 import "mjolnir"
-import "mjolnir/debugui"
 import "mjolnir/animation"
+import "mjolnir/debugui"
 import "mjolnir/gltf"
 import "mjolnir/input"
 import "mjolnir/platform"
@@ -93,18 +93,18 @@ shutdown :: proc(app: ^App) {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 20, 20}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), scale = {GROUND_SIZE, 0.2, GROUND_SIZE})
-  light := world.spawn(&app.scene, {0, 8, 0})
-  render.attach(&app.renderer, light, render.light_create(&app.renderer, render.make_point_light(intensity = 1200, radius = 80)))
+  mjolnir.spawn(&app.scene, &app.renderer, render.light_create(&app.renderer, render.make_point_light(intensity = 1200, radius = 80)), {0, 8, 0})
 
   app.spider_model = gltf.model_create(&app.renderer, #load("assets/spider.glb"))
   app.spider = gltf.instance_create(&app.spider_model, &app.scene, &app.renderer)
-  if len(app.spider.roots) == 0 || len(app.spider.skinned) == 0 do return .FAIL
-  app.spider_root = app.spider.roots[0]
+  if len(app.spider.skinned) == 0 do return .FAIL
+  app.spider_root = app.spider.root
   app.spider_mesh = app.spider.skinned[0].node
   app.rig = app.spider.skinned[0].rig
   rig, animator := &app.spider_model.rigs[app.rig], &app.spider.animators[app.rig]

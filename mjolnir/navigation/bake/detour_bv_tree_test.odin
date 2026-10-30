@@ -239,7 +239,7 @@ test_bv_tree_e2e :: proc(t: ^testing.T) {
     "Failed to init nav mesh: %v",
     init_status,
   )
-  tile_ref, add_status := detour.nav_mesh_add_tile(&nav_mesh, nav_data, 0)
+  _, add_status := detour.nav_mesh_add_tile(&nav_mesh, nav_data, 0)
   testing.expectf(
     t,
     detour.status_succeeded(add_status),
@@ -259,7 +259,7 @@ test_bv_tree_e2e :: proc(t: ^testing.T) {
   )
   filter: detour.Query_Filter
   detour.query_filter_init(&filter)
-  find_status, nearest_poly, nearest_point := detour.find_nearest_poly(
+  find_status, nearest_poly, _ := detour.find_nearest_poly(
     &query,
     test_point,
     extent,

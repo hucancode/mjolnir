@@ -1,6 +1,5 @@
 package physics
 
-import "../containers"
 import "../geometry"
 import "core:math/linalg"
 

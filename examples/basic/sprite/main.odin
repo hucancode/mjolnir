@@ -1,15 +1,15 @@
 // Sprite sheets with frame animation.
 package main
 
+import "core:fmt"
+import "core:log"
+import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:fmt"
-import "core:log"
-import mu "vendor:microui"
 
 SHEET_COLUMNS :: 6
 SHEET_ROWS :: 17
@@ -104,7 +104,6 @@ shutdown :: proc(app: ^App) {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   app.orbit = render.make_orbit({0, 1.5, 6}, {0, 1.5, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   tex, tex_ok := render.texture_create(&app.renderer, #load("assets/Warrior_Sheet-Effect.png"))
   if !tex_ok {

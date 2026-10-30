@@ -1,7 +1,7 @@
 package main
 
-import "mjolnir/render"
 import "mjolnir/geometry"
+import "mjolnir/render"
 
 TRUNK_SEGMENTS :: 24
 TRUNK_STEP :: f32(1) / TRUNK_SEGMENTS

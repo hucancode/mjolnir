@@ -100,6 +100,8 @@ draw :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
 
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .GRAY), {0, -0.05, 0}, scale = {40, 0.1, 40})
@@ -108,7 +110,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   app.model = gltf.model_create(&app.renderer, #load("assets/CesiumMan.glb"))
   app.inst = gltf.instance_create(&app.model, &app.scene, &app.renderer)
-  if len(app.inst.skinned) == 0 || len(app.inst.roots) == 0 do return .FAIL
+  if len(app.inst.skinned) == 0 do return .FAIL
   rig := app.inst.skinned[0].rig
   app.blocks = BLOCKS
   if !ragdoll.init(&app.rag, &app.model.rigs[rig].skeleton, app.blocks[:]) do return .FAIL
@@ -116,7 +118,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   respawn(app)
 
   app.orbit = render.make_orbit({1.2, 1.1, 3.4}, {0, 0.65, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   return .READY
 }
 
@@ -160,9 +161,8 @@ update :: proc(app: ^App, dt: f32) {
   rig := app.inst.skinned[0].rig
   palette := app.inst.animators[rig].palette
   if origin, ok := ragdoll.sync(&app.rag, &app.phys, palette); ok {
-    root := app.inst.roots[0]
-    world.translate(&app.scene, root, origin)
-    world.scale(&app.scene, root, app.rag.scale)
+    world.translate(&app.scene, app.inst.root, origin)
+    world.scale(&app.scene, app.inst.root, app.rag.scale)
     render.stage_bones(&app.renderer, app.inst.bones[rig], palette)
   }
   if app.show do draw_blocks(app)
@@ -197,7 +197,7 @@ drag_part :: proc(app: ^App) {
   if input.mouse_down(&app.input, .LEFT) {
     ray, ok := render.cursor_ray(&app.renderer, app.input.cursor)
     if !ok do return
-    normal := -render.camera_forward(render.main_camera(&app.renderer))
+    normal := geometry.qz(render.main_camera(&app.renderer).rotation)
     if at, hit := geometry.ray_plane_intersection(ray, g.point, normal, 100); hit do physics.joint_anchor(&app.phys, g.joint, at)
     return
   }

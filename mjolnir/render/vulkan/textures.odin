@@ -154,8 +154,7 @@ image_from_desc :: proc(b: ^Backend, desc: rhi.TextureDesc, data: []u8) -> (img:
   if data != nil do usage |= {.TRANSFER_DST, .TRANSFER_SRC}
   // A8 coverage samples as white with alpha = coverage, so shaders multiply every sample with the color
   swizzle := vk.ComponentMapping{r = .ONE, g = .ONE, b = .ONE, a = .R} if desc.format == .A8 else {}
-  extent := vk.Extent2D{desc.extent.x, desc.extent.y}
-  img = image_create(gctx, extent, FORMATS[desc.format], usage, max(desc.mip_levels, 1), cube = desc.cube, layers = max(desc.layers, 1), array = desc.layers > 1, shared = desc.shared, components = swizzle) or_return
+  img = image_create(gctx, desc, usage, swizzle) or_return
   if data != nil {
     if ret = queue_image_write(gctx, &img, raw_data(data), len(data)); ret != .SUCCESS {
       image_destroy(gctx, &img)
@@ -176,6 +175,11 @@ image_from_desc :: proc(b: ^Backend, desc: rhi.TextureDesc, data: []u8) -> (img:
 // texture_destroy destroys handle's texture at once: render retires the handle first.
 texture_destroy :: proc(b: ^Backend, handle: rhi.TextureHandle) {
   image_destroy(&b.gctx, &b.textures[handle])
+}
+
+// texture_desc is what handle's texture was made from (mip_levels and layers at least 1).
+texture_desc :: proc(b: ^Backend, handle: rhi.TextureHandle) -> rhi.TextureDesc {
+  return b.textures[handle].desc
 }
 
 @(private)

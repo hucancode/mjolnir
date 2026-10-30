@@ -29,12 +29,12 @@ Context_State :: struct {
   open:     bool,
   vertices: [dynamic]render.Vertex2D,
   indices:  [dynamic]u32,
-  commands: [dynamic]render.RenderCommand,
+  commands: [dynamic]render.OverlayCommand,
 }
 
 // init prepares the debug UI, laid out in a `reference` frame (the window's size by default,
-// render.window_size), and uploads its atlas to r. Call it once render.ready, before
-// render.setup if the application tears maps down, so the atlas outlives render.teardown.
+// render.window_size), and uploads its atlas to r. Call it once render.ready, and again
+// (after shutdown) after each render.teardown, which frees the atlas.
 init :: proc(self: ^Context, r: ^render.Renderer, reference := [2]f32{}) -> bool {
   mu.init(&self.mu)
   reference := reference if reference != {} else render.window_size(r)
@@ -162,8 +162,8 @@ end :: proc(self: ^Context, r: ^render.Renderer) {
     if last_index == run.first_index do continue
     // indices are relative to the run's first vertex
     for &idx in self.indices[run.first_index:last_index] do idx -= u32(run.first_vertex)
-    append(&self.commands, render.RenderCommand{
-      shape = render.DrawMeshCommand{
+    append(&self.commands, render.OverlayCommand{
+      shape = render.OverlayMesh{
         vertices = self.vertices[run.first_vertex:last_vertex],
         indices = self.indices[run.first_index:last_index],
         texture = self.atlas,

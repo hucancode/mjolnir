@@ -1,16 +1,17 @@
 // Navmesh baking and pathfinding: the agent keeps walking to random goals; right-click to pick one.
 package main
 
+import "core:log"
+import "core:math/linalg"
+import "core:math/rand"
 import "mjolnir"
+import "mjolnir/geometry"
 import "mjolnir/input"
+import nav "mjolnir/navigation"
+import "mjolnir/navigation/bake"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import nav "mjolnir/navigation"
-import "mjolnir/navigation/bake"
-import "core:log"
-import "core:math/rand"
-import "mjolnir/geometry"
 
 GROUND_HALF_SIZE :: 50
 AGENT_SPEED :: 5
@@ -67,8 +68,9 @@ draw :: proc(app: ^App) -> bool {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   app.orbit = render.make_orbit({35, 25, 35}, {0, 0, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)

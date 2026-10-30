@@ -1,5 +1,7 @@
 package render
 
+import "../containers"
+import "core:log"
 // Emitters spawn into the backend's particle ring of MAX_PARTICLES (flush_particles).
 @(private)
 MAX_EMITTERS :: 64
@@ -88,7 +90,7 @@ emitter :: proc(self: ^Renderer, handle: EmitterHandle) -> (^Emitter, bool) #opt
 // emit spawns count particles of emitter once, from slot's transform, on the next frame,
 // whatever its emission_rate (an emitter whose rate is 0 only bursts). A slot removed before
 // then emits nothing.
-emit :: proc(self: ^Renderer, emitter: EmitterHandle, slot: $H, count: u32) {
+emit :: proc(self: ^Renderer, slot: $H, emitter: EmitterHandle, count: u32) {
   if count == 0 do return
   lock(self)
   append(&self.bursts, Burst{emitter = emitter, slot = slot_index(slot), count = count})
@@ -160,4 +162,56 @@ make_force_field :: proc(
     strength         = strength,
     area_of_effect   = area_of_effect,
   }
+}
+
+// Frees the rows of the bursts the last frame emitted and gives the queued ones a row each.
+@(private)
+place_bursts :: proc(self: ^Renderer) {
+  kept := 0
+  for b in self.bursts {
+    if b.row != 0 {
+      containers.slots_free(&self.slots[.EMITTER_PLACEMENTS], b.row)
+      clear_entry(self, .EMITTER_PLACEMENTS, b.row)
+      continue
+    }
+    row, ok := containers.slots_alloc(&self.slots[.EMITTER_PLACEMENTS])
+    if !ok {
+      log.warnf("No room for more than %d placed emitters; the burst is dropped", MAX_EMITTERS - 1)
+      continue
+    }
+    write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[row] = {emitter = b.emitter, node = b.slot, burst = b.count}
+    mark_dirty(self, .EMITTER_PLACEMENTS, int(row))
+    self.bursts[kept] = b
+    self.bursts[kept].row = row
+    kept += 1
+  }
+  resize(&self.bursts, kept)
+}
+
+// Emitter placements take consecutive ranges of the frame's new particles, which take
+// consecutive ring slots after the previous frame's. A placement emits what
+// floor(rate * particle_time) grew by, so it carries no fraction from frame to frame.
+@(private)
+flush_particles :: proc(self: ^Renderer) {
+  place_bursts(self)
+  emitters := write_table(self, .EMITTERS, Emitter)
+  placements := write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[:self.slots[.EMITTER_PLACEMENTS].high_water]
+  p := &self.particle_params
+  p.emit_cursor = (p.emit_cursor + p.emit_total) % MAX_PARTICLES
+  t0, t1 := self.particle_time, self.time
+  p.delta_time = f32(t1 - t0)
+  total: u32
+  for &pl in placements {
+    // a free row reads emitter 0, whose rate is 0
+    rate := f64(max(emitters[pl.emitter].emission_rate, 0))
+    emit := pl.burst if pl.burst != 0 else u32(u64(rate * t1) - u64(rate * t0))
+    pl.emit_first = total
+    total += emit
+  }
+  mark_dirty(self, .EMITTER_PLACEMENTS, 0, len(placements))
+  // a ring slot takes at most one new particle per frame
+  p.emit_total = min(total, MAX_PARTICLES)
+  p.emitter_placement_count = u32(len(placements))
+  p.force_field_placement_count = self.slots[.FORCE_FIELD_PLACEMENTS].high_water
+  p.frame_counter += 1
 }

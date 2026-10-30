@@ -17,7 +17,7 @@ MaterialPass :: enum {
 @(private = "file")
 MATERIAL_PASS_TARGETS := [MaterialPass][]CameraImage {
   .GBUFFER = {.NORMAL, .ALBEDO, .METALLIC_ROUGHNESS, .EMISSIVE},
-  .FORWARD = {.FINAL_IMAGE},
+  .FORWARD = {.LIT},
 }
 
 @(private = "file")
@@ -121,6 +121,15 @@ material_init :: proc(self: ^Renderer) -> bool {
   return true
 }
 
+// Matches the push block of the mesh shaders (shader/mesh.slang).
+@(private = "file")
+MeshPush :: struct {
+  camera_index: u32,
+  // the sun's light and node (Renderer.sun), light 0 for none
+  sun_light:    u32,
+  sun_node:     u32,
+}
+
 // The forward pass draws particles first. A camera draws nothing until a cull has written its
 // lists (Vulkan; WebGPU culls the frame it draws).
 @(private)
@@ -147,9 +156,13 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
     keys[count], pipelines[count] = u32(t), p
     count += 1
   }
-  // every mesh draw reads the camera it draws for
-  camera_index := cam
-  pipeline_bind(self, cmd, pipelines[0], .MESH, f, &camera_index, .MATERIAL)
+  // every mesh draw reads the camera it draws for, and custom materials the sun
+  push := MeshPush{camera_index = cam}
+  if self.sun != 0 {
+    p := write_table(self, .LIGHT_PLACEMENTS, LightPlacement)[self.sun - 1]
+    push.sun_light, push.sun_node = u32(p.light), p.node
+  }
+  pipeline_bind(self, cmd, pipelines[0], .MESH, f, &push, .MATERIAL)
   when BINDLESS {
     ready, slot := camera_ready(self, cam), camera_slot(cam) + f
   } else {

@@ -535,10 +535,6 @@ check_path_validity :: proc(self: ^Crowd, agents: []^Agent) {
 
 @(private = "file")
 update_move_request :: proc(self: ^Crowd, dt: f32) {
-  PATH_MAX_AGENTS :: 8
-  queue: [PATH_MAX_AGENTS]^Agent
-  nqueue := 0
-
   for i in 0..<len(self.agents) {
     ag := &self.agents[i]
     if ag.state == .INVALID do continue

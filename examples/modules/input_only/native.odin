@@ -3,6 +3,6 @@ package main
 
 import "core:fmt"
 
-report :: proc(line: string) {
-  fmt.println(line)
+main :: proc() {
+  fmt.print(run())
 }

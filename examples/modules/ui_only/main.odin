@@ -49,8 +49,6 @@ text :: proc(parent: ui.NodeHandle, s: string, size: f32 = 18, n: ui.Node = {}) 
   return ui.node_create(&gui, n)
 }
 
-// tick lays the panel out for a window of `size` and answers one tick of input; true when its
-// looks changed.
 tick :: proc(s: ^input.State, size: [2]f32) -> bool {
   _, before := ui.update(&gui, size, &face)
   ui.update_input(&gui, s)

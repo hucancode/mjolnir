@@ -1,6 +1,8 @@
 // Ambient occlusion darkening a room's corners and contacts, tuned from a panel.
 package main
 
+import "core:log"
+import "core:math/linalg"
 import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
@@ -8,7 +10,6 @@ import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:log"
 
 App :: struct {
   platform:        platform.Platform,
@@ -17,6 +18,7 @@ App :: struct {
   input:           input.State,
   orbit:           render.Orbit,
   debug:           debugui.Context,
+  sun:             render.LightHandle,
 }
 
 main :: proc() {
@@ -45,15 +47,15 @@ shutdown :: proc(app: ^App) {
 }
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, position: [3]f32, scale: [3]f32 = {1, 1, 1}) -> world.NodeHandle {
-  return mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, color), position, scale)
+  return mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, color), position, scale = scale)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
-  app.renderer.sun.intensity = 0.3
+  app.sun = render.light_create(&app.renderer, render.make_directional_light(intensity = 0.3))
+  mjolnir.spawn(&app.scene, &app.renderer, app.sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   app.orbit = render.make_orbit({5, 4, 5}, {0, 0.8, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   spawn_primitive(app, .CUBE, .GRAY, {0, -0.05, 0}, {8, 0.1, 8})
   spawn_primitive(app, .CUBE, .GRAY, {0, 2, -4}, {8, 4, 0.1})
@@ -95,7 +97,7 @@ debug_ui :: proc(app: ^App) {
     mu.label(ctx, "IBL intensity")
     mu.slider(ctx, &app.renderer.ibl_intensity, 0.0, 2.0)
     mu.label(ctx, "Sun intensity")
-    mu.slider(ctx, &app.renderer.sun.intensity, 0.0, 5.0)
+    mu.slider(ctx, &render.light(&app.renderer, app.sun).intensity, 0.0, 5.0)
     if .SUBMIT in mu.button(ctx, "Reset") do ao^ = render.DEFAULT_AMBIENT_OCCLUSION
   }
 }

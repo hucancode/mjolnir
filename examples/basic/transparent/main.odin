@@ -1,12 +1,13 @@
 // Order-dependent transparency.
 package main
 
+import "core:log"
+import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
-import "core:log"
 
 App :: struct {
   platform: platform.Platform,
@@ -35,12 +36,13 @@ main :: proc() {
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
+  sun := render.light_create(&app.renderer, render.make_directional_light())
+  mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   app.orbit = render.make_orbit({6, 3, 6}, {0, 1, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 6.0)
 
-  red := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.95, 0.15, 0.15, 1}, roughness_value = 0.4))
+  red := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.95, 0.15, 0.15, 1}, roughness_factor = 0.4))
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, red), {0, 1, -2})
 
   glass_colors := [4][4]f32{
