@@ -114,9 +114,9 @@ obb_to_aabb :: #force_inline proc "contextless" (obb: Obb) -> Aabb {
 obb_closest_point :: proc "contextless" (obb: Obb, point: [3]f32) -> [3]f32 {
   d := point - obb.center
   inv_rot := linalg.quaternion_inverse(obb.rotation)
-  local := qmv(inv_rot, d)
+  local := linalg.mul(inv_rot, d)
   clamped := linalg.clamp(local, -obb.half_extents, obb.half_extents)
-  return obb.center + qmv(obb.rotation, clamped)
+  return obb.center + linalg.mul(obb.rotation, clamped)
 }
 
 // overlap_bounds reports whether boxes (amin, amax) and (bmin, bmax) overlap, touching counts;

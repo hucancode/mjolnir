@@ -41,7 +41,7 @@ upload :: proc(self: ^Model, r: ^render.Renderer, file: ^asset.Model) -> bool {
       material := r.builtin_materials[.WHITE] if p.material < 0 else self.materials[p.material]
       mesh := p.mesh
       p.mesh = {}
-      look[j] = {mesh = render.mesh_create(r, mesh) or_return, material = material, cast_shadow = true}
+      look[j] = {mesh = render.mesh_create(r, mesh) or_return, material = material}
     }
   }
   self.lights = make([]render.LightHandle, len(file.lights))

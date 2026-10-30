@@ -5,7 +5,7 @@ import "../geometry"
 import "../containers"
 import "core:log"
 
-// Primitive names a builtin mesh in Renderer.builtin_meshes.
+// Primitive names a builtin mesh (primitive).
 Primitive :: enum {
   CUBE,
   SPHERE,

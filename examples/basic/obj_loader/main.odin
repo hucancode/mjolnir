@@ -106,13 +106,12 @@ show_model :: proc(app: ^App, index: int) {
   radius := max(linalg.length(model.bounds.max - model.bounds.min) * 0.5, 1)
 
   attach_model(app)
-  world.translate(&app.scene, app.display, -center)
+  world.transform(&app.scene, app.display).position = -center
 
   cam_dist := radius
   cam := render.main_camera(&app.renderer)
   cam.projection, cam.near, cam.far = render.PerspectiveProjection{1.2}, max(0.1, cam_dist * 0.01), cam_dist * 5.0
   app.orbit = render.make_orbit({cam_dist, cam_dist * 0.7, cam_dist}, {0, 0, 0})
-  render.camera_orbit(cam, app.orbit)
 }
 
 draw :: proc(app: ^App) -> bool {
@@ -121,7 +120,7 @@ draw :: proc(app: ^App) -> bool {
 
 attach_model :: proc(app: ^App) {
   material := app.wire if app.wireframe else app.material
-  look := render.MeshAttachment{mesh = app.models[app.current].mesh, material = material, cast_shadow = !app.wireframe}
+  look := render.MeshAttachment{mesh = app.models[app.current].mesh, material = material, no_shadow = app.wireframe}
   render.attach(&app.renderer, app.display, look)
 }
 

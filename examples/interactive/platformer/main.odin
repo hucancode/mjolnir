@@ -227,7 +227,7 @@ sprite_look :: proc(app: ^App, sheet: Sheet, frame: u32) -> render.MaterialHandl
 }
 
 spawn_sprite :: proc(app: ^App, look: render.MaterialHandle, position: [3]f32, size: f32 = 1, parent: world.NodeHandle = {}) -> world.NodeHandle {
-  node := mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, look, cast_shadow = false), position, parent = parent, scale = size / 2)
+  node := mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, look, no_shadow = true), position, parent = parent, scale = size / 2)
   return node
 }
 
@@ -507,8 +507,8 @@ animate :: proc(app: ^App) {
 }
 
 place_character :: proc(app: ^App, node: world.NodeHandle, feet: [2]f32, facing: f32) {
-  world.translate(&app.scene, node, {feet.x, feet.y + CHARACTER_SIZE / 2, Z_CHARACTERS})
-  world.scale(&app.scene, node, {facing * CHARACTER_SIZE / 2, CHARACTER_SIZE / 2, 1})
+  world.transform(&app.scene, node).position = {feet.x, feet.y + CHARACTER_SIZE / 2, Z_CHARACTERS}
+  world.transform(&app.scene, node).scale = {facing * CHARACTER_SIZE / 2, CHARACTER_SIZE / 2, 1}
 }
 
 follow_player :: proc(app: ^App) {
@@ -526,7 +526,7 @@ follow_player :: proc(app: ^App) {
   camera := render.main_camera(&app.renderer)
   camera.projection = render.OrthographicProjection{view.y}
   render.camera_look_at(camera, {center.x, center.y, 10}, {center.x, center.y, 0}, {0, 1, 0})
-  world.translate(&app.scene, app.backdrop, {math.round(center.x * PARALLAX * pixels_per_unit) / pixels_per_unit, 0, Z_BACKGROUND})
+  world.transform(&app.scene, app.backdrop).position = {math.round(center.x * PARALLAX * pixels_per_unit) / pixels_per_unit, 0, Z_BACKGROUND}
 }
 
 draw :: proc(app: ^App) -> bool {

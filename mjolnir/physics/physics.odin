@@ -739,7 +739,7 @@ step :: proc(self: ^World, dt: f32) -> (stepped: bool) {
     prepare_ms             = f32(time.duration_milliseconds(prepare_time)),
     finalize_ms            = f32(time.duration_milliseconds(finalize_time)),
     cleanup_ms             = f32(time.duration_milliseconds(cleanup_time)),
-    body_count             = int(self.body_slots.count),
+    body_count             = int(containers.slots_count(&self.body_slots)),
     awake_body_count       = awake_body_count,
     sleeping_body_count    = sleeping_body_count,
     contact_count          = len(self.contacts),

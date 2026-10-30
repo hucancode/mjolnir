@@ -100,9 +100,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   for &v in rand_cylinder.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   rand_sphere_mesh := render.mesh_create(&app.renderer, rand_sphere)
   rand_cylinder_mesh := render.mesh_create(&app.renderer, rand_cylinder)
-  white := app.renderer.builtin_materials[.WHITE]
-  cylinder_look := render.MeshAttachment{mesh = rand_cylinder_mesh, material = white, cast_shadow = true}
-  sphere_look := render.MeshAttachment{mesh = rand_sphere_mesh, material = white, cast_shadow = true}
+  white := render.primitive(&app.renderer, color = .WHITE).material
+  cylinder_look := render.MeshAttachment{mesh = rand_cylinder_mesh, material = white}
+  sphere_look := render.MeshAttachment{mesh = rand_sphere_mesh, material = white}
 
   ground := world.spawn(&app.scene, {0, -0.5, 0})
   ground_body := body_create(app, .staticBody, {0, -0.5, 0})
@@ -139,7 +139,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   log.infof("Created %d Box3D bodies", PIECE_COUNT)
   app.orbit = render.make_orbit({10, 15, 10}, {0, 5, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   return .READY
 }
 

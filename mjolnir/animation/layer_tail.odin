@@ -1,6 +1,5 @@
 package animation
 
-import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
@@ -45,7 +44,7 @@ tail_apply :: proc(pose: Pose, bones: []u32, state: []f32, params: TailParams, d
     s := &tail[i]
     length := pose.lengths[bone]
     parent_world := to_world(pose, pose.positions[parent])
-    up := geometry.qy(pose.rotations[parent])
+    up := linalg.mul(pose.rotations[parent], linalg.VECTOR3F32_Y_AXIS)
     up_world := linalg.normalize((pose.root_world * [4]f32{up.x, up.y, up.z, 0}).xyz)
     tip_world := parent_world + up_world * length
     if fresh do s.position = tip_world

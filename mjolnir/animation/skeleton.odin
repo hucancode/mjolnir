@@ -5,11 +5,6 @@ import "core:math/linalg"
 import "core:slice"
 import "core:strings"
 
-// trs_matrix returns t as a 4x4 matrix.
-trs_matrix :: #force_inline proc "contextless" (t: geometry.Transform) -> matrix[4, 4]f32 {
-  return linalg.matrix4_from_trs(t.position, t.rotation, t.scale)
-}
-
 // Skeleton is the bone hierarchy definition, shared by every instance animated with it.
 // Immutable after skeleton_init. One flat array per attribute, indexed by
 // bone; bone indices match the skin's joint order.

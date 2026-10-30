@@ -80,11 +80,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 1.6, 3.6}, {0, 0.6, 0})
 
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 6.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), scale = 6.0)
 
   app.duck_model = gltf.model_create(&app.renderer, #load("assets/Duck.glb"))
   app.duck = gltf.instance_create(&app.duck_model, &app.scene, &app.renderer)
-  world.translate(&app.scene, app.duck.root, {-2, 0, 0})
+  world.transform(&app.scene, app.duck.root).position = {-2, 0, 0}
 
   app.man_model = gltf.model_create(&app.renderer, #load("assets/CesiumMan.glb"))
   app.man = gltf.instance_create(&app.man_model, &app.scene, &app.renderer)
@@ -92,7 +92,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   app.fox_model = gltf.model_create(&app.renderer, #load("assets/Fox2.glb"))
   app.fox = gltf.instance_create(&app.fox_model, &app.scene, &app.renderer)
-  world.translate(&app.scene, app.fox.root, {2, 0, 0})
+  world.transform(&app.scene, app.fox.root).position = {2, 0, 0}
   if len(app.fox.skinned) == 0 {
     log.error("Fox2.glb has no skinned mesh")
     return .FAIL
@@ -120,7 +120,7 @@ update :: proc(app: ^App, dt: f32) {
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
 
-  world.rotate_by(&app.scene, app.duck.root, dt * math.PI * 0.25)
+  world.transform(&app.scene, app.duck.root).rotation *= linalg.quaternion_angle_axis(dt * math.PI * 0.25, linalg.VECTOR3F32_Y_AXIS)
   app.since += dt
   if app.auto_switch && app.since >= AUTO_SWITCH_SECONDS {
     play_clip(app, (app.clip + 1) % len(app.fox_model.rigs[app.fox_rig].clips))

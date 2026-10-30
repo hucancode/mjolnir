@@ -21,5 +21,5 @@ seat :: proc(parent, child: Face) -> Transform {
   }
   m := frame(-parent.normal, parent.forward) * linalg.transpose(frame(child.normal, child.forward))
   rotation := linalg.normalize(linalg.quaternion_from_matrix3_f32(m))
-  return {parent.position - qmv(rotation, child.position), rotation, {1, 1, 1}}
+  return {parent.position - linalg.mul(rotation, child.position), rotation, {1, 1, 1}}
 }

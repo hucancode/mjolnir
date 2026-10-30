@@ -125,7 +125,7 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
-  for f in ([]^Field{&app.repel, &app.attract}) do world.rotate(&app.scene, f.pivot, app.time * f.spin_speed * f.spin_dir)
+  for f in ([]^Field{&app.repel, &app.attract}) do world.transform(&app.scene, f.pivot).rotation = linalg.quaternion_angle_axis(app.time * f.spin_speed * f.spin_dir, linalg.VECTOR3F32_Y_AXIS)
   mjolnir.update(&app.scene, &app.renderer, dt)
   for f in ([]^Field{&app.repel, &app.attract}) do draw_field_marker(app, f)
 }

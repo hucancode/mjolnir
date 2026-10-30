@@ -161,7 +161,7 @@ update :: proc(app: ^App, dt: f32) {
       b.position.y = limit.y
       b.velocity.y = 0
     }
-    world.translate(&app.scene, b.node, {b.position.x, b.position.y, 0})
+    world.transform(&app.scene, b.node).position = {b.position.x, b.position.y, 0}
   }
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
@@ -171,8 +171,8 @@ spawn :: proc(app: ^App, at: [2]f32) {
     node, ok := world.spawn(&app.scene, {at.x, at.y, 0})
     if !ok do return
     material := app.materials[rand.int_max(len(app.materials))]
-    render.attach(&app.renderer, node, render.primitive(&app.renderer, .QUAD_XY, material, cast_shadow = false))
-    world.scale(&app.scene, node, BUNNY_SIZE)
+    render.attach(&app.renderer, node, render.primitive(&app.renderer, .QUAD_XY, material, no_shadow = true))
+    world.transform(&app.scene, node).scale = BUNNY_SIZE
     append(
       &app.bunnies,
       Bunny{node = node, position = at, velocity = {rand.float32_range(-SPAWN_SPEED, SPAWN_SPEED), rand.float32_range(0, SPAWN_SPEED)}},

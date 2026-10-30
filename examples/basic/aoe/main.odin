@@ -55,7 +55,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   sun := render.light_create(&app.renderer, render.make_directional_light())
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
-  cube := render.primitive(&app.renderer, .CUBE, .CYAN, cast_shadow = false)
+  cube := render.primitive(&app.renderer, .CUBE, .CYAN, no_shadow = true)
   for x in 0 ..< GRID_SIZE do for z in 0 ..< GRID_SIZE {
     position := [3]f32{(f32(x) - GRID_SIZE * 0.5) * GRID_SPACING, 0.5, (f32(z) - GRID_SIZE * 0.5) * GRID_SPACING}
     node := world.spawn(&app.scene, position, scale = CUBE_HALF_EXTENT) or_continue
@@ -63,7 +63,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     physics.body_create(&app.phys, position, collider = physics.BoxCollider{half_extents = CUBE_HALF_EXTENT}, user = world.Handle(node))
   }
   effector_material := render.material_create(&app.renderer, render.make_material(emissive_factor = 5.0))
-  app.effector = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, effector_material, cast_shadow = false), scale = 0.5)
+  app.effector = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, effector_material, no_shadow = true), scale = 0.5)
   app.orbit = render.make_orbit({10, 30, 10}, {0, 0, 0})
   log.infof("AOE test setup complete: %d cubes", GRID_SIZE * GRID_SIZE)
   return .READY
@@ -79,7 +79,7 @@ shutdown :: proc(app: ^App) {
 }
 
 set_cube_half_extent :: proc(app: ^App, body: physics.BodyHandle, half_extent: f32) {
-  if b, ok := physics.body(&app.phys, body); ok do world.scale(&app.scene, world.NodeHandle(b.user), half_extent)
+  if b, ok := physics.body(&app.phys, body); ok do world.transform(&app.scene, world.NodeHandle(b.user)).scale = half_extent
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -97,7 +97,7 @@ update :: proc(app: ^App, dt: f32) {
 
   app.effector_angle += dt * EFFECTOR_ORBIT_SPEED
   effector_position := [3]f32{math.cos(app.effector_angle), 0, math.sin(app.effector_angle)} * EFFECTOR_ORBIT_RADIUS + {0, 1, 0}
-  world.translate(&app.scene, app.effector, effector_position)
+  world.transform(&app.scene, app.effector).position = effector_position
 
   for body in app.affected do set_cube_half_extent(app, body, CUBE_HALF_EXTENT)
   physics.overlap(&app.phys, physics.SphereCollider{radius = EFFECT_RADIUS}, effector_position, linalg.QUATERNIONF32_IDENTITY, &app.affected)

@@ -114,8 +114,6 @@ Renderer :: struct {
   skybox_blur:            f32,
   // scales image-based lighting
   ibl_intensity:          f32,
-  builtin_materials:      [Color]MaterialHandle,
-  builtin_meshes:         [Primitive]MeshHandle,
   using _:               Renderer_State,
 }
 
@@ -123,6 +121,9 @@ Renderer :: struct {
 Renderer_State :: struct {
   // presented to the swapchain (main_camera)
   main_camera:            CameraHandle,
+  // what primitive hands out
+  builtin_materials:      [Color]MaterialHandle,
+  builtin_meshes:         [Primitive]MeshHandle,
   gpu:                    Backend,
   capture:                Capture,
   // render's tables, the one copy; bit r of dirty[t] is region r of tables[t]

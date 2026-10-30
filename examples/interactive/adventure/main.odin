@@ -3,7 +3,6 @@
 // Particle textures: Kenney Particle Pack (www.kenney.nl)
 package main
 
-import sa "core:container/small_array"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -432,7 +431,9 @@ load_assets :: proc(app: ^App) -> bool {
   for data, power in POWER_MODELS do app.powers[power] = gltf.model_create(&app.renderer, data) or_return
   for data, i in DECOR do app.decor[i] = gltf.model_create(&app.renderer, data) or_return
   app.arrow = gltf.model_create(&app.renderer, ARROW_MODEL) or_return
-  sa.append(&render.main_camera(&app.renderer).effects, render.make_effect(render.OutlineEffect{thickness = 1.5}), render.make_effect(render.CrossHatchEffect{hatch_offset_y = 5, lum_thresholds = {0.6, 0.3, 0.15, 0.07}}))
+  effects := &render.main_camera(&app.renderer).effects
+  effects[0] = render.make_effect(render.OutlineEffect{thickness = 1.5})
+  effects[1] = render.make_effect(render.CrossHatchEffect{hatch_offset_y = 5, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
   return true
 }
 
@@ -513,7 +514,7 @@ enter_level :: proc(app: ^App) {
   for &decor, i in app.decor {
     angle := f32(i) / len(DECOR) * math.TAU
     node := world.spawn(&app.scene, (ARENA - 1.2) * [3]f32{math.cos(angle), 0, math.sin(angle)})
-    world.rotate(&app.scene, node, angle * 3)
+    world.transform(&app.scene, node).rotation = linalg.quaternion_angle_axis(angle * 3, linalg.VECTOR3F32_Y_AXIS)
     append(&app.props, gltf.instance_create(&decor, &app.scene, &app.renderer, parent = node))
   }
   for &emitter, effect in app.emitters do emitter = render.emitter_create(&app.renderer, effect_emitter(app, effect))
@@ -523,7 +524,7 @@ enter_level :: proc(app: ^App) {
     mjolnir.spawn(&app.scene, &app.renderer, torch_light, {0, 1, 0}, parent = torch)
   }
   fire_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {1, 0.4, 0.1, 1}, emissive_factor = 1.5))
-  app.fireball = render.primitive(&app.renderer, .SPHERE, fire_material, cast_shadow = false)
+  app.fireball = render.primitive(&app.renderer, .SPHERE, fire_material, no_shadow = true)
 
   hero := HEROES[app.hero]
   start := [3]f32{0, BODY_HALF_HEIGHT, 0}
@@ -555,11 +556,10 @@ enter_level :: proc(app: ^App) {
     append(&app.pickups, Pickup{node = node, instance = instance, power = power, base = base})
   }
   app.orbit = render.make_orbit({0, 6, -10}, {0, 1.5, 0})
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
 }
 
 spawn_ground :: proc(app: ^App) {
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = ARENA * 2)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), scale = ARENA * 2)
   append(&app.bodies, physics.body_create(&app.phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {ARENA, 0.5, ARENA}}))
 }
 
@@ -577,7 +577,7 @@ spawn_enemy :: proc(app: ^App, kind: EnemyKind, position: [3]f32) {
   params.max_speed = foe.speed
   e := Enemy{actor = actor_create(app, &app.foes[kind], foe.attack, at), kind = kind, health = foe.health}
   e.agent = nav.agent_create(&app.crowd, at, params, user = world.Handle(e.model)) or_else {}
-  world.scale(&app.scene, e.model, foe.scale)
+  world.transform(&app.scene, e.model).scale = foe.scale
   for &weapon, i in app.weapons[kind] {
     if len(weapon.nodes) == 0 do continue
     hand := world.find(&app.scene, "handslot.r" if i == 0 else "handslot.l", e.model) or_continue
@@ -590,15 +590,15 @@ effect_emitter :: proc(app: ^App, effect: Effect) -> render.Emitter {
   texture := app.textures[effect]
   switch effect {
   case .HIT:
-    return render.make_emitter(texture, 0, {0, 2, 0}, 3, {1, 0.9, 0.5, 1}, {1, 0.3, 0.1, 0}, 0.4, 0.2, 120, 20, 1)
+    return render.make_emitter(texture, emission_rate = 0, initial_velocity = {0, 2, 0}, velocity_spread = 3, color_start = {1, 0.9, 0.5, 1}, color_end = {1, 0.3, 0.1, 0}, particle_lifetime = 0.4, position_spread = 0.2, size_start = 120, size_end = 20)
   case .DEATH:
-    return render.make_emitter(texture, 0, {0, 1.5, 0}, 1.5, {0.8, 0.8, 0.9, 0.8}, {0.3, 0.3, 0.4, 0}, 1.5, 0.6, 300, 500, -0.2)
+    return render.make_emitter(texture, emission_rate = 0, initial_velocity = {0, 1.5, 0}, velocity_spread = 1.5, color_start = {0.8, 0.8, 0.9, 0.8}, color_end = {0.3, 0.3, 0.4, 0}, particle_lifetime = 1.5, position_spread = 0.6, size_start = 300, size_end = 500, weight = -0.2)
   case .PICKUP:
-    return render.make_emitter(texture, 0, {0, 3, 0}, 2, {0.5, 1, 0.6, 1}, {1, 1, 0.3, 0}, 0.8, 0.4, 150, 30, 0.3)
+    return render.make_emitter(texture, emission_rate = 0, initial_velocity = {0, 3, 0}, velocity_spread = 2, color_start = {0.5, 1, 0.6, 1}, color_end = {1, 1, 0.3, 0}, particle_lifetime = 0.8, position_spread = 0.4, size_start = 150, size_end = 30, weight = 0.3)
   case .MAGIC:
-    return render.make_emitter(texture, 200, {0, 0.3, 0}, 0.4, {1, 0.5, 0.1, 1}, {1, 0.1, 0, 0}, 0.5, 0.15, 240, 40, 0)
+    return render.make_emitter(texture, emission_rate = 200, initial_velocity = {0, 0.3, 0}, velocity_spread = 0.4, color_start = {1, 0.5, 0.1, 1}, color_end = {1, 0.1, 0, 0}, particle_lifetime = 0.5, position_spread = 0.15, size_start = 240, size_end = 40, weight = 0)
   case .FIRE:
-    return render.make_emitter(texture, 40, {0, 1.5, 0}, 0.3, {1, 0.7, 0.3, 1}, {1, 0.2, 0, 0}, 0.8, 0.2, 250, 60, -0.1)
+    return render.make_emitter(texture, emission_rate = 40, initial_velocity = {0, 1.5, 0}, velocity_spread = 0.3, color_start = {1, 0.7, 0.3, 1}, color_end = {1, 0.2, 0, 0}, particle_lifetime = 0.8, position_spread = 0.2, size_start = 250, size_end = 60, weight = -0.1)
   }
   return {}
 }
@@ -671,7 +671,7 @@ update_select :: proc(app: ^App, dt: f32) -> Screen {
     app.hero = (app.hero + step + len(HEROES)) % len(HEROES)
     actor_play(&app.lineup[app.hero], .CHEER)
   }
-  world.translate(&app.scene, app.spotlight, {f32(app.hero) * 2.2 - 4.4, 5, 3})
+  world.transform(&app.scene, app.spotlight).position = {f32(app.hero) * 2.2 - 4.4, 5, 3}
   for &a, i in app.lineup {
     actor_move(&a, false)
     gltf.animate(&a.instance, &app.heroes[i], &app.scene, &app.renderer, dt)
@@ -732,14 +732,14 @@ update_player :: proc(app: ^App, dt: f32) {
   vertical := JUMP_SPEED if jump else physics.body(&app.phys, p.body).velocity.y
   physics.set_velocity(&app.phys, p.body, {velocity.x, vertical, velocity.z})
   if linalg.length(move) > 0 do p.facing = math.atan2(move.x, move.z)
-  world.rotate(&app.scene, p.model, p.facing)
+  world.transform(&app.scene, p.model).rotation = linalg.quaternion_angle_axis(p.facing, linalg.VECTOR3F32_Y_AXIS)
   gltf.animate(&p.instance, &app.heroes[app.hero], &app.scene, &app.renderer, dt)
 }
 
 move_direction :: proc(app: ^App) -> [3]f32 {
   cam := render.main_camera(&app.renderer)
-  forward := -geometry.qz(cam.rotation) * {1, 0, 1}
-  right := geometry.qx(cam.rotation) * {1, 0, 1}
+  forward := -linalg.mul(cam.rotation, linalg.VECTOR3F32_Z_AXIS) * {1, 0, 1}
+  right := linalg.mul(cam.rotation, linalg.VECTOR3F32_X_AXIS) * {1, 0, 1}
   return linalg.normalize0(forward * input.axis(&app.input, .S, .W) + right * input.axis(&app.input, .A, .D))
 }
 
@@ -810,7 +810,7 @@ update_enemies :: proc(app: ^App, dt: f32) {
     agent := nav.agent(&app.crowd, e.agent)
     if e.health > 0 && (e.clip == .ATTACK || linalg.length(agent.velocity.xz) < 0.3) {
       to := feet(app) - agent.position
-      world.rotate(&app.scene, e.model, math.atan2(to.x, to.z))
+      world.transform(&app.scene, e.model).rotation = linalg.quaternion_angle_axis(math.atan2(to.x, to.z), linalg.VECTOR3F32_Y_AXIS)
     }
     actor_move(e, linalg.length(agent.velocity.xz) > 0.3)
     if e.strike > 0 {
@@ -844,7 +844,7 @@ shoot :: proc(app: ^App, shot: Shot, from, direction: [3]f32, damage: f32, frien
     instance = gltf.instance_create(&app.arrow, &app.scene, &app.renderer, parent = node)
   } else {
     render.attach(&app.renderer, node, app.fireball)
-    world.scale(&app.scene, node, 0.25)
+    world.transform(&app.scene, node).scale = 0.25
     trail := mjolnir.spawn(&app.scene, &app.renderer, app.emitters[.MAGIC], parent = node)
   }
   append(&app.projectiles, Projectile{friendly = friendly, node = node, instance = instance, position = from, velocity = direction * 12, damage = damage, life = 2})
@@ -944,7 +944,7 @@ update_projectiles :: proc(app: ^App, dt: f32) {
     shot := &app.projectiles[i]
     shot.life -= dt
     shot.position += shot.velocity * dt
-    world.translate(&app.scene, shot.node, shot.position)
+    world.transform(&app.scene, shot.node).position = shot.position
     hit := false
     if shot.friendly {
       for &e in app.enemies {
@@ -969,8 +969,8 @@ update_projectiles :: proc(app: ^App, dt: f32) {
 update_pickups :: proc(app: ^App, dt: f32) {
   for i := len(app.pickups) - 1; i >= 0; i -= 1 {
     pickup := &app.pickups[i]
-    world.rotate_by(&app.scene, pickup.node, dt * 2)
-    world.translate(&app.scene, pickup.node, pickup.base + {0, 0.2 * math.sin(app.screen.time * 3), 0})
+    world.transform(&app.scene, pickup.node).rotation *= linalg.quaternion_angle_axis(dt * 2, linalg.VECTOR3F32_Y_AXIS)
+    world.transform(&app.scene, pickup.node).position = pickup.base + {0, 0.2 * math.sin(app.screen.time * 3), 0}
     if app.player.health <= 0 || linalg.length(pickup.base.xz - feet(app).xz) > 1.2 do continue
     if pickup.power == .HEAL {
       app.player.health = min(app.player.health + 50, HEROES[app.hero].health)
@@ -1009,7 +1009,7 @@ draw_collider :: proc(app: ^App, body: physics.Body) {
   case physics.SphereCollider:
     render.debug_sphere(&app.renderer, body.position, shape.radius, render.COLOR_RGB[.GREEN])
   case physics.CylinderCollider:
-    up := linalg.quaternion_mul_vector3(body.rotation, [3]f32{0, shape.half_height, 0})
+    up := linalg.mul(body.rotation, [3]f32{0, shape.half_height, 0})
     render.debug_circle(&app.renderer, body.position + up, up, shape.radius, render.COLOR_RGB[.GREEN])
     render.debug_circle(&app.renderer, body.position - up, up, shape.radius, render.COLOR_RGB[.GREEN])
   }

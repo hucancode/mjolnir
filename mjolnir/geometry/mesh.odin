@@ -134,8 +134,8 @@ mesh_transform :: proc(mesh: Mesh, t: Transform) {
   inverse_scale := 1 / t.scale
   for &v in mesh.vertices {
     v.position = transform_point(t, v.position)
-    v.normal = linalg.normalize0(qmv(t.rotation, inverse_scale * v.normal))
-    v.tangent.xyz = linalg.normalize0(qmv(t.rotation, t.scale * v.tangent.xyz))
+    v.normal = linalg.normalize0(linalg.mul(t.rotation, inverse_scale * v.normal))
+    v.tangent.xyz = linalg.normalize0(linalg.mul(t.rotation, t.scale * v.tangent.xyz))
   }
   if t.scale.x * t.scale.y * t.scale.z >= 0 do return
   for i := 0; i + 2 < len(mesh.indices); i += 3 do mesh.indices[i + 1], mesh.indices[i + 2] = mesh.indices[i + 2], mesh.indices[i + 1]

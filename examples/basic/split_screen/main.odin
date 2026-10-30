@@ -50,7 +50,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   sun := render.light_create(&app.renderer, render.make_directional_light())
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   r := &app.renderer
-  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 40)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, no_shadow = true), scale = 40)
   for i in 0 ..< 36 {
     angle := f32(i) * 2.4
     mjolnir.spawn(&app.scene, r, render.primitive(r, .CUBE, render.Color(i % 6 + 3)), {math.cos(angle), 0, math.sin(angle)} * f32(5 + i / 2), scale = {0.8, f32(1 + i % 3), 0.8})
@@ -87,7 +87,7 @@ update :: proc(app: ^App, dt: f32) {
   for &p, i in app.players {
     move := [3]f32{input.axis(&app.input, p.keys[0], p.keys[1]), 0, input.axis(&app.input, p.keys[2], p.keys[3])}
     p.position += move * SPEED * dt
-    world.translate(&app.scene, p.node, p.position)
+    world.transform(&app.scene, p.node).position = p.position
     if camera, ok := render.camera(&app.renderer, p.camera); ok {
       render.camera_lerp_look_at(camera, p.position + {0, 4, 7}, p.position, geometry.exp_smooth(4, dt))
     }

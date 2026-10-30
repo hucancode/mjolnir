@@ -116,9 +116,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.renderer.skybox_intensity = 0
   ground := render.mesh_create(&app.renderer, geometry.make_cylinder(segments = 64, height = 0.2, radius = RADIUS * 3.0))
   dark_mat := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.05, 0.05, 0.06, 1.0}))
-  mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = ground, material = dark_mat}, {0, -0.1, 0})
+  mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = ground, material = dark_mat, no_shadow = true}, {0, -0.1, 0})
   spot := mjolnir.spawn(&app.scene, &app.renderer, render.light_create(&app.renderer, render.make_spot_light({1, 1, 1}, 500, 16.0, math.PI * 0.35)), {0, 10, 0})
-  world.rotate(&app.scene, spot, -math.PI * 0.45, {1, 0, 0})
+  world.transform(&app.scene, spot).rotation = linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
   app.orbit = render.make_orbit({0, 17, 17}, {0, 10, 0})
   for c, i in render.COLOR_RGB {
     app.state.transparent_material[i] = render.material_create(&app.renderer, render.make_material(type = .TRANSPARENT, base_color_factor = {c.r, c.g, c.b, PIECE_ALPHA}))
@@ -171,8 +171,8 @@ refresh_active_visuals :: proc(app: ^App) {
   for c, i in app.state.active_piece.cells {
     col := wrap_col(app.state.active_pos[0] + c[0])
     row := app.state.active_pos[1] + c[1]
-    world.translate(&app.scene, app.state.active_cells[i], cell_world_pos(col, row))
-    world.rotate(&app.scene, app.state.active_cells[i], -col_angle(col), {0, 1, 0})
+    world.transform(&app.scene, app.state.active_cells[i]).position = cell_world_pos(col, row)
+    world.transform(&app.scene, app.state.active_cells[i]).rotation = linalg.quaternion_angle_axis(-col_angle(col), {0, 1, 0})
   }
 }
 
@@ -222,7 +222,7 @@ clear_lines :: proc(app: ^App) -> int {
       for col in 0 ..< GRID_W {
         app.state.board[col][r2] = app.state.board[col][r2 + 1]
         app.state.occupied[col][r2] = app.state.occupied[col][r2 + 1]
-        if app.state.occupied[col][r2] do world.translate(&app.scene, app.state.board[col][r2], cell_world_pos(i32(col), i32(r2)))
+        if app.state.occupied[col][r2] do world.transform(&app.scene, app.state.board[col][r2]).position = cell_world_pos(i32(col), i32(r2))
       }
     }
     for col in 0 ..< GRID_W { app.state.board[col][GRID_H - 1] = {}; app.state.occupied[col][GRID_H - 1] = false }

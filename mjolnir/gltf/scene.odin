@@ -159,7 +159,7 @@ instance_create :: proc(
   for n, i in model.nodes {
     handle := world.spawn(w, name = n.name, parent = instance.root if n.parent < 0 else nodes[n.parent]) or_continue
     nodes[i] = handle
-    world.set_local(w, handle, n.transform)
+    world.transform(w, handle)^ = n.transform
     if n.light != 0 {
       // a light and a mesh share a slot only through a child node
       slot := handle
@@ -217,7 +217,7 @@ pose_joints :: proc(self: ^Instance, w: ^world.World, model: ^Model, rig: RigHan
   locals := make([]geometry.Transform, len(skeleton.parents), context.temp_allocator)
   animation.bone_locals(animator, skeleton, locals)
   for j in self.joints do if j.rig == rig {
-    world.set_local(w, j.node, locals[j.bone])
+    world.transform(w, j.node)^ = locals[j.bone]
   }
 }
 

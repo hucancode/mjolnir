@@ -57,7 +57,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
   r := &app.renderer
-  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 20)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, no_shadow = true), scale = 20)
   app.spinner = mjolnir.spawn(&app.scene, r, render.primitive(r, .CUBE, .MAGENTA), {0, 1, 0})
   render.camera_look_at(render.main_camera(r), {0, 3, 6}, {0, 1, 0})
   fsm.start(&app.screen, SCREENS, app, .TITLE)
@@ -75,10 +75,13 @@ shutdown :: proc(app: ^App) {
 menu :: proc(app: ^App, heading: string, lines: ..string) {
   size := render.window_size(&app.renderer)
   commands := make([dynamic]render.OverlayCommand, context.temp_allocator)
+  width := font.measure(&app.font, heading, 64)
+  for line in lines do width = max(width, font.measure(&app.font, line, 26))
+  left := (size.x - width) / 2
   append(&commands, render.OverlayCommand{shape = render.OverlayQuad{size = size, color = {0, 0, 0, 160}}})
-  append(&commands, render.OverlayCommand{shape = render.OverlayText{text = heading, position = {size.x / 2 - 160, size.y / 3}, size = 64, color = 255}, z_order = 1})
+  append(&commands, render.OverlayCommand{shape = render.OverlayText{text = heading, position = {left, size.y / 3}, size = 64, color = 255}, z_order = 1})
   for line, i in lines {
-    append(&commands, render.OverlayCommand{shape = render.OverlayText{text = line, position = {size.x / 2 - 160, size.y / 3 + 100 + f32(i) * 36}, size = 26, color = {220, 220, 220, 255}}, z_order = 1})
+    append(&commands, render.OverlayCommand{shape = render.OverlayText{text = line, position = {left, size.y / 3 + 100 + f32(i) * 36}, size = 26, color = {220, 220, 220, 255}}, z_order = 1})
   }
   render.stage_overlay(&app.renderer, commands[:], &app.font)
 }
@@ -90,7 +93,7 @@ title :: proc(app: ^App, dt: f32) -> Screen {
 }
 
 play :: proc(app: ^App, dt: f32) -> Screen {
-  world.rotate_by(&app.scene, app.spinner, dt)
+  world.transform(&app.scene, app.spinner).rotation *= linalg.quaternion_angle_axis(dt, linalg.VECTOR3F32_Y_AXIS)
   hud := [?]render.OverlayCommand{{shape = render.OverlayText{text = "Escape: pause", position = {20, 20}, size = 22, color = 255}}}
   render.stage_overlay(&app.renderer, hud[:], &app.font)
   return .PAUSE if input.key_pressed(&app.input, .ESCAPE) else .PLAY

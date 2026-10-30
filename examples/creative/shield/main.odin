@@ -78,7 +78,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   disc_mesh := render.mesh_create(r, geometry.make_circle(segments = DISC_SEGMENTS, radius = DISC_RADIUS))
   render.attach(r, disc, render.MeshAttachment{mesh = disc_mesh, material = app.ring})
   flipped := world.spawn(&app.scene, {0, RADIUS, 0})
-  world.rotate(&app.scene, flipped, math.PI, linalg.VECTOR3F32_X_AXIS)
+  world.transform(&app.scene, flipped).rotation = linalg.quaternion_angle_axis(math.PI, linalg.VECTOR3F32_X_AXIS)
   render.attach(r, flipped, render.MeshAttachment{mesh = disc_mesh, material = app.ring})
 
   return .READY

@@ -134,6 +134,7 @@ Cmd :: struct {
 @(private = "file")
 MAX_GROUPS :: 4
 
+@(private)
 rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
   return {
     indirect_first_instance = b.indirect_first_instance,
@@ -142,6 +143,7 @@ rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
   }
 }
 
+@(private)
 rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, bool) {
   // every buffer takes writes (buffer_write)
   usage := wgpu.BufferUsageFlags{.CopyDst}
@@ -161,6 +163,7 @@ rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, boo
 }
 
 // The last copy of a READBACK buffer that came back (zeros before the first).
+@(private)
 rhi_buffer_read :: proc(b: ^Backend, buffer: rhi.Buffer, offset: int, dst: []u8) -> (frame: u64, ok: bool) {
   rb := b.readbacks[buffer] or_return
   copy(dst, rb.data[offset:])
@@ -168,6 +171,7 @@ rhi_buffer_read :: proc(b: ^Backend, buffer: rhi.Buffer, offset: int, dst: []u8)
 }
 
 // WebGPU has no bindless arrays: callers branch on BINDLESS.
+@(private)
 rhi_bindless_write :: proc(b: ^Backend, array: rhi.BindlessArray, index: u32, resource: rhi.BindResource) {
   log.errorf("WebGPU has no bindless arrays")
 }
@@ -219,6 +223,7 @@ readback_free :: proc(b: ^Backend, handle: rhi.Buffer) {
 
 // WebGPU keeps a released buffer alive for work already submitted. A READBACK buffer's ring
 // goes with it, once no entry maps.
+@(private)
 rhi_buffer_retire :: proc(b: ^Backend, buffer: rhi.Buffer) {
   if buffer == 0 do return
   if buffer in b.readbacks {
@@ -231,6 +236,7 @@ rhi_buffer_retire :: proc(b: ^Backend, buffer: rhi.Buffer) {
   rhi.pool_release(&b.buffers, u32(buffer))
 }
 
+@(private)
 rhi_buffer_write :: proc(b: ^Backend, buffer: rhi.Buffer, offset: int, data: []u8) -> bool {
   if len(data) == 0 do return true
   // WriteBuffer takes 4-byte multiples
@@ -268,6 +274,7 @@ stage_flags :: proc(stages: bit_set[rhi.ShaderStage]) -> (flags: wgpu.ShaderStag
   return
 }
 
+@(private)
 rhi_bind_layout_create :: proc(b: ^Backend, desc: rhi.BindLayoutDesc) -> (rhi.BindLayout, bool) {
   entries := make([]wgpu.BindGroupLayoutEntry, len(desc.entries), context.temp_allocator)
   for e, i in desc.entries {
@@ -291,6 +298,7 @@ rhi_bind_layout_create :: proc(b: ^Backend, desc: rhi.BindLayoutDesc) -> (rhi.Bi
   return rhi.BindLayout(slot), true
 }
 
+@(private)
 rhi_bind_group_create :: proc(b: ^Backend, desc: rhi.BindGroupDesc) -> (rhi.BindGroup, bool) {
   entries := make([]wgpu.BindGroupEntry, len(desc.resources), context.temp_allocator)
   slot := rhi.pool_take(&b.groups, {})
@@ -329,6 +337,7 @@ rhi_bind_group_create :: proc(b: ^Backend, desc: rhi.BindGroupDesc) -> (rhi.Bind
   return rhi.BindGroup(slot), true
 }
 
+@(private)
 rhi_bind_group_retire :: proc(b: ^Backend, handle: rhi.BindGroup) {
   if handle == 0 do return
   group := &b.groups.items[handle]
@@ -356,6 +365,7 @@ pipeline_layout_make :: proc(b: ^Backend, desc: rhi.PipelineLayoutDesc) -> (wgpu
   return layout, push_set
 }
 
+@(private)
 rhi_compute_pipeline_create :: proc(b: ^Backend, desc: rhi.ComputePipelineDesc) -> (rhi.Pipeline, bool) {
   module := shader_module(b, string(desc.shader))
   defer wgpu.ShaderModuleRelease(module)
@@ -400,6 +410,7 @@ COMPARE_FUNCTIONS := [rhi.CompareOp]wgpu.CompareFunction {
   .GREATER_EQUAL = .GreaterEqual,
 }
 
+@(private)
 rhi_graphics_pipeline_create :: proc(b: ^Backend, desc: rhi.GraphicsPipelineDesc) -> (rhi.Pipeline, bool) {
   module := shader_module(b, string(desc.shader))
   defer wgpu.ShaderModuleRelease(module)
@@ -474,6 +485,7 @@ rhi_graphics_pipeline_create :: proc(b: ^Backend, desc: rhi.GraphicsPipelineDesc
   return rhi.Pipeline(rhi.pool_take(&b.pipelines, Pipeline{render = pipeline, push_set = push_set})), true
 }
 
+@(private)
 rhi_pipeline_retire :: proc(b: ^Backend, handle: rhi.Pipeline) {
   if handle == 0 do return
   p := &b.pipelines.items[handle]
@@ -483,10 +495,12 @@ rhi_pipeline_retire :: proc(b: ^Backend, handle: rhi.Pipeline) {
 }
 
 // Queue order is the only sync: no frame slot to wait for.
+@(private)
 rhi_frame_wait :: proc(b: ^Backend) -> bool {
   return b.up
 }
 
+@(private)
 rhi_frame_begin :: proc(b: ^Backend, framebuffer_size: [2]u32) -> rhi.FrameStatus {
   if !b.up do return .ERROR
   events_process(b)
@@ -511,6 +525,7 @@ rhi_frame_begin :: proc(b: ^Backend, framebuffer_size: [2]u32) -> rhi.FrameStatu
 
 // Submits the finished lists in order on the one queue; waits are already satisfied by it. The
 // uniforms written so far go first.
+@(private)
 rhi_submit :: proc(b: ^Backend, desc: rhi.SubmitDesc) -> rhi.SyncPoint {
   cmds, queue := desc.cmds, desc.queue
   if b.uniform_cursor > b.flushed {
@@ -537,6 +552,7 @@ rhi_submit :: proc(b: ^Backend, desc: rhi.SubmitDesc) -> rhi.SyncPoint {
   return {queue = queue}
 }
 
+@(private)
 rhi_frame_present :: proc(b: ^Backend) -> rhi.FrameStatus {
   wgpu.SurfacePresent(b.surface)
   wgpu.TextureViewRelease(b.surface_output)
@@ -548,11 +564,13 @@ rhi_frame_present :: proc(b: ^Backend) -> rhi.FrameStatus {
 }
 
 // Caps.timestamps is false: no scope is timed.
+@(private)
 rhi_frame_timings :: proc(b: ^Backend) -> []rhi.Timing {
   return nil
 }
 
 // One queue and one recording thread: `thread` is always 0.
+@(private)
 rhi_cmd_begin :: proc(b: ^Backend, queue: rhi.Queue, thread: u32) -> rhi.CommandList {
   for &c, i in b.cmds do if c.encoder == nil {
     c.encoder = wgpu.DeviceCreateCommandEncoder(b.device)
@@ -561,12 +579,14 @@ rhi_cmd_begin :: proc(b: ^Backend, queue: rhi.Queue, thread: u32) -> rhi.Command
   panic("more than MAX_CMDS command lists at once")
 }
 
+@(private)
 rhi_cmd_end :: proc(b: ^Backend, cmd: rhi.CommandList) {
   state := &b.cmds[cmd]
   state.finished = wgpu.CommandEncoderFinish(state.encoder)
 }
 
 // QueueWriteBuffer lands writes before the next submission on its own.
+@(private)
 rhi_cmd_flush_uploads :: proc(b: ^Backend, cmd: rhi.CommandList) {}
 
 @(private = "file")
@@ -582,6 +602,7 @@ LOAD_OPS := [rhi.LoadOp]wgpu.LoadOp {
   .DONT_CARE = .Clear,
 }
 
+@(private)
 rhi_cmd_begin_pass :: proc(b: ^Backend, cmd: rhi.CommandList, desc: rhi.PassDesc) {
   state := &b.cmds[cmd]
   colors := make([]wgpu.RenderPassColorAttachment, len(desc.colors), context.temp_allocator)
@@ -609,6 +630,7 @@ rhi_cmd_begin_pass :: proc(b: ^Backend, cmd: rhi.CommandList, desc: rhi.PassDesc
   state.pipeline, state.groups = 0, {}
 }
 
+@(private)
 rhi_cmd_end_pass :: proc(b: ^Backend, cmd: rhi.CommandList) {
   state := &b.cmds[cmd]
   wgpu.RenderPassEncoderEnd(state.render)
@@ -616,12 +638,14 @@ rhi_cmd_end_pass :: proc(b: ^Backend, cmd: rhi.CommandList) {
   state.render = nil
 }
 
+@(private)
 rhi_cmd_begin_compute :: proc(b: ^Backend, cmd: rhi.CommandList) {
   state := &b.cmds[cmd]
   state.compute = wgpu.CommandEncoderBeginComputePass(state.encoder)
   state.pipeline, state.groups = 0, {}
 }
 
+@(private)
 rhi_cmd_end_compute :: proc(b: ^Backend, cmd: rhi.CommandList) {
   state := &b.cmds[cmd]
   wgpu.ComputePassEncoderEnd(state.compute)
@@ -629,6 +653,7 @@ rhi_cmd_end_compute :: proc(b: ^Backend, cmd: rhi.CommandList) {
   state.compute = nil
 }
 
+@(private)
 rhi_cmd_bind_pipeline :: proc(b: ^Backend, cmd: rhi.CommandList, pipeline: rhi.Pipeline) {
   state := &b.cmds[cmd]
   if state.pipeline == pipeline do return
@@ -641,6 +666,7 @@ rhi_cmd_bind_pipeline :: proc(b: ^Backend, cmd: rhi.CommandList, pipeline: rhi.P
   }
 }
 
+@(private)
 rhi_cmd_bind_group :: proc(b: ^Backend, cmd: rhi.CommandList, set: u32, group: rhi.BindGroup) {
   state := &b.cmds[cmd]
   if state.groups[set] == group do return
@@ -654,6 +680,7 @@ rhi_cmd_bind_group :: proc(b: ^Backend, cmd: rhi.CommandList, set: u32, group: r
 }
 
 // A debug group on the pass open, else on the encoder; it closes where it opened.
+@(private)
 rhi_cmd_label_begin :: proc(b: ^Backend, cmd: rhi.CommandList, name: string) {
   state := &b.cmds[cmd]
   if state.render != nil {
@@ -665,6 +692,7 @@ rhi_cmd_label_begin :: proc(b: ^Backend, cmd: rhi.CommandList, name: string) {
   }
 }
 
+@(private)
 rhi_cmd_label_end :: proc(b: ^Backend, cmd: rhi.CommandList) {
   state := &b.cmds[cmd]
   if state.render != nil {
@@ -677,9 +705,11 @@ rhi_cmd_label_end :: proc(b: ^Backend, cmd: rhi.CommandList) {
 }
 
 // WebGPU has no bindless arrays.
+@(private)
 rhi_cmd_bind_bindless :: proc(b: ^Backend, cmd: rhi.CommandList) {}
 
 // Writes data to the next entry of the uniform ring and binds the push group at its offset.
+@(private)
 rhi_cmd_push :: proc(b: ^Backend, cmd: rhi.CommandList, data: rawptr, size: u32) {
   state := &b.cmds[cmd]
   assert(size <= UNIFORM_ALIGNMENT)
@@ -696,36 +726,43 @@ rhi_cmd_push :: proc(b: ^Backend, cmd: rhi.CommandList, data: rawptr, size: u32)
   }
 }
 
+@(private)
 rhi_cmd_set_scissor :: proc(b: ^Backend, cmd: rhi.CommandList, x, y, w, h: u32) {
   wgpu.RenderPassEncoderSetScissorRect(b.cmds[cmd].render, x, y, w, h)
 }
 
+@(private)
 rhi_cmd_set_viewport :: proc(b: ^Backend, cmd: rhi.CommandList, x, y, w, h: u32) {
   wgpu.RenderPassEncoderSetViewport(b.cmds[cmd].render, f32(x), f32(y), f32(w), f32(h), 0, 1)
 }
 
+@(private)
 rhi_cmd_bind_vertex :: proc(b: ^Backend, cmd: rhi.CommandList, slot: u32, buffer: rhi.Buffer, offset: int) {
   state := &b.cmds[cmd]
   buf := b.buffers.items[buffer]
   wgpu.RenderPassEncoderSetVertexBuffer(state.render, slot, buf, u64(offset), wgpu.BufferGetSize(buf) - u64(offset))
 }
 
+@(private)
 rhi_cmd_bind_index :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset: int) {
   state := &b.cmds[cmd]
   buf := b.buffers.items[buffer]
   wgpu.RenderPassEncoderSetIndexBuffer(state.render, buf, .Uint32, u64(offset), wgpu.BufferGetSize(buf) - u64(offset))
 }
 
+@(private)
 rhi_cmd_draw :: proc(b: ^Backend, cmd: rhi.CommandList, vertex_count, instance_count, first_vertex, first_instance: u32) {
   wgpu.RenderPassEncoderDraw(b.cmds[cmd].render, vertex_count, instance_count, first_vertex, first_instance)
 }
 
+@(private)
 rhi_cmd_draw_indexed :: proc(b: ^Backend, cmd: rhi.CommandList, index_count, instance_count, first_index: u32, vertex_offset: i32, first_instance: u32) {
   wgpu.RenderPassEncoderDrawIndexed(b.cmds[cmd].render, index_count, instance_count, first_index, vertex_offset, first_instance)
 }
 
 // A draw each: render's commands are 5 words apart, and a non-indexed multi-draw reads them
 // 4 words apart.
+@(private)
 rhi_cmd_draw_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset: int, draw_count, stride: u32) {
   render, buf := b.cmds[cmd].render, b.buffers.items[buffer]
   for i in 0 ..< draw_count do wgpu.RenderPassEncoderDrawIndirect(render, buf, u64(offset) + u64(i) * u64(stride))
@@ -733,6 +770,7 @@ rhi_cmd_draw_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buf
 
 // Natively consecutive commands are one multi-draw (wgpu-native has it on every adapter, in
 // hardware or not); the web, or commands apart, take a draw each.
+@(private)
 rhi_cmd_draw_indexed_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset: int, draw_count, stride: u32) {
   render, buf := b.cmds[cmd].render, b.buffers.items[buffer]
   when ODIN_OS != .JS {
@@ -745,6 +783,7 @@ rhi_cmd_draw_indexed_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer:
 }
 
 // Caps.multi_draw_indirect_count is false: callers branch on it.
+@(private)
 rhi_cmd_draw_indexed_indirect_count :: proc(
   b: ^Backend,
   cmd: rhi.CommandList,
@@ -757,20 +796,24 @@ rhi_cmd_draw_indexed_indirect_count :: proc(
   log.errorf("WebGPU has no indirect count draws (Caps.multi_draw_indirect_count)")
 }
 
+@(private)
 rhi_cmd_dispatch :: proc(b: ^Backend, cmd: rhi.CommandList, x, y, z: u32) {
   wgpu.ComputePassEncoderDispatchWorkgroups(b.cmds[cmd].compute, x, y, z)
 }
 
+@(private)
 rhi_cmd_dispatch_indirect :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset: int) {
   wgpu.ComputePassEncoderDispatchWorkgroupsIndirect(b.cmds[cmd].compute, b.buffers.items[buffer], u64(offset))
 }
 
 // Outside any pass; zeroes the range (WebGPU fills nothing else).
+@(private)
 rhi_cmd_fill_buffer :: proc(b: ^Backend, cmd: rhi.CommandList, buffer: rhi.Buffer, offset, size: int) {
   wgpu.CommandEncoderClearBuffer(b.cmds[cmd].encoder, b.buffers.items[buffer], u64(offset), u64(size))
 }
 
 // Only where Caps.backbuffer_copy: the surface was configured as a copy source.
+@(private)
 rhi_cmd_copy_backbuffer :: proc(b: ^Backend, cmd: rhi.CommandList, dst: rhi.Buffer) {
   target := copy_target(b, dst)
   if target == nil do return
@@ -795,6 +838,7 @@ copy_target :: proc(b: ^Backend, dst: rhi.Buffer) -> wgpu.Buffer {
   return nil
 }
 
+@(private)
 rhi_cmd_copy_buffer :: proc(b: ^Backend, cmd: rhi.CommandList, src: rhi.Buffer, src_offset: int, dst: rhi.Buffer, dst_offset, size: int) {
   target := copy_target(b, dst)
   if target == nil do return
@@ -809,6 +853,7 @@ rhi_cmd_copy_buffer :: proc(b: ^Backend, cmd: rhi.CommandList, src: rhi.Buffer, 
 }
 
 // WebGPU orders and flushes on its own.
+@(private)
 rhi_cmd_barrier :: proc(b: ^Backend, cmd: rhi.CommandList, barriers: []rhi.Barrier, discards: []rhi.TextureHandle) {}
 
 // Releases what rhi made that shutdown has not: buffers, layouts, groups and pipelines.

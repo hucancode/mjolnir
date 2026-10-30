@@ -2,6 +2,7 @@
 #+private
 package physics
 
+import "../containers"
 import "core:math"
 import "core:math/linalg"
 import "core:testing"
@@ -59,8 +60,8 @@ test_ball_chain_stays_connected :: proc(t: ^testing.T) {
     a := body(&w, j.body_a)
     b := body(&w, j.body_b)
     if j.body_b == {} do continue
-    pa := a.position + linalg.quaternion128_mul_vector3(a.rotation, j.local_a)
-    pb := b.position + linalg.quaternion128_mul_vector3(b.rotation, j.local_b)
+    pa := a.position + linalg.mul(a.rotation, j.local_a)
+    pb := b.position + linalg.mul(b.rotation, j.local_b)
     testing.expect(t, linalg.length(pa - pb) < 0.05, "chain link separated")
   }
 }
@@ -75,7 +76,7 @@ test_hinge_respects_limits :: proc(t: ^testing.T) {
   joint_create(&w, arm, top, HingeJoint{anchor = {0, 5, 0}, axis = {0, 0, 1}, lower = -0.5, upper = 0.5})
   run(&w, 3)
   a := body(&w, arm)
-  forward := linalg.quaternion128_mul_vector3(a.rotation, [3]f32{1, 0, 0})
+  forward := linalg.mul(a.rotation, [3]f32{1, 0, 0})
   angle := math.atan2(forward.y, forward.x)
   testing.expectf(t, angle > -0.6 && angle < 0.05, "hinge angle %v outside limit", angle)
   testing.expect(t, math.abs(forward.z) < 0.05, "hinge left its plane")
@@ -91,7 +92,7 @@ test_cone_limit_holds :: proc(t: ^testing.T) {
   joint_create(&w, arm, top, BallJoint{anchor = {0, 5, 0}, axis = {0, -1, 0}, cone = 0.6})
   set_velocity(&w, arm, {6, 0, 0})
   run(&w, 2)
-  dir := linalg.quaternion128_mul_vector3(body(&w, arm).rotation, [3]f32{0, -1, 0})
+  dir := linalg.mul(body(&w, arm).rotation, [3]f32{0, -1, 0})
   angle := math.acos(clamp(dir.y * -1, -1, 1))
   testing.expectf(t, angle < 0.75, "cone exceeded: %v", angle)
 }
@@ -120,9 +121,9 @@ test_destroy_body_removes_joint :: proc(t: ^testing.T) {
   b := body_create(&w, {0, 4, 0}, collider = SphereCollider{radius = 0.5}, mass = 1)
   joint_create(&w, a, b, BallJoint{anchor = {0, 4.5, 0}})
   joint_create(&w, b, {}, BallJoint{anchor = {0, 4, 0}})
-  testing.expect(t, w.joint_slots.count == 2)
+  testing.expect(t, containers.slots_count(&w.joint_slots) == 2)
   body_destroy(&w, b)
-  testing.expect(t, w.joint_slots.count == 0, "joints of a destroyed body must go")
+  testing.expect(t, containers.slots_count(&w.joint_slots) == 0, "joints of a destroyed body must go")
   step(&w, STEP)
 }
 

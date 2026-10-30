@@ -57,7 +57,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     return .FAIL
   }
 
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 20.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), scale = 20.0)
 
   colors := [?][4]f32{{1.0, 0.45, 0.3, 1}, {0.35, 0.8, 0.45, 1}, {0.35, 0.55, 1.0, 1}, {1.0, 0.85, 0.3, 1}}
   shapes := [?]render.Primitive{.SPHERE, .CUBE, .SPHERE, .CUBE}

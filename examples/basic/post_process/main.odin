@@ -1,7 +1,6 @@
 // Bloom, DoF, fog, tonemap, outline, crosshatch, and a user shader: vignette.
 package main
 
-import sa "core:container/small_array"
 import "core:log"
 import "core:math/linalg"
 import mu "vendor:microui"
@@ -91,7 +90,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   ok: bool
   app.vignette, ok = render.post_shader_create(&app.renderer, #load("vignette." + render.SHADER_EXT))
   if !ok do log.error("Failed to create the vignette shader")
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 30.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), scale = 30.0)
 
   magenta_emit := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.1, 0.8, 1}, emissive_factor = 4.0))
   spawn_primitive(app, .SPHERE, magenta_emit, {-3.0, 1.2, 1.5})
@@ -107,16 +106,16 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   orange := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.4, 0.1, 1}, emissive_factor = 4.0))
   spawn_primitive(app, .CUBE, orange, {-3.0, 1.0, -1.5})
   glass := render.material_create(&app.renderer, render.make_material(.TRANSPARENT, base_color_factor = {0.2, 0.9, 0.4, 0.4}))
-  spawn_primitive(app, .SPHERE, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
+  spawn_primitive(app, .SPHERE, glass, {1.5, 1.5, -3.5}, no_shadow = true)
 
-  for i in 0 ..< 5 do spawn_primitive(app, .CUBE, app.renderer.builtin_materials[.WHITE], {f32(i) * 4.0 - 8.0, 0.5, -7.0})
+  for i in 0 ..< 5 do mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .WHITE), {f32(i) * 4.0 - 8.0, 0.5, -7.0})
 
   mjolnir.spawn(&app.scene, &app.renderer, render.light_create(&app.renderer, render.make_point_light(color = {1.0, 0.5, 0.2}, intensity = 200, radius = 8.0, cast_shadow = false)))
   return .READY
 }
 
-spawn_primitive :: proc(app: ^App, shape: render.Primitive, material: render.MaterialHandle, position: [3]f32, cast_shadow := true) {
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, material, cast_shadow), position)
+spawn_primitive :: proc(app: ^App, shape: render.Primitive, material: render.MaterialHandle, position: [3]f32, no_shadow := false) {
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, material, no_shadow), position)
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -126,18 +125,18 @@ update :: proc(app: ^App, dt: f32) {
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if input.key_pressed(&app.input, .F12) do render.screenshot(&app.renderer, "post_process.png")
   effects := &render.main_camera(&app.renderer).effects
-  sa.clear(effects)
-  if outline_on    do sa.append(effects, render.make_effect(render.OutlineEffect{thickness = outline_thickness}))
-  if fog_on        do sa.append(effects, render.make_effect(render.FogEffect{color = {0.55, 0.6, 0.7}, start = fog_start, end = fog_end, height = fog_height, height_falloff = fog_height_falloff}))
-  if dof_on        do sa.append(effects, render.make_effect(render.DoFEffect{focus_distance = dof_focus, focus_range = dof_range, blur_strength = dof_blur, bokeh_intensity = 0.5}))
-  if bloom_on      do sa.append(effects, render.make_effect(render.BloomEffect{threshold = bloom_threshold, intensity = bloom_intensity, blur_radius = 32.0}))
-  if blur_on       do sa.append(effects, render.make_effect(render.BlurEffect{radius = blur_radius, weight_falloff = 1.0}))
-  if crosshatch_on do sa.append(effects, render.make_effect(render.CrossHatchEffect{hatch_offset_y = 5.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}}))
-  if grayscale_on  do sa.append(effects, render.make_effect(render.GrayscaleEffect{strength = grayscale_strength}))
-  if tonemap_on    do sa.append(effects, render.make_effect(render.ToneMapEffect{exposure = tonemap_exposure, gamma = tonemap_gamma}))
+  effects^ = {}
+  if outline_on    do effects[0] = render.make_effect(render.OutlineEffect{thickness = outline_thickness})
+  if fog_on        do effects[1] = render.make_effect(render.FogEffect{color = {0.55, 0.6, 0.7}, start = fog_start, end = fog_end, height = fog_height, height_falloff = fog_height_falloff})
+  if dof_on        do effects[2] = render.make_effect(render.DoFEffect{focus_distance = dof_focus, focus_range = dof_range, blur_strength = dof_blur, bokeh_intensity = 0.5})
+  if bloom_on      do effects[3] = render.make_effect(render.BloomEffect{threshold = bloom_threshold, intensity = bloom_intensity, blur_radius = 32.0})
+  if blur_on       do effects[4] = render.make_effect(render.BlurEffect{radius = blur_radius, weight_falloff = 1.0})
+  if crosshatch_on do effects[5] = render.make_effect(render.CrossHatchEffect{hatch_offset_y = 5.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
+  if grayscale_on  do effects[6] = render.make_effect(render.GrayscaleEffect{strength = grayscale_strength})
+  if tonemap_on    do effects[7] = render.make_effect(render.ToneMapEffect{exposure = tonemap_exposure, gamma = tonemap_gamma})
   if vignette_on && app.vignette != 0 {
     params := VignetteParams{color = {0.02, 0.0, 0.05}, radius = vignette_radius, softness = vignette_softness, strength = vignette_strength}
-    sa.append(effects, render.make_effect(app.vignette, params))
+    effects[8] = render.make_effect(app.vignette, params)
   }
   mjolnir.update(&app.scene, &app.renderer, dt)
 }

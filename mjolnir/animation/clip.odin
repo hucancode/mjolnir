@@ -167,5 +167,5 @@ clip_player_update :: proc(
   playback_advance(self, clip.duration, delta_time)
   trs := rest
   clip_sample_trs(clip, channel, self.time, &trs)
-  return trs_matrix(trs)
+  return linalg.matrix4_from_trs(trs.position, trs.rotation, trs.scale)
 }

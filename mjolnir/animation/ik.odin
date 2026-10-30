@@ -1,6 +1,5 @@
 package animation
 
-import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
@@ -29,7 +28,7 @@ ik_apply :: proc(pose: Pose, bones: []u32, params: IKParams) {
   ik_solve(pose, bones, target, pole, params.pole_weight, params.iterations, params.tolerance)
 }
 
-// Clamp `dir` so its angular deviation from `fk_rot`'s forward axis (qy)
+// Clamp `dir` so its angular deviation from `fk_rot`'s forward axis (+Y)
 // stays within an elliptical cone defined by max_angle.x (swing toward bone-local X)
 // and max_angle.z (swing toward bone-local Z). Direction is preserved when within bounds.
 @(private = "file")
@@ -41,7 +40,7 @@ apply_swing_constraint :: proc(
 ) -> [3]f32 {
   if max_x < 0 && max_z < 0 do return dir
   inv_fk := linalg.quaternion_inverse(fk_rot)
-  local_dir := geometry.qmv(inv_fk, dir)
+  local_dir := linalg.mul(inv_fk, dir)
   // local_dir.y = cos(swing_angle), (local_dir.x, local_dir.z) is the swing axis direction.
   cos_swing := clamp(local_dir.y, -1.0, 1.0)
   swing_angle := math.acos(cos_swing)
@@ -59,7 +58,7 @@ apply_swing_constraint :: proc(
   new_xz_mag := math.sin(limit)
   new_y := math.cos(limit)
   clamped_local := [3]f32{sxz_x * new_xz_mag, new_y, sxz_z * new_xz_mag}
-  return geometry.qmv(fk_rot, clamped_local)
+  return linalg.mul(fk_rot, clamped_local)
 }
 
 // Clamp twist rotation of `new_rot` around `fk_rot`'s forward axis. Returns a rotation
@@ -152,7 +151,7 @@ ik_solve :: proc(
   frames := make([]quaternion128, chain_length, context.temp_allocator)
   copy(frames, fk_rotations)
   for i in 0 ..< chain_length - 1 {
-    fk_dirs[i] = safe_dir(fk_positions[i + 1] - fk_positions[i], geometry.qy(fk_rotations[i]))
+    fk_dirs[i] = safe_dir(fk_positions[i + 1] - fk_positions[i], linalg.mul(fk_rotations[i], linalg.VECTOR3F32_Y_AXIS))
   }
   root_position := joints[0]
   target_pos := target
@@ -233,7 +232,7 @@ aim_bend_at_pole :: proc(joints: [][3]f32, end, pole: [3]f32, weight: f32) {
     q = linalg.quaternion_between_two_vector3(bend, want)
   }
   q = linalg.quaternion_slerp(linalg.QUATERNIONF32_IDENTITY, q, weight)
-  for i in 1 ..< n - 1 do joints[i] = root + geometry.qmv(q, joints[i] - root)
+  for i in 1 ..< n - 1 do joints[i] = root + linalg.mul(q, joints[i] - root)
 }
 
 // Backward FABRIK pass: walk from the root placing each joint one bone length

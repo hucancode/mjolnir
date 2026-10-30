@@ -161,8 +161,8 @@ update :: proc(app: ^App, dt: f32) {
   rig := app.inst.skinned[0].rig
   palette := app.inst.animators[rig].palette
   if origin, ok := ragdoll.sync(&app.rag, &app.phys, palette); ok {
-    world.translate(&app.scene, app.inst.root, origin)
-    world.scale(&app.scene, app.inst.root, app.rag.scale)
+    world.transform(&app.scene, app.inst.root).position = origin
+    world.transform(&app.scene, app.inst.root).scale = app.rag.scale
     render.stage_bones(&app.renderer, app.inst.bones[rig], palette)
   }
   if app.show do draw_blocks(app)
@@ -197,7 +197,7 @@ drag_part :: proc(app: ^App) {
   if input.mouse_down(&app.input, .LEFT) {
     ray, ok := render.cursor_ray(&app.renderer, app.input.cursor)
     if !ok do return
-    normal := geometry.qz(render.main_camera(&app.renderer).rotation)
+    normal := linalg.mul(render.main_camera(&app.renderer).rotation, linalg.VECTOR3F32_Z_AXIS)
     if at, hit := geometry.ray_plane_intersection(ray, g.point, normal, 100); hit do physics.joint_anchor(&app.phys, g.joint, at)
     return
   }
@@ -229,7 +229,7 @@ draw_blocks :: proc(app: ^App) {
     render.debug_cube(&app.renderer, position, rotation, half, color)
     if app.mode == .SIM && app.blocks[k].parent >= 0 {
       start := [3]f32{0, -(half.y - app.blocks[k].back * app.rag.scale), 0}
-      render.debug_point(&app.renderer, position + linalg.quaternion128_mul_vector3(rotation, start), 0.03 * app.rag.scale, CYAN, 0, true)
+      render.debug_point(&app.renderer, position + linalg.mul(rotation, start), 0.03 * app.rag.scale, CYAN, 0, true)
     }
   }
 }

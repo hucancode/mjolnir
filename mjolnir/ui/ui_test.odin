@@ -2,6 +2,7 @@
 #+private file
 package ui
 
+import "../containers"
 import "../font"
 import "../input"
 import "core:testing"
@@ -321,7 +322,7 @@ test_max_scroll_follows_overflow :: proc(t: ^testing.T) {
 	update(&f.ui, VIEWPORT, &f.font)
 	testing.expect_value(t, max_scroll(&f.ui, list), [2]f32{0, 70})
 	node_destroy(&f.ui, list)
-	testing.expect_value(t, f.ui.slots.count, 0)
+	testing.expect_value(t, containers.slots_count(&f.ui.slots), 0)
 }
 
 @(test)

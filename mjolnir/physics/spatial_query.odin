@@ -113,8 +113,8 @@ raycast_collider :: proc(
   }
   inv_rot := linalg.quaternion_inverse(rotation)
   local := geometry.Ray {
-    origin    = geometry.qmv(inv_rot, ray.origin - position),
-    direction = geometry.qmv(inv_rot, ray.direction),
+    origin    = linalg.mul(inv_rot, ray.origin - position),
+    direction = linalg.mul(inv_rot, ray.direction),
   }
   local_normal: [3]f32
   #partial switch shape in collider {
@@ -124,7 +124,7 @@ raycast_collider :: proc(
     t, local_normal, hit = raycast_local_cylinder(local, shape.radius, shape.half_height)
   }
   if !hit || t > max_dist do return 0, {}, false
-  return t, geometry.qmv(rotation, local_normal), true
+  return t, linalg.mul(rotation, local_normal), true
 }
 
 @(private = "file")

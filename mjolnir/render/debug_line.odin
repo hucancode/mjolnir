@@ -117,7 +117,7 @@ debug_cube :: proc(
   }
   c: [8][3]f32
   for i in 0 ..< 8 {
-    c[i] = linalg.quaternion_mul_vector3(rotation, base[i]) + center
+    c[i] = linalg.mul(rotation, base[i]) + center
   }
   push_box_edges(self, c, color, life, bypass_depth)
 }
@@ -213,9 +213,9 @@ debug_axes :: proc(
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
-  x := linalg.quaternion_mul_vector3(rotation, [3]f32{scale, 0, 0})
-  y := linalg.quaternion_mul_vector3(rotation, [3]f32{0, scale, 0})
-  z := linalg.quaternion_mul_vector3(rotation, [3]f32{0, 0, scale})
+  x := linalg.mul(rotation, [3]f32{scale, 0, 0})
+  y := linalg.mul(rotation, [3]f32{0, scale, 0})
+  z := linalg.mul(rotation, [3]f32{0, 0, scale})
   // pure RGB, unlike the tinted COLOR_RGB[.BLUE]
   segs := [3]DebugLineSegment {
     {a = origin, b = origin + x, color = {1, 0, 0, 1}},

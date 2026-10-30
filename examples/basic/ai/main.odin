@@ -137,7 +137,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = ARENA)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), scale = ARENA)
   bake.append_box(&builder, {0, -0.5, 0}, {ARENA, 0.5, ARENA})
   for wall in WALLS {
     mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .WHITE), wall.center, scale = wall.half_extents)
@@ -214,7 +214,7 @@ respawn_intruder :: proc(app: ^App) {
   }
   delete(app.intruder.path)
   app.intruder.path = nil
-  world.translate(&app.scene, app.intruder.node, app.intruder.position + {0, 0.6, 0})
+  world.transform(&app.scene, app.intruder.node).position = app.intruder.position + {0, 0.6, 0}
 }
 
 random_point :: proc(app: ^App) -> [3]f32 {
@@ -240,7 +240,7 @@ walk_to :: proc(app: ^App, w: ^Walker, goal: [3]f32) {
 
 walk :: proc(app: ^App, w: ^Walker, speed, dt: f32, lift: f32 = HALF_HEIGHT) -> (moving: bool) {
   nav.follow(w.path, &w.next, &w.position, speed * dt, WAYPOINT_REACHED) or_return
-  world.translate(&app.scene, w.node, w.position + {0, lift, 0})
+  world.transform(&app.scene, w.node).position = w.position + {0, lift, 0}
   return true
 }
 

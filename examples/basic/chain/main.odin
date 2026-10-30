@@ -123,7 +123,7 @@ build_head :: proc() -> geometry.Mesh {
 }
 
 spawn_box :: proc(app: ^App, mesh: render.MeshHandle, material: render.MaterialHandle) -> world.NodeHandle {
-  return mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = mesh, material = material, cast_shadow = true})
+  return mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = mesh, material = material})
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -133,7 +133,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   mjolnir.spawn(&app.scene, r, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, r) do return .FAIL
 
-  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -0.01, 0}, scale = 20)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, no_shadow = true), {0, -0.01, 0}, scale = 20)
 
   cube := render.mesh_create(r, geometry.make_cube())
   head := render.mesh_create(r, build_head())
@@ -295,16 +295,12 @@ size :: proc(t: f32) -> f32 {
 place :: proc(app: ^App, node: world.NodeHandle, from, to: [2]f32, y, half_height, half_width: f32) {
   direction := to - from
   mid := (from + to) * 0.5
-  world.translate(&app.scene, node, {mid.x, y, mid.y})
-  world.rotate(&app.scene, node, yaw(direction), [3]f32{0, 1, 0})
-  world.scale(&app.scene, node, {linalg.length(direction) * 0.5 * GAP, half_height, half_width})
+  world.transform(&app.scene, node)^ = {{mid.x, y, mid.y}, linalg.quaternion_angle_axis(yaw(direction), [3]f32{0, 1, 0}), {linalg.length(direction) * 0.5 * GAP, half_height, half_width}}
 }
 
 pose :: proc(app: ^App, heading: [2]f32) {
   head := app.chain.head
-  world.translate(&app.scene, app.head, {head.x, HEAD_Y, head.y})
-  world.rotate(&app.scene, app.head, yaw(heading), [3]f32{0, 1, 0})
-  world.scale(&app.scene, app.head, HEAD_SCALE)
+  world.transform(&app.scene, app.head)^ = {{head.x, HEAD_Y, head.y}, linalg.quaternion_angle_axis(yaw(heading), [3]f32{0, 1, 0}), HEAD_SCALE}
 
   count := len(app.chain.points)
   from := head

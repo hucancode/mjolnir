@@ -143,8 +143,8 @@ obstacle_avoidance_query_prepare :: proc(query: ^Obstacle_Avoidance_Query, pos: 
     cir.dp = linalg.normalize(pb - pa)
     dv := cir.dvel - dvel
 
-    a := geometry.signed_triangle_area_2d(orig, cir.dp, dv)
-    if a < 0.01 {
+    // the triangle (orig, dp, dv) has a signed area below 0.01
+    if geometry.perpendicular_cross_2d(orig, cir.dp, dv) < 0.02 {
       cir.np = {-cir.dp.z, 0, cir.dp.x}
     } else {
       cir.np = {cir.dp.z, 0, -cir.dp.x}

@@ -2,6 +2,7 @@
 package main
 
 import "core:log"
+import "core:math/linalg"
 import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/debugui"
@@ -76,7 +77,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   app.turntable = world.spawn(&app.scene)
   app.mount = world.spawn(&app.scene, parent = app.turntable)
-  world.translate(&app.scene, app.mount, {0, -1, 0})
+  world.transform(&app.scene, app.mount).position = {0, -1, 0}
   show_model(app, 0)
   show_environment(app, 0)
   return .READY
@@ -111,7 +112,7 @@ update :: proc(app: ^App, dt: f32) {
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.renderer.skybox_intensity = skybox_on ? 1 : 0
-  if spinning do world.rotate_by(&app.scene, app.turntable, dt * rotate_speed)
+  if spinning do world.transform(&app.scene, app.turntable).rotation *= linalg.quaternion_angle_axis(dt * rotate_speed, linalg.VECTOR3F32_Y_AXIS)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 

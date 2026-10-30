@@ -72,7 +72,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   for &cube, i in app.cubes {
     cube = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, colors[i % len(colors)]), scale = 0.3)
   }
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -2, 0}, scale = 20.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), {0, -2, 0}, scale = 20.0)
   return .READY
 }
 
@@ -86,7 +86,7 @@ update :: proc(app: ^App, dt: f32) {
     offset := f32(i) / f32(CUBE_COUNT) * total_length
     distance := math.mod_f32(app.time * (total_length / ANIMATION_DURATION) + offset, total_length)
     eased := ease.ease(.Quadratic_In_Out, distance / total_length) * total_length
-    world.translate(&app.scene, cube, geometry.spline_sample_uniform(app.spline, eased))
+    world.transform(&app.scene, cube).position = geometry.spline_sample_uniform(app.spline, eased)
   }
   draw_spline(app)
   mjolnir.update(&app.scene, &app.renderer, dt)

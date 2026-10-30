@@ -78,8 +78,8 @@ World_State :: struct {
   pending_removed: [dynamic]u32,
 }
 
-// node returns a copy of the node behind `handle`; false when stale. Change it with translate,
-// rotate, rotate_by, scale, set_local, set_world_pose, set_parent, set_visible and set_name.
+// node returns a copy of the node behind `handle`; false when stale. Change it with transform,
+// set_world_pose, set_parent, set_visible and set_name.
 node :: proc(self: ^World, handle: NodeHandle) -> (n: Node, ok: bool) #optional_ok {
   p := lookup(self, handle) or_return
   return p^, true

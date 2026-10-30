@@ -381,7 +381,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     }
     orb.node = mjolnir.spawn(&app.scene, r, light, orb_position(orb^, 0))
     material := render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, emissive_factor = 5))
-    mjolnir.spawn(&app.scene, r, render.MeshAttachment{mesh = app.meshes[.SPHERE], material = material}, scale = ORB_SIZE, parent = orb.node)
+    mjolnir.spawn(&app.scene, r, render.MeshAttachment{mesh = app.meshes[.SPHERE], material = material, no_shadow = true}, scale = ORB_SIZE, parent = orb.node)
   }
 
   app.orbit = {yaw = 0.7, pitch = 0.25, distance = 7, target = {0, 2.6, 0}}
@@ -411,7 +411,7 @@ update :: proc(app: ^App, dt: f32) {
   for &v, i in app.current do v += clamp(app.pose[i] - v, -step, step)
   pose(app)
   app.elapsed += dt
-  for orb in app.orbs do world.translate(&app.scene, orb.node, orb_position(orb, app.elapsed))
+  for orb in app.orbs do world.transform(&app.scene, orb.node).position = orb_position(orb, app.elapsed)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
@@ -459,7 +459,7 @@ stand :: proc(app: ^App) {
 recolor :: proc(app: ^App) {
   for p in app.pieces {
     material := app.materials[(p.key ~ app.seed) % len(PALETTE)]
-    render.attach(&app.renderer, p.node, render.MeshAttachment{mesh = app.meshes[p.mesh], material = material, cast_shadow = true})
+    render.attach(&app.renderer, p.node, render.MeshAttachment{mesh = app.meshes[p.mesh], material = material})
   }
 }
 
@@ -527,12 +527,12 @@ part :: proc(app: ^App, name: string) {
 piece :: proc(app: ^App, f: Frame, mesh: Mesh, scale: [3]f32, position: [3]f32 = {}, rotation := linalg.QUATERNIONF32_IDENTITY, next := true) {
   node := world.spawn(&app.scene, parent = app.bones[f.bone].node)
   placed := geometry.transform_mul(f.place, {position, rotation, scale})
-  world.set_local(&app.scene, node, placed)
+  world.transform(&app.scene, node)^ = placed
   key := fmt.tprintf("%s %d", app.part, app.count)
   append(&app.pieces, Piece{node, mesh, hash.fnv32a(transmute([]u8)key)})
   if next do app.count += 1
   material := app.materials[(app.pieces[len(app.pieces) - 1].key ~ app.seed) % len(PALETTE)]
-  render.attach(&app.renderer, node, render.MeshAttachment{mesh = app.meshes[mesh], material = material, cast_shadow = true})
+  render.attach(&app.renderer, node, render.MeshAttachment{mesh = app.meshes[mesh], material = material})
 }
 
 box :: proc(app: ^App, f: Frame, size, position: [3]f32, rotation := linalg.QUATERNIONF32_IDENTITY, mesh := Mesh.BOX) {
@@ -540,7 +540,7 @@ box :: proc(app: ^App, f: Frame, size, position: [3]f32, rotation := linalg.QUAT
 }
 
 cylinder :: proc(app: ^App, f: Frame, radius, height: f32, position: [3]f32 = {}, rotation := linalg.QUATERNIONF32_IDENTITY, mesh := Mesh.CYLINDER, next := true) {
-  center := position + linalg.quaternion128_mul_vector3(rotation, [3]f32{0, height / 2, 0})
+  center := position + linalg.mul(rotation, [3]f32{0, height / 2, 0})
   piece(app, f, mesh, {radius, height, radius}, center, rotation, next)
 }
 
@@ -554,7 +554,7 @@ solve :: proc(app: ^App, channels: []f32, origin: [3]f32 = {}) -> []BonePose {
   for b, i in app.bones {
     position, rotation := origin, linalg.QUATERNIONF32_IDENTITY
     if b.parent >= 0 do position, rotation = app.poses[b.parent].position, app.poses[b.parent].rotation
-    position += linalg.quaternion128_mul_vector3(rotation, b.offset)
+    position += linalg.mul(rotation, b.offset)
     axis: [3]f32
     axis[b.axis] = 1
     rotation *= b.rest * linalg.quaternion_angle_axis_f32(b.sign * channels[b.channel], axis)

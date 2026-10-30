@@ -14,6 +14,6 @@ test_seat_bolts_faces_together :: proc(t: ^testing.T) {
   child := Face{{0, 0.5, 0}, {0, 1, 0}, {1, 0, 0}}
   placed := seat(parent, child)
   testing.expect(t, near(transform_point(placed, child.position), parent.position))
-  testing.expect(t, near(linalg.quaternion128_mul_vector3(placed.rotation, child.normal), -parent.normal))
-  testing.expect(t, near(linalg.quaternion128_mul_vector3(placed.rotation, child.forward), parent.forward))
+  testing.expect(t, near(linalg.mul(placed.rotation, child.normal), -parent.normal))
+  testing.expect(t, near(linalg.mul(placed.rotation, child.forward), parent.forward))
 }

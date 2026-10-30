@@ -74,7 +74,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GREEN, cast_shadow = false), scale = GROUND_HALF_SIZE)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GREEN, no_shadow = true), scale = GROUND_HALF_SIZE)
   bake.append_box(&builder, {0, -0.5, 0}, {GROUND_HALF_SIZE, 0.5, GROUND_HALF_SIZE})
   for box in OBSTACLES {
     mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .RED), box.center, scale = box.half_extents)
@@ -98,7 +98,7 @@ show_navmesh :: proc(app: ^App) {
   positions, indices := nav.debug_triangles(&app.navmesh, context.temp_allocator)
   mesh := render.mesh_create(&app.renderer, geometry.make_mesh_from_triangles(positions, indices))
   material := render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {1.0, 0.8, 0.3, 0.3}))
-  mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = mesh, material = material})
+  mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = mesh, material = material, no_shadow = true})
 }
 
 shutdown :: proc(app: ^App) {
@@ -111,7 +111,7 @@ shutdown :: proc(app: ^App) {
 }
 
 go_to :: proc(app: ^App, goal: [3]f32) {
-  world.translate(&app.scene, app.goal_marker, goal)
+  world.transform(&app.scene, app.goal_marker).position = goal
   path := nav.find_path(&app.navmesh, app.agent_position, goal, MAX_PATH_POINTS)
   if len(path) == 0 do return
   delete(app.path)
@@ -143,7 +143,7 @@ random_goal :: proc(app: ^App) -> [3]f32 {
 
 follow_path :: proc(app: ^App, dt: f32) {
   if !nav.follow(app.path, &app.next_waypoint, &app.agent_position, AGENT_SPEED * dt, WAYPOINT_REACHED) do return
-  world.translate(&app.scene, app.agent, app.agent_position + {0, AGENT_HALF_HEIGHT, 0})
+  world.transform(&app.scene, app.agent).position = app.agent_position + {0, AGENT_HALF_HEIGHT, 0}
 }
 
 draw_path :: proc(app: ^App) {

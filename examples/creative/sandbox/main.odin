@@ -1,7 +1,6 @@
 // Sandbox: the general test. The Warrior holds a Sponza courtyard: a sprite warrior idles, runs and strikes, a city hides behind the walls (occlusion culling), with torches, orbiting shadow casters, physics, particles, a portal and bloom.
 package main
 
-import sa "core:container/small_array"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -11,7 +10,6 @@ import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/animation"
 import "mjolnir/debugui"
-import "mjolnir/geometry"
 import "mjolnir/gltf"
 import "mjolnir/input"
 import "mjolnir/physics"
@@ -145,9 +143,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
 actor :: proc(app: ^App, model: Model, position: [3]f32, scale: f32 = 1, yaw: f32 = 0, clip := "") -> ^Actor {
   a := Actor{model = model, instance = gltf.instance_create(&app.models[model], &app.scene, &app.renderer)}
-  world.translate(&app.scene, a.instance.root, position)
-  world.rotate(&app.scene, a.instance.root, yaw)
-  world.scale(&app.scene, a.instance.root, scale)
+  world.transform(&app.scene, a.instance.root)^ = {position, linalg.quaternion_angle_axis(yaw, linalg.VECTOR3F32_Y_AXIS), scale}
   for &animator, i in a.instance.animators do animation.play(&animator, &app.models[model].rigs[i], clip)
   append(&app.actors, a)
   return &app.actors[len(app.actors) - 1]
@@ -173,7 +169,7 @@ courtyard :: proc(app: ^App) {
   helmet := actor(app, .DAMAGED_HELMET, {-17, 1, MID}, 0.6)
   append(&app.spinners, helmet.instance.root)
   spot := world.spawn(&app.scene, {-17, 7, MID})
-  world.rotate(&app.scene, spot, -math.PI / 2, {1, 0, 0})
+  world.transform(&app.scene, spot).rotation = linalg.quaternion_angle_axis(-math.PI / 2, linalg.VECTOR3F32_X_AXIS)
   render.attach(r, spot, render.light_create(r, render.make_spot_light({1, 0.9, 0.75}, 400, 10, math.PI * 0.12)))
   suzanne := actor(app, .SUZANNE, {0, 9, MID}, 1.4)
   append(&app.spinners, suzanne.instance.root)
@@ -193,7 +189,7 @@ lights :: proc(app: ^App) {
     color := [3]f32{0.5 + 0.5 * math.cos(angle), 0.5 + 0.5 * math.cos(angle + 2.1), 0.5 + 0.5 * math.cos(angle + 4.2)}
     lamp := mjolnir.spawn(&app.scene, r, render.light_create(r, render.make_point_light(color, 60, 10)), {math.cos(angle) * 12, 0, math.sin(angle) * 2}, parent = app.lights_root)
     bulb := render.material_create(r, render.make_material(base_color_factor = {color.r, color.g, color.b, 1}, emissive_factor = 8))
-    mesh(app, render.primitive(r, .SPHERE, bulb, cast_shadow = false), {0, 0.35, 0}, 0.12, lamp)
+    mesh(app, render.primitive(r, .SPHERE, bulb, no_shadow = true), {0, 0.35, 0}, 0.12, lamp)
   }
 }
 
@@ -202,13 +198,13 @@ particles :: proc(app: ^App) {
   flame := render.texture_create(r, #load("assets/particles/flame_03.png"))
   star := render.texture_create(r, #load("assets/particles/star_07.png"))
   spark := render.texture_create(r, #load("assets/particles/light_01.png"))
-  fire := render.emitter_create(r, render.make_emitter(flame, 45, {0, 1.2, 0}, 0.25, {1, 0.7, 0.3, 1}, {1, 0.15, 0, 0}, 0.7, 0.08, 180, 40, -0.1))
+  fire := render.emitter_create(r, render.make_emitter(flame, emission_rate = 45, initial_velocity = {0, 1.2, 0}, velocity_spread = 0.25, color_start = {1, 0.7, 0.3, 1}, color_end = {1, 0.15, 0, 0}, particle_lifetime = 0.7, position_spread = 0.08, size_start = 180, size_end = 40, weight = -0.1))
   for p in TORCHES do mjolnir.spawn(&app.scene, r, fire, p)
-  sparks := render.emitter_create(r, render.make_emitter(spark, 60, {0, 0.4, 0}, 1.2, {0.6, 0.8, 1, 1}, {0.2, 0.4, 1, 0}, 1.4, 0.6, 90, 10, 0.05))
+  sparks := render.emitter_create(r, render.make_emitter(spark, emission_rate = 60, initial_velocity = {0, 0.4, 0}, velocity_spread = 1.2, color_start = {0.6, 0.8, 1, 1}, color_end = {0.2, 0.4, 1, 0}, particle_lifetime = 1.4, position_spread = 0.6, size_start = 90, size_end = 10, weight = 0.05))
   mjolnir.spawn(&app.scene, r, sparks, {0, 1.2, 0}, parent = app.hammer)
-  fountain := render.emitter_create(r, render.make_emitter(star, 140, {0, 5, 0}, 0.6, {1, 0.9, 0.3, 1}, {1, 0.3, 0.6, 0}, 2.6, 0.15, 160, 60, 1))
+  fountain := render.emitter_create(r, render.make_emitter(star, emission_rate = 140, initial_velocity = {0, 5, 0}, velocity_spread = 0.6, color_start = {1, 0.9, 0.3, 1}, color_end = {1, 0.3, 0.6, 0}, particle_lifetime = 2.6, position_spread = 0.15, size_start = 160, size_end = 60))
   mjolnir.spawn(&app.scene, r, fountain, {-8, 0.2, MID})
-  mjolnir.spawn(&app.scene, r, render.force_field_create(r, render.make_force_field(3, 4, 6)), {-8, 3.5, MID})
+  mjolnir.spawn(&app.scene, r, render.force_field_create(r, render.make_force_field(area_of_effect = 3, strength = 4, tangent_strength = 6)), {-8, 3.5, MID})
 }
 
 crates :: proc(app: ^App) {
@@ -232,11 +228,11 @@ portal :: proc(app: ^App) {
   app.portal = render.material_create(r, render.make_material(emissive_factor = 0.2))
   frame := render.primitive(r, .CUBE, .BLACK)
   mesh(app, frame, {-21.6, 3.2, MID}, {0.1, 2.3, 2.3})
-  screen := mesh(app, render.primitive(r, .QUAD_XY, app.portal, cast_shadow = false), {-21.45, 3.2, MID}, {2.1, 2.1, 1})
-  world.rotate(&app.scene, screen, math.PI / 2)
+  screen := mesh(app, render.primitive(r, .QUAD_XY, app.portal, no_shadow = true), {-21.45, 3.2, MID}, {2.1, 2.1, 1})
+  world.transform(&app.scene, screen).rotation = linalg.quaternion_angle_axis(math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   sheet := render.texture_create(r, #load("assets/Warrior_Sheet-Effect.png"))
   app.sprite = render.material_create(r, render.make_material(.SPRITE, albedo_texture = sheet, frame_columns = 6, frame_rows = 17))
-  app.sprite_node = mesh(app, render.primitive(r, .QUAD_XY, app.sprite, cast_shadow = false), {})
+  app.sprite_node = mesh(app, render.primitive(r, .QUAD_XY, app.sprite, no_shadow = true), {})
   app.sprite_x, app.sprite_facing = SPRITE_LANE.x, 1
   sprite_play(app, SPRITE_IDLE, false, 3)
 }
@@ -250,16 +246,14 @@ hidden_city :: proc(app: ^App) {
     for z := f32(-52); z <= 52; z += 2 {
       if abs(x) < 33 && abs(z) < 22 do continue
       height := 0.4 + rand.float32() * 2
-      look := render.primitive(&app.renderer, rand.choice(shapes[:]), rand.choice(colors[:]), cast_shadow = false)
+      look := render.primitive(&app.renderer, rand.choice(shapes[:]), rand.choice(colors[:]), no_shadow = true)
       mesh(app, look, {x, height, z}, {0.7, height, 0.7})
     }
   }
 }
 
 set_effects :: proc(app: ^App) {
-  effects := &render.main_camera(&app.renderer).effects
-  sa.clear(effects)
-  if app.bloom do sa.append(effects, render.make_effect(render.BloomEffect{threshold = 1, intensity = 0.35, blur_radius = 24}))
+  render.main_camera(&app.renderer).effects[0] = render.make_effect(render.BloomEffect{threshold = 1, intensity = 0.35, blur_radius = 24}) if app.bloom else {}
 }
 
 shutdown :: proc(app: ^App) {
@@ -296,10 +290,10 @@ animate :: proc(app: ^App, dt: f32) {
   t := app.time
   hero := &app.actors[app.hero]
   if animation.clip_done(&hero.instance.animators[0], app.hero_intro) do animation.play(&hero.instance.animators[0], &app.models[.WARRIOR].rigs[0], "idle")
-  for node in app.spinners do world.rotate_by(&app.scene, node, dt * 0.6)
-  world.translate(&app.scene, app.hammer, {0, 4.2 + 0.25 * math.sin(t * 1.7), MID})
-  world.rotate(&app.scene, app.hammer, t * 1.3)
-  if app.spin_lights do world.rotate_by(&app.scene, app.lights_root, dt * 0.35)
+  for node in app.spinners do world.transform(&app.scene, node).rotation *= linalg.quaternion_angle_axis(dt * 0.6, linalg.VECTOR3F32_Y_AXIS)
+  world.transform(&app.scene, app.hammer).position = {0, 4.2 + 0.25 * math.sin(t * 1.7), MID}
+  world.transform(&app.scene, app.hammer).rotation = linalg.quaternion_angle_axis(t * 1.3, linalg.VECTOR3F32_Y_AXIS)
+  if app.spin_lights do world.transform(&app.scene, app.lights_root).rotation *= linalg.quaternion_angle_axis(dt * 0.35, linalg.VECTOR3F32_Y_AXIS)
   for h, i in app.torches {
     if l, ok := render.light(r, h); ok do l.intensity = TORCH_INTENSITY * (0.8 + 0.2 * math.sin(t * 13 + f32(i) * 1.7) * math.sin(t * 7.3 + f32(i)))
   }
@@ -307,12 +301,12 @@ animate :: proc(app: ^App, dt: f32) {
   if m, ok := render.material(r, app.portal); ok do m.albedo_texture = render.camera_image(r, app.portal_camera, .FINAL_IMAGE, previous_frame = true)
   elevation := app.sun_angle * math.RAD_PER_DEG
   sun := [3]f32{-math.cos(elevation) * 0.35, -math.sin(elevation), -math.cos(elevation)}
-  world.rotate(&app.scene, app.sun, linalg.quaternion_from_forward_and_up(sun, [3]f32{0, 1, 0}))
+  world.transform(&app.scene, app.sun).rotation = linalg.quaternion_from_forward_and_up(sun, [3]f32{0, 1, 0})
 }
 
 shoot :: proc(app: ^App) {
   cam := render.main_camera(&app.renderer)
-  forward := -geometry.qz(cam.rotation)
+  forward := -linalg.mul(cam.rotation, linalg.VECTOR3F32_Z_AXIS)
   if len(app.balls) == MAX_BALLS {
     physics.destroy(&app.phys, app.balls[0].body)
     world.destroy(&app.scene, app.balls[0].node)
@@ -380,6 +374,6 @@ sprite_step :: proc(app: ^App, dt: f32) {
   }
   clip := app.sprite_clip
   render.material(&app.renderer, app.sprite).frame_index = clip.first + (min(frame, clip.count - 1) if app.sprite_once else frame % clip.count)
-  world.translate(&app.scene, app.sprite_node, {app.sprite_x, SPRITE_HEIGHT / 2, MID})
-  world.scale(&app.scene, app.sprite_node, {app.sprite_facing * SPRITE_HEIGHT * SPRITE_ASPECT / 2, SPRITE_HEIGHT / 2, 1})
+  world.transform(&app.scene, app.sprite_node).position = {app.sprite_x, SPRITE_HEIGHT / 2, MID}
+  world.transform(&app.scene, app.sprite_node).scale = {app.sprite_facing * SPRITE_HEIGHT * SPRITE_ASPECT / 2, SPRITE_HEIGHT / 2, 1}
 }

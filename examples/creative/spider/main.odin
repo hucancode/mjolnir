@@ -155,7 +155,7 @@ ground_body :: proc(app: ^App) {
 walk :: proc(app: ^App, dt: f32) {
   move_body(app, dt)
   app.lift_period = clamp(STRIDE / app.body_speed_max, MIN_PERIOD, MAX_PERIOD)
-  world.translate(&app.scene, app.spider_root, app.body_position)
+  world.transform(&app.scene, app.spider_root).position = app.body_position
   for layer, i in app.legs {
     if leg, ok := animation.layer_params(&app.spider.animators[app.rig], layer, animation.LegParams); ok do tripod_step(app, leg, i)
   }

@@ -1,6 +1,7 @@
 #+private
 package physics
 
+import "../containers"
 import "../geometry"
 import "base:intrinsics"
 import "core:math"
@@ -393,7 +394,7 @@ worker_joint_phase :: proc(
   local_sense: ^bool,
 ) {
   world := data.world
-  if world.joint_slots.count == 0 do return
+  if containers.slots_count(&world.joint_slots) == 0 do return
   if data.thread_id == 0 {
     switch pass {
     case .Warmstart:

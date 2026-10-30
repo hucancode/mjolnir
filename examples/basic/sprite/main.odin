@@ -118,8 +118,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !sprite_ok do return .FAIL
   node, node_ok := world.spawn(&app.scene, {0, 1.5, 0})
   if !node_ok do return .FAIL
-  render.attach(&app.renderer, node, render.primitive(&app.renderer, .QUAD_XY, app.sprite, cast_shadow = false))
-  world.scale(&app.scene, node, {SPRITE_HEIGHT * CELL_ASPECT, SPRITE_HEIGHT, 1})
+  render.attach(&app.renderer, node, render.primitive(&app.renderer, .QUAD_XY, app.sprite, no_shadow = true))
+  world.transform(&app.scene, node).scale = {SPRITE_HEIGHT * CELL_ASPECT, SPRITE_HEIGHT, 1}
 
   return .READY
 }

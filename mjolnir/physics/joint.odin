@@ -145,7 +145,7 @@ to_local :: proc(body: ^Body, point: [3]f32) -> [3]f32 {
 
 @(private)
 to_local_dir :: proc(body: ^Body, dir: [3]f32) -> [3]f32 {
-  return linalg.quaternion128_mul_vector3(linalg.quaternion_inverse(body.rotation), dir)
+  return linalg.mul(linalg.quaternion_inverse(body.rotation), dir)
 }
 
 @(private)
@@ -199,11 +199,6 @@ step_wake_joints :: proc(world: ^World) {
 }
 
 @(private = "file")
-rotate :: #force_inline proc "contextless" (q: quaternion128, v: [3]f32) -> [3]f32 {
-  return linalg.quaternion128_mul_vector3(q, v)
-}
-
-@(private = "file")
 LimitRow :: struct {
   normal: [3]f32, // pushing B along it widens the gap
   gap:    f32, // room left before the limit, negative when past it
@@ -212,8 +207,8 @@ LimitRow :: struct {
 @(private = "file")
 joint_limits :: proc(j: ^JointData, a, b: ^Body) -> (rows: [2]LimitRow, count: int) {
   if !j.limited do return
-  ua := rotate(a.rotation, j.axis_a)
-  ub := rotate(b.rotation, j.axis_b)
+  ua := linalg.mul(a.rotation, j.axis_a)
+  ub := linalg.mul(b.rotation, j.axis_b)
   if !j.hinge {
     n := linalg.cross(ua, ub)
     l := linalg.length(n)
@@ -222,8 +217,8 @@ joint_limits :: proc(j: ^JointData, a, b: ^Body) -> (rows: [2]LimitRow, count: i
     rows[0] = {-n / l, j.cone - theta}
     return rows, 1
   }
-  ra := rotate(a.rotation, j.ref_a)
-  rb := rotate(b.rotation, j.ref_b)
+  ra := linalg.mul(a.rotation, j.ref_a)
+  rb := linalg.mul(b.rotation, j.ref_b)
   phi := math.atan2(linalg.dot(ua, linalg.cross(ra, rb)), linalg.dot(ra, rb))
   rows[0] = {ua, phi - j.lower}
   rows[1] = {-ua, j.upper - phi}
@@ -239,8 +234,8 @@ warmstart_joints :: proc(world: ^World) {
     j := &world.joints[i]
     a, b, ok := joint_bodies(world, j, &world_body)
     if !ok || !joint_active(a, b) do continue
-    pa := a.position + rotate(a.rotation, j.local_a)
-    pb := b.position + rotate(b.rotation, j.local_b)
+    pa := a.position + linalg.mul(a.rotation, j.local_a)
+    pb := b.position + linalg.mul(b.rotation, j.local_b)
     apply_impulse_at_point(a, -j.point_impulse, pa)
     apply_impulse_at_point(b, j.point_impulse, pb)
     apply_angular_impulse(a, -j.angular_impulse)
@@ -271,8 +266,8 @@ solve_joints :: proc(world: ^World, soft: Softness, inv_h: f32, use_bias: bool) 
 
 @(private = "file")
 solve_point :: proc(j: ^JointData, a, b: ^Body, soft: Softness, use_bias: bool) {
-  ra := rotate(a.rotation, j.local_a)
-  rb := rotate(b.rotation, j.local_b)
+  ra := linalg.mul(a.rotation, j.local_a)
+  rb := linalg.mul(b.rotation, j.local_b)
   sa := geometry.skew(ra)
   sb := geometry.skew(rb)
   m := a.inv_mass + b.inv_mass
@@ -301,8 +296,8 @@ solve_point :: proc(j: ^JointData, a, b: ^Body, soft: Softness, use_bias: bool) 
 // Keeps both bodies' hinge axes parallel: two angular rows normal to the axis, solved together.
 @(private = "file")
 solve_hinge_axis :: proc(j: ^JointData, a, b: ^Body, soft: Softness, use_bias: bool) {
-  ua := rotate(a.rotation, j.axis_a)
-  ub := rotate(b.rotation, j.axis_b)
+  ua := linalg.mul(a.rotation, j.axis_a)
+  ub := linalg.mul(b.rotation, j.axis_b)
   t1, t2 := geometry.tangent_basis(ua)
   iw := a.inv_inertia_world + b.inv_inertia_world
   i1 := iw * t1

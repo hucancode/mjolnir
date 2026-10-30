@@ -2,7 +2,6 @@ package render
 
 import "../containers"
 import "../geometry"
-import "core:container/small_array"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -63,8 +62,9 @@ Camera :: struct {
   near, far:         f32,
   ambient_occlusion: AmbientOcclusion,
   anti_aliasing:     AntiAliasing,
-  // run in order over the camera's image (make_effect); without a ToneMapEffect it stays HDR
-  effects:           small_array.Small_Array(MAX_EFFECTS, Effect),
+  // run in order over the camera's image (make_effect), skipping the zero Effect; without a
+  // ToneMapEffect it stays HDR
+  effects:           [MAX_EFFECTS]Effect,
   // the layers (MeshAttachment.layer) whose meshes it does not draw
   hidden_layers:     Layers,
 }
@@ -121,8 +121,8 @@ camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   // the camera looks along its -Z axis, up its Y axis
   return linalg.matrix4_look_at(
     camera.position,
-    camera.position - geometry.qz(camera.rotation),
-    geometry.qy(camera.rotation),
+    camera.position - linalg.mul(camera.rotation, linalg.VECTOR3F32_Z_AXIS),
+    linalg.mul(camera.rotation, linalg.VECTOR3F32_Y_AXIS),
   )
 }
 

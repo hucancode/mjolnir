@@ -112,7 +112,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   wall_h :: 0.5
 
   floor := spawn_primitive(app, .CUBE, .GRAY, {0, -0.5, 0})
-  world.scale(&app.scene, floor, {half, 0.5, half})
+  world.transform(&app.scene, floor).scale = {half, 0.5, half}
 
   spawn_wall(app, {0, wall_h, half + wall_t}, half + wall_t * 2, wall_h, wall_t)
   spawn_wall(app, {0, wall_h, -(half + wall_t)}, half + wall_t * 2, wall_h, wall_t)
@@ -122,9 +122,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({0, 12, 3}, {0, 0, 0})
 
   app.game.head_node = spawn_primitive(app, .CUBE, .YELLOW)
-  world.scale(&app.scene, app.game.head_node, SEGMENT_SCALE)
+  world.transform(&app.scene, app.game.head_node).scale = SEGMENT_SCALE
   app.game.food_node = spawn_primitive(app, .SPHERE, .RED)
-  world.scale(&app.scene, app.game.food_node, FOOD_SCALE)
+  world.transform(&app.scene, app.game.food_node).scale = FOOD_SCALE
 
   sweep(eat_samples[:], 600, 1200)
   sweep(crash_samples[:], 220, 55)
@@ -147,7 +147,7 @@ sweep :: proc(samples: []f32, from, to: f32) {
 
 spawn_wall :: proc(app: ^App, pos: [3]f32, sx, sy, sz: f32) {
   h := spawn_primitive(app, .CUBE, .WHITE, pos)
-  world.scale(&app.scene, h, {sx, sy, sz})
+  world.transform(&app.scene, h).scale = {sx, sy, sz}
 }
 
 reset_game :: proc(app: ^App) {
@@ -171,12 +171,12 @@ reset_game :: proc(app: ^App) {
 
 spawn_body_node :: proc(app: ^App, c: Cell) -> world.NodeHandle {
   h := spawn_primitive(app, .CUBE, .GREEN, cell_to_world(c, SEGMENT_Y))
-  world.scale(&app.scene, h, SEGMENT_SCALE)
+  world.transform(&app.scene, h).scale = SEGMENT_SCALE
   return h
 }
 
 place_node :: proc(app: ^App, h: world.NodeHandle, c: Cell, y: f32) {
-  world.translate(&app.scene, h, cell_to_world(c, y))
+  world.transform(&app.scene, h).position = cell_to_world(c, y)
 }
 
 place_food :: proc(app: ^App) {

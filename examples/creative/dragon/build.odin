@@ -109,7 +109,7 @@ smooth :: proc(x: f32) -> f32 {
 }
 
 rotate :: proc(q: quaternion128, v: [3]f32) -> [3]f32 {
-  return linalg.quaternion128_mul_vector3(q, v)
+  return linalg.mul(q, v)
 }
 
 lateral :: proc(n: [3]f32, az: f32) -> [3]f32 {
@@ -256,6 +256,6 @@ assemble :: proc(app: ^App) {
 }
 
 show :: proc(app: ^App, p: Piece, x: geometry.Transform) {
-  world.set_local(&app.scene, p.node, x)
+  world.transform(&app.scene, p.node)^ = x
   world.set_visible(&app.scene, p.node, true)
 }

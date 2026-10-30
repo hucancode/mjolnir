@@ -40,7 +40,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   app.orbit = render.make_orbit({6, 3, 6}, {0, 1, 0})
 
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 6.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), scale = 6.0)
 
   red := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.95, 0.15, 0.15, 1}, roughness_factor = 0.4))
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, red), {0, 1, -2})
@@ -53,7 +53,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   for color, i in glass_colors {
     glass := render.material_create(&app.renderer, render.make_material(.TRANSPARENT, base_color_factor = color))
-    mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, glass, cast_shadow = false), {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4}, scale = 0.8)
+    mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, glass, no_shadow = true), {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4}, scale = 0.8)
   }
 
   return .READY

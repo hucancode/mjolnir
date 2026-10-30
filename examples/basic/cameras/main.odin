@@ -65,9 +65,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 6, 12}, {0, 0, 0})
   cam := render.main_camera(&app.renderer)
-  render.camera_orbit(cam, app.orbit)
   app.perspective = cam.projection
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 20.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), scale = 20.0)
 
   spawn_landmark(app, {-6, 1, 0}, .RED)
   spawn_landmark(app, {6, 1, 0}, .GREEN)
@@ -98,7 +97,7 @@ update :: proc(app: ^App, dt: f32) {
   app.time += dt
   phase := app.time * 0.6
   app.runner_pos = {7.0 * math.sin(phase), 0.6, 4.0 * math.sin(phase * 2.0)}
-  world.translate(&app.scene, app.runner, app.runner_pos)
+  world.transform(&app.scene, app.runner).position = app.runner_pos
   cam := render.main_camera(&app.renderer)
   if !app.input.mouse_captured {
     switch app.mode {
@@ -163,11 +162,11 @@ follow_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
 
 free_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {
   s := &app.input
-  move := geometry.qx(cam.rotation) * input.axis(s, .A, .D) + {0, 1, 0} * input.axis(s, .Q, .E) + -geometry.qz(cam.rotation) * input.axis(s, .S, .W)
+  move := linalg.mul(cam.rotation, linalg.VECTOR3F32_X_AXIS) * input.axis(s, .A, .D) + {0, 1, 0} * input.axis(s, .Q, .E) + -linalg.mul(cam.rotation, linalg.VECTOR3F32_Z_AXIS) * input.axis(s, .S, .W)
   cam.position += move * free_speed * dt
   d := s.mouse_delta * 0.002
   cam.rotation = linalg.quaternion_angle_axis(-d.x, linalg.VECTOR3F32_Y_AXIS) * cam.rotation
-  cam.rotation = linalg.quaternion_angle_axis(-d.y, geometry.qx(cam.rotation)) * cam.rotation
+  cam.rotation = linalg.quaternion_angle_axis(-d.y, linalg.mul(cam.rotation, linalg.VECTOR3F32_X_AXIS)) * cam.rotation
 }
 
 top_camera :: proc(app: ^App, cam: ^render.Camera, dt: f32) {

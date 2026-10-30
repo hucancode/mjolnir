@@ -1,7 +1,6 @@
 package render
 
 import "base:intrinsics"
-import "core:container/small_array"
 import "rhi"
 
 // Post-processing: each camera's effects as fullscreen passes over its image, each pass's
@@ -123,16 +122,16 @@ effect_shader :: proc(self: ^Renderer, effect: Effect) -> ^Shader {
 @(private)
 post_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32, present: bool) {
   camera, targets := &self.cameras[cam], &self.camera_targets[cam]
-  effects := small_array.slice(&camera.effects)
   total: u32
-  for effect in effects do total += effect_shader(self, effect).passes
+  for effect in camera.effects do if effect.shader != 0 do total += effect_shader(self, effect).passes
   if present do total = max(total, 1)
   else do total += (3 - total % 3) % 3
   if total == 0 do return
   ring := [3]TextureHandle{targets.images[.FINAL_IMAGE][f], targets.post[f][0], targets.post[f][1]}
   barrier_discard(self, cmd, ring[1:])
   i: u32
-  for effect in effects {
+  for effect in camera.effects {
+    if effect.shader == 0 do continue
     s := effect_shader(self, effect)
     for pass in 0 ..< s.passes {
       post_pass(self, cmd, f, cam, ring, i, present && i == total - 1, s, {camera_index = cam, pass = pass, params = effect.params})

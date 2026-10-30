@@ -173,31 +173,6 @@ calc_tri_normal :: proc "contextless" (v0, v1, v2: [3]f32) -> (norm: [3]f32) {
   return
 }
 
-// Direction utilities
-
-// signed_triangle_area_2d returns the signed area of triangle abc in the XZ plane.
-signed_triangle_area_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
-  return linalg.cross(b.xz - a.xz, c.xz - a.xz) * 0.5
-}
-
-@(private)
-aabb_disc_intersects :: proc "contextless" (
-  aabb: Aabb,
-  center: [3]f32,
-  normal: [3]f32,
-  radius: f32,
-) -> bool {
-  closest := linalg.clamp(center, aabb.min, aabb.max)
-  to_closest := closest - center
-  dist_sq := linalg.dot(to_closest, to_closest)
-  if dist_sq > radius * radius do return false
-  dist_to_plane := linalg.dot(to_closest, normal)
-  projected := closest - normal * dist_to_plane
-  to_projected := projected - center
-  projected_dist_sq := linalg.dot(to_projected, to_projected)
-  return projected_dist_sq <= radius * radius
-}
-
 // point_segment_distance_sq returns the squared distance from pt to segment va-vb.
 point_segment_distance_sq :: proc "contextless" (pt, va, vb: [3]f32) -> f32 {
   segment := vb - va
@@ -253,14 +228,4 @@ point_to_triangle_distance_sq :: proc "contextless" (
   closest = b + t * bc
   min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
   return min_dist_sq
-}
-
-// safe_normalize normalizes v in place, leaving near-zero vectors untouched.
-safe_normalize :: proc(v: ^[3]f32) {
-  sq_mag := v.x * v.x + v.y * v.y + v.z * v.z
-  if sq_mag <= math.F32_EPSILON do return
-  inv_mag := 1.0 / math.sqrt(sq_mag)
-  v.x *= inv_mag
-  v.y *= inv_mag
-  v.z *= inv_mag
 }

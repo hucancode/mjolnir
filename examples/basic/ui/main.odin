@@ -287,7 +287,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.hero = gltf.instance_create(&app.knight, &app.scene, &app.renderer)
   for name in KNIGHT_PROPS do if node, found := world.find(&app.scene, name, app.hero.root); found do world.set_visible(&app.scene, node, false)
   if len(app.hero.animators) > 0 do animation.play(&app.hero.animators[0], &app.knight.rigs[0], "Idle")
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 8)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), scale = 8)
   app.orbit = render.make_orbit({0, 2.2, 4.5}, {0, 1, 0})
   sample_data(app)
   ui.init(&app.gui, REFERENCE)

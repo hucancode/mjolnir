@@ -111,7 +111,7 @@ build_level :: proc(app: ^App) -> bool {
   builder: bake.NavGeometryBuilder
   defer bake.destroy(&builder)
   ground_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_factor = 0.8))
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, ground_material, cast_shadow = false), scale = WORLD_HALF * 2)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, ground_material, no_shadow = true), scale = WORLD_HALF * 2)
   bake.append_box(&builder, {0, -0.5, 0}, {WORLD_HALF * 2, 0.5, WORLD_HALF * 2})
   obstacle_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_factor = 0.6))
   for box in OBSTACLES {
@@ -126,7 +126,7 @@ show_navmesh :: proc(app: ^App) {
   positions, indices := nav.debug_triangles(&app.navmesh, context.temp_allocator)
   mesh := render.mesh_create(&app.renderer, geometry.make_mesh_from_triangles(positions, indices))
   material := render.material_create(&app.renderer, render.make_material(type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7}))
-  mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = mesh, material = material}, {0, NAVMESH_OVERLAY_LIFT, 0})
+  mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = mesh, material = material, no_shadow = true}, {0, NAVMESH_OVERLAY_LIFT, 0})
 }
 
 spawn_agents :: proc(app: ^App) {
@@ -143,7 +143,7 @@ spawn_agents :: proc(app: ^App) {
     angle := f32(i) / AGENT_COUNT * math.TAU
     position := (SPAWN_RADIUS - 4) * [3]f32{math.cos(angle), 0, math.sin(angle)}
     node := world.spawn(&app.scene, position)
-    mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = capsule, material = materials[i % len(PALETTE)], cast_shadow = true}, {0, AGENT_HEIGHT * 0.5, 0}, parent = node)
+    mjolnir.spawn(&app.scene, &app.renderer, render.MeshAttachment{mesh = capsule, material = materials[i % len(PALETTE)]}, {0, AGENT_HEIGHT * 0.5, 0}, parent = node)
     a.handle, a.placed = nav.agent_create(&app.crowd, position, params, user = world.Handle(node))
     a.color = PALETTE[i % len(PALETTE)]
   }

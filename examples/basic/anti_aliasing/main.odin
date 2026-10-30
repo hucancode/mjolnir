@@ -47,7 +47,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
   r := &app.renderer
-  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 20)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, no_shadow = true), scale = 20)
   app.turntable = world.spawn(&app.scene)
   for i in 0 ..< BARS {
     angle := f32(i) / BARS * math.TAU
@@ -77,7 +77,7 @@ update :: proc(app: ^App, dt: f32) {
   camera := render.main_camera(&app.renderer)
   if input.key_pressed(&app.input, .SPACE) do camera.anti_aliasing = .NONE if camera.anti_aliasing == .FXAA else .FXAA
   mjolnir.orbit_drag(&app.orbit, camera, &app.input)
-  world.rotate_by(&app.scene, app.turntable, dt * 0.1)
+  world.transform(&app.scene, app.turntable).rotation *= linalg.quaternion_angle_axis(dt * 0.1, linalg.VECTOR3F32_Y_AXIS)
   hud := [?]render.OverlayCommand {
     {shape = render.OverlayText{text = fmt.tprintf("%v (Space)", camera.anti_aliasing), position = {20, 20}, size = 28, color = {255, 255, 255, 255}}},
   }

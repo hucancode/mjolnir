@@ -139,7 +139,7 @@ test_slots_alloc_free_reuse :: proc(t: ^testing.T) {
   testing.expect(t, !slots_live(&s, i1), "freed index is not live")
   testing.expect(t, !slots_free(&s, i1), "double free is rejected")
   testing.expect_value(t, slots_alloc(&s), i1)
-  testing.expect_value(t, s.count, 2)
+  testing.expect_value(t, slots_count(&s), 2)
   testing.expect_value(t, s.high_water, 3)
 }
 
@@ -223,7 +223,7 @@ test_slots_rewind :: proc(t: ^testing.T) {
   slots_rewind(&s)
   testing.expect(t, slots_live(&s, kept))
   testing.expect(t, !slots_valid(&s, ha))
-  testing.expect_value(t, s.count, 1)
+  testing.expect_value(t, slots_count(&s), 1)
   testing.expect_value(t, len(s.retiring), 0)
   // rewound indices come back at once, in order
   testing.expect_value(t, slots_alloc(&s), a)
@@ -237,7 +237,7 @@ test_slots_first :: proc(t: ^testing.T) {
   defer slots_destroy(&s)
   testing.expect_value(t, slots_alloc(&s), 5)
   slots_rewind(&s)
-  testing.expect_value(t, s.count, 0)
+  testing.expect_value(t, slots_count(&s), 0)
   testing.expect_value(t, slots_alloc(&s), 5)
 }
 

@@ -53,7 +53,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit_speed = 1
   app.spin_speed = 2
 
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -2, 0}, scale = 20.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), {0, -2, 0}, scale = 20.0)
 
   sun_material := render.material_create(&app.renderer, render.make_material(base_color_factor = {1.0, 0.8, 0.2, 1.0}, emissive_factor = 2.0))
   app.sun = body(app, render.primitive(&app.renderer, .SPHERE, sun_material), {}, 1.2, {})
@@ -88,11 +88,11 @@ update :: proc(app: ^App, dt: f32) {
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   app.phase += dt * app.orbit_speed
-  world.rotate(&app.scene, app.sun, app.phase * 0.3)
+  world.transform(&app.scene, app.sun).rotation = linalg.quaternion_angle_axis(app.phase * 0.3, linalg.VECTOR3F32_Y_AXIS)
   for planet, i in app.planets {
-    world.rotate(&app.scene, planet, app.phase * app.spin_speed * f32(i + 1) * 0.5)
+    world.transform(&app.scene, planet).rotation = linalg.quaternion_angle_axis(app.phase * app.spin_speed * f32(i + 1) * 0.5, linalg.VECTOR3F32_Y_AXIS)
   }
-  world.rotate(&app.scene, app.moon, app.phase * 4.0)
+  world.transform(&app.scene, app.moon).rotation = linalg.quaternion_angle_axis(app.phase * 4.0, linalg.VECTOR3F32_Y_AXIS)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 

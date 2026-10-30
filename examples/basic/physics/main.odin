@@ -66,9 +66,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   for &v in rand_cylinder.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   rand_sphere_mesh := render.mesh_create(&app.renderer, rand_sphere)
   rand_cylinder_mesh := render.mesh_create(&app.renderer, rand_cylinder)
-  white := app.renderer.builtin_materials[.WHITE]
-  cylinder_look := render.MeshAttachment{mesh = rand_cylinder_mesh, material = white, cast_shadow = true}
-  sphere_look := render.MeshAttachment{mesh = rand_sphere_mesh, material = white, cast_shadow = true}
+  white := render.primitive(&app.renderer, color = .WHITE).material
+  cylinder_look := render.MeshAttachment{mesh = rand_cylinder_mesh, material = white}
+  sphere_look := render.MeshAttachment{mesh = rand_sphere_mesh, material = white}
 
   ground_position := [3]f32{0, -0.5, 0}
   ground_half_extents := [3]f32{PLANE_WIDTH, 0.5, PLANE_HEIGHT}

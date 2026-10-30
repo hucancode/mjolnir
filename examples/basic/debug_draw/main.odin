@@ -45,7 +45,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   sun := render.light_create(&app.renderer, render.make_directional_light())
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
 
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, -1, 0}, scale = 20.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), {0, -1, 0}, scale = 20.0)
 
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .BLUE), {-6, 0, 0}, scale = 0.8)
 

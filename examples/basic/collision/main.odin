@@ -145,7 +145,7 @@ load :: proc(app: ^App, scenario: Scenario) -> bool {
   case .SLOPE:
     slope := turn(25, {0, 0, 1})
     add(app, "slope", physics.BoxCollider{half_extents = {4, 0.25, 2}}, {0, 2, 0}, 0, .GRAY, slope)
-    up := linalg.quaternion_mul_vector3(slope, [3]f32{0, 1, 0})
+    up := linalg.mul(slope, [3]f32{0, 1, 0})
     rough := add(app, "rough", physics.BoxCollider{half_extents = 0.4}, [3]f32{0, 2, -1} + up * 0.66, 1, .GREEN, slope)
     slick := add(app, "slick", physics.BoxCollider{half_extents = 0.4}, [3]f32{0, 2, 1} + up * 0.66, 1, .BLUE, slope)
     physics.body_params(&app.phys, rough).friction = 1
@@ -263,7 +263,7 @@ draw_colliders :: proc(app: ^App) {
     case physics.BoxCollider:
       render.debug_cube(&app.renderer, b.position, b.rotation, c.half_extents, white, bypass_depth = true)
     case physics.CylinderCollider:
-      axis := linalg.quaternion_mul_vector3(b.rotation, [3]f32{0, 1, 0})
+      axis := linalg.mul(b.rotation, [3]f32{0, 1, 0})
       render.debug_circle(&app.renderer, b.position + axis * c.half_height, axis, c.radius, white, bypass_depth = true)
       render.debug_circle(&app.renderer, b.position - axis * c.half_height, axis, c.radius, white, bypass_depth = true)
     }

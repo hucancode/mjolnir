@@ -55,7 +55,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
   r := &app.renderer
-  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 20)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, no_shadow = true), scale = 20)
   app.orbit = render.make_orbit({0, 10, 12}, {})
   app.status = "click to place boxes"
   return .READY

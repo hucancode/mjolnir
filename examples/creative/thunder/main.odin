@@ -1,7 +1,6 @@
 // Thunder: lightning bolts strike out of the night onto Mjolnir. Click to strike, drag to look around. Ported from the storm on hucancode.com.
 package main
 
-import sa "core:container/small_array"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -78,15 +77,14 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, r) do return .FAIL
   app.orbit = render.make_orbit({12, 10, 12}, {0, 1.6, 0})
   cam := render.main_camera(r)
-  render.camera_orbit(cam, app.orbit)
   cam.projection, cam.near, cam.far = render.PerspectiveProjection{math.to_radians(f32(50))}, 0.3, 600
 
   app.model = gltf.model_create(r, #load("assets/Mjolnir.glb"))
   app.hammer = gltf.instance_create(&app.model, &app.scene, r)
-  world.translate(&app.scene, app.hammer.root, {0, 0.106, 0})
+  world.transform(&app.scene, app.hammer.root).position = {0, 0.106, 0}
 
   floor_material := render.material_create(r, render.make_material(base_color_factor = {0.02, 0.02, 0.035, 1}, roughness_factor = 0.35))
-  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, floor_material, cast_shadow = false), scale = 400)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, floor_material, no_shadow = true), scale = 400)
 
   for i in 0 ..< MAX_LIGHTS {
     app.lamps[i] = world.spawn(&app.scene)
@@ -95,7 +93,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
 
   fill := world.spawn(&app.scene)
-  world.translate(&app.scene, fill, FILL_POSITION)
+  world.transform(&app.scene, fill).position = FILL_POSITION
   render.attach(r, fill, render.light_create(r, render.make_point_light(color = FILL_COLOR, intensity = FILL_INTENSITY, radius = 30)))
 
   ok: bool
@@ -135,7 +133,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   r.ibl_intensity = 0.1
   app.sun = render.light_create(r, render.make_directional_light(color_a, MOONLIGHT, cast_shadow = false))
   mjolnir.spawn(&app.scene, r, app.sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.3, -1, -0.2}, [3]f32{0, 1, 0}))
-  sa.append(&render.main_camera(r).effects, render.make_effect(render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32}))
+  render.main_camera(r).effects[0] = render.make_effect(render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32})
   return .READY
 }
 
@@ -164,7 +162,7 @@ update :: proc(app: ^App, dt: f32) {
 
   lights := advance(&app.storm, min(dt, 0.05), eye)
   for sample, i in lights {
-    world.translate(&app.scene, app.lamps[i], sample.position)
+    world.transform(&app.scene, app.lamps[i]).position = sample.position
     lamp := render.light(r, app.lights[i])
     lamp.intensity = sample.intensity
     lamp.color = sample.color
@@ -172,7 +170,7 @@ update :: proc(app: ^App, dt: f32) {
   moon := render.light(r, app.sun)
   moon.color = app.storm.tint
   moon.intensity = MOONLIGHT + min(app.storm.flash, 1) * FLASH_GAIN
-  sa.set(&render.main_camera(r).effects, 0, render.make_effect(render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32}))
+  render.main_camera(r).effects[0] = render.make_effect(render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32})
 
   stage_bolts(app)
   stage_impacts(app)
@@ -205,7 +203,7 @@ stage_impacts :: proc(app: ^App) {
     i.sparked = true
     node := app.spark_nodes[app.next_spark]
     app.next_spark = (app.next_spark + 1) % SPARK_SLOTS
-    world.translate(&app.scene, node, i.position)
+    world.transform(&app.scene, node).position = i.position
     render.emit(r, node, app.sparks[1 if i.furious else 0], u32(SPARKS * i.power))
   }
   n := min(len(app.storm.impacts), MAX_IMPACTS)

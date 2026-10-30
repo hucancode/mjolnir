@@ -46,7 +46,7 @@ to_model :: #force_inline proc(pose: Pose, p: [3]f32) -> [3]f32 {
 aim_bone :: proc(pose: Pose, bone: u32, direction: [3]f32) {
   if linalg.length2(direction) < 1e-6 do return
   rot := pose.rotations[bone]
-  pose.rotations[bone] = linalg.quaternion_between_two_vector3(geometry.qy(rot), linalg.normalize(direction)) * rot
+  pose.rotations[bone] = linalg.quaternion_between_two_vector3(linalg.mul(rot, linalg.VECTOR3F32_Y_AXIS), linalg.normalize(direction)) * rot
 }
 
 // Skeleton-space transform of bone `i` from its local transform and its
@@ -61,7 +61,7 @@ compose_bone :: #force_inline proc(pose: Pose, i: u32) {
   }
   pr := pose.rotations[parent]
   ps := pose.scales[parent]
-  pose.positions[i] = pose.positions[parent] + geometry.qmv(pr, ps * l.position)
+  pose.positions[i] = pose.positions[parent] + linalg.mul(pr, ps * l.position)
   pose.rotations[i] = pr * l.rotation
   pose.scales[i] = ps * l.scale
 }
@@ -107,7 +107,7 @@ pose_blend :: proc(pose: Pose, bones: []u32, positions: [][3]f32, rotations: []q
     before := positions[k] - positions[kp]
     after := solved[k] - solved[kp]
     // the bone keeps its place on the parent as the parent turns from before to blended
-    turned := geometry.qmv(pose.rotations[p] * linalg.quaternion_inverse(rotations[kp]), before)
+    turned := linalg.mul(pose.rotations[p] * linalg.quaternion_inverse(rotations[kp]), before)
     length := linalg.lerp(linalg.length(before), linalg.length(after), weight)
     if l := linalg.length(turned); l > 1e-6 do turned *= length / l
     pose.positions[b] = pose.positions[p] + turned

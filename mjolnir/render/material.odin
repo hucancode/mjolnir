@@ -6,7 +6,7 @@ package render
 @(private)
 GBUFFER_TYPES :: u32(1) << u32(FIRST_FORWARD_TYPE) - 1
 
-// Color names a builtin solid-color material in Renderer.builtin_materials.
+// Color names a builtin solid-color material (primitive), colored COLOR_RGB.
 Color :: enum {
   WHITE,
   BLACK,
@@ -101,11 +101,11 @@ material_destroy :: proc(self: ^Renderer, handle: MaterialHandle) {
   resource_destroy(self, .MATERIALS, u32(handle))
 }
 
-// primitive returns a builtin mesh (builtin_meshes) ready to attach, drawn with either
-//   a builtin color material (builtin_materials):
-//     primitive(r, shape = .CUBE, color = .WHITE, cast_shadow = true) -> MeshAttachment
+// primitive returns a builtin mesh ready to attach, drawn with either
+//   a builtin color material:
+//     primitive(r, shape = .CUBE, color = .WHITE, no_shadow = false) -> MeshAttachment
 //   a material of yours:
-//     primitive(r, shape, material: MaterialHandle, cast_shadow = true) -> MeshAttachment
+//     primitive(r, shape, material: MaterialHandle, no_shadow = false) -> MeshAttachment
 primitive :: proc {
   primitive_color,
   primitive_material,
@@ -116,9 +116,9 @@ primitive_color :: proc(
   self: ^Renderer,
   shape: Primitive = .CUBE,
   color: Color = .WHITE,
-  cast_shadow := true,
+  no_shadow := false,
 ) -> MeshAttachment {
-  return primitive_material(self, shape, self.builtin_materials[color], cast_shadow)
+  return primitive_material(self, shape, self.builtin_materials[color], no_shadow)
 }
 
 @(private = "file")
@@ -126,12 +126,12 @@ primitive_material :: proc(
   self: ^Renderer,
   shape: Primitive,
   material: MaterialHandle,
-  cast_shadow := true,
+  no_shadow := false,
 ) -> MeshAttachment {
-  return {mesh = self.builtin_meshes[shape], material = material, cast_shadow = cast_shadow}
+  return {mesh = self.builtin_meshes[shape], material = material, no_shadow = no_shadow}
 }
 
-// COLOR_RGB is the base color of each builtin color material (builtin_materials).
+// COLOR_RGB is the base color of each builtin color material (Color).
 COLOR_RGB :: [Color][4]f32 {
   .WHITE   = {1.0, 1.0, 1.0, 1.0},
   .BLACK   = {0.0, 0.0, 0.0, 1.0},

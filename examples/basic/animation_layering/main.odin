@@ -77,7 +77,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({3, 2, 3}, {0, 1, 0})
 
-  app.target_cube = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .RED, cast_shadow = false), app.target, scale = 0.25)
+  app.target_cube = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, .RED, no_shadow = true), app.target, scale = 0.25)
 
   app.fox_model = gltf.model_create(&app.renderer, #load("assets/Fox2.glb"))
   app.fox = gltf.instance_create(&app.fox_model, &app.scene, &app.renderer)
@@ -113,7 +113,7 @@ update :: proc(app: ^App, dt: f32) {
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   t := app.time
   app.target = {math.cos(t) * TARGET_RADIUS, 4 + math.sin(t * 2), math.sin(t) * TARGET_RADIUS}
-  world.translate(&app.scene, app.target_cube, app.target)
+  world.transform(&app.scene, app.target_cube).position = app.target
   blend_layers(app)
   mjolnir.update(&app.scene, &app.renderer, dt)
   gltf.animate(&app.fox, &app.fox_model, &app.scene, &app.renderer, dt)

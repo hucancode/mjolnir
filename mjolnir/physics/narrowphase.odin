@@ -151,7 +151,7 @@ test_sphere_cylinder :: proc(
   hit: bool,
 ) {
   inv_rot := linalg.quaternion_inverse(rot_cylinder)
-  local_sphere := geometry.qmv(inv_rot, pos_sphere - pos_cylinder)
+  local_sphere := linalg.mul(inv_rot, pos_sphere - pos_cylinder)
   half_height := cylinder.half_height
   radial := [3]f32{local_sphere.x, 0, local_sphere.z}
   radial_dist := linalg.length(radial)
@@ -187,8 +187,8 @@ test_sphere_cylinder :: proc(
   } else {
     local_normal = radial_dir
   }
-  world_closest := pos_cylinder + geometry.qmv(rot_cylinder, local_closest)
-  surface_normal := geometry.qmv(rot_cylinder, local_normal)
+  world_closest := pos_cylinder + linalg.mul(rot_cylinder, local_closest)
+  surface_normal := linalg.mul(rot_cylinder, local_normal)
   dist_sq := linalg.length2(pos_sphere - world_closest)
   if dist_sq > sphere.radius * sphere.radius do return
   penetration = sphere.radius - math.sqrt(dist_sq)
@@ -216,7 +216,7 @@ test_box_cylinder :: proc(
   hit: bool,
 ) {
   obb := geometry.Obb{center = pos_box, half_extents = box.half_extents, rotation = rot_box}
-  axis := geometry.qy(rot_cylinder) * cylinder.half_height
+  axis := linalg.mul(rot_cylinder, linalg.VECTOR3F32_Y_AXIS) * cylinder.half_height
   seg_start := pos_cylinder - axis
   seg_end := pos_cylinder + axis
   min_dist_sq := f32(math.F32_MAX)
@@ -260,8 +260,8 @@ test_cylinder_cylinder :: proc(
   penetration: f32,
   hit: bool,
 ) {
-  axis_a := geometry.qy(rot_a) * cylinder_a.half_height
-  axis_b := geometry.qy(rot_b) * cylinder_b.half_height
+  axis_a := linalg.mul(rot_a, linalg.VECTOR3F32_Y_AXIS) * cylinder_a.half_height
+  axis_b := linalg.mul(rot_b, linalg.VECTOR3F32_Y_AXIS) * cylinder_b.half_height
   p0_a := pos_a - axis_a
   p0_b := pos_b - axis_b
   d1 := 2 * axis_a
@@ -725,7 +725,7 @@ cylinder_cap_manifold :: proc(
   plane_normal: [3]f32, // toward the cylinder
   margin: f32,
 ) {
-  axis := geometry.qy(cyl_rot)
+  axis := linalg.mul(cyl_rot, linalg.VECTOR3F32_Y_AXIS)
   cap_dot := linalg.dot(axis, plane_normal)
   if math.abs(cap_dot) < 0.966 do return // cos(15°)
   cap_sign: f32 = cap_dot > 0 ? -1 : 1
@@ -778,8 +778,8 @@ collide_cylinders :: proc(
   cyl_b: CylinderCollider,
   margin: f32,
 ) -> (m: Manifold, hit: bool) {
-  axis_a := geometry.qy(rot_a)
-  axis_b := geometry.qy(rot_b)
+  axis_a := linalg.mul(rot_a, linalg.VECTOR3F32_Y_AXIS)
+  axis_b := linalg.mul(rot_b, linalg.VECTOR3F32_Y_AXIS)
   parallel := math.abs(linalg.dot(axis_a, axis_b)) > 0.99
   if parallel {
     // Choose the smaller of radial vs axial penetration — stacked cylinders

@@ -101,7 +101,7 @@ solve_gyroscopic :: proc(body: ^Body, dt: f32) {
   ii := body.inv_inertia
   if ii.x <= 0 || ii.y <= 0 || ii.z <= 0 do return
   q := body.rotation
-  w1 := linalg.quaternion128_mul_vector3(
+  w1 := linalg.mul(
     linalg.quaternion_inverse(q),
     body.angular_velocity,
   )
@@ -115,7 +115,7 @@ solve_gyroscopic :: proc(body: ^Body, dt: f32) {
   }
   jac := i_mat + dt * (geometry.skew(w1) * i_mat - geometry.skew(iw))
   w2 := w1 - linalg.inverse(jac) * f
-  body.angular_velocity = linalg.quaternion128_mul_vector3(q, w2)
+  body.angular_velocity = linalg.mul(q, w2)
 }
 
 @(private)

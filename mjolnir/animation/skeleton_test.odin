@@ -68,7 +68,7 @@ test_skeleton_lengths_and_rest :: proc(t: ^testing.T) {
   // rest local transforms composed along parents reproduces bind
   model: [5]matrix[4, 4]f32
   for i in skel.order {
-    m := trs_matrix(skel.rest[i])
+    m := linalg.matrix4_from_trs(skel.rest[i].position, skel.rest[i].rotation, skel.rest[i].scale)
     if p := skel.parents[i]; p >= 0 do m = model[p] * m
     model[i] = m
     testing.expectf(t, matrix_almost_equal(m, skel.bind[i]), "bone %d rest composes to bind", i)

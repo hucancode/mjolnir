@@ -1,7 +1,6 @@
 // GPU programming: a school of fish simulated by a compute shader, drawn by a draw shader.
 package main
 
-import sa "core:container/small_array"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -127,7 +126,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !ok do return .FAIL
 
   sand := render.material_create(r, render.make_material(base_color_factor = {0.76, 0.66, 0.45, 1}, roughness_factor = 0.9))
-  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, sand, cast_shadow = false), scale = 40)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, sand, no_shadow = true), scale = 40)
   rock := render.material_create(r, render.make_material(base_color_factor = {0.35, 0.38, 0.4, 1}, roughness_factor = 0.8))
   for i in 0 ..< 7 {
     angle := f32(i) / 7 * math.TAU
@@ -138,7 +137,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   sun := render.light_create(r, render.make_directional_light(SUN_COLOR, SUN_INTENSITY))
   mjolnir.spawn(&app.scene, r, sun, rotation = linalg.quaternion_from_forward_and_up(SUN_FORWARD, [3]f32{0, 1, 0}))
   r.skybox_intensity = 0
-  sa.append(&render.main_camera(r).effects, render.make_effect(render.FogEffect{color = {0.05, 0.25, 0.35}, start = 2, end = 45}))
+  render.main_camera(r).effects[0] = render.make_effect(render.FogEffect{color = {0.05, 0.25, 0.35}, start = 2, end = 45})
   return .READY
 }
 
@@ -159,7 +158,7 @@ update :: proc(app: ^App, dt: f32) {
   app.time += dt
   app.feeding = max(app.feeding - dt, 0)
   shark := [3]f32{math.cos(app.time * 0.4) * 8, 3 + math.sin(app.time * 0.9) * 1.5, math.sin(app.time * 0.4) * 8}
-  world.translate(&app.scene, app.shark, shark)
+  world.transform(&app.scene, app.shark).position = shark
   world.set_visible(&app.scene, app.shark, shark_on)
   simulate(app, dt, shark)
   render.buffer_read(&app.renderer, app.counters, app.stats[:])

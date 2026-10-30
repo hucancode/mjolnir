@@ -92,7 +92,6 @@ build_level :: proc(app: ^App, index: int) -> bool {
   app.model = gltf.model_create(&app.renderer, data) or_return
   app.level = gltf.instance_create(&app.model, &app.scene, &app.renderer) or_return
   app.orbit = render.make_orbit(l.target + {l.distance, l.distance * 0.1, 0}, l.target)
-  render.camera_orbit(render.main_camera(&app.renderer), app.orbit)
   if toward_sun, has_sun := l.sun.?; has_sun {
     sun := render.light_create(&app.renderer, render.make_directional_light(shadow_distance = l.shadow))
     mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up(-toward_sun, [3]f32{0, 1, 0}))

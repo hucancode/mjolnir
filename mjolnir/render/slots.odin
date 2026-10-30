@@ -74,14 +74,14 @@ Node :: struct #packed {
 
 // MeshAttachment draws mesh with material from a slot's transform; a skinned mesh deforms by
 // the palette `bones` (bones_create), else draws as modelled. Cameras with `layer` in
-// Camera.hidden_layers skip it; shadows still cast it.
+// Camera.hidden_layers skip it; shadows still cast it unless no_shadow.
 MeshAttachment :: struct {
-  mesh:        MeshHandle,
-  material:    MaterialHandle,
-  cast_shadow: bool,
-  bones:       BonesHandle,
+  mesh:      MeshHandle,
+  material:  MaterialHandle,
+  no_shadow: bool,
+  bones:     BonesHandle,
   // below MAX_LAYERS
-  layer:       u32,
+  layer:     u32,
 }
 
 // SlotHandle is a scene slot: any u32 below MAX_SLOTS you pick, e.g. a scene graph node's
@@ -247,7 +247,7 @@ attach :: proc(self: ^Renderer, slot: $H, attachment: Attachment) {
     if a.layer < MAX_LAYERS do node.layer = a.layer
     else do log.errorf("Layer %d exceeds MAX_LAYERS", a.layer)
     batch_join(self, slot, node.mesh_id, node.material_id)
-    if a.cast_shadow do node.flags += {.CASTS_SHADOW}
+    if !a.no_shadow do node.flags += {.CASTS_SHADOW}
     skin(self, slot, a.bones)
   case LightHandle:
     place_row(self, slot, .LIGHT, u32(a))
@@ -318,7 +318,7 @@ attachment :: proc(
   node := write_table(self, .NODES, Node)[slot]
   when T == MeshAttachment {
     if node.mesh_id == 0 do return
-    att = {mesh = MeshHandle(node.mesh_id), material = MaterialHandle(node.material_id), cast_shadow = .CASTS_SHADOW in node.flags, layer = node.layer}
+    att = {mesh = MeshHandle(node.mesh_id), material = MaterialHandle(node.material_id), no_shadow = .CASTS_SHADOW not_in node.flags, layer = node.layer}
     if .SKINNED not_in node.flags do return att, true
     att.bones = BonesHandle(node.attachment_data_index + 1)
     return att, true

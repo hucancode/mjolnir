@@ -82,7 +82,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.orbit = render.make_orbit({9, 8, 9}, {0, 1, 0})
   app.renderer.ibl_intensity = 0.3
 
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 10.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), scale = 10.0)
 
   for x in 0 ..< 3 do for z in 0 ..< 3 {
     color: render.Color
@@ -133,7 +133,7 @@ spawn_light :: proc(app: ^App, kind: LightKind) {
   l.light, ok = render.light_create(&app.renderer, light_settings(app, l))
   if !ok do return
   l.node = mjolnir.spawn(&app.scene, &app.renderer, l.light, light_position(l, app.elapsed))
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, app.marker_material, cast_shadow = false), parent = l.node, scale = MARKER_SCALE)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, app.marker_material, no_shadow = true), parent = l.node, scale = MARKER_SCALE)
   append(&app.lights, l)
 }
 
@@ -188,10 +188,10 @@ update :: proc(app: ^App, dt: f32) {
   app.elapsed += dt
   for l in app.lights {
     pos := light_position(l, app.elapsed)
-    world.translate(&app.scene, l.node, pos)
+    world.transform(&app.scene, l.node).position = pos
     if l.kind == .SPOT {
       dir := linalg.normalize(SPOT_TARGET - pos)
-      world.rotate(&app.scene, l.node, linalg.quaternion_between_two_vector3(-linalg.VECTOR3F32_Z_AXIS, dir))
+      world.transform(&app.scene, l.node).rotation = linalg.quaternion_between_two_vector3(-linalg.VECTOR3F32_Z_AXIS, dir)
     }
   }
   apply_light_settings(app)

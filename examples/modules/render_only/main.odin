@@ -17,10 +17,10 @@ orbit: render.Orbit
 
 setup :: proc() -> bool {
   font.init(&f, #load("../../../assets/Outfit-Regular.ttf")) or_return
-  render.attach(r, FLOOR, render.primitive(r, .QUAD_XZ, .GRAY, cast_shadow = false))
+  render.attach(r, FLOOR, render.primitive(r, .QUAD_XZ, .GRAY, no_shadow = true))
   render.place(r, FLOOR, linalg.matrix4_scale([3]f32{12, 1, 12}))
   gold := render.material_create(r, render.make_material(base_color_factor = {1, 0.8, 0.3, 1}, metallic_factor = 1, roughness_factor = 0.3))
-  render.attach(r, TORUS, render.MeshAttachment{mesh = render.mesh_create(r, geometry.make_torus()), material = gold, cast_shadow = true})
+  render.attach(r, TORUS, render.MeshAttachment{mesh = render.mesh_create(r, geometry.make_torus()), material = gold})
   render.attach(r, LAMP, render.light_create(r, render.make_point_light({1, 0.6, 0.3}, 40, 8)))
   render.place(r, LAMP, linalg.matrix4_translate([3]f32{0, 2.5, 0}))
   render.attach(r, SPOT, render.light_create(r, render.make_spot_light({0.4, 0.6, 1}, 200, 15)))

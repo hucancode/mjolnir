@@ -44,7 +44,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   sun := render.light_create(&app.renderer, render.make_directional_light())
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   r := &app.renderer
-  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, cast_shadow = false), scale = 30)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, .GRAY, no_shadow = true), scale = 30)
   for x in -3 ..= 3 do for z in -3 ..= 3 {
     if (x + z) % 2 == 0 do mjolnir.spawn(&app.scene, r, render.primitive(r, .CUBE, .WHITE), {f32(x) * 3, 0.25, f32(z) * 3}, scale = 0.5)
   }
@@ -69,7 +69,7 @@ update :: proc(app: ^App, dt: f32) {
   if input.key_pressed(&app.input, .SPACE) do app.trauma = min(app.trauma + 0.5, 1)
   app.trauma = max(app.trauma - dt, 0)
   target := [3]f32{4 * math.cos(t * 0.6), 0.5, 4 * math.sin(t * 0.6)}
-  world.translate(&app.scene, app.ball, target)
+  world.transform(&app.scene, app.ball).position = target
   app.eye = linalg.lerp(app.eye, target + {0, 4, 7}, geometry.exp_smooth(3, dt))
   shake := app.trauma * app.trauma
   offset := shake * 0.3 * [3]f32{math.sin(t * 37), math.sin(t * 43 + 1), math.sin(t * 29 + 2)}

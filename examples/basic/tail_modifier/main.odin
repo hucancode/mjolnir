@@ -81,7 +81,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 4, -4}, {0, 1, 0})
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false), {0, GROUND_Y, 0}, scale = 20.0)
+  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), {0, GROUND_Y, 0}, scale = 20.0)
   app.snake_model = gltf.model_create(&app.renderer, #load("assets/stuffed_snake_rigged.glb"))
   app.snake = gltf.instance_create(&app.snake_model, &app.scene, &app.renderer)
   if len(app.snake.skinned) == 0 do return .FAIL
@@ -113,7 +113,7 @@ move_snake :: proc(app: ^App, dt: f32) {
   if app.auto_animate {
     app.time += dt
     y := app.drive_amplitude * math.sin(app.time * app.drive_frequency * 2 * math.PI)
-    world.translate(&app.scene, app.snake_node, {0, y, 0})
+    world.transform(&app.scene, app.snake_node).position = {0, y, 0}
     app.dragging = false
   } else {
     drag_head(app)
@@ -138,7 +138,7 @@ drag_head :: proc(app: ^App) {
   if !app.dragging do return
   hit, on_ground := cursor_on_ground(app)
   if !on_ground do return
-  world.translate(&app.scene, app.snake_node, {hit.x - app.head_offset.x, app.drag_height, hit.z - app.head_offset.z})
+  world.transform(&app.scene, app.snake_node).position = {hit.x - app.head_offset.x, app.drag_height, hit.z - app.head_offset.z}
 }
 
 draw :: proc(app: ^App) -> bool {

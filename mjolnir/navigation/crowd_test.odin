@@ -532,7 +532,7 @@ test_crowd_agent_poses_links_users :: proc(t: ^testing.T) {
   testing.expect_value(t, poses[0].user, Handle{index = 7, generation = 1})
   testing.expect(t, poses[0].agent == linked && poses[1].agent == unlinked, "every agent has a pose, by handle")
   testing.expect_value(t, poses[0].position, c.agents[linked.index].position)
-  forward := linalg.quaternion_mul_vector3(poses[0].rotation, [3]f32{0, 0, 1})
+  forward := linalg.mul(poses[0].rotation, [3]f32{0, 0, 1})
   testing.expectf(t, forward.z > 0.9, "heading should turn +Z towards +Z travel, got %v", forward)
 }
 

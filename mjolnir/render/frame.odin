@@ -147,7 +147,7 @@ gpu_timings :: proc(self: ^Renderer) -> []Timing {
 // camera; render scopes cannot hold barriers. `closing` ends them, as one barrier.
 @(private = "file")
 camera_passes :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, closing: ..Barrier) {
-  if self.slots[.CAMERAS].count == 0 do return
+  if containers.slots_count(&self.slots[.CAMERAS]) == 0 do return
   discards := make([dynamic]TextureHandle, context.temp_allocator)
   c: u32
   for i in containers.slots_next(&self.slots[.CAMERAS], &c) do for a in CameraImage do append(&discards, self.camera_targets[i].images[a][f])

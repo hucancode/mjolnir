@@ -1,5 +1,7 @@
 package containers
 
+import "base:intrinsics"
+
 // Handle is an index with the generation it was handed out at; it goes stale when the index is freed.
 // The zero Handle is none.
 Handle :: struct {
@@ -19,7 +21,6 @@ Retiring :: struct {
 // reused only `grace` ticks later, so a consumer lagging up to `grace` ticks
 // never sees it reused.
 Slots :: struct {
-  count:    u32, // live indices
   capacity: u32,
   using _:  Slots_State,
 }
@@ -74,7 +75,6 @@ slots_alloc :: proc(self: ^Slots) -> (index: u32, ok: bool) #optional_ok {
     return
   }
   self.live[index / 64] |= 1 << (index % 64)
-  self.count += 1
   return index, true
 }
 
@@ -83,7 +83,6 @@ slots_free :: proc(self: ^Slots, index: u32) -> bool {
   if !slots_live(self, index) do return false
   self.live[index / 64] &~= 1 << (index % 64)
   self.generation[index] += 1
-  self.count -= 1
   if self.grace == 0 do append(&self.free, index)
   else do append(&self.retiring, Retiring{index, self.tick + self.grace})
   return true
@@ -92,6 +91,12 @@ slots_free :: proc(self: ^Slots, index: u32) -> bool {
 // slots_live reports whether index is currently allocated.
 slots_live :: #force_inline proc "contextless" (self: ^Slots, index: u32) -> bool {
   return index < self.capacity && self.live[index / 64] & (1 << (index % 64)) != 0
+}
+
+// slots_count returns how many indices are live.
+slots_count :: proc "contextless" (self: ^Slots) -> (n: u32) {
+  for word in self.live[:(self.high_water + 63) / 64] do n += u32(intrinsics.count_ones(word))
+  return
 }
 
 // slots_handle returns the handle of a live index.
@@ -143,7 +148,6 @@ slots_rewind :: proc(self: ^Slots) {
     if !slots_live(self, i) do continue
     self.live[i / 64] &~= 1 << (i % 64)
     self.generation[i] += 1
-    self.count -= 1
   }
   remove_range(&self.retiring, 0, self.reclaimed)
   self.reclaimed = 0

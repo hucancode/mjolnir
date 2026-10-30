@@ -7,38 +7,6 @@ import "core:math/linalg"
 import "core:testing"
 
 @(test)
-test_qmv_matches_linalg :: proc(t: ^testing.T) {
-	q := linalg.quaternion_from_euler_angles_f32(0.7, -1.1, 0.4, .XYZ)
-	vecs := [?][3]f32{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 2, 3}, {-0.5, 0.25, 4}}
-	for v in vecs {
-		got := qmv(q, v)
-		want := linalg.quaternion128_mul_vector3(q, v)
-		diff := linalg.length(got - want)
-		testing.expectf(t, diff < 1e-4, "qmv mismatch v=%v: got %v want %v", v, got, want)
-	}
-}
-
-@(test)
-test_qx_qy_qz_match_axis_rotations :: proc(t: ^testing.T) {
-	q := linalg.quaternion_from_euler_angles_f32(0.5, -0.8, 0.3, .XYZ)
-	x := qx(q)
-	y := qy(q)
-	z := qz(q)
-	wx := linalg.quaternion128_mul_vector3(q, [3]f32{1, 0, 0})
-	wy := linalg.quaternion128_mul_vector3(q, [3]f32{0, 1, 0})
-	wz := linalg.quaternion128_mul_vector3(q, [3]f32{0, 0, 1})
-	testing.expectf(t, linalg.length(x - wx) < 1e-4, "qx mismatch: %v vs %v", x, wx)
-	testing.expectf(t, linalg.length(y - wy) < 1e-4, "qy mismatch: %v vs %v", y, wy)
-	testing.expectf(t, linalg.length(z - wz) < 1e-4, "qz mismatch: %v vs %v", z, wz)
-
-	// Identity quat returns standard basis
-	id := linalg.QUATERNIONF32_IDENTITY
-	testing.expect(t, qx(id) == [3]f32{1, 0, 0}, "qx(id) = +X")
-	testing.expect(t, qy(id) == [3]f32{0, 1, 0}, "qy(id) = +Y")
-	testing.expect(t, qz(id) == [3]f32{0, 0, 1}, "qz(id) = +Z")
-}
-
-@(test)
 test_decompose_matrix_round_trip :: proc(t: ^testing.T) {
 	pos := [3]f32{2, -3, 5}
 	rot := linalg.quaternion_from_euler_angle_y_f32(math.PI / 3)

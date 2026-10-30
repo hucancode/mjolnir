@@ -90,7 +90,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   geometry.chain_init(&app.chain, {0, 0}, {0, 1}, SNAKE_LENGTH, CHAIN_STEP)
 
   grass := render.material_create(r, render.make_material(base_color_factor = {0.45, 0.7, 0.35, 1}, roughness_factor = 0.9))
-  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, grass, cast_shadow = false), scale = ARENA + 4)
+  mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, grass, no_shadow = true), scale = ARENA + 4)
   for i in 0 ..< 6 {
     angle := f32(i) / 6 * math.TAU + 0.4
     mjolnir.spawn(&app.scene, r, render.primitive(r, .SPHERE, .GRAY), {math.cos(angle) * 9, 0.4, math.sin(angle) * 9}, scale = 0.8)
@@ -120,7 +120,7 @@ update :: proc(app: ^App, dt: f32) {
 steer :: proc(app: ^App, dt: f32) {
   s := &app.input
   move := linalg.clamp([2]f32{input.axis(s, .A, .D) + input.axis(s, .LEFT, .RIGHT), input.axis(s, .S, .W) + input.axis(s, .DOWN, .UP)}, -1, 1)
-  ahead := linalg.normalize0((-geometry.qz(render.main_camera(&app.renderer).rotation)).xz)
+  ahead := linalg.normalize0((-linalg.mul(render.main_camera(&app.renderer).rotation, linalg.VECTOR3F32_Z_AXIS)).xz)
   want := ahead * move.y + [2]f32{-ahead.y, ahead.x} * move.x
   aim, target := f32(0), f32(0)
   if want != 0 {
@@ -154,19 +154,15 @@ steer :: proc(app: ^App, dt: f32) {
 pose :: proc(app: ^App) {
   yaw := app.heading + app.look + 0.5 * WEAVE * math.sin(app.phase)
   neck := app.chain.head
-  world.translate(&app.scene, app.head, {neck.x, 0, neck.y})
-  world.rotate(
-    &app.scene,
-    app.head,
-    linalg.quaternion_angle_axis(yaw, [3]f32{0, 1, 0}) *
-    linalg.quaternion_angle_axis(app.lean, [3]f32{0, 0, 1}),
-  )
+  world.transform(&app.scene, app.head).position = {neck.x, 0, neck.y}
+  world.transform(&app.scene, app.head).rotation = linalg.quaternion_angle_axis(yaw, [3]f32{0, 1, 0}) *
+    linalg.quaternion_angle_axis(app.lean, [3]f32{0, 0, 1})
   app.orbit.target = {app.focus.x, 0.3, app.focus.y}
 
   head_skin := render.material(&app.renderer, app.head_skin)
   head_skin.base_color_factor = {color.r, color.g, color.b, 1}
 
-  world.translate(&app.scene, app.body, {neck.x, 0, neck.y})
+  world.transform(&app.scene, app.body).position = {neck.x, 0, neck.y}
   skin := render.material(&app.renderer, app.skin)
   skin.base_color_factor = head_skin.base_color_factor
   for i in 0 ..< SPINE_POINTS {

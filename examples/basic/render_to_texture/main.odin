@@ -45,8 +45,8 @@ shutdown :: proc(app: ^App) {
   free(app)
 }
 
-spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, position: [3]f32, scale_factor: f32 = 1, cast_shadow := true) -> world.NodeHandle {
-  return mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, color, cast_shadow), position, scale = scale_factor)
+spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, position: [3]f32, scale_factor: f32 = 1, no_shadow := false) -> world.NodeHandle {
+  return mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, color, no_shadow), position, scale = scale_factor)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -55,7 +55,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   app.orbit = render.make_orbit({5, 3, 6}, {0, 1, 0})
 
-  spawn_primitive(app, .QUAD_XZ, .GRAY, {0, 0, 0}, 6.0, cast_shadow = false)
+  spawn_primitive(app, .QUAD_XZ, .GRAY, {0, 0, 0}, 6.0, no_shadow = true)
 
   spawn_primitive(app, .CUBE,   .RED,   {-1.5, 0.5, 0})
   spawn_primitive(app, .SPHERE, .GREEN, {0, 0.6, 1.0}, 0.6)
@@ -69,7 +69,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   top_down.hidden_layers = {2}
   app.top_down_camera = render.camera_create(&app.renderer, {512, 512}, top_down)
   app.screen_material = render.material_create(&app.renderer, render.make_material())
-  screen := render.primitive(&app.renderer, .QUAD_XY, app.screen_material, cast_shadow = false)
+  screen := render.primitive(&app.renderer, .QUAD_XY, app.screen_material, no_shadow = true)
   screen.layer = 2
   mjolnir.spawn(&app.scene, &app.renderer, screen, {0, 2.5, -3.5}, scale = 3.0)
   return .READY
@@ -80,7 +80,7 @@ update :: proc(app: ^App, dt: f32) {
   app.time += dt
   platform.read_input(&app.platform, &app.input)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
-  world.rotate(&app.scene, app.spinner, app.time)
+  world.transform(&app.scene, app.spinner).rotation = linalg.quaternion_angle_axis(app.time, linalg.VECTOR3F32_Y_AXIS)
   screen := render.material(&app.renderer, app.screen_material)
   screen.albedo_texture = render.camera_image(&app.renderer, app.top_down_camera, .FINAL_IMAGE, previous_frame = true)
   mjolnir.update(&app.scene, &app.renderer, dt)

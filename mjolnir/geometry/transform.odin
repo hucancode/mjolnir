@@ -46,5 +46,5 @@ transform_mul :: proc "contextless" (parent, child: Transform) -> Transform {
 
 // transform_point returns p moved from t's frame into its parent's: scaled, rotated, translated.
 transform_point :: proc "contextless" (t: Transform, p: [3]f32) -> [3]f32 {
-  return t.position + qmv(t.rotation, t.scale * p)
+  return t.position + linalg.mul(t.rotation, t.scale * p)
 }

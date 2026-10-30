@@ -223,7 +223,7 @@ place :: proc(app: ^App) {
   }
   for p, i in app.pieces {
     x := app.live.pieces[i]
-    world.set_local(&app.scene, p.node, x)
+    world.transform(&app.scene, p.node)^ = x
     world.set_visible(&app.scene, p.node, true)
   }
 }
@@ -296,7 +296,7 @@ mesh :: proc(app: ^App, unit: Unit) -> render.MeshHandle {
 
 attach :: proc(app: ^App, p: Piece) {
   material := app.materials[(p.key ~ app.seed) % len(PALETTE)]
-  render.attach(&app.renderer, p.node, render.MeshAttachment{mesh = mesh(app, p.unit), material = material, cast_shadow = true})
+  render.attach(&app.renderer, p.node, render.MeshAttachment{mesh = mesh(app, p.unit), material = material})
 }
 
 recolor :: proc(app: ^App) {
@@ -411,7 +411,7 @@ build :: proc(app: ^App) {
         ball_male(app, j)
       }
       l.seat = geometry.seat(b, l.mount.face)
-      if l.mount.axis do l.seat.position = -linalg.quaternion128_mul_vector3(l.seat.rotation, l.mount.face.position)
+      if l.mount.axis do l.seat.position = -linalg.mul(l.seat.rotation, l.mount.face.position)
     }
     append(&app.groups, Group{link = i})
     emit(app, l.bone, l.seat)
@@ -536,7 +536,7 @@ snapshot :: proc(app: ^App, offset: f32, out: ^Snapshot) {
   for g, i in app.groups {
     l := app.links[g.link]
     out.centers[i] /= f32(max(1, g.pieces))
-    out.normals[i] = -linalg.normalize(linalg.quaternion128_mul_vector3(out.bones[l.bone].rotation * l.seat.rotation, l.mount.face.normal))
+    out.normals[i] = -linalg.normalize(linalg.mul(out.bones[l.bone].rotation * l.seat.rotation, l.mount.face.normal))
   }
 }
 

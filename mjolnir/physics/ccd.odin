@@ -45,8 +45,8 @@ swept_sphere_box :: proc(
   half_extents: [3]f32,
 ) -> (t: f32, hit: bool) {
   inv_rot := linalg.quaternion_inverse(box_rotation)
-  local_origin := geometry.qmv(inv_rot, center - box_center)
-  local_velocity := geometry.qmv(inv_rot, velocity)
+  local_origin := linalg.mul(inv_rot, center - box_center)
+  local_velocity := linalg.mul(inv_rot, velocity)
   r := half_extents + radius
   return sweep_point_aabb(local_origin, local_velocity, {-r, r})
 }
