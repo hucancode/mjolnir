@@ -65,7 +65,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   effector_material := render.material_create(&app.renderer, render.make_material(emissive_factor = 5.0))
   app.effector = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .SPHERE, effector_material, no_shadow = true), scale = 0.5)
   app.orbit = render.make_orbit({10, 30, 10}, {0, 0, 0})
-  log.infof("AOE test setup complete: %d cubes", GRID_SIZE * GRID_SIZE)
   return .READY
 }
 

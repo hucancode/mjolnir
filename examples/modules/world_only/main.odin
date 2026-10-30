@@ -2,6 +2,7 @@
 package main
 
 import "core:fmt"
+import "core:math"
 import "core:math/linalg"
 import "core:strings"
 import "mjolnir/world"
@@ -48,7 +49,7 @@ teardown :: proc() {
 }
 
 tick :: proc() {
-  for b, i in BODIES do if b.period > 0 do world.transform(&w, pivots[i]).rotation *= linalg.quaternion_angle_axis(2 * 3.14159265 / b.period, linalg.VECTOR3F32_Y_AXIS)
+  for b, i in BODIES do if b.period > 0 do world.transform(&w, pivots[i]).rotation *= linalg.quaternion_angle_axis(math.TAU / b.period, linalg.VECTOR3F32_Y_AXIS)
   if ticks == TICKS / 2 do world.destroy(&w, world.find(&w, "deimos"))
   world.update(&w)
   for c in world.changes(&w) {

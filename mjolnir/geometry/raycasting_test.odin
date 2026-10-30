@@ -16,7 +16,7 @@ test_ray_sphere_intersection :: proc(t: ^testing.T) {
     origin    = {0, 0, 5},
     direction = {0, 0, -1},
   }
-  hit, dist := ray_sphere_intersection(ray, sphere)
+  dist, hit := ray_sphere_intersection(ray, sphere)
   testing.expect(t, hit, "Ray should hit sphere")
   testing.expect_value(t, dist, 4.0)
   // Basic miss
@@ -24,7 +24,7 @@ test_ray_sphere_intersection :: proc(t: ^testing.T) {
     origin    = {2, 0, 5},
     direction = {0, 0, -1},
   }
-  hit2, _ := ray_sphere_intersection(ray2, sphere)
+  _, hit2 := ray_sphere_intersection(ray2, sphere)
   testing.expect(t, !hit2, "Ray should miss sphere")
   // Edge cases
   // Tangent ray
@@ -32,7 +32,7 @@ test_ray_sphere_intersection :: proc(t: ^testing.T) {
     origin    = {1, 0, 5},
     direction = {0, 0, -1},
   }
-  hit3, dist3 := ray_sphere_intersection(ray_tangent, sphere)
+  dist3, hit3 := ray_sphere_intersection(ray_tangent, sphere)
   testing.expect(t, hit3, "Tangent ray should hit sphere")
   testing.expect_value(t, dist3, 5.0)
   // Ray starting inside
@@ -40,7 +40,7 @@ test_ray_sphere_intersection :: proc(t: ^testing.T) {
     origin    = {0, 0, 0},
     direction = {1, 0, 0},
   }
-  hit4, dist4 := ray_sphere_intersection(ray_inside, sphere)
+  dist4, hit4 := ray_sphere_intersection(ray_inside, sphere)
   testing.expect(t, hit4, "Ray from inside should hit")
   testing.expect_value(t, dist4, 1.0)
   // Very small sphere
@@ -52,7 +52,7 @@ test_ray_sphere_intersection :: proc(t: ^testing.T) {
     origin    = {0, 0, 1},
     direction = {0, 0, -1},
   }
-  hit5, _ := ray_sphere_intersection(ray_tiny, tiny_sphere)
+  _, hit5 := ray_sphere_intersection(ray_tiny, tiny_sphere)
   testing.expect(t, hit5, "Should hit tiny sphere")
 }
 

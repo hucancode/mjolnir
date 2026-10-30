@@ -78,7 +78,7 @@ doc: shader
 		odin build $$(ls -d examples/*/$$name) $(WASM_FLAGS) -out:$(WEB_OUT)/$$name.wasm >/dev/null 2>&1 \
 			|| echo "  skipped $$name (no web build)"; \
 	done
-	odin run docs/gen -- -src=mjolnir -out=$(WEB_OUT) -examples=examples -media=docs/site \
+	odin run docs/gen -- -src=mjolnir -out=$(WEB_OUT) -examples=examples -media=docs/site -no-media=modules \
 		-name=Mjolnir -url=https://github.com/hucancode/mjolnir
 
 # The site's media, kept out of git: $(MEDIA_DIR)/videos/<example>.mp4 and

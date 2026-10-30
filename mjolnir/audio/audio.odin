@@ -20,3 +20,8 @@ Bus :: enum u8 {
   DIALOG,
   UI,
 }
+
+// destroy frees a sound, as sound_destroy does.
+destroy :: proc {
+  sound_destroy,
+}

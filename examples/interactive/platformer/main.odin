@@ -227,8 +227,7 @@ sprite_look :: proc(app: ^App, sheet: Sheet, frame: u32) -> render.MaterialHandl
 }
 
 spawn_sprite :: proc(app: ^App, look: render.MaterialHandle, position: [3]f32, size: f32 = 1, parent: world.NodeHandle = {}) -> world.NodeHandle {
-  node := mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, look, no_shadow = true), position, parent = parent, scale = size / 2)
-  return node
+  return mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, look, no_shadow = true), position, parent = parent, scale = size / 2)
 }
 
 build_backdrop :: proc(app: ^App, sheet: Sheet) {

@@ -96,7 +96,7 @@ material_create :: proc(self: ^Renderer, m: Material) -> (handle: MaterialHandle
   return MaterialHandle(resource_create(self, .MATERIALS, m) or_return), true
 }
 
-// material_destroy frees the material; a stale handle is ignored.
+// material_destroy frees the material; destroy each handle once.
 material_destroy :: proc(self: ^Renderer, handle: MaterialHandle) {
   resource_destroy(self, .MATERIALS, u32(handle))
 }

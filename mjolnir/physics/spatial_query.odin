@@ -1,7 +1,6 @@
 package physics
 
 import "../geometry"
-import "core:math"
 import "core:math/linalg"
 
 // RayHit is a raycast result; hit is false when nothing was hit.
@@ -103,7 +102,7 @@ raycast_collider :: proc(
   hit: bool,
 ) {
   if sphere, is_sphere := collider.(SphereCollider); is_sphere {
-    hit, t = geometry.ray_sphere_intersection(
+    t, hit = geometry.ray_sphere_intersection(
       ray,
       geometry.Sphere{center = position, radius = sphere.radius},
       max_dist,
@@ -121,7 +120,7 @@ raycast_collider :: proc(
   case BoxCollider:
     t, local_normal, hit = raycast_local_box(local, shape.half_extents)
   case CylinderCollider:
-    t, local_normal, hit = raycast_local_cylinder(local, shape.radius, shape.half_height)
+    t, local_normal, hit = geometry.ray_cylinder_intersection(local, shape.radius, shape.half_height)
   }
   if !hit || t > max_dist do return 0, {}, false
   return t, linalg.mul(rotation, local_normal), true
@@ -141,47 +140,4 @@ raycast_local_box :: proc(
   if t_near > t_far || t_far < 0 do return
   t = max(0, t_near)
   return t, geometry.aabb_face_normal(box, ray.origin + ray.direction * t), true
-}
-
-// Ray vs a cylinder centered on the origin with axis Y. Takes the nearest
-// hit among the caps and the curved wall, each clipped to the solid.
-@(private = "file")
-raycast_local_cylinder :: proc(
-  ray: geometry.Ray,
-  radius, half_h: f32,
-) -> (
-  t: f32,
-  normal: [3]f32,
-  hit: bool,
-) {
-  r2 := radius * radius
-  if linalg.length2(ray.origin.xz) <= r2 && math.abs(ray.origin.y) <= half_h {
-    return 0, -linalg.normalize(ray.direction), true
-  }
-  t = max(f32)
-  if math.abs(ray.direction.y) > 1e-8 {
-    for side in ([2]f32{-1, 1}) {
-      s := (side * half_h - ray.origin.y) / ray.direction.y
-      p := ray.origin + ray.direction * s
-      if s >= 0 && s < t && linalg.length2(p.xz) <= r2 {
-        t, normal, hit = s, {0, side, 0}, true
-      }
-    }
-  }
-  // Curved wall: |o.xz + s*d.xz|^2 = r^2, entering root
-  a := linalg.length2(ray.direction.xz)
-  if a > 1e-12 {
-    b := linalg.dot(ray.origin.xz, ray.direction.xz)
-    c := linalg.length2(ray.origin.xz) - r2
-    disc := b * b - a * c
-    if disc >= 0 {
-      s := (-b - math.sqrt(disc)) / a
-      p := ray.origin + ray.direction * s
-      if s >= 0 && s < t && math.abs(p.y) <= half_h {
-        t, normal, hit = s, {p.x / radius, 0, p.z / radius}, true
-      }
-    }
-  }
-  if !hit do t = 0
-  return
 }

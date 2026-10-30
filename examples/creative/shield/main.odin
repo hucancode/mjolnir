@@ -24,8 +24,8 @@ App :: struct {
   platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
-  debug:    debugui.Context,
   input:    input.State,
+  debug:    debugui.Context,
   orbit:    render.Orbit,
   field:    render.MaterialHandle,
   ring:     render.MaterialHandle,
@@ -71,15 +71,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.field = render.material_create(r, render.make_material(field_shader))
   app.ring = render.material_create(r, render.make_material(ring_shader))
 
-  sphere := world.spawn(&app.scene, {0, RADIUS, 0})
   sphere_mesh := render.mesh_create(r, geometry.make_sphere(segments = SEGMENTS, rings = RINGS, radius = RADIUS, faceted = true))
-  render.attach(r, sphere, render.MeshAttachment{mesh = sphere_mesh, material = app.field})
-  disc := world.spawn(&app.scene, {0, RADIUS, 0})
-  disc_mesh := render.mesh_create(r, geometry.make_circle(segments = DISC_SEGMENTS, radius = DISC_RADIUS))
-  render.attach(r, disc, render.MeshAttachment{mesh = disc_mesh, material = app.ring})
-  flipped := world.spawn(&app.scene, {0, RADIUS, 0})
-  world.transform(&app.scene, flipped).rotation = linalg.quaternion_angle_axis(math.PI, linalg.VECTOR3F32_X_AXIS)
-  render.attach(r, flipped, render.MeshAttachment{mesh = disc_mesh, material = app.ring})
+  mjolnir.spawn(&app.scene, r, render.MeshAttachment{mesh = sphere_mesh, material = app.field}, {0, RADIUS, 0})
+  disc := render.MeshAttachment{mesh = render.mesh_create(r, geometry.make_circle(segments = DISC_SEGMENTS, radius = DISC_RADIUS)), material = app.ring}
+  mjolnir.spawn(&app.scene, r, disc, {0, RADIUS, 0})
+  mjolnir.spawn(&app.scene, r, disc, {0, RADIUS, 0}, linalg.quaternion_angle_axis(math.PI, linalg.VECTOR3F32_X_AXIS))
 
   return .READY
 }

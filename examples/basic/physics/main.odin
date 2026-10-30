@@ -66,7 +66,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   for &v in rand_cylinder.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   rand_sphere_mesh := render.mesh_create(&app.renderer, rand_sphere)
   rand_cylinder_mesh := render.mesh_create(&app.renderer, rand_cylinder)
-  white := render.primitive(&app.renderer, color = .WHITE).material
+  white := render.material_create(&app.renderer, render.make_material())
   cylinder_look := render.MeshAttachment{mesh = rand_cylinder_mesh, material = white}
   sphere_look := render.MeshAttachment{mesh = rand_sphere_mesh, material = white}
 
@@ -95,7 +95,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     physics.body_create(&app.phys, pos, mass = 50.0, collider = collider, user = world.Handle(node))
     mjolnir.spawn(&app.scene, &app.renderer, look, parent = node)
   }
-  log.infof("Created %d physics objects", PIECE_COUNT)
   app.orbit = render.make_orbit({10, 15, 10}, {0, 5, 0})
   return .READY
 }

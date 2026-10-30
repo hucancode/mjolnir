@@ -190,7 +190,7 @@ resource_create :: proc(self: ^Renderer, pool: Pool, value: $T) -> (index: u32, 
   return index, true
 }
 
-// The row of a live handle, to edit in place: valid until the next frame, as render.material's.
+// The row of a live handle, to edit in place: valid for this tick, as render.material's.
 @(private)
 resource :: proc(self: ^Renderer, pool: Pool, $T: typeid, index: u32) -> (^T, bool) {
   if !containers.slots_live(&self.slots[pool], index) do return nil, false

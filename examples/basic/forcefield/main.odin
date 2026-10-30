@@ -18,8 +18,8 @@ App :: struct {
   platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
-  debug:    debugui.Context,
   input:    input.State,
+  debug:    debugui.Context,
   orbit:    render.Orbit,
   time:     f32,
   repel:    Field,
@@ -71,9 +71,8 @@ spawn_field :: proc(
 ) -> Field {
   f := Field{color = color, enabled = true, area = area, spin_speed = spin_speed, spin_dir = spin_dir}
   f.pivot = world.spawn(&app.scene, {0, 2, 0})
-  f.node = world.spawn(&app.scene, {orbit_radius, 0, 0}, parent = f.pivot)
   f.handle = render.force_field_create(&app.renderer, render.make_force_field(area_of_effect = area, strength = strength, tangent_strength = tangent))
-  render.attach(&app.renderer, f.node, f.handle)
+  f.node = mjolnir.spawn(&app.scene, &app.renderer, f.handle, {orbit_radius, 0, 0}, parent = f.pivot)
   return f
 }
 

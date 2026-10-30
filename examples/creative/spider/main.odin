@@ -38,12 +38,11 @@ App :: struct {
   platform:       platform.Platform,
   scene:          world.World,
   renderer:       render.Renderer,
-  debug:          debugui.Context,
   input:          input.State,
+  debug:          debugui.Context,
   orbit:          render.Orbit,
   spider_model:   gltf.Model,
   spider:         gltf.Instance,
-  spider_root:    world.NodeHandle,
   spider_mesh:    world.NodeHandle,
   rig:            gltf.RigHandle,
   legs:           [LEG_COUNT]animation.LayerHandle,
@@ -104,7 +103,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   app.spider_model = gltf.model_create(&app.renderer, #load("assets/spider.glb"))
   app.spider = gltf.instance_create(&app.spider_model, &app.scene, &app.renderer)
   if len(app.spider.skinned) == 0 do return .FAIL
-  app.spider_root = app.spider.root
   app.spider_mesh = app.spider.skinned[0].node
   app.rig = app.spider.skinned[0].rig
   rig, animator := &app.spider_model.rigs[app.rig], &app.spider.animators[app.rig]
@@ -155,7 +153,7 @@ ground_body :: proc(app: ^App) {
 walk :: proc(app: ^App, dt: f32) {
   move_body(app, dt)
   app.lift_period = clamp(STRIDE / app.body_speed_max, MIN_PERIOD, MAX_PERIOD)
-  world.transform(&app.scene, app.spider_root).position = app.body_position
+  world.transform(&app.scene, app.spider.root).position = app.body_position
   for layer, i in app.legs {
     if leg, ok := animation.layer_params(&app.spider.animators[app.rig], layer, animation.LegParams); ok do tripod_step(app, leg, i)
   }

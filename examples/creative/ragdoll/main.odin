@@ -22,10 +22,6 @@ Mode :: enum {
 }
 
 PART_COUNT :: 13
-GREEN :: [4]f32{0.2, 1, 0.3, 1}
-YELLOW :: [4]f32{1, 0.9, 0.2, 1}
-RED :: [4]f32{1, 0.25, 0.2, 1}
-CYAN :: [4]f32{0.2, 0.9, 1, 1}
 
 BLOCKS := [PART_COUNT]ragdoll.Block {
   {name = "Pelvis", start = 0, end = 1, parent = -1, back = 0.07, size = {0.095, 0, 0.07}},
@@ -56,8 +52,8 @@ App :: struct {
   platform:  platform.Platform,
   scene:     world.World,
   renderer:  render.Renderer,
-  debug:     debugui.Context,
   input:     input.State,
+  debug:     debugui.Context,
   orbit:     render.Orbit,
   phys:      physics.World,
   model:     gltf.Model,
@@ -224,12 +220,12 @@ draw_blocks :: proc(app: ^App) {
   for k in 0 ..< PART_COUNT {
     position, rotation, half, ok := ragdoll.block_pose(&app.rag, &app.phys, k)
     if !ok do continue
-    color := YELLOW if k == app.selected else GREEN
-    if app.grab.active && app.grab.part == k do color = RED
+    color := render.COLOR_RGB[.YELLOW] if k == app.selected else render.COLOR_RGB[.GREEN]
+    if app.grab.active && app.grab.part == k do color = render.COLOR_RGB[.RED]
     render.debug_cube(&app.renderer, position, rotation, half, color)
     if app.mode == .SIM && app.blocks[k].parent >= 0 {
       start := [3]f32{0, -(half.y - app.blocks[k].back * app.rag.scale), 0}
-      render.debug_point(&app.renderer, position + linalg.mul(rotation, start), 0.03 * app.rag.scale, CYAN, 0, true)
+      render.debug_point(&app.renderer, position + linalg.mul(rotation, start), 0.03 * app.rag.scale, render.COLOR_RGB[.CYAN], 0, true)
     }
   }
 }

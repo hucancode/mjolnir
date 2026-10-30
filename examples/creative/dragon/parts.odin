@@ -77,10 +77,6 @@ half_cylinder_box :: proc(r, h, depth: f32) -> Shape {
   return s
 }
 
-around :: proc(angle: f32, axis: [3]f32) -> quaternion128 {
-  return linalg.quaternion_angle_axis_f32(angle, axis)
-}
-
 spin :: proc(s: Shape, q: quaternion128) -> Shape {
   s := s
   for &p in s.parts[:s.count] do p.place = geometry.transform_mul({rotation = q, scale = 1}, p.place)
@@ -88,15 +84,15 @@ spin :: proc(s: Shape, q: quaternion128) -> Shape {
 }
 
 rot_x :: proc(s: Shape, angle: f32) -> Shape {
-  return spin(s, around(angle, X))
+  return spin(s, linalg.quaternion_angle_axis(angle, X))
 }
 
 rot_y :: proc(s: Shape, angle: f32) -> Shape {
-  return spin(s, around(angle, Y))
+  return spin(s, linalg.quaternion_angle_axis(angle, Y))
 }
 
 rot_z :: proc(s: Shape, angle: f32) -> Shape {
-  return spin(s, around(angle, Z))
+  return spin(s, linalg.quaternion_angle_axis(angle, Z))
 }
 
 move :: proc(s: Shape, x, y, z: f32) -> Shape {

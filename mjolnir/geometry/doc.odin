@@ -1,6 +1,6 @@
-// 3D math and procedural geometry: boxes, rays, frustums, intersection tests, a BVH, transforms,
-// splines and chains (what trails a moving point), and CPU triangle meshes: generators
-// (make_lathe, make_extrusion), shapes built on them (make_cube, ...) and mesh_merge.
+// 3D math and CPU geometry with no GPU or engine state: build meshes (make_cube, make_lathe,
+// mesh_merge), test rays and bounds against shapes, and query a BVH; pass the results to render,
+// physics or navigation.
 package geometry
 
 // Layer 0: core

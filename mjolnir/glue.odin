@@ -47,10 +47,10 @@ sync_bodies :: proc(w: ^world.World, p: ^physics.World) {
   world.set_world_poses(w, physics.body_poses(p))
 }
 
-// orbit_drag steers the orbit from a tick of input and places camera on it (render.camera_orbit),
-// unless a consumer captured the mouse (call it after the UIs that may, e.g. debugui.begin): it turns by the mouse movement times speed while a
-// button of `rotate_with` is held ({} only zooms) and moves a step closer per scroll, keeping
-// pitch short of the poles and distance in range.
+// orbit_drag steers the orbit from a tick of input and places camera on it (render.camera_orbit).
+// It turns by the mouse movement times speed while a button of `rotate_with` is held ({} only
+// zooms) and moves a step closer per scroll, keeping pitch short of the poles and distance in
+// range. A captured mouse is left alone: call it after the UIs that capture it (debugui.begin).
 orbit_drag :: proc(
   self: ^render.Orbit,
   camera: ^render.Camera,
@@ -72,10 +72,9 @@ orbit_drag :: proc(
   render.camera_orbit(camera, self^)
 }
 
-// stage_ui brings gui up to date for r's window at p's DPI scale (ui.update) and stages its mesh over what is
-// staged so far (render.stage_overlay_mesh), glyphs sampled from render.font_texture. Restaging
-// an unchanged UI is a copy: layout and tessellation run only when it changed. It returns what
-// the update redid.
+// stage_ui brings gui up to date for r's window at p's DPI scale (ui.update) and stages its mesh
+// over what is staged so far (render.stage_overlay_mesh), glyphs sampled from
+// render.font_texture. It returns what the update redid.
 stage_ui :: proc(r: ^render.Renderer, p: ^platform.Platform, gui: ^ui.UI, f: ^font.Font) -> (laid_out, painted: bool) {
   laid_out, painted = ui.update(gui, render.window_size(r), f, platform.dpi_scale(p))
   vertices, indices, batches := ui.mesh(gui)

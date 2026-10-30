@@ -771,7 +771,8 @@ step :: proc(self: ^World, dt: f32) -> (stepped: bool) {
   return true
 }
 
-// destroy frees a body, as body_destroy does.
+// destroy frees a body or joint, as body_destroy and joint_destroy do.
 destroy :: proc {
   body_destroy,
+  joint_destroy,
 }

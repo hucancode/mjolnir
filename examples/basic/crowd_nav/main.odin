@@ -50,8 +50,8 @@ App :: struct {
   platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
-  debug:    debugui.Context,
   input:    input.State,
+  debug:    debugui.Context,
   orbit:    render.Orbit,
   navmesh:  nav.NavMesh,
   crowd:    nav.Crowd,
@@ -186,8 +186,9 @@ update :: proc(app: ^App, dt: f32) {
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if !app.input.mouse_captured && input.mouse_pressed(&app.input, .RIGHT) {
-    ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
-    if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do send_all_to(app, goal)
+    if ray, ok := render.cursor_ray(&app.renderer, app.input.cursor); ok {
+      if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do send_all_to(app, goal)
+    }
   }
   if app.wander do reassign_arrived(app)
   nav.crowd_update(&app.crowd, dt)

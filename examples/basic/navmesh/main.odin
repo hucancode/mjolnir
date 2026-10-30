@@ -124,8 +124,9 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.platform, &app.input)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if !app.input.mouse_captured && input.mouse_pressed(&app.input, .RIGHT) {
-    ray, _ := render.cursor_ray(&app.renderer, app.input.cursor)
-    if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do go_to(app, goal)
+    if ray, ok := render.cursor_ray(&app.renderer, app.input.cursor); ok {
+      if goal, on_navmesh := nav.raycast(&app.navmesh, ray); on_navmesh do go_to(app, goal)
+    }
   }
   follow_path(app, dt)
   if app.next_waypoint >= len(app.path) do go_to(app, random_goal(app))

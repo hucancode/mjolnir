@@ -1,9 +1,10 @@
 // An API and examples reference generator for any Odin project:
-//   odin run docs/gen -- -src=<dir> -out=<dir> [-examples=<dir>] [-media=<dir>] [-name=<project>] [-url=<repo>]
+//   odin run docs/gen -- -src=<dir> -out=<dir> [-examples=<dir>] [-media=<dir>] [-no-media=<category>]
+//     [-name=<project>] [-url=<repo>]
 // Writes <out>/api.json (every package under -src, from `odin doc`) and <out>/examples.json
 // (every <examples>/<category>/<name>/main.odin, its leading comment the description; a web
 // build at <out>/<name>.wasm and media at <media>/videos/<name>.mp4 and <media>/posters/<name>.jpg
-// noted); the pages fetch them. A package's doc.odin may name its layer after the package clause
+// noted, a missing video warned of outside the -no-media category); the pages fetch them. A package's doc.odin may name its layer after the package clause
 // (`// Layer N: name`): once one does, every one must, and imports must point to lower layers.
 package main
 
@@ -54,7 +55,7 @@ Examples :: struct {
 
 // The command line.
 Options :: struct {
-  src, out, examples, media, name, url: string,
+  src, out, examples, media, no_media, name, url: string,
 }
 
 options: Options
@@ -397,7 +398,7 @@ load_examples :: proc(root, wasm_dir, media: string) -> []Example {
 check_media :: proc(examples: []Example, media: string) {
   if media == "" do return
   for e in examples {
-    if !e.video do fmt.eprintfln("warning: example %s has no video", e.name)
+    if !e.video && e.category != options.no_media do fmt.eprintfln("warning: example %s has no video", e.name)
     poster, _ := filepath.join({media, "posters", fmt.tprintf("%s.jpg", e.name)})
     if e.video && !os.exists(poster) do fmt.eprintfln("warning: example %s has a video but no poster", e.name)
   }
@@ -420,7 +421,7 @@ emit :: proc(path: string, value: any) {
   write(path, string(data))
 }
 
-USAGE :: "usage: gen -src=<dir> -out=<dir> [-examples=<dir>] [-media=<dir>] [-name=<project>] [-url=<repo>]"
+USAGE :: "usage: gen -src=<dir> -out=<dir> [-examples=<dir>] [-media=<dir>] [-no-media=<category>] [-name=<project>] [-url=<repo>]"
 
 main :: proc() {
   for arg in os.args[1:] {
@@ -436,6 +437,8 @@ main :: proc() {
       options.examples = value
     case "-media":
       options.media = value
+    case "-no-media":
+      options.no_media = value
     case "-name":
       options.name = value
     case "-url":

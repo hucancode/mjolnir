@@ -15,8 +15,8 @@ App :: struct {
   platform: platform.Platform,
   scene:    world.World,
   renderer: render.Renderer,
-  debug:    debugui.Context,
   input:    input.State,
+  debug:    debugui.Context,
   orbit:    render.Orbit,
   vignette: render.ShaderHandle,
 }

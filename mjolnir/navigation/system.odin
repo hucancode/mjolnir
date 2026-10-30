@@ -77,7 +77,6 @@ raycast :: proc(
   point: [3]f32,
   ok: bool,
 ) {
-  origin, dir := ray.origin, ray.direction
   best := max_t
   for i in 0 ..< self.detour_mesh.max_tiles {
     tile := &self.detour_mesh.tiles[i]
@@ -90,7 +89,7 @@ raycast :: proc(
           v0 := tile.verts[poly.verts[0]]
           v1 := tile.verts[poly.verts[j]]
           v2 := tile.verts[poly.verts[j + 1]]
-          if t, hit := geometry.ray_triangle_intersection(origin, dir, v0, v1, v2); hit && t < best {
+          if t, hit := geometry.ray_triangle_intersection(ray, v0, v1, v2); hit && t < best {
             best = t
             ok = true
           }
@@ -108,7 +107,7 @@ raycast :: proc(
             v[j] = tile.detail_verts[pd.vert_base + u32(tri[j] - poly.vert_count)]
           }
         }
-        if t, hit := geometry.ray_triangle_intersection(origin, dir, v[0], v[1], v[2]); hit && t < best {
+        if t, hit := geometry.ray_triangle_intersection(ray, v[0], v[1], v[2]); hit && t < best {
           best = t
           ok = true
         }
@@ -116,7 +115,7 @@ raycast :: proc(
     }
   }
   if !ok do return {}, false
-  return origin + dir * best, true
+  return ray.origin + ray.direction * best, true
 }
 
 // find_path returns straight-line waypoints from start to end, the cheapest way filter allows;

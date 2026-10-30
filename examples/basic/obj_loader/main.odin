@@ -26,8 +26,8 @@ App :: struct {
   platform:  platform.Platform,
   scene:     world.World,
   renderer:  render.Renderer,
-  debug:     debugui.Context,
   input:     input.State,
+  debug:     debugui.Context,
   orbit:     render.Orbit,
   models:    [3]Model,
   material:  render.MaterialHandle,
@@ -108,10 +108,9 @@ show_model :: proc(app: ^App, index: int) {
   attach_model(app)
   world.transform(&app.scene, app.display).position = -center
 
-  cam_dist := radius
   cam := render.main_camera(&app.renderer)
-  cam.projection, cam.near, cam.far = render.PerspectiveProjection{1.2}, max(0.1, cam_dist * 0.01), cam_dist * 5.0
-  app.orbit = render.make_orbit({cam_dist, cam_dist * 0.7, cam_dist}, {0, 0, 0})
+  cam.projection, cam.near, cam.far = render.PerspectiveProjection{1.2}, max(0.1, radius * 0.01), radius * 5.0
+  app.orbit = render.make_orbit({radius, radius * 0.7, radius}, {0, 0, 0})
 }
 
 draw :: proc(app: ^App) -> bool {

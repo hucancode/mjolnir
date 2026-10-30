@@ -1,4 +1,4 @@
-// A game HUD on the retained ui, over sample data: bars, hotbar, minimap, tracker, toasts, and draggable inventory, character, quest and settings windows.
+// A game HUD on the retained ui, over sample data: bars, hotbar, minimap, quest tracker, toasts, a draggable inventory and quest log, and pause and quit dialogs.
 package main
 
 import "core:fmt"
@@ -6,7 +6,6 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:strings"
-import "core:time"
 import "mjolnir"
 import "mjolnir/animation"
 import "mjolnir/font"
@@ -40,18 +39,17 @@ ItemInfo :: struct {
   name, text: string,
   tile:       u32,
   value:      int,
-  stack:      int,
   consumable: bool,
 }
 
 ITEMS := [Item]ItemInfo {
   .NONE     = {},
-  .POTION   = {"Heart Potion", "Restores 120 health.", 44, 15, 20, true},
-  .MUSHROOM = {"Red Mushroom", "Restores 60 mana.", 128, 10, 20, true},
-  .GEM      = {"Sapphire", "A cold blue gem. Merchants love it.", 67, 80, 10, false},
-  .SPROUT   = {"Sprout", "A herb for the alchemist in town.", 124, 4, 30, false},
-  .CRATE    = {"Supply Crate", "Heavy. Something rattles inside.", 26, 25, 1, false},
-  .KEY      = {"Golden Key", "Opens the gate of the old crypt.", 27, 0, 1, false},
+  .POTION   = {"Heart Potion", "Restores 120 health.", 44, 15, true},
+  .MUSHROOM = {"Red Mushroom", "Restores 60 mana.", 128, 10, true},
+  .GEM      = {"Sapphire", "A cold blue gem. Merchants love it.", 67, 80, false},
+  .SPROUT   = {"Sprout", "A herb for the alchemist in town.", 124, 4, false},
+  .CRATE    = {"Supply Crate", "Heavy. Something rattles inside.", 26, 25, false},
+  .KEY      = {"Golden Key", "Opens the gate of the old crypt.", 27, 0, false},
 }
 
 Skill :: enum u8 {
@@ -79,13 +77,6 @@ Action :: union {
   Item,
 }
 
-Stat :: enum u8 {
-  STRENGTH,
-  DEXTERITY,
-  INTELLECT,
-  VITALITY,
-}
-
 Quest :: struct {
   title, text, goal: string,
 }
@@ -103,67 +94,24 @@ MAP_MARKERS := [?][2]f32{{0.2, 0.3}, {0.75, 0.2}, {0.8, 0.7}, {0.3, 0.8}, {0.55,
 
 Window :: enum u8 {
   INVENTORY,
-  CHARACTER,
   QUESTS,
-  SETTINGS,
   PAUSE,
-  CONFIRM,
 }
 
-Tab :: enum u8 {
-  GAMEPLAY,
-  VIDEO,
-  AUDIO,
-  CONTROLS,
-}
-
-Setting :: enum u8 {
-  SENSITIVITY,
-  FOV,
-  MASTER,
-  MUSIC,
-  EFFECTS,
-}
-
-SETTING_RANGE := [Setting][3]f32 {
-  .SENSITIVITY = {0.25, 3, 1},
-  .FOV         = {50, 110, 80},
-  .MASTER      = {0, 100, 80},
-  .MUSIC       = {0, 100, 60},
-  .EFFECTS     = {0, 100, 90},
-}
-
-Toggle :: enum u8 {
-  MINIMAP,
-  PERF,
-  TOASTS,
-}
-
-MenuButton :: enum u8 {
-  CHARACTER,
-  INVENTORY,
-  QUESTS,
-  SETTINGS,
-  MENU,
-}
-
-MENU_BUTTONS := [MenuButton]struct {
+MENU_BUTTONS := [Window]struct {
   label, key: string,
 } {
-  .CHARACTER = {"Hero", "C"},
   .INVENTORY = {"Bag", "I"},
   .QUESTS    = {"Quests", "J"},
-  .SETTINGS  = {"Options", "O"},
-  .MENU      = {"Menu", "Esc"},
+  .PAUSE     = {"Menu", "Esc"},
 }
 
 Styles :: struct {
-  text, dim, gold, good, title, small:           ui.StyleHandle,
-  panel, window, title_bar, close, button, tab:  ui.StyleHandle,
-  slot, icon, cooldown, bar, hp, mp, xp:         ui.StyleHandle,
-  map_, enemy, player, tooltip, dim_screen:      ui.StyleHandle,
-  toast, check, track, track_fill, knob, row:    ui.StyleHandle,
-  row_text:                                      ui.StyleHandle,
+  text, dim, gold, title, small:            ui.StyleHandle,
+  panel, window, title_bar, close, button:  ui.StyleHandle,
+  slot, icon, cooldown, bar, hp, mp, xp:    ui.StyleHandle,
+  map_, enemy, player, tooltip, dim_screen: ui.StyleHandle,
+  toast, track, row, row_text:              ui.StyleHandle,
 }
 
 Slot :: struct {
@@ -172,10 +120,6 @@ Slot :: struct {
 
 Bar :: struct {
   fill, label: ui.NodeHandle,
-}
-
-Slider :: struct {
-  track, fill, knob, value: ui.NodeHandle,
 }
 
 Panel :: struct {
@@ -193,69 +137,48 @@ Stack :: struct {
 }
 
 App :: struct {
-  platform:   platform.Platform,
-  scene:      world.World,
-  renderer:   render.Renderer,
-  input:      input.State,
-  font:       font.Font,
-  gui:        ui.UI,
-  orbit:      render.Orbit,
-  knight:     gltf.Model,
-  hero:       gltf.Instance,
-  sheet:      render.TextureHandle,
-  s:          Styles,
-  map_frame:  ui.NodeHandle,
-  perf:       ui.NodeHandle,
-  tracker:    ui.NodeHandle,
-  hotbar:     [HOTBAR]Slot,
-  menu:       [MenuButton]ui.NodeHandle,
-  toast_list: ui.NodeHandle,
-  tooltip:    ui.NodeHandle,
-  tip_title:  ui.NodeHandle,
-  tip_text:   ui.NodeHandle,
-  ghost:      ui.NodeHandle,
-  panels:     [Window]Panel,
-  open:       [Window]bool,
-  top_z:      i32,
-  bag_slots:  [BAG_SIZE]Slot,
-  sort:       ui.NodeHandle,
-  points:     ui.NodeHandle,
-  stat_value: [Stat]ui.NodeHandle,
-  stat_plus:  [Stat]ui.NodeHandle,
-  quest_list: ui.NodeHandle,
-  quest_rows: [len(QUESTS)]ui.NodeHandle,
-  quest_name: ui.NodeHandle,
-  quest_text: ui.NodeHandle,
-  quest_goal: ui.NodeHandle,
-  track:      ui.NodeHandle,
+  platform:    platform.Platform,
+  scene:       world.World,
+  renderer:    render.Renderer,
+  input:       input.State,
+  font:        font.Font,
+  gui:         ui.UI,
+  orbit:       render.Orbit,
+  knight:      gltf.Model,
+  hero:        gltf.Instance,
+  sheet:       render.TextureHandle,
+  s:           Styles,
+  map_frame:   ui.NodeHandle,
+  tracker:     ui.NodeHandle,
+  hotbar:      [HOTBAR]Slot,
+  menu:        [Window]ui.NodeHandle,
+  toast_list:  ui.NodeHandle,
+  tooltip:     ui.NodeHandle,
+  tip_title:   ui.NodeHandle,
+  tip_text:    ui.NodeHandle,
+  ghost:       ui.NodeHandle,
+  panels:      [Window]Panel,
+  open:        [Window]bool,
+  top_z:       i32,
+  bag_slots:   [BAG_SIZE]Slot,
+  quest_list:  ui.NodeHandle,
+  quest_rows:  [len(QUESTS)]ui.NodeHandle,
+  quest_name:  ui.NodeHandle,
+  quest_text:  ui.NodeHandle,
+  quest_goal:  ui.NodeHandle,
+  track:       ui.NodeHandle,
   track_label: ui.NodeHandle,
-  tabs:       [Tab]ui.NodeHandle,
-  pages:      [Tab]ui.NodeHandle,
-  sliders:    [Setting]Slider,
-  toggles:    [Toggle]ui.NodeHandle,
-  reset:      ui.NodeHandle,
-  resume:     ui.NodeHandle,
-  options:    ui.NodeHandle,
-  quit:       ui.NodeHandle,
-  yes, no:    ui.NodeHandle,
-  unspent:    int,
-  stats:      [Stat]int,
-  bag:        [BAG_SIZE]Stack,
-  actions:    [HOTBAR]Action,
-  cooldowns:  [HOTBAR]f32,
-  toasts:     [dynamic]Toast,
-  tracked:    [len(QUESTS)]bool,
-  quest:      int,
-  tab:        Tab,
-  values:     [Setting]f32,
-  shown:      [Toggle]bool,
-  dragging:   int,
-  perf_tick:  f32,
-  frames:     int,
-  layouts:    int,
-  paints:     int,
-  ui_time:    time.Duration,
-  quitting:   bool,
+  resume:      ui.NodeHandle,
+  quit:        ui.NodeHandle,
+  bag:         [BAG_SIZE]Stack,
+  actions:     [HOTBAR]Action,
+  cooldowns:   [HOTBAR]f32,
+  toasts:      [dynamic]Toast,
+  tracked:     [len(QUESTS)]bool,
+  quest:       int,
+  minimap:     bool,
+  dragging:    int,
+  quitting:    bool,
 }
 
 main :: proc() {
@@ -280,10 +203,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   sun := render.light_create(&app.renderer, render.make_directional_light())
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
-  app.sheet = render.texture_create(&app.renderer, #load("assets/kenney_pixel_platformer/Tilemap/tilemap_packed.png")) or_else 0
-  ok: bool
-  app.knight, ok = gltf.model_create(&app.renderer, #load("assets/kaykit_adventurers/Knight.glb"))
-  if !ok do return .FAIL
+  app.sheet = render.texture_create(&app.renderer, #load("assets/kenney_pixel_platformer/Tilemap/tilemap_packed.png"))
+  app.knight = gltf.model_create(&app.renderer, #load("assets/kaykit_adventurers/Knight.glb"))
   app.hero = gltf.instance_create(&app.knight, &app.scene, &app.renderer)
   for name in KNIGHT_PROPS do if node, found := world.find(&app.scene, name, app.hero.root); found do world.set_visible(&app.scene, node, false)
   if len(app.hero.animators) > 0 do animation.play(&app.hero.animators[0], &app.knight.rigs[0], "Idle")
@@ -298,8 +219,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 sample_data :: proc(app: ^App) {
-  app.stats = {.STRENGTH = 12, .DEXTERITY = 9, .INTELLECT = 7, .VITALITY = 11}
-  app.unspent = 3
   app.bag[0] = {.POTION, 3}
   app.bag[1] = {.MUSHROOM, 2}
   app.bag[2] = {.SPROUT, 3}
@@ -308,8 +227,7 @@ sample_data :: proc(app: ^App) {
   app.actions = {Skill.SPIKES, Skill.THORNS, Skill.FROST, Skill.RALLY, Item.POTION, Item.MUSHROOM, nil, nil}
   app.tracked[0], app.tracked[1] = true, true
   app.dragging = -1
-  for s in Setting do app.values[s] = SETTING_RANGE[s][2]
-  app.shown = {.MINIMAP = true, .PERF = true, .TOASTS = true}
+  app.minimap = true
 }
 
 shutdown :: proc(app: ^App) {
@@ -337,7 +255,6 @@ create_styles :: proc(app: ^App) {
   s.text = ui.style_create(gui, {color = WHITE})
   s.dim = ui.style_create(gui, {color = rgba(160, 166, 184)})
   s.gold = ui.style_create(gui, {color = GOLD})
-  s.good = ui.style_create(gui, {color = rgba(130, 220, 140)})
   s.title = ui.style_create(gui, {color = GOLD})
   s.small = ui.style_create(gui, {color = rgba(210, 214, 228)})
   s.panel = ui.style_create(gui, {fill = rgba(16, 18, 26, 215), border = 1, border_color = EDGE})
@@ -352,9 +269,6 @@ create_styles :: proc(app: ^App) {
   active := button
   active.fill, active.border_color, active.color = rgba(132, 98, 44), GOLD, WHITE
   s.button = ui.style_create(gui, button, hover, press, active)
-  tab := button
-  tab.fill = rgba(30, 34, 46)
-  s.tab = ui.style_create(gui, tab, hover, press, active)
   slot := ui.Style{fill = rgba(12, 14, 20, 230), border = 1, border_color = EDGE}
   slot_hover := slot
   slot_hover.border_color = GOLD
@@ -373,10 +287,7 @@ create_styles :: proc(app: ^App) {
   s.tooltip = ui.style_create(gui, {fill = rgba(10, 10, 16), border = 1, border_color = rgba(130, 108, 66)})
   s.dim_screen = ui.style_create(gui, {fill = rgba(0, 0, 0, 150)})
   s.toast = ui.style_create(gui, {fill = rgba(10, 10, 16, 190), color = WHITE}, nil, nil, ui.Style{fill = rgba(10, 10, 16, 90), color = rgba(235, 235, 242, 110)})
-  s.check = ui.style_create(gui, slot, slot_hover, slot_hover, ui.Style{fill = GOLD, border = 1, border_color = GOLD})
   s.track = ui.style_create(gui, {fill = rgba(10, 12, 18), border = 1, border_color = EDGE})
-  s.track_fill = ui.style_create(gui, {fill = rgba(150, 112, 50)})
-  s.knob = ui.style_create(gui, {fill = rgba(225, 225, 232), border = 1, border_color = rgba(0, 0, 0)}, ui.Style{fill = GOLD, border = 1, border_color = rgba(0, 0, 0)})
   row := ui.Style{color = WHITE}
   row_hover := ui.Style{fill = rgba(50, 54, 72), color = WHITE}
   row_active := ui.Style{fill = rgba(96, 74, 38), color = GOLD}
@@ -452,7 +363,6 @@ build_hud :: proc(app: ^App) {
   gold := add(app, top_right, {gap = 6, align = {.END, .CENTER}, padding = {8, 4, 8, 4}, style = s.panel})
   add(app, gold, {size = fixed(18, 18), style = s.icon, image = u32(app.sheet), image_rect = tile_rect(151)})
   label(app, gold, "35", 16, s.gold)
-  app.perf = label(app, top_right, "", 12, s.dim)
 
   tracker := add(app, screen, {position = .ABSOLUTE, anchor = {0, 0.4}, offset = {16, 0}, direction = .COLUMN, gap = 6, padding = {12, 10, 12, 10}, style = s.panel})
   label(app, tracker, "Quests", 16, s.gold)
@@ -462,10 +372,10 @@ build_hud :: proc(app: ^App) {
   for &h, i in app.hotbar do h = slot(app, hotbar, 56, fmt.tprint(i + 1))
 
   menu := add(app, screen, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, gap = 6, padding = {8, 8, 8, 8}, style = s.panel})
-  for &b, m in app.menu {
+  for &b, w in app.menu do if MENU_BUTTONS[w].label != "" {
     b = add(app, menu, {direction = .COLUMN, size = {{.FIXED, 62}, {.FIXED, 50}}, align = {.CENTER, .CENTER}, interactive = true, style = s.button})
-    label(app, b, MENU_BUTTONS[m].label, 15)
-    label(app, b, MENU_BUTTONS[m].key, 11, s.dim)
+    label(app, b, MENU_BUTTONS[w].label, 15)
+    label(app, b, MENU_BUTTONS[w].key, 11, s.dim)
   }
 
   app.toast_list = add(app, screen, {position = .ABSOLUTE, anchor = {0.5, 1}, offset = {0, -110}, direction = .COLUMN, gap = 6, align = {.CENTER, .END}})
@@ -507,21 +417,9 @@ build_windows :: proc(app: ^App) {
   footer := add(app, body, {size = {{.GROW, 0}, {}}, gap = 8, align = {.START, .CENTER}})
   add(app, footer, {size = fixed(20, 20), style = s.icon, image = u32(app.sheet), image_rect = tile_rect(151)})
   label(app, footer, "35 gold", 16, s.gold)
-  add(app, footer, {size = {{.GROW, 0}, {}}})
-  app.sort = button(app, footer, "Sort")
   label(app, body, "Drag to move, drop on the hotbar to bind, right click to use.", 13, s.dim, {size = {{.GROW, 0}, {}}, wrap = true})
 
-  body = panel_create(app, .CHARACTER, "Character", 330, {120, 140})
-  label(app, body, "Knight, level 7", 15, s.small)
-  app.points = label(app, body, "", 15, s.good)
-  for stat in Stat {
-    r := add(app, body, {size = {{.GROW, 0}, {.FIXED, 30}}, gap = 8, align = {.START, .CENTER}})
-    label(app, r, fmt.tprintf("%v", stat), 15, s.text, {size = {{.FIXED, 120}, {}}})
-    app.stat_value[stat] = label(app, r, "", 16, s.gold, {size = {{.GROW, 0}, {}}})
-    app.stat_plus[stat] = button(app, r, "+", 30, 28)
-  }
-
-  body = panel_create(app, .QUESTS, "Quest Log", 560, {360, 120})
+  body = panel_create(app, .QUESTS, "Quest Log", 560, {120, 120})
   split := add(app, body, {gap = 14, size = {{.GROW, 0}, {.FIXED, 300}}})
   app.quest_list = add(app, split, {direction = .COLUMN, size = {{.FIXED, 200}, {.GROW, 0}}, gap = 2, padding = {4, 4, 4, 4}, clip = true, interactive = true, style = s.track})
   for &r, i in app.quest_rows {
@@ -536,65 +434,9 @@ build_windows :: proc(app: ^App) {
   app.track = add(app, detail, {size = fixed(120, 34), align = {.CENTER, .CENTER}, interactive = true, style = s.button})
   app.track_label = label(app, app.track, "Track", 16)
 
-  body = panel_create(app, .SETTINGS, "Settings", 480, {400, 110})
-  tabs := add(app, body, {gap = 4, size = {{.GROW, 0}, {}}})
-  for &t, tab in app.tabs do t = button(app, tabs, tab_name(tab), 0, 32, s.tab)
-  pages := add(app, body, {size = {{.GROW, 0}, {.FIXED, 250}}, padding = {14, 14, 14, 14}, style = s.track})
-  for &p in app.pages do p = add(app, pages, {direction = .COLUMN, size = {{.GROW, 0}, {}}, gap = 12, hidden = true})
-  slider_row(app, app.pages[.GAMEPLAY], .SENSITIVITY, "Camera speed")
-  toggle_row(app, app.pages[.GAMEPLAY], .MINIMAP, "Show minimap  (M)")
-  toggle_row(app, app.pages[.GAMEPLAY], .TOASTS, "Show messages")
-  toggle_row(app, app.pages[.GAMEPLAY], .PERF, "Show UI statistics")
-  slider_row(app, app.pages[.VIDEO], .FOV, "Field of view")
-  slider_row(app, app.pages[.AUDIO], .MASTER, "Master volume")
-  slider_row(app, app.pages[.AUDIO], .MUSIC, "Music")
-  slider_row(app, app.pages[.AUDIO], .EFFECTS, "Effects")
-  keys := add(app, app.pages[.CONTROLS], {gap = 24})
-  label(app, keys, "1 - 8\nI\nC\nJ\nO\nM\nEsc\nLeft drag\nWheel\nRight click", 15, s.gold)
-  label(app, keys, "Use hotbar slot\nInventory\nCharacter\nQuest log\nSettings\nMinimap\nMenu, close window\nOrbit camera\nZoom, scroll lists\nUse item", 15, s.small)
-  buttons := add(app, body, {size = {{.GROW, 0}, {}}, align = {.END, .CENTER}})
-  app.reset = button(app, buttons, "Reset defaults")
-
   body = modal_create(app, .PAUSE, "Paused")
   app.resume = button(app, body, "Resume", 220, 40)
-  app.options = button(app, body, "Settings", 220, 40)
   app.quit = button(app, body, "Quit to desktop", 220, 40)
-
-  body = modal_create(app, .CONFIRM, "Leave the vale?")
-  label(app, body, "Unsaved progress will be lost.", 16, s.small)
-  choice := add(app, body, {gap = 12})
-  app.yes = button(app, choice, "Quit", 120, 38)
-  app.no = button(app, choice, "Stay", 120, 38)
-}
-
-tab_name :: proc(t: Tab) -> string {
-  switch t {
-  case .GAMEPLAY:
-    return "Gameplay"
-  case .VIDEO:
-    return "Video"
-  case .AUDIO:
-    return "Audio"
-  case .CONTROLS:
-    return "Controls"
-  }
-  return ""
-}
-
-slider_row :: proc(app: ^App, page: ui.NodeHandle, setting: Setting, text: string) {
-  r := add(app, page, {size = {{.GROW, 0}, {.FIXED, 28}}, gap = 12, align = {.START, .CENTER}})
-  label(app, r, text, 15, app.s.text, {size = {{.FIXED, 140}, {}}})
-  sl := &app.sliders[setting]
-  sl.track = add(app, r, {size = {{.GROW, 0}, {.FIXED, 10}}, interactive = true, style = app.s.track})
-  sl.fill = add(app, sl.track, {size = {{.PERCENT, 0}, {.PERCENT, 1}}, style = app.s.track_fill})
-  sl.knob = add(app, sl.track, {position = .ABSOLUTE, size = fixed(14, 22), anchor = {0, 0.5}, style = app.s.knob})
-  sl.value = label(app, r, "", 15, app.s.gold, {size = {{.FIXED, 52}, {}}, align = {.END, .START}})
-}
-
-toggle_row :: proc(app: ^App, page: ui.NodeHandle, toggle: Toggle, text: string) {
-  r := add(app, page, {size = {{.GROW, 0}, {.FIXED, 28}}, gap = 12, align = {.START, .CENTER}, interactive = true})
-  app.toggles[toggle] = add(app, r, {size = fixed(22, 22), style = app.s.check})
-  label(app, r, text, 15)
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -608,11 +450,8 @@ update :: proc(app: ^App, dt: f32) {
   handle_keys(app)
   refresh(app, dt)
   camera := render.main_camera(&app.renderer)
-  mjolnir.orbit_drag(&app.orbit, camera, &app.input, speed = 0.02 * app.values[.SENSITIVITY])
-  if p, ok := &camera.projection.(render.PerspectiveProjection); ok do p.fov = math.to_radians(app.values[.FOV])
-  start := time.tick_now()
-  laid_out, painted := mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font)
-  measure(app, time.tick_since(start), laid_out, painted, dt)
+  mjolnir.orbit_drag(&app.orbit, camera, &app.input)
+  mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font)
   mjolnir.update(&app.scene, &app.renderer, dt)
   gltf.animate(&app.hero, &app.knight, &app.scene, &app.renderer, dt)
 }
@@ -652,20 +491,7 @@ handle_windows :: proc(app: ^App) {
 
 handle_hud :: proc(app: ^App) {
   gui := &app.gui
-  for b, m in app.menu do if ui.clicked(gui, b) {
-    switch m {
-    case .CHARACTER:
-      open_window(app, .CHARACTER, !app.open[.CHARACTER])
-    case .INVENTORY:
-      open_window(app, .INVENTORY, !app.open[.INVENTORY])
-    case .QUESTS:
-      open_window(app, .QUESTS, !app.open[.QUESTS])
-    case .SETTINGS:
-      open_window(app, .SETTINGS, !app.open[.SETTINGS])
-    case .MENU:
-      open_window(app, .PAUSE)
-    }
-  }
+  for b, w in app.menu do if b != {} && ui.clicked(gui, b) do open_window(app, w, !app.open[w])
   for h, i in app.hotbar do if ui.clicked(gui, h.frame) && input.mouse_released(&app.input, .LEFT) && app.dragging < 0 do use_action(app, i)
   for h, i in app.hotbar do if ui.clicked(gui, h.frame) && input.mouse_released(&app.input, .RIGHT) do app.actions[i] = nil
 }
@@ -683,15 +509,7 @@ handle_inventory :: proc(app: ^App) {
   from := app.dragging
   app.dragging = -1
   for b, i in app.bag_slots do if ui.hovered(gui, b.frame) && i != from {
-    a, z := &app.bag[from], &app.bag[i]
-    if a.item == z.item && z.count < ITEMS[z.item].stack {
-      moved := min(a.count, ITEMS[z.item].stack - z.count)
-      z.count += moved
-      a.count -= moved
-      if a.count == 0 do a^ = {}
-    } else {
-      a^, z^ = z^, a^
-    }
+    app.bag[from], app.bag[i] = app.bag[i], app.bag[from]
   }
   for h, i in app.hotbar do if ui.hovered(gui, h.frame) {
     item := app.bag[from].item
@@ -700,43 +518,16 @@ handle_inventory :: proc(app: ^App) {
   }
 }
 
-sort_bag :: proc(app: ^App) {
-  for i in 0 ..< BAG_SIZE do for j in 0 ..< BAG_SIZE - 1 - i {
-    a, b := app.bag[j], app.bag[j + 1]
-    if a.item == .NONE && b.item != .NONE || a.item != .NONE && b.item != .NONE && a.item > b.item do app.bag[j], app.bag[j + 1] = b, a
-  }
-}
-
 handle_panels :: proc(app: ^App) {
   gui := &app.gui
-  if ui.clicked(gui, app.sort) do sort_bag(app)
-  for stat in Stat do if ui.clicked(gui, app.stat_plus[stat]) && app.unspent > 0 {
-    app.stats[stat] += 1
-    app.unspent -= 1
-  }
   for r, i in app.quest_rows do if ui.clicked(gui, r) do app.quest = i
   if ui.clicked(gui, app.track) do app.tracked[app.quest] = !app.tracked[app.quest]
   if ui.hovered(gui, app.quest_list) {
     list := ui.node(gui, app.quest_list)
     list.scroll.y = clamp(list.scroll.y - app.input.scroll.y * 24, 0, ui.max_scroll(gui, app.quest_list).y)
   }
-  for t, tab in app.tabs do if ui.clicked(gui, t) do app.tab = tab
-  for &sl, setting in app.sliders do if ui.pressed(gui, sl.track) {
-    r := ui.rect(gui, sl.track)
-    t := clamp((app.input.cursor.x - r.pos.x) / max(r.size.x, 1), 0, 1)
-    lo, hi := SETTING_RANGE[setting][0], SETTING_RANGE[setting][1]
-    app.values[setting] = lo + t * (hi - lo)
-  }
-  for t, toggle in app.toggles do if ui.clicked(gui, ui.node(gui, t).parent) do app.shown[toggle] = !app.shown[toggle]
-  if ui.clicked(gui, app.reset) {
-    for s in Setting do app.values[s] = SETTING_RANGE[s][2]
-    app.shown = {.MINIMAP = true, .PERF = true, .TOASTS = true}
-  }
   if ui.clicked(gui, app.resume) do app.open[.PAUSE] = false
-  if ui.clicked(gui, app.options) do open_window(app, .SETTINGS)
-  if ui.clicked(gui, app.quit) do open_window(app, .CONFIRM)
-  if ui.clicked(gui, app.no) do app.open[.CONFIRM] = false
-  if ui.clicked(gui, app.yes) do app.quitting = true
+  if ui.clicked(gui, app.quit) do app.quitting = true
 }
 
 handle_keys :: proc(app: ^App) {
@@ -746,13 +537,13 @@ handle_keys :: proc(app: ^App) {
     if w, ok := topmost(app); ok do app.open[w] = false
     else do open_window(app, .PAUSE)
   }
-  if app.open[.PAUSE] || app.open[.CONFIRM] do return
+  if app.open[.PAUSE] do return
   toggles := [?]struct {
     key: input.Key,
     w:   Window,
-  }{{.I, .INVENTORY}, {.C, .CHARACTER}, {.J, .QUESTS}, {.O, .SETTINGS}}
+  }{{.I, .INVENTORY}, {.J, .QUESTS}}
   for t in toggles do if input.key_pressed(s, t.key) do open_window(app, t.w, !app.open[t.w])
-  if input.key_pressed(s, .M) do app.shown[.MINIMAP] = !app.shown[.MINIMAP]
+  if input.key_pressed(s, .M) do app.minimap = !app.minimap
   for i in 0 ..< HOTBAR do if input.key_pressed(s, input.Key(int(input.Key.NUM_1) + i)) do use_action(app, i)
 }
 
@@ -785,7 +576,6 @@ has :: proc(app: ^App, item: Item) -> (count: int) {
 }
 
 toast :: proc(app: ^App, text: string) {
-  if !app.shown[.TOASTS] do return
   if len(app.toasts) == TOASTS {
     ui.destroy(&app.gui, app.toasts[0].node)
     ordered_remove(&app.toasts, 0)
@@ -812,8 +602,7 @@ set_bar :: proc(app: ^App, b: Bar, value, total: f32) {
 refresh :: proc(app: ^App, dt: f32) {
   gui := &app.gui
   for w in Window do show(app, app.panels[w].root, app.open[w])
-  show(app, app.map_frame, app.shown[.MINIMAP])
-  show(app, app.perf, app.shown[.PERF])
+  show(app, app.map_frame, app.minimap)
 
   b := strings.builder_make(context.temp_allocator)
   for q, i in QUESTS do if app.tracked[i] do fmt.sbprintf(&b, "%s%s", "\n" if strings.builder_len(b) > 0 else "", q.title)
@@ -861,30 +650,12 @@ refresh :: proc(app: ^App, dt: f32) {
     ghost.offset = ui.to_reference(gui, app.input.cursor) - 22
   }
 
-  ui.set_text(gui, app.points, fmt.tprintf("%d attribute points to spend", app.unspent) if app.unspent > 0 else "")
-  for stat in Stat {
-    ui.set_text(gui, app.stat_value[stat], fmt.tprint(app.stats[stat]))
-    show(app, app.stat_plus[stat], app.unspent > 0)
-  }
-
   for r, i in app.quest_rows do ui.node(gui, r).active = i == app.quest
   q := QUESTS[app.quest]
   ui.set_text(gui, app.quest_name, q.title)
   ui.set_text(gui, app.quest_text, q.text)
   ui.set_text(gui, app.quest_goal, q.goal)
   ui.set_text(gui, app.track_label, "Untrack" if app.tracked[app.quest] else "Track")
-
-  for t, tab in app.tabs do ui.node(gui, t).active = tab == app.tab
-  for p, tab in app.pages do show(app, p, tab == app.tab)
-  for sl, setting in app.sliders {
-    lo, hi := SETTING_RANGE[setting][0], SETTING_RANGE[setting][1]
-    t := (app.values[setting] - lo) / (hi - lo)
-    ui.node(gui, sl.fill).size.x = {.PERCENT, t}
-    ui.node(gui, sl.knob).anchor = {t, 0.5}
-    format := "%.0f" if hi > 10 else "%.2f"
-    ui.set_text(gui, sl.value, fmt.tprintf(format, app.values[setting]))
-  }
-  for t, toggle in app.toggles do ui.node(gui, t).active = app.shown[toggle]
 
   tooltip(app)
 }
@@ -908,19 +679,4 @@ tooltip :: proc(app: ^App) {
   screen := ui.to_reference(gui, render.window_size(&app.renderer))
   at := ui.to_reference(gui, app.input.cursor) + 18
   tip.offset = {min(at.x, screen.x - size.x - 8), min(at.y, screen.y - size.y - 8)}
-}
-
-measure :: proc(app: ^App, cost: time.Duration, laid_out, painted: bool, dt: f32) {
-  app.frames += 1
-  app.ui_time += cost
-  if laid_out do app.layouts += 1
-  if painted do app.paints += 1
-  app.perf_tick += dt
-  if app.perf_tick < 0.5 do return
-  ui.set_text(
-    &app.gui,
-    app.perf,
-    fmt.tprintf("UI %d nodes  %d layouts  %d paints of %d frames  %.0f us/frame", len(app.gui.draw_order), app.layouts, app.paints, app.frames, time.duration_microseconds(app.ui_time) / f64(app.frames)),
-  )
-  app.perf_tick, app.frames, app.layouts, app.paints, app.ui_time = 0, 0, 0, 0, 0
 }

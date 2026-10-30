@@ -102,7 +102,7 @@ function show() {
   content.replaceChildren(el('h1', { textContent: pkg.path }), el('small', { textContent: pkg.layer < 0 ? '' : `LAYER ${pkg.layer}: ${pkg.layer_name.toUpperCase()}` }));
   if (pkg.doc) content.append(...prose(pkg.doc));
   content.append(diagram(pkg));
-  if (pkg.notes) content.append(el('h2', { textContent: 'Architecture' }), ...prose(pkg.notes));
+  if (pkg.notes) content.append(el('h2', { textContent: 'Notes' }), ...prose(pkg.notes));
   if (pkg.sections.length) content.append(el('h2', { textContent: 'API' }));
   for (const s of pkg.sections) {
     content.append(el('h3', { textContent: s.name }));

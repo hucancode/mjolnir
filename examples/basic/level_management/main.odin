@@ -17,7 +17,6 @@ import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
 
-AUTOMATED_TEST :: #config(AUTOMATED_TEST, false)
 LEVEL_SECONDS :: f32(10)
 
 Level :: struct {
@@ -40,8 +39,8 @@ App :: struct {
   platform:    platform.Platform,
   scene:       world.World,
   renderer:    render.Renderer,
-  debug:       debugui.Context,
   input:       input.State,
+  debug:       debugui.Context,
   orbit:       render.Orbit,
   model:       gltf.Model,
   level:       gltf.Instance,
@@ -50,7 +49,6 @@ App :: struct {
   loads:       int,
   countdown:   f32,
   auto_switch: bool,
-  test_frame:  int,
 }
 
 main :: proc() {
@@ -141,24 +139,7 @@ update :: proc(app: ^App, dt: f32) {
   }
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
-  when AUTOMATED_TEST do run_test_step(app)
   mjolnir.update(&app.scene, &app.renderer, dt)
-}
-
-run_test_step :: proc(app: ^App) {
-  app.test_frame += 1
-  switch app.test_frame {
-  case 5:
-    app.requested = 1
-  case 15:
-    app.requested = 0
-  case 25:
-    app.requested = app.current
-  case 35:
-    app.requested = len(LEVELS)
-  case 45:
-    log.info("automated test sequence complete")
-  }
 }
 
 debug_ui :: proc(app: ^App) {

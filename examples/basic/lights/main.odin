@@ -18,12 +18,12 @@ App :: struct {
   platform:        platform.Platform,
   scene:           world.World,
   renderer:        render.Renderer,
-  debug:           debugui.Context,
   input:           input.State,
+  debug:           debugui.Context,
   orbit:           render.Orbit,
   lights:          [dynamic]MovingLight,
   marker_material: render.MaterialHandle,
-  elapsed:         f32,
+  time:            f32,
   groups:          [LightKind]LightGroup,
   sun:             render.LightHandle,
   sun_node:        world.NodeHandle,
@@ -132,7 +132,7 @@ spawn_light :: proc(app: ^App, kind: LightKind) {
   ok: bool
   l.light, ok = render.light_create(&app.renderer, light_settings(app, l))
   if !ok do return
-  l.node = mjolnir.spawn(&app.scene, &app.renderer, l.light, light_position(l, app.elapsed))
+  l.node = mjolnir.spawn(&app.scene, &app.renderer, l.light, light_position(l, app.time))
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .CUBE, app.marker_material, no_shadow = true), parent = l.node, scale = MARKER_SCALE)
   append(&app.lights, l)
 }
@@ -185,9 +185,9 @@ update :: proc(app: ^App, dt: f32) {
   if input.key_pressed(&app.input, .O) do spawn_light(app, .SPOT)
   if input.key_pressed(&app.input, .DELETE) do remove_random_light(app)
 
-  app.elapsed += dt
+  app.time += dt
   for l in app.lights {
-    pos := light_position(l, app.elapsed)
+    pos := light_position(l, app.time)
     world.transform(&app.scene, l.node).position = pos
     if l.kind == .SPOT {
       dir := linalg.normalize(SPOT_TARGET - pos)

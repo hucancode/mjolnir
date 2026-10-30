@@ -27,8 +27,8 @@ App :: struct {
   platform:  platform.Platform,
   scene:     world.World,
   renderer:  render.Renderer,
-  debug:     debugui.Context,
   input:     input.State,
+  debug:     debugui.Context,
   orbit:     render.Orbit,
   body:      world.NodeHandle,
   head:      world.NodeHandle,
@@ -136,19 +136,19 @@ steer :: proc(app: ^App, dt: f32) {
     aim = wrap(math.atan2(-to.x, -to.y) - app.heading)
     target = cruise_speed
   }
-  app.speed += (target - app.speed) * min(dt * 4, 1)
+  app.speed = math.lerp(app.speed, target, geometry.exp_smooth(4, dt))
   ds := app.speed * dt
   turn := clamp(aim, -MAX_CURVATURE * ds, MAX_CURVATURE * ds)
   app.heading = wrap(app.heading + turn)
-  app.look += (clamp(aim - turn, -LOOK, LOOK) - app.look) * min(dt * 12, 1)
-  app.lean += (clamp(turn / max(dt, 1e-4) * 0.12, -0.35, 0.35) - app.lean) * min(dt * 6, 1)
+  app.look = math.lerp(app.look, clamp(aim - turn, -LOOK, LOOK), geometry.exp_smooth(12, dt))
+  app.lean = math.lerp(app.lean, clamp(turn / max(dt, 1e-4) * 0.12, -0.35, 0.35), geometry.exp_smooth(6, dt))
 
   app.phase = math.mod(app.phase + ds * math.TAU / WAVELENGTH, math.TAU)
   course := app.heading + WEAVE * math.sin(app.phase)
   neck := app.chain.head + [2]f32{-math.sin(course), -math.cos(course)} * ds
   if linalg.length(neck) > ARENA do neck = linalg.normalize(neck) * ARENA
   geometry.chain_move(&app.chain, neck)
-  app.focus += (neck - app.focus) * min(dt * 5, 1)
+  app.focus = linalg.lerp(app.focus, neck, geometry.exp_smooth(5, dt))
 }
 
 pose :: proc(app: ^App) {

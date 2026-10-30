@@ -104,14 +104,6 @@ pick :: proc(r: [2]f32, i, salt: int) -> f32 {
   return r[0] + (r[1] - r[0]) * hash01(i, salt)
 }
 
-smooth :: proc(x: f32) -> f32 {
-  return x * x * (3 - 2 * x)
-}
-
-rotate :: proc(q: quaternion128, v: [3]f32) -> [3]f32 {
-  return linalg.mul(q, v)
-}
-
 lateral :: proc(n: [3]f32, az: f32) -> [3]f32 {
   ref := Y if abs(n.y) < 0.9 else X
   u := linalg.normalize(linalg.cross(ref, n))
@@ -145,11 +137,11 @@ simulate :: proc(app: ^App, g: int, from, n0: [3]f32, tau: f32, h: Homing, done:
         axis := linalg.cross(dir, want)
         l := linalg.length(axis)
         axis = axis / l if l > 1e-6 else lateral(dir, 0)
-        dir = linalg.normalize(rotate(around(min(angle, h.turn * step), axis), dir))
+        dir = linalg.normalize(linalg.mul(linalg.quaternion_angle_axis(min(angle, h.turn * step), axis), dir))
       }
     }
     arrive := 0.35 + 0.65 * min(1, d / (2 * h.dock))
-    pos += dir * h.speed * smooth(clamp(tk / SPEED_RAMP, 0, 1)) * arrive * step
+    pos += dir * h.speed * math.smoothstep(f32(0), 1, tk / SPEED_RAMP) * arrive * step
   }
   return
 }
@@ -185,7 +177,7 @@ assemble :: proc(app: ^App) {
       f.position, dir = simulate(app, gi, from, n0, p3, h, done)
       x := clamp((min(1, p3 / APPROACH) - (1 - CAPTURE)) / CAPTURE, 0, 1)
       if x > 0 {
-        w := smooth(x)
+        w := math.smoothstep(f32(0), 1, x)
         f.position = linalg.lerp(f.position, seat + normal * h.dock, w)
         blend := dir * (1 - w) - normal * w
         dir = linalg.normalize(blend) if linalg.length(blend) > 1e-6 else -normal
@@ -198,7 +190,7 @@ assemble :: proc(app: ^App) {
     f.settle = ease.cubic_in_out(min(1, p3 / (ALIGN * APPROACH)))
     f.bank = linalg.QUATERNIONF32_IDENTITY
     axis := linalg.cross(-normal, dir)
-    if l := linalg.length(axis); l > 1e-4 do f.bank = around(math.atan2(l, -linalg.dot(normal, dir)) * f.settle, axis / l)
+    if l := linalg.length(axis); l > 1e-4 do f.bank = linalg.quaternion_angle_axis(math.atan2(l, -linalg.dot(normal, dir)) * f.settle, axis / l)
   }
 
   for p, i in app.pieces {
@@ -223,7 +215,7 @@ assemble :: proc(app: ^App) {
     if f.active {
       parked := base.position - ref.centers[gi]
       offset := linalg.lerp(parked, target.position - live.centers[gi], f.settle)
-      x.position = f.position + rotate(f.bank, offset)
+      x.position = f.position + linalg.mul(f.bank, offset)
     } else {
       x.position = base.position + ref.normals[gi] * parks[gi]
     }
@@ -236,7 +228,7 @@ assemble :: proc(app: ^App) {
       ay := 2 * hash01(item, 8) - 1
       ring := math.sqrt(max(0, 1 - ay * ay))
       aa := 2 * math.PI * hash01(item, 9)
-      x.rotation = around(revs * 2 * math.PI * (1 - fp), {math.cos(aa) * ring, ay, math.sin(aa) * ring}) * x.rotation
+      x.rotation = linalg.quaternion_angle_axis(revs * 2 * math.PI * (1 - fp), {math.cos(aa) * ring, ay, math.sin(aa) * ring}) * x.rotation
     } else if pt < FLY + SNAP {
       dist = pick(STANDOFF, item, 5) * (1 - ease.back_out((pt - FLY) / SNAP))
     }

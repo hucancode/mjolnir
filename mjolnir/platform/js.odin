@@ -165,8 +165,8 @@ set_title :: proc(self: ^Platform, title: string) {
   js.set_document_title(title)
 }
 
-// get_clipboard returns empty: browsers read the clipboard asynchronously only.
-get_clipboard :: proc(self: ^Platform, allocator := context.allocator) -> string {
+// clipboard returns empty: browsers read the clipboard asynchronously only.
+clipboard :: proc(self: ^Platform, allocator := context.allocator) -> string {
   return ""
 }
 

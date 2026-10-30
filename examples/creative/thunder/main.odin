@@ -25,30 +25,30 @@ FIELD_RADIUS :: f32(60)
 HAMMER_RADIUS :: f32(1.2)
 
 App :: struct {
-  platform: platform.Platform,
-  scene:    world.World,
-  renderer: render.Renderer,
-  debug:    debugui.Context,
-  input:    input.State,
-  orbit:    render.Orbit,
-  sun:      render.LightHandle,
-  storm:    Storm,
-  model:    gltf.Model,
-  hammer:   gltf.Instance,
-  bolts:    render.BufferHandle,
-  bolt:     render.ShaderHandle,
-  rod:      render.MeshHandle,
+  platform:       platform.Platform,
+  scene:          world.World,
+  renderer:       render.Renderer,
+  input:          input.State,
+  debug:          debugui.Context,
+  orbit:          render.Orbit,
+  sun:            render.LightHandle,
+  storm:          Storm,
+  model:          gltf.Model,
+  hammer:         gltf.Instance,
+  bolts:          render.BufferHandle,
+  bolt:           render.ShaderHandle,
+  rod:            render.MeshHandle,
   impacts_buffer: render.BufferHandle,
-  sparks:   [2]render.EmitterHandle,
-  spark_nodes: [SPARK_SLOTS]world.NodeHandle,
-  next_spark: int,
-  impact:   render.ShaderHandle,
-  lamps:    [MAX_LIGHTS]world.NodeHandle,
-  lights:   [MAX_LIGHTS]render.LightHandle,
-  pressed:  bool,
-  dragged:  f32,
-  instances: [MAX_BOLTS]BoltInstance,
-  impacts:  [MAX_IMPACTS]ImpactInstance,
+  sparks:         [2]render.EmitterHandle,
+  spark_nodes:    [SPARK_SLOTS]world.NodeHandle,
+  next_spark:     int,
+  impact:         render.ShaderHandle,
+  lamps:          [MAX_LIGHTS]world.NodeHandle,
+  lights:         [MAX_LIGHTS]render.LightHandle,
+  pressed:        bool,
+  dragged:        f32,
+  instances:      [MAX_BOLTS]BoltInstance,
+  impacts:        [MAX_IMPACTS]ImpactInstance,
 }
 
 bloom: f32 = 1
@@ -87,14 +87,10 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   mjolnir.spawn(&app.scene, r, render.primitive(r, .QUAD_XZ, floor_material, no_shadow = true), scale = 400)
 
   for i in 0 ..< MAX_LIGHTS {
-    app.lamps[i] = world.spawn(&app.scene)
     app.lights[i] = render.light_create(r, render.make_point_light(color = color_a, intensity = 0, radius = 40, cast_shadow = false))
-    render.attach(r, app.lamps[i], app.lights[i])
+    app.lamps[i] = mjolnir.spawn(&app.scene, r, app.lights[i])
   }
-
-  fill := world.spawn(&app.scene)
-  world.transform(&app.scene, fill).position = FILL_POSITION
-  render.attach(r, fill, render.light_create(r, render.make_point_light(color = FILL_COLOR, intensity = FILL_INTENSITY, radius = 30)))
+  mjolnir.spawn(&app.scene, r, render.light_create(r, render.make_point_light(color = FILL_COLOR, intensity = FILL_INTENSITY, radius = 30)), FILL_POSITION)
 
   ok: bool
   app.rod, ok = rod_create(r)
@@ -133,7 +129,6 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   r.ibl_intensity = 0.1
   app.sun = render.light_create(r, render.make_directional_light(color_a, MOONLIGHT, cast_shadow = false))
   mjolnir.spawn(&app.scene, r, app.sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.3, -1, -0.2}, [3]f32{0, 1, 0}))
-  render.main_camera(r).effects[0] = render.make_effect(render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32})
   return .READY
 }
 
@@ -230,25 +225,17 @@ click_to_strike :: proc(app: ^App) {
 strike_at_cursor :: proc(app: ^App) {
   ray, ok := render.cursor_ray(&app.renderer, app.input.cursor)
   if !ok do return
-  t := FIELD_RADIUS
-  if ray.direction.y < -1e-3 do t = min(-ray.origin.y / ray.direction.y, FIELD_RADIUS)
-  hit := ray.origin + ray.direction * t
+  hit, on_ground := geometry.ray_plane_intersection(ray, {}, {0, 1, 0}, FIELD_RADIUS)
+  if !on_ground do hit = ray.origin + ray.direction * FIELD_RADIUS
   hit.y = 0
   strike(&app.storm, hit, 1 + rand.float32() * 0.5, hits_hammer(ray, hit))
 }
 
 hits_hammer :: proc(ray: geometry.Ray, hit: [3]f32) -> bool {
   if math.hypot(hit.x, hit.z) < HAMMER_RADIUS + 0.4 do return true
-  o, d := ray.origin, ray.direction
-  a := d.x * d.x + d.z * d.z
-  b := o.x * d.x + o.z * d.z
-  disc := b * b - a * (o.x * o.x + o.z * o.z - HAMMER_RADIUS * HAMMER_RADIUS)
-  if a < 1e-6 || disc < 0 do return false
-  root := math.sqrt(disc)
-  s0 := max((-b - root) / a, 0)
-  s1 := (-b + root) / a
-  if s0 > s1 do return false
-  return min(o.y + d.y * s0, o.y + d.y * s1) < HAMMER_TIP.y + 0.8
+  half_height := (HAMMER_TIP.y + 0.8) / 2
+  _, _, through := geometry.ray_cylinder_intersection({ray.origin - {0, half_height, 0}, ray.direction}, HAMMER_RADIUS, half_height)
+  return through
 }
 
 draw :: proc(app: ^App) -> bool {

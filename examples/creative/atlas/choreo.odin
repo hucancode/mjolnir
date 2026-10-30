@@ -2,6 +2,7 @@ package main
 
 import "core:math"
 import "core:math/ease"
+import "core:math/rand"
 
 PERIOD :: 1.5
 BOUNCE_POWER :: 0.2
@@ -52,7 +53,7 @@ Slider :: struct {
 }
 
 Choreo :: struct {
-  rng:        u32,
+  rng:        rand.Default_Random_State,
   mirror:     bool,
   sliders:    [dynamic]Slider,
   tracks:     [dynamic]Track,
@@ -71,7 +72,7 @@ Choreo :: struct {
 }
 
 choreo_init :: proc(self: ^Choreo, seed: u32, mirror: bool) {
-  self.rng = seed
+  self.rng = rand.create(u64(seed))
   self.mirror = mirror
   self.weights = STEP_WEIGHT
   self.power = BOUNCE_POWER
@@ -113,11 +114,7 @@ choreo_step :: proc(self: ^Choreo, dt: f32, pose: ^Pose) {
 
 @(private = "file")
 random :: proc(self: ^Choreo) -> f32 {
-  self.rng += 0x6d2b79f5
-  t := self.rng
-  t = (t ~ (t >> 15)) * (t | 1)
-  t ~= t + (t ~ (t >> 7)) * (t | 61)
-  return f32(t ~ (t >> 14)) / 4294967296.0
+  return rand.float32(rand.default_random_generator(&self.rng))
 }
 
 @(private = "file")

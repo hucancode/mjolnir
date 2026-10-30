@@ -15,10 +15,9 @@ App :: struct {
   platform:  platform.Platform,
   scene:     world.World,
   renderer:  render.Renderer,
-  debug:     debugui.Context,
   input:     input.State,
+  debug:     debugui.Context,
   orbit:     render.Orbit,
-  toon:      render.MaterialType,
   materials: [dynamic]render.MaterialHandle,
 }
 
@@ -50,8 +49,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.orbit = render.make_orbit({0, 4, 10}, {0, 1, 0})
 
-  ok: bool
-  app.toon, ok = render.material_shader_create(&app.renderer, #load("toon." + render.SHADER_EXT), blend = .NONE)
+  toon, ok := render.material_shader_create(&app.renderer, #load("toon." + render.SHADER_EXT), blend = .NONE)
   if !ok {
     log.error("Failed to create the toon shader")
     return .FAIL
@@ -62,7 +60,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   colors := [?][4]f32{{1.0, 0.45, 0.3, 1}, {0.35, 0.8, 0.45, 1}, {0.35, 0.55, 1.0, 1}, {1.0, 0.85, 0.3, 1}}
   shapes := [?]render.Primitive{.SPHERE, .CUBE, .SPHERE, .CUBE}
   for color, i in colors {
-    mat := render.material_create(&app.renderer, render.make_material(app.toon, base_color_factor = color))
+    mat := render.material_create(&app.renderer, render.make_material(toon, base_color_factor = color))
     append(&app.materials, mat)
     spawn_primitive(app, shapes[i], mat, {f32(i) * 2.5 - 3.75, 1.0, 0})
   }

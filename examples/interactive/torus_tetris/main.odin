@@ -39,7 +39,6 @@ PIECES := [?]Piece {
 
 State :: struct {
   board:                [GRID_W][GRID_H]world.NodeHandle,
-  occupied:             [GRID_W][GRID_H]bool,
   active_cells:         [PIECE_LEN]world.NodeHandle,
   active_piece:         Piece,
   active_pos:           [2]i32,
@@ -129,15 +128,16 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 }
 
 reset_game :: proc(app: ^App) {
-  for col in 0 ..< GRID_W do for row in 0 ..< GRID_H do if app.state.occupied[col][row] {
+  for col in 0 ..< GRID_W do for row in 0 ..< GRID_H do if app.state.board[col][row] != {} {
     world.destroy(&app.scene, app.state.board[col][row])
-    app.state.board[col][row] = {}; app.state.occupied[col][row] = false
+    app.state.board[col][row] = {}
   }
   if app.state.has_active {
     for h in app.state.active_cells do world.destroy(&app.scene, h)
     app.state.has_active = false
   }
-  app.state.score = 0; app.state.fall_timer = 0
+  app.state.score = 0
+  app.state.fall_timer = 0
   app.state.game_over = false
   spawn_piece(app)
 }
@@ -162,7 +162,7 @@ collides :: proc(app: ^App, piece: Piece, pos: [2]i32) -> bool {
     col := wrap_col(pos[0] + c[0])
     row := pos[1] + c[1]
     if row < 0 || row >= GRID_H do return true
-    if app.state.occupied[col][row] do return true
+    if app.state.board[col][row] != {} do return true
   }
   return false
 }
@@ -199,7 +199,6 @@ lock_piece :: proc(app: ^App) {
     col := wrap_col(app.state.active_pos[0] + c[0])
     row := app.state.active_pos[1] + c[1]
     app.state.board[col][row] = app.state.active_cells[i]
-    app.state.occupied[col][row] = true
     render.attach(&app.renderer, app.state.active_cells[i], render.primitive(&app.renderer, .CUBE, opaque))
   }
   app.state.has_active = false
@@ -212,20 +211,19 @@ clear_lines :: proc(app: ^App) -> int {
   r := 0
   for r < GRID_H {
     full := true
-    for col in 0 ..< GRID_W do if !app.state.occupied[col][r] { full = false; break }
+    for col in 0 ..< GRID_W do if app.state.board[col][r] == {} { full = false; break }
     if !full { r += 1; continue }
     for col in 0 ..< GRID_W {
       world.destroy(&app.scene, app.state.board[col][r])
-      app.state.board[col][r] = {}; app.state.occupied[col][r] = false
+      app.state.board[col][r] = {}
     }
     for r2 := r; r2 < GRID_H - 1; r2 += 1 {
       for col in 0 ..< GRID_W {
         app.state.board[col][r2] = app.state.board[col][r2 + 1]
-        app.state.occupied[col][r2] = app.state.occupied[col][r2 + 1]
-        if app.state.occupied[col][r2] do world.transform(&app.scene, app.state.board[col][r2]).position = cell_world_pos(i32(col), i32(r2))
+        if app.state.board[col][r2] != {} do world.transform(&app.scene, app.state.board[col][r2]).position = cell_world_pos(i32(col), i32(r2))
       }
     }
-    for col in 0 ..< GRID_W { app.state.board[col][GRID_H - 1] = {}; app.state.occupied[col][GRID_H - 1] = false }
+    for col in 0 ..< GRID_W do app.state.board[col][GRID_H - 1] = {}
     cleared += 1
   }
   return cleared

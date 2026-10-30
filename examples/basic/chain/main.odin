@@ -228,10 +228,10 @@ ground_hit :: proc(ray: geometry.Ray) -> (at: [2]f32, ok: bool) {
 
 touches_dragon :: proc(app: ^App, ray: geometry.Ray) -> bool {
   head := app.chain.head
-  hit, _ := geometry.ray_sphere_intersection(ray, {center = {head.x, HEAD_Y, head.y}, radius = 0.7})
+  _, hit := geometry.ray_sphere_intersection(ray, {center = {head.x, HEAD_Y, head.y}, radius = 0.7})
   if hit do return true
   for p in app.chain.points {
-    hit, _ = geometry.ray_sphere_intersection(ray, {center = {p.x, BODY_HEIGHT, p.y}, radius = GRAB_RADIUS})
+    _, hit = geometry.ray_sphere_intersection(ray, {center = {p.x, BODY_HEIGHT, p.y}, radius = GRAB_RADIUS})
     if hit do return true
   }
   return false

@@ -283,9 +283,10 @@ DepthState :: struct {
 // without push constants (WebGPU); without it the group follows the last layout.
 PUSH_GROUP :: BindLayout(max(u32))
 
-// A pipeline's resource interface: `layouts` are sets 0 .. n - 1. With `bindless` (the backend's BINDLESS)
-// the global texture arrays follow as set n. cmd_push writes `push_size` bytes of constants, or on a backend without push constants (WebGPU) to a push group that
-// every pipeline has, whether or not it pushes (PUSH_GROUP).
+// A pipeline's resource interface: `layouts` are sets 0 .. n - 1. With `bindless` (the
+// backend's BINDLESS) the global texture arrays follow as set n. cmd_push writes `push_size`
+// bytes of constants, or on a backend without push constants (WebGPU) to a push group that every
+// pipeline has, whether or not it pushes (PUSH_GROUP).
 PipelineLayoutDesc :: struct {
   layouts:   []BindLayout,
   push_size: u32,
@@ -363,9 +364,9 @@ BindlessArray :: enum {
 // render calls the backend's procs directly, so none of this costs a dispatch.
 Procs :: struct($Device: typeid, $Window: typeid) {
   // lifecycle: init brings the device up on window, its bindless arrays of the sizes given
-  // (ready says when it is, the web finishes later); shutdown destroys everything. window_size measures the window: its framebuffer in
-  // pixels and its DPI scale (pixels per window unit). wait_idle lands every upload and waits for the GPU,
-  // then destroys what was retired. tick destroys what was retired RETIRE_GRACE frames ago,
+  // (ready says when it is, the web finishes later); shutdown destroys everything. window_size
+  // measures the window: its framebuffer in pixels and its DPI scale (pixels per window unit).
+  // wait_idle lands every upload and waits for the GPU, then destroys what was retired. tick destroys what was retired RETIRE_GRACE frames ago,
   // once per frame. frame_serial counts presented frames; extent is the swapchain's size.
   init:                          proc(d: ^Device, window: Window, bindless: [BindlessArray]u32) -> bool,
   window_size:                   proc(d: ^Device) -> (framebuffer_size: [2]u32, dpi_scale: f32),

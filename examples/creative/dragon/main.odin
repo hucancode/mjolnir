@@ -115,8 +115,8 @@ App :: struct {
   platform:  platform.Platform,
   scene:     world.World,
   renderer:  render.Renderer,
-  debug:     debugui.Context,
   input:     input.State,
+  debug:     debugui.Context,
   orbit:     render.Orbit,
   loop:      geometry.Spline([3]f32),
   total:     f32,
@@ -128,14 +128,14 @@ App :: struct {
   groups:    [dynamic]Group,
   cursor:    struct {
     bone, group: int,
-    seat:        geometry.Transform,
+    seat: geometry.Transform,
   },
-  live:      Snapshot,
-  build:     Build,
-  pose:      Pose,
-  seed:      u32,
-  autoplay:  bool,
-  spin:      f32,
+  live:     Snapshot,
+  build:    Build,
+  pose:     Pose,
+  seed:     u32,
+  autoplay: bool,
+  spin:     f32,
 }
 
 main :: proc() {
@@ -396,7 +396,7 @@ build :: proc(app: ^App) {
         hinge_male(app, j, false, false)
       case .DISC_HINGE:
         l.first = bone(app, parent.bone, origin, r, .Y)
-        swing := bone(app, l.first, {}, around(HPI, X), .X)
+        swing := bone(app, l.first, {}, linalg.quaternion_angle_axis(HPI, X), .X)
         l.bone = bone(app, swing, {}, linalg.QUATERNIONF32_IDENTITY, .Y)
         emit(app, l.first)
         hinge_female(app, j, true)
@@ -515,11 +515,11 @@ snapshot :: proc(app: ^App, offset: f32, out: ^Snapshot) {
     m: quaternion128
     switch b.axis {
     case .X:
-      m = around(b.angle, X)
+      m = linalg.quaternion_angle_axis(b.angle, X)
     case .Y:
-      m = around(b.angle, Y)
+      m = linalg.quaternion_angle_axis(b.angle, Y)
     case .Z:
-      m = around(b.angle, Z)
+      m = linalg.quaternion_angle_axis(b.angle, Z)
     case .FREE:
       m = linalg.quaternion_inverse(b.rest) * linalg.quaternion_inverse(parent.rotation) * b.aim
     }

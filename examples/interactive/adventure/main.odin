@@ -310,8 +310,8 @@ App :: struct {
   platform:     platform.Platform,
   scene:        world.World,
   renderer:     render.Renderer,
-  phys:         physics.World,
   input:        input.State,
+  phys:         physics.World,
   font:         font.Font,
   gui:          ui.UI,
   panel:        Panel,
@@ -845,7 +845,7 @@ shoot :: proc(app: ^App, shot: Shot, from, direction: [3]f32, damage: f32, frien
   } else {
     render.attach(&app.renderer, node, app.fireball)
     world.transform(&app.scene, node).scale = 0.25
-    trail := mjolnir.spawn(&app.scene, &app.renderer, app.emitters[.MAGIC], parent = node)
+    mjolnir.spawn(&app.scene, &app.renderer, app.emitters[.MAGIC], parent = node)
   }
   append(&app.projectiles, Projectile{friendly = friendly, node = node, instance = instance, position = from, velocity = direction * 12, damage = damage, life = 2})
 }

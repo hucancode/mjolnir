@@ -77,7 +77,7 @@ trace :: proc(mesh: geometry.Mesh) -> (image: []u8, hits: int) {
       nearest, normal, hit := f32(math.F32_MAX), [3]f32{}, false
       for t in candidates {
         a, b, c := corners(mesh, t)
-        if d, ok := geometry.ray_triangle_intersection(ray.origin, ray.direction, a, b, c); ok && d < nearest {
+        if d, ok := geometry.ray_triangle_intersection(ray, a, b, c); ok && d < nearest {
           nearest, normal, hit = d, linalg.normalize(linalg.cross(b - a, c - a)), true
         }
       }

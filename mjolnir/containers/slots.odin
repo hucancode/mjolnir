@@ -172,8 +172,9 @@ slots_next :: proc "contextless" (self: ^Slots, cursor: ^u32) -> (index: u32, ok
   return 0, false
 }
 
-// destroy frees a Slots or SlabAllocator, as its *_destroy does.
+// destroy frees a Slots, SlabAllocator or Ranges, as its *_destroy does.
 destroy :: proc {
   slots_destroy,
   slab_destroy,
+  ranges_destroy,
 }

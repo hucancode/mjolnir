@@ -20,9 +20,7 @@ ALIGN_FACTOR := [Align]f32 {
 // reference frame scaled up or down until one axis matches the window, so the window is the
 // reference widened on the other axis; roots sit in it as ABSOLUTE nodes do in their parent.
 // Rects, clips and lines come out in window pixels, the mesh in framebuffer pixels.
-// Only what changed since the last update is redone, found by comparing the nodes and styles
-// with how they were: nothing when no node, style, hover or press changed; the mesh alone when
-// only looks did (Node.style, active, image, the interactions). It returns what it redid.
+// Only what changed since the last update is redone; it returns what it redid.
 update :: proc(self: ^UI, window: [2]f32, f: ^font.Font, dpi: f32 = 1) -> (laid_out, painted: bool) {
   n := int(self.slots.high_water)
   frame := anchor.frame(self.reference, window)

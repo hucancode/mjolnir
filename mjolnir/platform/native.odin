@@ -145,9 +145,9 @@ set_title :: proc(self: ^Platform, title: string) {
   glfw.SetWindowTitle(self.window, strings.clone_to_cstring(title, context.temp_allocator))
 }
 
-// get_clipboard returns the clipboard's text, allocated; empty when it holds none. Main thread
+// clipboard returns the clipboard's text, allocated; empty when it holds none. Main thread
 // only.
-get_clipboard :: proc(self: ^Platform, allocator := context.allocator) -> string {
+clipboard :: proc(self: ^Platform, allocator := context.allocator) -> string {
   return strings.clone(glfw.GetClipboardString(self.window), allocator)
 }
 

@@ -97,8 +97,8 @@ draw_hud :: proc(app: ^App) {
   render.stage_overlay(&app.renderer, hud[:], &app.font)
 }
 
-spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, pos: [3]f32 = {}) -> world.NodeHandle {
-  return mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, color), pos)
+spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, pos: [3]f32 = {}, scale: [3]f32 = {1, 1, 1}) -> world.NodeHandle {
+  return mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, shape, color), pos, scale = scale)
 }
 
 setup :: proc(app: ^App) -> mjolnir.Setup {
@@ -111,20 +111,17 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   wall_t :: 0.2
   wall_h :: 0.5
 
-  floor := spawn_primitive(app, .CUBE, .GRAY, {0, -0.5, 0})
-  world.transform(&app.scene, floor).scale = {half, 0.5, half}
+  spawn_primitive(app, .CUBE, .GRAY, {0, -0.5, 0}, {half, 0.5, half})
 
-  spawn_wall(app, {0, wall_h, half + wall_t}, half + wall_t * 2, wall_h, wall_t)
-  spawn_wall(app, {0, wall_h, -(half + wall_t)}, half + wall_t * 2, wall_h, wall_t)
-  spawn_wall(app, {half + wall_t, wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
-  spawn_wall(app, {-(half + wall_t), wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
+  spawn_primitive(app, .CUBE, .WHITE, {0, wall_h, half + wall_t}, {half + wall_t * 2, wall_h, wall_t})
+  spawn_primitive(app, .CUBE, .WHITE, {0, wall_h, -(half + wall_t)}, {half + wall_t * 2, wall_h, wall_t})
+  spawn_primitive(app, .CUBE, .WHITE, {half + wall_t, wall_h, 0}, {wall_t, wall_h, half + wall_t * 2})
+  spawn_primitive(app, .CUBE, .WHITE, {-(half + wall_t), wall_h, 0}, {wall_t, wall_h, half + wall_t * 2})
 
   app.orbit = render.make_orbit({0, 12, 3}, {0, 0, 0})
 
-  app.game.head_node = spawn_primitive(app, .CUBE, .YELLOW)
-  world.transform(&app.scene, app.game.head_node).scale = SEGMENT_SCALE
-  app.game.food_node = spawn_primitive(app, .SPHERE, .RED)
-  world.transform(&app.scene, app.game.food_node).scale = FOOD_SCALE
+  app.game.head_node = spawn_primitive(app, .CUBE, .YELLOW, scale = SEGMENT_SCALE)
+  app.game.food_node = spawn_primitive(app, .SPHERE, .RED, scale = FOOD_SCALE)
 
   sweep(eat_samples[:], 600, 1200)
   sweep(crash_samples[:], 220, 55)
@@ -145,14 +142,10 @@ sweep :: proc(samples: []f32, from, to: f32) {
   }
 }
 
-spawn_wall :: proc(app: ^App, pos: [3]f32, sx, sy, sz: f32) {
-  h := spawn_primitive(app, .CUBE, .WHITE, pos)
-  world.transform(&app.scene, h).scale = {sx, sy, sz}
-}
-
 reset_game :: proc(app: ^App) {
   for h in app.game.body_nodes do world.destroy(&app.scene, h)
-  clear(&app.game.body_nodes); clear(&app.game.body)
+  clear(&app.game.body_nodes)
+  clear(&app.game.body)
 
   mid: i32 = GRID / 2
   append(&app.game.body, Cell{mid, mid})
@@ -163,16 +156,17 @@ reset_game :: proc(app: ^App) {
   }
   place_node(app, app.game.head_node, app.game.body[0], SEGMENT_Y)
 
-  app.game.dir = {1, 0}; app.game.pending_dir = {1, 0}
-  app.game.timer = 0; app.game.score = 0; app.game.alive = true
+  app.game.dir = {1, 0}
+  app.game.pending_dir = {1, 0}
+  app.game.timer = 0
+  app.game.score = 0
+  app.game.alive = true
 
   place_food(app)
 }
 
 spawn_body_node :: proc(app: ^App, c: Cell) -> world.NodeHandle {
-  h := spawn_primitive(app, .CUBE, .GREEN, cell_to_world(c, SEGMENT_Y))
-  world.transform(&app.scene, h).scale = SEGMENT_SCALE
-  return h
+  return spawn_primitive(app, .CUBE, .GREEN, cell_to_world(c, SEGMENT_Y), SEGMENT_SCALE)
 }
 
 place_node :: proc(app: ^App, h: world.NodeHandle, c: Cell, y: f32) {

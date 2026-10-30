@@ -284,8 +284,8 @@ camera_create :: proc(self: ^Renderer, size: [2]u32, c: Camera) -> (handle: Came
   return handle, true
 }
 
-// camera_destroy frees the camera; its handle is stale at once. The main camera, which lives as
-// long as the renderer, and a stale handle are ignored.
+// camera_destroy frees the camera; destroy each handle once. The main camera, which lives as
+// long as the renderer, is ignored.
 camera_destroy :: proc(self: ^Renderer, handle: CameraHandle) {
   lock(self)
   if handle == self.main_camera do return

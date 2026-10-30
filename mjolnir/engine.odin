@@ -5,7 +5,7 @@ import "core:thread"
 import "core:time"
 import "platform"
 
-// RENDER_FPS is the target frame rate of Loop.frame (-define:RENDER_FPS=n).
+// RENDER_FPS is the target frame rate of Loop.render (-define:RENDER_FPS=n).
 RENDER_FPS :: #config(RENDER_FPS, 60)
 @(private = "file")
 FRAME_TIME :: 1.0 / RENDER_FPS

@@ -12,13 +12,13 @@ import "mjolnir/render"
 import "mjolnir/world"
 
 App :: struct {
-  platform:        platform.Platform,
-  scene:           world.World,
-  renderer:        render.Renderer,
-  input:           input.State,
-  orbit:           render.Orbit,
-  debug:           debugui.Context,
-  sun:             render.LightHandle,
+  platform: platform.Platform,
+  scene:    world.World,
+  renderer: render.Renderer,
+  input:    input.State,
+  orbit:    render.Orbit,
+  debug:    debugui.Context,
+  sun:      render.LightHandle,
 }
 
 main :: proc() {

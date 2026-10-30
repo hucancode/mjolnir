@@ -273,8 +273,8 @@ App :: struct {
   platform:  platform.Platform,
   scene:     world.World,
   renderer:  render.Renderer,
-  debug:     debugui.Context,
   input:     input.State,
+  debug:     debugui.Context,
   orbit:     render.Orbit,
   bones:     [dynamic]Bone,
   poses:     [dynamic]BonePose,
@@ -296,7 +296,7 @@ App :: struct {
   dancing:   bool,
   tempo:     f32,
   orbs:      [len(ORB_COLORS)]Orb,
-  elapsed:   f32,
+  time:      f32,
 }
 
 chan :: proc(c: Channel, side := Side.L) -> int {
@@ -410,8 +410,8 @@ update :: proc(app: ^App, dt: f32) {
   step := MAX_JOINT_SPEED * dt
   for &v, i in app.current do v += clamp(app.pose[i] - v, -step, step)
   pose(app)
-  app.elapsed += dt
-  for orb in app.orbs do world.transform(&app.scene, orb.node).position = orb_position(orb, app.elapsed)
+  app.time += dt
+  for orb in app.orbs do world.transform(&app.scene, orb.node).position = orb_position(orb, app.time)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 
@@ -512,10 +512,6 @@ panel :: proc(app: ^App) {
   }
 }
 
-turn :: proc(angle: f32, axis: [3]f32) -> quaternion128 {
-  return linalg.quaternion_angle_axis_f32(angle, axis)
-}
-
 at :: proc(f: Frame, position: [3]f32, rotation := linalg.QUATERNIONF32_IDENTITY) -> Frame {
   return {f.bone, geometry.transform_mul(f.place, {position, rotation, 1})}
 }
@@ -599,9 +595,9 @@ joint :: proc(app: ^App, parent: Frame, slot: geometry.Face, j: Joint, binds: [3
     dofs[1].axis, count = .Y, 2
   case .DISC_HINGE:
     dofs[0].axis, dofs[2].axis, count = .Y, .Y, 3
-    dofs[1].rest = turn(math.PI / 2, X)
+    dofs[1].rest = linalg.quaternion_angle_axis(math.PI / 2, X)
   case .WRIST:
-    dofs[1].offset, dofs[1].rest = {0, WRIST_DROP, 0}, turn(-math.PI / 2, Y)
+    dofs[1].offset, dofs[1].rest = {0, WRIST_DROP, 0}, linalg.quaternion_angle_axis(-math.PI / 2, Y)
     dofs[2].axis, count = .Y, 3
   case .BALL:
     dofs[1].axis, dofs[2].axis, count = .Y, .Z, 3
@@ -622,7 +618,7 @@ joint :: proc(app: ^App, parent: Frame, slot: geometry.Face, j: Joint, binds: [3
     hinge_male(app, ride(bones[1]), j, true, true, true)
   case .WRIST:
     hinge_male(app, ride(bones[0]), j, false, false, true)
-    hinge_female(app, at(ride(bones[0]), {0, WRIST_DROP, 0}, turn(-math.PI / 2, Y)), j, true)
+    hinge_female(app, at(ride(bones[0]), {0, WRIST_DROP, 0}, linalg.quaternion_angle_axis(-math.PI / 2, Y)), j, true)
     hinge_male(app, ride(bones[1]), j, true, true, true)
   case .BALL:
     ball_male(app, ride(bones[2]), j)
@@ -635,7 +631,7 @@ jaw_width :: proc(j: Joint) -> f32 {
 }
 
 lug :: proc(app: ^App, f: Frame, j: Joint, thickness, x, up: f32) {
-  piece(app, f, .CYLINDER, {j.lug_d / 2, thickness - 0.002, j.lug_d / 2}, {x, 0, 0}, turn(-math.PI / 2, Z), false)
+  piece(app, f, .CYLINDER, {j.lug_d / 2, thickness - 0.002, j.lug_d / 2}, {x, 0, 0}, linalg.quaternion_angle_axis(-math.PI / 2, Z), false)
   box(app, f, {thickness, SHANK, j.lug_d}, {x, up * SHANK / 2, 0})
 }
 
@@ -658,7 +654,7 @@ hinge_base :: proc(app: ^App, f: Frame, j: Joint, up: f32, disc: bool) {
 
 hinge_pin :: proc(app: ^App, f: Frame, j: Joint) {
   half := jaw_width(j) / 2 + j.lug_t + max(0.005, j.pin_out)
-  piece(app, f, .CYLINDER, {j.pin_r, 2 * half, j.pin_r}, {}, turn(-math.PI / 2, Z))
+  piece(app, f, .CYLINDER, {j.pin_r, 2 * half, j.pin_r}, {}, linalg.quaternion_angle_axis(-math.PI / 2, Z))
 }
 
 hinge_female :: proc(app: ^App, f: Frame, j: Joint, disc: bool) {
@@ -689,27 +685,27 @@ build :: proc(app: ^App) {
   pelvis := Frame{bone(app, -1), geometry.TRANSFORM_IDENTITY}
   part(app, "pelvis")
   cylinder(app, pelvis, HIP_W / 2, DISC_T, {0, -DISC_T, 0})
-  cylinder(app, pelvis, HIP_H, DOME_W, {-DOME_W / 2, -DISC_T, 0}, turn(math.PI / 2, Y) * turn(math.PI / 2, X), .HALF_CYLINDER)
+  cylinder(app, pelvis, HIP_H, DOME_W, {-DOME_W / 2, -DISC_T, 0}, linalg.quaternion_angle_axis(math.PI / 2, Y) * linalg.quaternion_angle_axis(math.PI / 2, X), .HALF_CYLINDER)
 
   torso, _ := joint(app, pelvis, {{}, Y, Z}, WAIST, {{chan(.WAIST_BEND), 1}, {chan(.TWIST), 1}, {chan(.WAIST_TILT), 1}}, {{}, NEG_Y, Z})
   part(app, "torso")
   cw: f32 = CHEST_W - 2 * FLANK_R
   box(app, torso, {CHEST_W * 0.55, TAPER_H + 0.06, CHEST_D * 0.75}, {0, TAPER_H / 2, 0})
   box(app, torso, {cw, CHEST_H, 2 * FLANK_R}, {0, CHEST_Y + CHEST_H / 2, 0})
-  for s in ([2]f32{1, -1}) do cylinder(app, torso, FLANK_R, CHEST_H - 0.002, {s * cw / 2, CHEST_Y + 0.001, 0}, turn(s * math.PI / 2, Y), .HALF_CYLINDER)
+  for s in ([2]f32{1, -1}) do cylinder(app, torso, FLANK_R, CHEST_H - 0.002, {s * cw / 2, CHEST_Y + 0.001, 0}, linalg.quaternion_angle_axis(s * math.PI / 2, Y), .HALF_CYLINDER)
   box(app, torso, {cw * 0.85, CHEST_H * 0.72, 0.06}, {0, CHEST_Y + CHEST_H * 0.56, FLANK_R + 0.01})
   cylinder(app, torso, 0.17, 0.1, {0, CHEST_TOP, 0})
   disc_r := shoulder_disc_radius()
-  for s in ([2]f32{1, -1}) do cylinder(app, torso, disc_r + 0.07, CONE_LEN, {s * (CHEST_W / 2 - CONE_LEN), SHOULDER_Y, 0}, turn(-s * math.PI / 2, Z), .SHOULDER_CONE)
+  for s in ([2]f32{1, -1}) do cylinder(app, torso, disc_r + 0.07, CONE_LEN, {s * (CHEST_W / 2 - CONE_LEN), SHOULDER_Y, 0}, linalg.quaternion_angle_axis(-s * math.PI / 2, Z), .SHOULDER_CONE)
 
   head, _ := joint(app, torso, {{0, NECK_Y, 0}, Y, Z}, NECK, {{chan(.HEAD_PITCH), 1}, {chan(.HEAD_YAW), 1}, {}}, {{}, NEG_Y, Z})
   part(app, "head")
   cy: f32 = HEAD_R + 0.04
   cylinder(app, head, 0.14, 0.05)
-  cylinder(app, head, HEAD_R, HEAD_D, {0, cy, -HEAD_D / 2}, turn(math.PI / 2, X))
-  cylinder(app, head, HEAD_R + 0.03, 0.06, {0, cy, HEAD_D / 2}, turn(math.PI / 2, X))
-  cylinder(app, head, INNER_R, 0.05, {0, cy, HEAD_D / 2 + 0.06}, turn(math.PI / 2, X))
-  for s in ([2]f32{1, -1}) do cylinder(app, head, 0.09, 0.06, {s * (HEAD_R + 0.06), cy, 0}, turn(s * math.PI / 2, Z))
+  cylinder(app, head, HEAD_R, HEAD_D, {0, cy, -HEAD_D / 2}, linalg.quaternion_angle_axis(math.PI / 2, X))
+  cylinder(app, head, HEAD_R + 0.03, 0.06, {0, cy, HEAD_D / 2}, linalg.quaternion_angle_axis(math.PI / 2, X))
+  cylinder(app, head, INNER_R, 0.05, {0, cy, HEAD_D / 2 + 0.06}, linalg.quaternion_angle_axis(math.PI / 2, X))
+  for s in ([2]f32{1, -1}) do cylinder(app, head, 0.09, 0.06, {s * (HEAD_R + 0.06), cy, 0}, linalg.quaternion_angle_axis(s * math.PI / 2, Z))
 
   for side in Side do limbs(app, pelvis, torso, side)
 }
@@ -726,7 +722,7 @@ limbs :: proc(app: ^App, pelvis, torso: Frame, side: Side) {
   arm, _ := joint(app, torso, {{-sgn * CHEST_W / 2, SHOULDER_Y, 0}, -sgn * X, sgn * Z}, SHOULDER, {bind(.SHOULDER, side, -sgn), bind(.ARM_OUT, side, -1), bind(.ARM_TWIST, side, sgn)}, {{}, Y, Z})
   part(app, "upper arm")
   cylinder(app, arm, ARM_W / 2, ARM_LEN + 0.08, {0, -ARM_LEN - 0.02, 0})
-  cylinder(app, arm, ARM_W * 0.4, ARM_W + 0.14, {-(ARM_W + 0.14) / 2, -ARM_LEN, 0}, turn(-math.PI / 2, Z))
+  cylinder(app, arm, ARM_W * 0.4, ARM_W + 0.14, {-(ARM_W + 0.14) / 2, -ARM_LEN, 0}, linalg.quaternion_angle_axis(-math.PI / 2, Z))
 
   fore, _ := joint(app, arm, {{0, -ARM_LEN, 0}, NEG_Y, X}, ELBOW, {bind(.ELBOW, side, -sgn), bind(.FORE_TWIST, side, sgn), {}}, {{}, Y, X})
   part(app, "forearm")
@@ -755,7 +751,7 @@ limbs :: proc(app: ^App, pelvis, torso: Frame, side: Side) {
   thigh, leg.hip = joint(app, pelvis, {{-sgn * DOME_W / 2, HIP_Y, 0}, -sgn * X, sgn * Z}, HIP, {bind(.HIP, side, -sgn), {}, {}}, {{}, Y, Z})
   part(app, "thigh")
   box(app, thigh, {THIGH_W, THIGH_LEN + 0.1, THIGH_W + 0.04}, {0, -(THIGH_LEN + 0.1) / 2 + 0.07, 0})
-  cylinder(app, thigh, THIGH_W * 0.38, THIGH_W + 0.16, {-(THIGH_W + 0.16) / 2, -THIGH_LEN, 0}, turn(-math.PI / 2, Z))
+  cylinder(app, thigh, THIGH_W * 0.38, THIGH_W + 0.16, {-(THIGH_W + 0.16) / 2, -THIGH_LEN, 0}, linalg.quaternion_angle_axis(-math.PI / 2, Z))
 
   shin: Frame
   shin, leg.knee = joint(app, thigh, {{0, -THIGH_LEN, 0}, NEG_Y, X}, KNEE, {bind(.KNEE, side, -sgn), {}, {}}, {{}, Y, X})
@@ -773,7 +769,7 @@ limbs :: proc(app: ^App, pelvis, torso: Frame, side: Side) {
   box(app, foot, {FOOT_W, FOOT_H, run}, {0, mid, z0 + run / 2}, mesh = .FOOT_SLOPE)
   box(app, foot, {FOOT_W * 0.92, toe_h, TOE_D}, {0, SOLE_Y - FOOT_H + toe_h / 2, z0 + run + TOE_D / 2})
   box(app, foot, {FOOT_W, FOOT_H, HEEL_D}, {0, mid, -z0 - HEEL_D / 2})
-  box(app, foot, {FOOT_W, FOOT_H, HEEL_CAP_D}, {0, mid, -z0 - HEEL_D - HEEL_CAP_D / 2}, turn(math.PI, Y), .HEEL_SLOPE)
+  box(app, foot, {FOOT_W, FOOT_H, HEEL_CAP_D}, {0, mid, -z0 - HEEL_D - HEEL_CAP_D / 2}, linalg.quaternion_angle_axis(math.PI, Y), .HEEL_SLOPE)
 }
 
 shoulder_disc_radius :: proc() -> f32 {
