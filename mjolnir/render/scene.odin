@@ -97,6 +97,7 @@ BuiltinPipeline :: enum {
   // the pyramid build: compacted builds every mip at once, batched mip by mip
   DEPTH_REDUCE,
   SHADOW,
+  AMBIENT_OCCLUSION,
   LIGHTING,
   PARTICLE_EMIT,
   PARTICLE_SIMULATE,
@@ -268,6 +269,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
   cull_init(self) or_return
   shadow_init(self) or_return
   material_init(self) or_return
+  ambient_occlusion_init(self) or_return
   lighting_init(self) or_return
   post_init(self) or_return
   particles_init(self) or_return

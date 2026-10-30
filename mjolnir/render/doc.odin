@@ -14,7 +14,7 @@ package render
 // render keeps the one CPU copy of each scene table (tables.odin, layouts in gpu_data.odin)
 // and marks what it writes; flush resolves the frame (slots, lights, post effects) and
 // frame.odin records it through rhi: the dirty table regions per frame in flight, then one
-// pass_*.odin file per pass, each owning its pipelines and shader/*.slang sources (one source
+// pass_*.odin file per pass (per camera: G-buffer, ambient occlusion, lighting, forward), each owning its pipelines and shader/*.slang sources (one source
 // for both backends, built by make shader).
 // Where backends differ a pass branches on the backend's compile-time BINDLESS or on rhi.Caps.
 // The seams are rhi, the contract both sides share, and backend.odin/backend_glue.odin, the

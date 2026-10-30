@@ -51,13 +51,33 @@ CAMERA_LIST_CAPACITY :: MAX_SLOTS
 @(private)
 SHADOW_LIST_CAPACITY :: 4096 * MAX_SHADOW_VIEWS
 
-// Camera is a view into the scene: pose and projection. Its images are camera_image's.
+// Camera is a view into the scene: pose, projection and the lighting passes it runs. Its
+// images are camera_image's.
 Camera :: struct {
-  position:   [3]f32,
-  rotation:   quaternion128,
-  projection: CameraProjection,
+  position:          [3]f32,
+  rotation:          quaternion128,
+  projection:        CameraProjection,
   // clip planes, shared by both projections
-  near, far:  f32,
+  near, far:         f32,
+  ambient_occlusion: AmbientOcclusion,
+}
+
+// AmbientOcclusion darkens the image-based light where nearby surfaces hide the sky: creases,
+// contacts, corners. Estimated per pixel from the camera's depth and normals (screen space),
+// so what is off screen occludes nothing. Direct lights are not affected.
+AmbientOcclusion :: struct {
+  enabled:   bool,
+  // world units around a point searched for occluders
+  radius:    f32,
+  // exponent on the visibility: above 1 darkens, 0 turns it off
+  intensity: f32,
+}
+
+// DEFAULT_AMBIENT_OCCLUSION is what make_camera starts a camera with.
+DEFAULT_AMBIENT_OCCLUSION :: AmbientOcclusion {
+  enabled   = true,
+  radius    = 0.5,
+  intensity = 1.0,
 }
 
 // What render keeps per camera beside the Camera: the images it renders into, at extent.
@@ -219,7 +239,7 @@ make_camera :: proc(
 ) -> (
   c: Camera,
 ) {
-  c = {projection = PerspectiveProjection{fov}, near = near, far = far}
+  c = {projection = PerspectiveProjection{fov}, near = near, far = far, ambient_occlusion = DEFAULT_AMBIENT_OCCLUSION}
   camera_look_at(&c, position, target)
   return
 }
@@ -333,12 +353,13 @@ View :: struct {
   list_capacity:   u32,
   // render's clock in seconds (render.update)
   time:            f32,
+  _:               [3]u32,
   // Renderer.sun as seen by every view: color * intensity (0 when off), and the direction
   // towards it
   sun_radiance:    [4]f32,
   sun_direction:   [4]f32,
 }
-#assert(size_of(View) == 480)
+#assert(size_of(View) == 496)
 
 // A camera's images and depth pyramids, one set per frame in flight (pyramid_shape).
 @(private)

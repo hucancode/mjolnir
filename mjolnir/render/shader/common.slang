@@ -53,7 +53,7 @@ struct View {
     float near;
     float far;
     // render's texture handles, by CameraImage (bound through a group on wgpu)
-    uint images[6];
+    uint images[7];
     uint pyramid;
     // bit t: material type t is tested against the pyramid
     uint occlusion_mask;
@@ -68,6 +68,9 @@ struct View {
     uint list_capacity;
     // render's clock in seconds
     float time;
+    uint _view_pad0;
+    uint _view_pad1;
+    uint _view_pad2;
     // Renderer.sun: color * intensity (0 when off), and the direction towards it
     float4 sun_radiance;
     float4 sun_direction;
@@ -239,6 +242,14 @@ static const float4 CLIP_DISCARD = float4(2.0, 2.0, 2.0, 1.0);
 float3x3 mat3_of(float4x4 m)
 {
     return float3x3(m[0].xyz, m[1].xyz, m[2].xyz);
+}
+
+// World position of the G-buffer texel at framebuffer uv, rebuilt from its
+// depth. Clip-space y points down, so ndc follows uv on both axes.
+float3 world_position(View camera, float2 uv, float depth)
+{
+    float4 p = mul(camera.inv_view_projection, float4(uv * 2.0 - 1.0, depth, 1.0));
+    return p.xyz / p.w;
 }
 
 // Where a direction lands on an equirectangular image.

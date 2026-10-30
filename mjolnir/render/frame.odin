@@ -165,6 +165,12 @@ camera_passes :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, closing: ..
   }
   barrier(self, cmd, .GBUFFER_TO_LIGHTING)
   {
+    scope(self, cmd, "ambient occlusion")
+    c = 0
+    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do ambient_occlusion_record(self, cmd, f, i)
+  }
+  barrier(self, cmd, .FILL_TO_COMPUTE)
+  {
     scope(self, cmd, "lighting")
     c = 0
     for i in containers.slots_next(&self.slots[.CAMERAS], &c) do lighting_record(self, cmd, f, i)

@@ -2,7 +2,8 @@
 // the tile's depth range and walks the light placements once, listing the visible placed
 // lights that reach the tile: the point and spot lights whose sphere meets the tile's box.
 // Then each invocation shades its pixel once: image-based ambient and emissive, the sun, then
-// the listed lights. The background gets the skybox, or black. A placed light is a Light at a
+// the listed lights. The image-based light is scaled by the camera's ambient occlusion, when it
+// has any. The background gets the skybox, or black. A placed light is a Light at a
 // node's transform (scene.odin light_pose); the sun is not placed, the push holds it.
 #include "common.slang"
 
@@ -21,6 +22,7 @@ static const uint IMAGE_ALBEDO = 2;
 static const uint IMAGE_METALLIC_ROUGHNESS = 3;
 static const uint IMAGE_EMISSIVE = 4;
 static const uint IMAGE_DEPTH = 5;
+static const uint IMAGE_AMBIENT_OCCLUSION = 6;
 
 struct LightingPush {
     uint camera_index;
@@ -38,6 +40,8 @@ struct LightingPush {
     float ibl_intensity;
     // view of the sun's first shadow cascade, 0 for none
     uint sun_shadow_map;
+    // 1: the camera's ambient occlusion image holds this frame's occlusion
+    uint ambient_occlusion;
 }
 PUSH_BLOCK(LightingPush, lighting_push)
 
@@ -54,6 +58,7 @@ PUSH_BLOCK(LightingPush, lighting_push)
 [vk::binding(7, 1)] TextureCube prefilter_cube;
 [vk::binding(8, 1)] Texture2D brdf_lut;
 [vk::binding(9, 1)] Texture2D environment_map;
+[vk::binding(10, 1)] Texture2D ambient_occlusion_texture;
 [vk::binding(0, 3)] [format("rgba16f")] WTexture2D<float4> output_image;
 // texels on a side of a shadow map
 static const float SHADOW_MAP_SIZE = 512.0;
@@ -72,14 +77,6 @@ groupshared Atomic<uint> tile_max_bits;
 groupshared Atomic<uint> tile_light_count;
 groupshared uint tile_lights[MAX_LIGHTS];
 
-// World position of the G-buffer texel at framebuffer uv, rebuilt from its
-// depth. Clip-space y points down, so ndc follows uv on both axes.
-float3 world_position(View camera, float2 uv, float depth)
-{
-    float4 p = mul(camera.inv_view_projection, float4(uv * 2.0 - 1.0, depth, 1.0));
-    return p.xyz / p.w;
-}
-
 float scene_depth(View camera, int2 pixel)
 {
 #if BACKEND_WGPU
@@ -96,7 +93,8 @@ float4 camera_image(View camera, uint a, int2 pixel)
     case IMAGE_NORMAL: return normal_texture.Load(int3(pixel, 0));
     case IMAGE_ALBEDO: return albedo_texture.Load(int3(pixel, 0));
     case IMAGE_METALLIC_ROUGHNESS: return metallic_roughness_texture.Load(int3(pixel, 0));
-    default: return emissive_texture.Load(int3(pixel, 0));
+    case IMAGE_EMISSIVE: return emissive_texture.Load(int3(pixel, 0));
+    default: return ambient_occlusion_texture.Load(int3(pixel, 0));
     }
 #else
     return textures[NonUniformResourceIndex(camera.images[a])].Load(int3(pixel, 0));
@@ -429,8 +427,47 @@ float3 sample_skybox(View camera, float2 uv)
     return sample_prefilter(dir, b * prefilter_max_lod());
 }
 
-// Image-based lighting at intensity ibl_intensity, from the unnormalized G-buffer normal.
-float3 ambient_light(float ibl_intensity, float3 normal, Surface s, float roughness)
+// The ambient occlusion at a pixel showing s: the average over the 4x4 texels its pattern
+// repeats in (shader/ambient_occlusion.slang), of those on s's plane. 1 without the image.
+float ambient_visibility(View camera, int2 pixel, Surface s)
+{
+    if (lighting_push.ambient_occlusion == 0) return 1.0;
+    float tolerance = 0.02 * length(camera.position.xyz - s.position) + 1e-3;
+    float sum = 0.0;
+    float weight = 0.0;
+    for (int y = -1; y <= 2; y++) {
+        for (int x = -1; x <= 2; x++) {
+            int2 q = clamp(pixel + int2(x, y), int2(0), int2(camera.extent) - 1);
+            float q_depth = scene_depth(camera, q);
+            if (q_depth >= 1.0) continue;
+            float3 q_pos = world_position(camera, (float2(q) + 0.5) / camera.extent, q_depth);
+            float w = clamp(1.0 - abs(dot(q_pos - s.position, s.geometric)) / tolerance, 0.0, 1.0);
+            sum += w * camera_image(camera, IMAGE_AMBIENT_OCCLUSION, q).r;
+            weight += w;
+        }
+    }
+    return weight > 0.0 ? sum / weight : 1.0;
+}
+
+// Light bouncing between occluded surfaces: brighter albedo gives back part of what ambient
+// occlusion takes (Jimenez et al. 2016).
+float3 multi_bounce(float visibility, float3 albedo)
+{
+    float3 a = 2.0404 * albedo - 0.3324;
+    float3 b = -4.7951 * albedo + 0.6417;
+    float3 c = 2.7552 * albedo + 0.6903;
+    return max(float3(visibility), ((visibility * a + b) * visibility + c) * visibility);
+}
+
+// The share of a reflection's lobe ambient occlusion leaves open (Lagarde and de Rousiers 2014).
+float specular_occlusion(float n_dot_v, float visibility, float roughness)
+{
+    return clamp(pow(n_dot_v + visibility, exp2(-16.0 * roughness - 1.0)) - 1.0 + visibility, 0.0, 1.0);
+}
+
+// Image-based lighting at intensity ibl_intensity, from the unnormalized G-buffer normal,
+// occluded by visibility.
+float3 ambient_light(float ibl_intensity, float3 normal, Surface s, float roughness, float visibility)
 {
     if (ibl_intensity <= 0.0 || lighting_push.prefilter_index == NO_TEXTURE) return float3(0.0);
     float3 r = reflect(-s.v, normal);
@@ -442,7 +479,9 @@ float3 ambient_light(float ibl_intensity, float3 normal, Surface s, float roughn
     float3 prefiltered = sample_prefilter(r, roughness * prefilter_max_lod());
     float2 lut = sample_brdf_lut(float2(n_dot_v, roughness));
     float3 specular = prefiltered * (f * lut.x + lut.y);
-    return (kd * irradiance * s.albedo + specular) * ibl_intensity;
+    float3 diffuse = kd * irradiance * s.albedo * multi_bounce(visibility, s.albedo);
+    specular *= specular_occlusion(n_dot_v, visibility, roughness);
+    return (diffuse + specular) * ibl_intensity;
 }
 
 // Whether the sphere (center, radius) meets the box [lo, hi].
@@ -522,7 +561,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 group : SV_GroupID, uint local 
     s.geometric = geometric_normal(camera, pixel, s.position, depth, s.normal);
 
     float3 color = camera_image(camera, IMAGE_EMISSIVE, pixel).rgb;
-    color += ambient_light(lighting_push.ibl_intensity, raw_normal, s, mr.g);
+    color += ambient_light(lighting_push.ibl_intensity, raw_normal, s, mr.g, ambient_visibility(camera, pixel, s));
     s.roughness = clamp(mr.g, 0.08, 1.0);
     if (any(camera.sun_radiance.rgb > float3(0.0))) color += sun_light(s);
     uint listed = tile_light_count.load();

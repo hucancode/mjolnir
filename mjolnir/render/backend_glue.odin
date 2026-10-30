@@ -35,10 +35,10 @@ MAX_DEPTH_MIPS :: 16
 MAX_PYRAMID_SLOTS :: MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
 MAX_DRAW_LIST_SLOTS :: (MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
 // The bindless arrays: storage images hold the pyramids' mips, then the IBL precompute targets,
-// then the cameras' lit images, one per pyramid slot; storage buffers the draw lists; the extra
-// buffer the pyramid counters, one u32 per pyramid slot.
+// then the cameras' lit images and their ambient occlusion images, one each per pyramid slot;
+// storage buffers the draw lists; the extra buffer the pyramid counters, one u32 per pyramid slot.
 BINDLESS_SIZES :: [rhi.BindlessArray]u32 {
-  .STORAGE_IMAGES  = MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS + PRECOMPUTE_TARGETS + MAX_PYRAMID_SLOTS,
+  .STORAGE_IMAGES  = MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS + PRECOMPUTE_TARGETS + 2 * MAX_PYRAMID_SLOTS,
   .STORAGE_BUFFERS = MAX_DRAW_LIST_SLOTS,
   .EXTRA_BUFFERS   = 1,
 }

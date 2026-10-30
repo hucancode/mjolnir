@@ -7,6 +7,7 @@ import "rhi"
 // walks the light placements once and lists the visible lights reaching its tile (the point
 // and spot ones whose sphere meets it), so a pixel reads the G-buffer once however many lights
 // cover it. The sun is not listed: every pixel adds it from the push (shader/lighting.slang).
+// The image-based light is scaled by the camera's ambient occlusion image, when it has one.
 // The image is a storage image: bindless at LIT_STORAGE_BASE + the camera's pyramid slot
 // (pyramids_bind), or a group-3 bind group per image (WebGPU).
 
@@ -20,19 +21,21 @@ LIT_STORAGE_BASE :: PRECOMPUTE_STORAGE_BASE + PRECOMPUTE_TARGETS
 // Matches the push block of the lighting shaders (and, in WebGPU, their uniform struct).
 @(private = "file")
 LightingPush :: struct {
-  camera_index:     u32,
-  irradiance:       u32,
-  prefilter:        u32,
-  brdf_lut:         u32,
-  environment:      u32,
-  skybox_intensity: f32,
-  skybox_blur:      f32,
-  output_index:     u32,
+  camera_index:      u32,
+  irradiance:        u32,
+  prefilter:         u32,
+  brdf_lut:          u32,
+  environment:       u32,
+  skybox_intensity:  f32,
+  skybox_blur:       f32,
+  output_index:      u32,
   // rows of the light placement table
-  light_count:      u32,
-  ibl_intensity:    f32,
+  light_count:       u32,
+  ibl_intensity:     f32,
   // view of the sun's first shadow cascade, 0 for none
-  sun_shadow_map:   u32,
+  sun_shadow_map:    u32,
+  // 1: the camera's AMBIENT_OCCLUSION image holds this frame's occlusion
+  ambient_occlusion: u32,
 }
 
 // WebGPU: group 3 of the lighting dispatch, the image it writes.
@@ -65,17 +68,18 @@ lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32)
     if !ok do return
   }
   push := LightingPush {
-    camera_index     = cam,
-    irradiance       = u32(self.irradiance_cube),
-    prefilter        = u32(self.prefilter_cube),
-    brdf_lut         = u32(self.brdf_lut),
-    environment      = u32(self.environment_map),
-    skybox_intensity = self.skybox_intensity,
-    skybox_blur      = self.skybox_blur,
-    output_index     = LIT_STORAGE_BASE + camera_slot(cam) + f,
-    light_count      = self.slots[.LIGHT_PLACEMENTS].high_water,
-    ibl_intensity    = self.ibl_intensity,
-    sun_shadow_map   = self.sun_shadow_map,
+    camera_index      = cam,
+    irradiance        = u32(self.irradiance_cube),
+    prefilter         = u32(self.prefilter_cube),
+    brdf_lut          = u32(self.brdf_lut),
+    environment       = u32(self.environment_map),
+    skybox_intensity  = self.skybox_intensity,
+    skybox_blur       = self.skybox_blur,
+    output_index      = LIT_STORAGE_BASE + camera_slot(cam) + f,
+    light_count       = self.slots[.LIGHT_PLACEMENTS].high_water,
+    ibl_intensity     = self.ibl_intensity,
+    sun_shadow_map    = self.sun_shadow_map,
+    ambient_occlusion = u32(ambient_occlusion_on(self, cam)),
   }
   dev.cmd_begin_compute(&self.gpu, cmd)
   defer dev.cmd_end_compute(&self.gpu, cmd)
@@ -97,6 +101,7 @@ lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32)
     self.prefilter_cube,
     self.brdf_lut,
     self.environment_map,
+    images[.AMBIENT_OCCLUSION][f],
   )
   if group != 0 do dev.cmd_bind_group(&self.gpu, cmd, 3, group)
   groups := (self.camera_targets[cam].extent + LIGHTING_TILE - 1) / LIGHTING_TILE

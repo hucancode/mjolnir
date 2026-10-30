@@ -70,6 +70,8 @@ CameraImage :: enum {
   METALLIC_ROUGHNESS = 3,
   EMISSIVE           = 4,
   DEPTH              = 5,
+  // how much ambient light reaches each pixel, 1 unoccluded (Camera.ambient_occlusion)
+  AMBIENT_OCCLUSION  = 6,
 }
 
 // Each camera attachment's texture; pipelines drawing into an attachment take its format.
@@ -84,6 +86,8 @@ CAMERA_IMAGES :: [CameraImage]TextureDesc {
   .EMISSIVE           = {format = .RGBA16F, usage = {.COLOR_TARGET, .SAMPLED}},
   // the depth pyramid build reads it
   .DEPTH              = {format = .D32F, usage = {.DEPTH_TARGET, .SAMPLED}, shared = true},
+  // written by the ambient occlusion dispatch; RGBA8 is a storage format WebGPU can filter
+  .AMBIENT_OCCLUSION  = {format = .RGBA8_UNORM, usage = {.SAMPLED, .STORAGE}},
 }
 
 // How a material is drawn, in this order. PBR is opaque: lit, occlusion-culled and casting

@@ -18,6 +18,8 @@ ScenePass :: enum {
   MESH,
   // the lighting compute shader
   LIGHTING,
+  // the ambient occlusion compute shader
+  AMBIENT_OCCLUSION,
   // the shadow depth vertex shader
   SHADOW,
   CULL,
@@ -116,6 +118,7 @@ SCENE_PASSES := [ScenePass]struct {
   .NONE              = {},
   .MESH              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .SKINNED_VERTICES, .VERTICES, .INDICES}, {.VERTEX, .FRAGMENT}, {}},
   .LIGHTING          = {{.VIEWS, .LIGHTS, .NODES, .LIGHT_PLACEMENTS}, {.COMPUTE}, {}},
+  .AMBIENT_OCCLUSION = {{.VIEWS}, {.COMPUTE}, {}},
   .SHADOW            = {{.VIEWS, .NODES, .MESHES, .SKINNED_VERTICES}, {.VERTEX}, {}},
   .CULL              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .BATCHES, .NODE_BATCH}, {.COMPUTE}, {}},
   .PARTICLE_EMIT     = {{.NODES, .EMITTERS, .PARTICLES, .EMITTER_PLACEMENTS}, {.COMPUTE}, {.PARTICLES}},
@@ -142,8 +145,10 @@ TextureLayout :: enum {
   // albedo, metallic-roughness, normal, emissive
   MATERIAL,
   // normal, albedo, metallic-roughness, emissive, depth, shadow atlas, irradiance, prefilter,
-  // BRDF LUT, environment
+  // BRDF LUT, environment, ambient occlusion
   LIGHTING,
+  // normal, depth
+  AMBIENT_OCCLUSION,
   // input, original, normal, depth
   POST,
   SINGLE,
@@ -151,13 +156,14 @@ TextureLayout :: enum {
 }
 
 @(private)
-MAX_GROUP_TEXTURES :: 10
+MAX_GROUP_TEXTURES :: 11
 
 @(private = "file")
 TEXTURE_LAYOUTS := [TextureLayout][]TextureSlot {
   .NONE      = {},
   .MATERIAL  = {.FLOAT, .FLOAT, .FLOAT, .FLOAT},
-  .LIGHTING  = {.FLOAT, .FLOAT, .FLOAT, .FLOAT, .DEPTH, .SHADOW_ATLAS, .CUBE, .CUBE, .FLOAT, .FLOAT},
+  .LIGHTING  = {.FLOAT, .FLOAT, .FLOAT, .FLOAT, .DEPTH, .SHADOW_ATLAS, .CUBE, .CUBE, .FLOAT, .FLOAT, .FLOAT},
+  .AMBIENT_OCCLUSION = {.FLOAT, .DEPTH},
   .POST      = {.FLOAT, .FLOAT, .FLOAT, .DEPTH},
   .SINGLE    = {.FLOAT},
   .PARTICLES = {.FLOAT, .FLOAT, .FLOAT, .FLOAT, .FLOAT, .FLOAT, .FLOAT, .FLOAT},

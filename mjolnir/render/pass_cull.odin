@@ -123,7 +123,7 @@ pyramid_shape :: proc(extent: [2]u32) -> (half: [2]u32, mips: u32) {
 }
 
 // Registers the storage views of the live cameras' pyramids that are not yet, and of the
-// lit image the lighting pass writes at the same slot (LIT_STORAGE_BASE). A pyramid's views
+// lit and ambient occlusion images written at the same slot (LIT_STORAGE_BASE, AO_STORAGE_BASE). A pyramid's views
 // enter the bindless array at its slot's next frame, once no frame in flight reads the
 // previous ones.
 @(private)
@@ -140,6 +140,7 @@ pyramids_bind :: proc(self: ^Renderer, f: u32) {
       dev.bindless_write(&self.gpu, .STORAGE_IMAGES, slot * MAX_DEPTH_MIPS + mip, rhi.TextureView{targets.pyramid[f], i32(mip)})
     }
     dev.bindless_write(&self.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + slot, rhi.TextureView{targets.images[.FINAL_IMAGE][f], 0})
+    dev.bindless_write(&self.gpu, .STORAGE_IMAGES, AO_STORAGE_BASE + slot, rhi.TextureView{targets.images[.AMBIENT_OCCLUSION][f], 0})
   }
 }
 
