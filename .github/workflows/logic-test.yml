@@ -64,7 +64,7 @@ jobs:
         make -v
 
     - name: Check Odin code
-      run: make shader && odin check . && odin check . -define:RENDER_BACKEND=wgpu
+      run: make shader && odin check mjolnir -no-entry-point && odin check mjolnir -no-entry-point -define:RENDER_BACKEND=wgpu
 
     - name: Run tests
-      run: odin test . --all-packages
+      run: odin test mjolnir --all-packages
