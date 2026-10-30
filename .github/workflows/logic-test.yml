@@ -25,6 +25,7 @@ jobs:
         bash /home/runner/odin/vendor/stb/src/build_stb.sh
         bash /home/runner/odin/vendor/cgltf/src/build_cgltf.sh
         bash /home/runner/odin/vendor/box2d/build_box2d.sh
+        bash /home/runner/odin/vendor/miniaudio/src/build_miniaudio.sh
         # build.sh also attempts a wasm build, which needs clang + wasm-ld and
         # may be missing on the runner. The native lib is produced first, so
         # only fail if it is actually absent.

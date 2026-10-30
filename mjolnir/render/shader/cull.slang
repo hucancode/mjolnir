@@ -115,9 +115,10 @@ bool project_sphere(float3 center, float radius, float4x4 proj, float near, floa
 // fetch reduced with MAX.
 float max_depth(Texture2D pyramid_texture, float2 uv, int level)
 {
+    // from mip 0: lavapipe (wgpu) answers a runtime mip's size query with mip 0's size
     uint w, h, levels;
-    pyramid_texture.GetDimensions(level, w, h, levels);
-    int2 size = int2(w, h);
+    pyramid_texture.GetDimensions(0, w, h, levels);
+    int2 size = max(int2(w, h) >> level, int2(1));
     int2 i0 = int2(floor(uv * float2(size) - 0.5));
     int2 lo = clamp(i0, int2(0), size - 1);
     int2 hi = clamp(i0 + 1, int2(0), size - 1);

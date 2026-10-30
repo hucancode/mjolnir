@@ -81,9 +81,45 @@ doc: shader
 	odin run docs/gen -- -src=mjolnir -out=$(WEB_OUT) -examples=examples -media=docs/site \
 		-name=Mjolnir -url=https://github.com/hucancode/mjolnir
 
-# docs/site/videos/<example>.mp4 and docs/site/posters/<example>.jpg (see examples/record.sh).
-record: shader
-	./examples/record.sh $(RECORD_ARGS) $(EXAMPLE)
+# The site's media, kept out of git: $(MEDIA_DIR)/videos/<example>.mp4 and
+# $(MEDIA_DIR)/posters/<example>.jpg. Each example runs on the wgpu backend for MEDIA_FRAMES
+# frames with FRAME_DUMP (frames read back from the backbuffer, no window capture), encoded with
+# ffmpeg. An example is skipped while the hash of its sources, the engine and the assets matches
+# the one of its last recording. EXAMPLE picks some; unset, every one but the modules examples.
+MEDIA_FRAMES ?= 300
+MEDIA_FPS ?= 30
+MEDIA_DIR ?= docs/site
+MEDIA_WORK := artifacts/media
+MEDIA_EXAMPLES = $(or $(EXAMPLE),$(notdir $(patsubst %/main.odin,%,$(filter-out examples/modules/%,$(wildcard examples/*/*/main.odin)))))
+media_hash = { git ls-files -s $(1); git diff -- $(1); } | cksum
+
+media: shader
+	@command -v ffmpeg > /dev/null || { echo "media needs ffmpeg"; exit 1; }
+	@mkdir -p $(MEDIA_DIR)/videos $(MEDIA_DIR)/posters $(MEDIA_WORK) bin
+	@engine=$$($(call media_hash,mjolnir assets)); failed=; \
+	for name in $(MEDIA_EXAMPLES); do \
+		dir=$$(ls -d examples/*/$$name); work=$(MEDIA_WORK)/$$name; \
+		video=$(MEDIA_DIR)/videos/$$name.mp4; poster=$(MEDIA_DIR)/posters/$$name.jpg; \
+		sum="$$engine $(MEDIA_FRAMES) $(MEDIA_FPS) $$($(call media_hash,$$dir))"; \
+		if [ -f $$video ] && [ -f $$poster ] && [ "$$(cat $$work.sum 2>/dev/null)" = "$$sum" ]; then \
+			echo "== $$name (up to date)"; continue; \
+		fi; \
+		echo "== $$name"; \
+		rm -rf $$work $$work.sum; \
+		if odin build $$dir -out:bin/media_$$name -define:RENDER_BACKEND=wgpu \
+			-define:RENDER_FPS=$(MEDIA_FPS) -define:FRAME_LIMIT=$(MEDIA_FRAMES) -define:FRAME_DUMP=$$work \
+			> $$work.log 2>&1; then \
+			./bin/media_$$name >> $$work.log 2>&1; \
+			ffmpeg -nostdin -y -loglevel error -framerate $(MEDIA_FPS) -i $$work/%05d.png \
+				-vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" -c:v libx264 -preset slow -crf 23 -pix_fmt yuv420p \
+				-movflags +faststart $$video >> $$work.log 2>&1 && \
+			ffmpeg -nostdin -y -loglevel error -i $$work/$$(printf %05d $$(($(MEDIA_FRAMES) * 2 / 5))).png \
+				-vf scale=480:-2 -q:v 4 $$poster >> $$work.log 2>&1 && \
+			echo "$$sum" > $$work.sum; \
+		else false; fi || { echo "   failed, see $$work.log"; tail -n 15 $$work.log | sed 's/^/   | /'; failed="$$failed $$name"; }; \
+		rm -rf $$work; \
+	done; \
+	if [ -n "$$failed" ]; then echo "media failed:$$failed"; exit 1; fi
 
 # Runs every modules example natively (windowed ones for MODULE_FRAMES frames), writing
 # artifacts/modules/, after checking each imports no root package and Layer 2+ packages of one

@@ -6,3 +6,6 @@ test.bin
 artifacts/
 perf.data
 perf.data.old
+# the site media, recorded by make media
+docs/site/videos/
+docs/site/posters/

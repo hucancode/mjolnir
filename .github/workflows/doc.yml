@@ -8,6 +8,7 @@ on:
       - 'docs/**'
       - 'mjolnir/**'
       - 'examples/**'
+      - 'assets/**'
       - '.github/workflows/doc.yml'
   workflow_dispatch:
 
@@ -32,15 +33,17 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # wasm-ld links the live WebGPU builds of the examples
-      - name: Install lld
-        run: sudo apt-get update && sudo apt-get install -y lld
+      # wasm-ld links the live WebGPU builds of the examples; make media renders on lavapipe
+      # (software Vulkan) under a virtual display and encodes with ffmpeg
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y lld mesa-vulkan-drivers xvfb ffmpeg libglfw3-dev
 
       - name: Build Odin vendor libraries
         run: |
           bash /home/runner/odin/vendor/stb/src/build_stb.sh
           bash /home/runner/odin/vendor/cgltf/src/build_cgltf.sh
           bash /home/runner/odin/vendor/box2d/build_box2d.sh
+          bash /home/runner/odin/vendor/miniaudio/src/build_miniaudio.sh
           # build.sh also builds wasm, which may fail on the runner; only the native lib is needed
           bash /home/runner/odin/vendor/box3d/src/build.sh || test -f /home/runner/odin/vendor/box3d/lib/linux-amd64/libbox3d.a
 
@@ -74,6 +77,23 @@ jobs:
           tar -xzf slang.tar.gz -C "$HOME/slang"
           rm slang.tar.gz
           echo "$HOME/slang/bin" >> "$GITHUB_PATH"
+
+      # the media is not in git: kept from the last run, make media records only examples whose
+      # sources, engine or assets changed. A failed or timed-out run still saves its progress.
+      - name: Restore media
+        uses: actions/cache@v4
+        with:
+          path: |
+            docs/site/videos
+            docs/site/posters
+            artifacts/media
+          key: media-${{ github.sha }}
+          restore-keys: media-
+
+      - name: Record media
+        run: xvfb-run -a make media
+        timeout-minutes: 120
+        continue-on-error: true
 
       - name: Build documentation
         run: make doc
