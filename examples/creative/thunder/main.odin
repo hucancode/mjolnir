@@ -43,6 +43,7 @@ App :: struct {
   spark_nodes:    [SPARK_SLOTS]world.NodeHandle,
   next_spark:     int,
   impact:         render.ShaderHandle,
+  glow:           render.ShaderHandle,
   lamps:          [MAX_LIGHTS]world.NodeHandle,
   lights:         [MAX_LIGHTS]render.LightHandle,
   pressed:        bool,
@@ -52,6 +53,14 @@ App :: struct {
 }
 
 bloom: f32 = 1
+
+// glow.slang's Effect
+GlowParams :: struct {
+  tint:        [3]f32,
+  threshold:   f32,
+  intensity:   f32,
+  blur_radius: f32,
+}
 orbiting := true
 
 main :: proc() {
@@ -111,6 +120,8 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     app.impacts_buffer,
   )
   if !ok do return .FAIL
+  app.glow, ok = render.post_shader_create(r, #load("glow." + render.SHADER_EXT), passes = 2)
+  if !ok do return .FAIL
   glow := render.texture_create(r, #load("assets/particles/light_01.png"))
   app.sparks[0] = render.emitter_create(r, render.make_emitter(
     texture = glow, emission_rate = 0, initial_velocity = {0, 8, 0}, velocity_spread = 16, drag = 7,
@@ -165,7 +176,7 @@ update :: proc(app: ^App, dt: f32) {
   moon := render.light(r, app.sun)
   moon.color = app.storm.tint
   moon.intensity = MOONLIGHT + min(app.storm.flash, 1) * FLASH_GAIN
-  render.main_camera(r).effects[0] = render.make_effect(render.BloomEffect{threshold = 1, intensity = bloom, blur_radius = 32})
+  render.main_camera(r).effects[0] = render.make_effect(app.glow, GlowParams{tint = app.storm.tint, threshold = 1, intensity = bloom, blur_radius = 32})
 
   stage_bolts(app)
   stage_impacts(app)
@@ -254,7 +265,7 @@ debug_ui :: proc(app: ^App) {
     mu.label(ctx, "Thin / thick")
     mu.layout_row(ctx, {125, -1}, 0)
     mu.slider(ctx, &thickness_min, 0.05, 5)
-    mu.slider(ctx, &thickness_max, 0.05, 20)
+    mu.slider(ctx, &thickness_max, 0.05, 10)
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Width tones"); mu.slider(ctx, &tones, 2, 8, 1)
     mu.label(ctx, "Sharpness"); mu.slider(ctx, &sharpness, 0, 1)

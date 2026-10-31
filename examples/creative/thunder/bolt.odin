@@ -142,8 +142,14 @@ ANTICIPATION_COUNT :: 5
 OVERSHOOT_PERIOD :: f32(0.2)
 OVERSHOOT_COUNT :: 3
 sharpness: f32 = 0.6
-color_a := [3]f32{0.3, 0.3, 0.7}
+color_a := [3]f32{0.0, 0.0, 0.3}
 color_b := [3]f32{1, 1, 1}
+
+// each channel picked on its own between color_a's and color_b's
+random_color :: proc() -> (c: [3]f32) {
+  for &v, i in c do v = rand.float32_range(min(color_a[i], color_b[i]), max(color_a[i], color_b[i]))
+  return
+}
 
 shape :: proc() -> (joints: [JOINTS]Joint) {
   seed := i64(rand.uint32())
@@ -254,7 +260,7 @@ strike :: proc(s: ^Storm, to: [3]f32, power: f32, to_hammer: bool, furious := fa
     top       = start,
     right     = right,
     radius    = 0.035 * (0.7 + min(power, 1.4) * 0.3) * size,
-    color     = linalg.lerp(color_a, color_b, rand.float32()),
+    color     = random_color(),
     leader    = 0.12 + rand.float32() * 0.1,
     power     = power,
     to_hammer = to_hammer,
