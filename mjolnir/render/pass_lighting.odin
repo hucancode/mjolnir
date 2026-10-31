@@ -3,7 +3,7 @@ package render
 import "rhi"
 
 // Deferred lighting: one compute dispatch per camera reads the G-buffer and writes the
-// camera's lit image (LIT) whole, a group per LIGHTING_TILE square tile. Each group
+// camera's lit image (FINAL_IMAGE) whole, a group per LIGHTING_TILE square tile. Each group
 // walks the light placements once and lists the visible lights reaching its tile (the point
 // and spot ones whose sphere meets it), so a pixel reads the G-buffer once however many lights
 // cover it. Directional lights reach every tile, so every tile lists them.
@@ -59,7 +59,7 @@ lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32)
   images := &self.camera_targets[cam].images
   group: rhi.BindGroup
   when !BINDLESS {
-    output := images[.LIT][f]
+    output := images[.FINAL_IMAGE][f]
     resources := [1]rhi.BindResource{rhi.TextureView{output, 0}}
     ok: bool
     group, ok = cached_group(self, output, gpu_layout(self, LIGHTING_OUTPUT_LAYOUT) or_else 0, resources[:])

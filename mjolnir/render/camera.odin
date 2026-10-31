@@ -61,7 +61,6 @@ Camera :: struct {
   // clip planes, shared by both projections
   near, far:         f32,
   ambient_occlusion: AmbientOcclusion,
-  anti_aliasing:     AntiAliasing,
   // run in order over the camera's image (make_effect), skipping the zero Effect; without a
   // ToneMapEffect it stays HDR
   effects:           [MAX_EFFECTS]Effect,
@@ -76,13 +75,6 @@ MAX_EFFECTS :: 16
 Layers :: bit_set[0 ..< MAX_LAYERS; u32]
 
 MAX_LAYERS :: 32
-
-// AntiAliasing smooths the jagged edges of a camera's image. FXAA finds edges by brightness after
-// lighting and blends across them: it softens geometry edges, not shimmer from motion.
-AntiAliasing :: enum u32 {
-  NONE,
-  FXAA,
-}
 
 // AmbientOcclusion darkens the image-based light where nearby surfaces hide the sky: creases,
 // contacts, corners. Estimated per pixel from the camera's depth and normals (screen space),
@@ -257,7 +249,7 @@ make_camera :: proc(
 ) -> (
   c: Camera,
 ) {
-  c = {projection = PerspectiveProjection{fov}, near = near, far = far, ambient_occlusion = DEFAULT_AMBIENT_OCCLUSION, anti_aliasing = .FXAA}
+  c = {projection = PerspectiveProjection{fov}, near = near, far = far, ambient_occlusion = DEFAULT_AMBIENT_OCCLUSION}
   camera_look_at(&c, position, target)
   return
 }
@@ -370,7 +362,7 @@ View :: struct {
   time:            f32,
   // a node in one of these is not drawn (Camera.hidden_layers)
   hidden_layers:   Layers,
-  _:               u32,
+  _:               [2]u32,
 }
 #assert(size_of(View) == 464)
 

@@ -176,12 +176,6 @@ camera_passes :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, closing: ..
     c = 0
     for i in containers.slots_next(&self.slots[.CAMERAS], &c) do material_record(self, cmd, f, i, .FORWARD)
   }
-  barrier(self, cmd, .COLOR_TO_SAMPLE)
-  {
-    scope(self, cmd, "anti-aliasing")
-    c = 0
-    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do anti_aliasing_record(self, cmd, f, i)
-  }
   barrier(self, cmd, ..closing)
 }
 

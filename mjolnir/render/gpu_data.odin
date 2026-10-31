@@ -72,15 +72,13 @@ CameraImage :: enum {
   DEPTH              = 5,
   // how much ambient light reaches each pixel, 1 unoccluded (Camera.ambient_occlusion)
   AMBIENT_OCCLUSION  = 6,
-  // the lit image before anti-aliasing (Camera.anti_aliasing) makes FINAL_IMAGE of it
-  LIT                = 7,
 }
 
 // Each camera attachment's texture; pipelines drawing into an attachment take its format.
 @(private)
 CAMERA_IMAGES :: [CameraImage]TextureDesc {
-  // written whole by the anti-aliasing pass
-  .FINAL_IMAGE        = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED}},
+  // written whole by the lighting dispatch, then drawn over by the forward pass
+  .FINAL_IMAGE        = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED, .STORAGE}},
   .NORMAL             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
   .ALBEDO             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
   .METALLIC_ROUGHNESS = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
@@ -90,8 +88,6 @@ CAMERA_IMAGES :: [CameraImage]TextureDesc {
   .DEPTH              = {format = .D32F, usage = {.DEPTH_TARGET, .SAMPLED}, shared = true},
   // written by the ambient occlusion dispatch; RGBA8 is a storage format WebGPU can filter
   .AMBIENT_OCCLUSION  = {format = .RGBA8_UNORM, usage = {.SAMPLED, .STORAGE}},
-  // written whole by the lighting dispatch, then drawn over by the forward pass
-  .LIT                = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED, .STORAGE}},
 }
 
 // How a material is drawn, in this order. PBR is opaque: lit, occlusion-culled and casting
@@ -248,6 +244,31 @@ DoFEffect :: struct {
   focus_range:     f32, // Range where objects are in focus
   blur_strength:   f32, // Maximum blur radius
   bokeh_intensity: f32, // Bokeh effect intensity
+}
+
+// FXAAEffect smooths jagged edges: it finds them by brightness and blends across them. It
+// softens geometry edges, not shimmer from motion. It expects the linear HDR image: run it before
+// ToneMapEffect and effects that blur.
+FXAAEffect :: struct {
+  // the contrast an edge needs, relative to the brightest neighbour: lower smooths more edges
+  edge_threshold:     f32,
+  // the contrast an edge needs at least, so dark areas are left alone
+  edge_threshold_min: f32,
+  // how much a lone bright or dark pixel blends into its neighbours, 0 to 1
+  subpixel:           f32,
+  // how far along an edge to look for its ends, at most MAX_FXAA_SEARCH_STEPS
+  search_steps:       u32,
+}
+
+// MAX_FXAA_SEARCH_STEPS is the most FXAAEffect.search_steps counts.
+MAX_FXAA_SEARCH_STEPS :: 10
+
+// DEFAULT_FXAA is FXAA's usual tuning.
+DEFAULT_FXAA :: FXAAEffect {
+  edge_threshold     = 0.166,
+  edge_threshold_min = 0.0833,
+  subpixel           = 0.75,
+  search_steps       = MAX_FXAA_SEARCH_STEPS,
 }
 
 @(private)

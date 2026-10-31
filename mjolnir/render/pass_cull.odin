@@ -139,7 +139,7 @@ pyramids_bind :: proc(self: ^Renderer, f: u32) {
     for mip in 0 ..< mips {
       dev.bindless_write(&self.gpu, .STORAGE_IMAGES, slot * MAX_DEPTH_MIPS + mip, rhi.TextureView{targets.pyramid[f], i32(mip)})
     }
-    dev.bindless_write(&self.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + slot, rhi.TextureView{targets.images[.LIT][f], 0})
+    dev.bindless_write(&self.gpu, .STORAGE_IMAGES, LIT_STORAGE_BASE + slot, rhi.TextureView{targets.images[.FINAL_IMAGE][f], 0})
     dev.bindless_write(&self.gpu, .STORAGE_IMAGES, AO_STORAGE_BASE + slot, rhi.TextureView{targets.images[.AMBIENT_OCCLUSION][f], 0})
   }
 }

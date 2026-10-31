@@ -94,7 +94,6 @@ BuiltinPipeline :: enum {
   SHADOW,
   AMBIENT_OCCLUSION,
   LIGHTING,
-  ANTI_ALIASING,
   PARTICLE_EMIT,
   PARTICLE_SIMULATE,
   PARTICLE_DRAW,
@@ -257,7 +256,6 @@ init_resources :: proc(self: ^Renderer) -> bool {
   shadow_init(self) or_return
   material_init(self) or_return
   ambient_occlusion_init(self) or_return
-  anti_aliasing_init(self) or_return
   lighting_init(self) or_return
   post_init(self) or_return
   particles_init(self) or_return

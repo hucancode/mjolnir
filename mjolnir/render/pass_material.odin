@@ -17,7 +17,7 @@ MaterialPass :: enum {
 @(private = "file")
 MATERIAL_PASS_TARGETS := [MaterialPass][]CameraImage {
   .GBUFFER = {.NORMAL, .ALBEDO, .METALLIC_ROUGHNESS, .EMISSIVE},
-  .FORWARD = {.LIT},
+  .FORWARD = {.FINAL_IMAGE},
 }
 
 @(private = "file")

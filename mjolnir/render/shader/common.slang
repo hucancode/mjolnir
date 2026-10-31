@@ -42,7 +42,6 @@ static const uint IMAGE_METALLIC_ROUGHNESS = 3;
 static const uint IMAGE_EMISSIVE = 4;
 static const uint IMAGE_DEPTH = 5;
 static const uint IMAGE_AMBIENT_OCCLUSION = 6;
-static const uint IMAGE_LIT = 7;
 
 static const uint SAMPLER_NEAREST_CLAMP = 0;
 static const uint SAMPLER_LINEAR_CLAMP = 1;
@@ -64,7 +63,7 @@ struct View {
     float near;
     float far;
     // render's texture handles, by CameraImage (bound through a group on wgpu)
-    uint images[8];
+    uint images[7];
     uint pyramid;
     // bit t: material type t is tested against the pyramid
     uint occlusion_mask;
@@ -82,6 +81,7 @@ struct View {
     // bit l: nodes of layer l are not drawn
     uint hidden_layers;
     uint _view_pad1;
+    uint _view_pad2;
 }
 
 struct Node {

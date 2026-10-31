@@ -19,6 +19,7 @@ BuiltinEffect :: union {
   FogEffect,
   CrossHatchEffect,
   DoFEffect,
+  FXAAEffect,
 }
 
 // The shader that copies its input: what an effect of a shader that is gone runs, and what pads
@@ -53,6 +54,7 @@ post_init :: proc(self: ^Renderer) -> bool {
     {shader_source("post_fog"), 1},
     {shader_source("post_crosshatch"), 1},
     {shader_source("post_dof"), 1},
+    {shader_source("post_fxaa"), 1},
   }
   for s, i in shaders {
     handle := post_shader_create(self, s.source, s.passes) or_return
@@ -89,7 +91,7 @@ post_shader_create :: proc(self: ^Renderer, source: []u8, passes: u32 = 1) -> (s
 
 // make_effect makes an Effect for a camera's effects:
 //   make_effect(FogEffect{...}): one of render's effects (GrayscaleEffect, ToneMapEffect,
-//   BlurEffect, BloomEffect, OutlineEffect, FogEffect, CrossHatchEffect, DoFEffect)
+//   BlurEffect, BloomEffect, OutlineEffect, FogEffect, CrossHatchEffect, DoFEffect, FXAAEffect)
 //   make_effect(shader, params): a post shader of yours with params, laid out as the shader's
 //   `struct Effect` reads them: the same fields in the same order (a [3]f32 must be followed by
 //   an f32, so prefer [4]f32 and scalars); at most PARAMS_BYTES

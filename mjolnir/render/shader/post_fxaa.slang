@@ -1,19 +1,16 @@
-// A camera's anti-aliasing pass (render.Camera.anti_aliasing): the lit image copied (NONE), or
-// with its edges smoothed by FXAA (after Timothy Lottes' FXAA 3.11, quality preset 12). Edges are
-// found on luma compressed by l / (1 + l), so the HDR highlights do not hide the dim edges; the
-// blend itself stays in HDR.
+// render.FXAAEffect: the image with its edges smoothed (after Timothy Lottes' FXAA 3.11, quality
+// preset 12). Edges are found on the luma of the colour compressed by c / (1 + c), so the HDR
+// highlights do not hide the dim edges, and gamma-encoded by sqrt, as FXAA's thresholds expect;
+// the blend itself stays in HDR.
 struct Effect {
-    // render.AntiAliasing
-    uint mode;
+    // render.FXAAEffect
+    float edge_threshold;
+    float edge_threshold_min;
+    float subpixel;
+    uint search_steps;
 }
 #include "post.slang"
 
-static const uint MODE_FXAA = 1;
-// the contrast an edge needs: relative to the brightest neighbour, and at least
-static const float EDGE_THRESHOLD = 0.166;
-static const float EDGE_THRESHOLD_MIN = 0.0833;
-// how much a lone bright or dark pixel blends into its neighbours
-static const float SUBPIXEL = 0.75;
 // the steps walking along an edge to its ends, in texels, then the guess past the last
 static const uint SEARCH_STEPS = 10;
 static const float STEP_SIZES[SEARCH_STEPS] = { 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0 };
@@ -21,8 +18,7 @@ static const float LAST_GUESS = 8.0;
 
 float edge_luma(float3 color)
 {
-    float l = dot(color, float3(0.299, 0.587, 0.114));
-    return l / (1.0 + l);
+    return dot(sqrt(color / (1.0 + color)), float3(0.299, 0.587, 0.114));
 }
 
 float luma_at(float2 uv)
@@ -35,7 +31,7 @@ float luma_at(float2 uv)
 float2 edge_end(float2 uv, float2 step, float edge_value, float threshold, out float delta)
 {
     delta = 0.0;
-    for (uint i = 0; i < SEARCH_STEPS; i++) {
+    for (uint i = 0; i < min(effect().search_steps, SEARCH_STEPS); i++) {
         uv += step * STEP_SIZES[i];
         delta = luma_at(uv) - edge_value;
         if (abs(delta) >= threshold) return uv;
@@ -47,7 +43,6 @@ float2 edge_end(float2 uv, float2 step, float edge_value, float threshold, out f
 float4 fs_main(PostIn v) : SV_Target0
 {
     float4 center = post_input_level(v.uv);
-    if (effect().mode != MODE_FXAA) return center;
 
     float2 texel = 1.0 / post_resolution();
     float m = edge_luma(center.rgb);
@@ -58,7 +53,7 @@ float4 fs_main(PostIn v) : SV_Target0
     float lo = min(m, min(min(n, s), min(e, w)));
     float hi = max(m, max(max(n, s), max(e, w)));
     float range = hi - lo;
-    if (range < max(EDGE_THRESHOLD_MIN, hi * EDGE_THRESHOLD)) return center;
+    if (range < max(effect().edge_threshold_min, hi * effect().edge_threshold)) return center;
 
     float ne = luma_at(v.uv + float2(texel.x, -texel.y));
     float nw = luma_at(v.uv - texel);
@@ -68,7 +63,7 @@ float4 fs_main(PostIn v) : SV_Target0
     // a lone pixel unlike its neighbourhood blends toward it
     float average = (2.0 * (n + s + e + w) + ne + nw + se + sw) / 12.0;
     float subpixel = smoothstep(0.0, 1.0, saturate(abs(average - m) / range));
-    subpixel = subpixel * subpixel * SUBPIXEL;
+    subpixel = subpixel * subpixel * effect().subpixel;
 
     // the edge runs along the direction of least change
     float horizontal = abs(nw + ne - 2.0 * n) + 2.0 * abs(w + e - 2.0 * m) + abs(sw + se - 2.0 * s);
