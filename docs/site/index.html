@@ -18,79 +18,76 @@
 </head>
 <body>
 <nav>
-  <a href="index.html">Home</a>
-  <a href="examples.html">Examples</a>
-  <a href="api.html">API</a>
-  <a href="https://github.com/hucancode/mjolnir">GitHub</a>
+  <a data-icon="home" href="index.html">Home</a>
+  <a data-icon="examples" href="examples.html">Examples</a>
+  <a data-icon="api" href="api.html">API</a>
+  <a data-icon="github" href="https://github.com/hucancode/mjolnir">GitHub</a>
 </nav>
 <main>
 <header>
-  <figure>
-    <canvas id="storm" aria-label="Interactive lightning storm: click to strike, drag to look around" role="img"></canvas>
-    <button type="button" aria-label="Toggle controls" aria-expanded="false">«</button>
-    <aside hidden>
-      <h3>Storm</h3>
-      <div><label for="storm-rate">Strike rate</label><input id="storm-rate" data-key="rate" type="range" min="0" max="4" step="0.05"></div>
-      <div><label for="storm-rage">Raging thunder</label><input id="storm-rage" data-key="rage" type="range" min="0" max="0.8" step="0.01"></div>
-      <h3>Bolt</h3>
-      <div><label for="storm-jag">Jaggedness</label><input id="storm-jag" data-key="jag" type="range" min="0.1" max="1" step="0.01"></div>
-      <div><label for="storm-thickness">Thickness</label><input id="storm-thickness" data-key="thickness" type="range" min="0.4" max="5" step="0.05"></div>
-      <div><label for="storm-restrikes">Re-strikes</label><input id="storm-restrikes" data-key="restrikes" type="range" min="0" max="10" step="1"></div>
-      <div><label for="storm-bloom">Bloom</label><input id="storm-bloom" data-key="bloom" type="range" min="0" max="5" step="0.05"></div>
-      <h3>Camera</h3>
-      <div class="check"><label for="storm-orbit">Auto rotate</label><input id="storm-orbit" data-key="orbit" type="checkbox"></div>
-    </aside>
-  </figure>
-  <div>
-    <h1>Mjolnir Engine</h1>
-    <p>
-      <a href="https://github.com/hucancode/mjolnir">Mjolnir</a> is a minimalistic,
-      GPU-driven game engine written in <a href="https://github.com/odin-lang/Odin">Odin</a>.
-    </p>
-  </div>
+  <canvas id="storm" aria-label="Interactive lightning storm: click to strike, drag to look around" role="img"></canvas>
+  <h1>Mjolnir Engine</h1>
+  <p>
+    <a href="https://github.com/hucancode/mjolnir">Mjolnir</a> is a minimalistic,
+    GPU-driven game engine written in <a href="https://github.com/odin-lang/Odin">Odin</a>.
+  </p>
 </header>
 
 <ul>
-  <li><a href="examples.html#pbr"><figure><video src="videos/pbr.mp4" poster="posters/pbr.jpg" muted playsinline preload="none" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>PBR</a></li>
-  <li><a href="examples.html#lights"><figure><video src="videos/lights.mp4" poster="posters/lights.jpg" muted playsinline preload="none" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Lights and shadows</a></li>
-  <li><a href="examples.html#animation_layering"><figure><video src="videos/animation_layering.mp4" poster="posters/animation_layering.jpg" muted playsinline preload="none" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Skeletal animation</a></li>
-  <li><a href="examples.html#atlas"><figure><video src="videos/atlas.mp4" poster="posters/atlas.jpg" muted playsinline preload="none" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Kinematic 1</a></li>
-  <li><a href="examples.html#dragon"><figure><video src="videos/dragon.mp4" poster="posters/dragon.jpg" muted playsinline preload="none" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Kinematic 2</a></li>
-  <li><a href="examples.html#spider"><figure><video src="videos/spider.mp4" poster="posters/spider.jpg" muted playsinline preload="none" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Procedural animation</a></li>
-  <li><a href="examples.html#physics"><figure><video src="videos/physics.mp4" poster="posters/physics.jpg" muted playsinline preload="none" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Rigid-body physics</a></li>
-  <li><a href="examples.html#ragdoll"><figure><video src="videos/ragdoll.mp4" poster="posters/ragdoll.jpg" muted playsinline preload="none" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Ragdoll physics</a></li>
-  <li><a href="examples.html#crowd_nav"><figure><video src="videos/crowd_nav.mp4" poster="posters/crowd_nav.jpg" muted playsinline preload="none" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Navigation</a></li>
-  <li><a href="examples.html#thunder"><figure><video src="videos/thunder.mp4" poster="posters/thunder.jpg" muted playsinline preload="none" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Particle Effect</a></li>
-  <li><a href="examples.html#post_process"><figure><video src="videos/post_process.mp4" poster="posters/post_process.jpg" muted playsinline preload="none" aria-hidden="true"></video><progress max="1" value="0" hidden></progress></figure>Post-processing</a></li>
+  <li><a href="examples.html#pbr"><video src="videos/pbr.mp4" poster="posters/pbr.jpg" muted playsinline preload="none" aria-hidden="true"></video>PBR</a></li>
+  <li><a href="examples.html#lights"><video src="videos/lights.mp4" poster="posters/lights.jpg" muted playsinline preload="none" aria-hidden="true"></video>Lights and shadows</a></li>
+  <li><a href="examples.html#animation_layering"><video src="videos/animation_layering.mp4" poster="posters/animation_layering.jpg" muted playsinline preload="none" aria-hidden="true"></video>Skeletal animation</a></li>
+  <li><a href="examples.html#atlas"><video src="videos/atlas.mp4" poster="posters/atlas.jpg" muted playsinline preload="none" aria-hidden="true"></video>Kinematic 1</a></li>
+  <li><a href="examples.html#dragon"><video src="videos/dragon.mp4" poster="posters/dragon.jpg" muted playsinline preload="none" aria-hidden="true"></video>Kinematic 2</a></li>
+  <li><a href="examples.html#spider"><video src="videos/spider.mp4" poster="posters/spider.jpg" muted playsinline preload="none" aria-hidden="true"></video>Procedural animation</a></li>
+  <li><a href="examples.html#physics"><video src="videos/physics.mp4" poster="posters/physics.jpg" muted playsinline preload="none" aria-hidden="true"></video>Rigid-body physics</a></li>
+  <li><a href="examples.html#ragdoll"><video src="videos/ragdoll.mp4" poster="posters/ragdoll.jpg" muted playsinline preload="none" aria-hidden="true"></video>Ragdoll physics</a></li>
+  <li><a href="examples.html#crowd_nav"><video src="videos/crowd_nav.mp4" poster="posters/crowd_nav.jpg" muted playsinline preload="none" aria-hidden="true"></video>Navigation</a></li>
+  <li><a href="examples.html#thunder"><video src="videos/thunder.mp4" poster="posters/thunder.jpg" muted playsinline preload="none" aria-hidden="true"></video>Particle Effect</a></li>
+  <li><a href="examples.html#post_process"><video src="videos/post_process.mp4" poster="posters/post_process.jpg" muted playsinline preload="none" aria-hidden="true"></video>Post-processing</a></li>
+  <li><a href="examples.html"><div class="more"><img src="posters/cube.jpg" alt="" loading="lazy"><img src="posters/ragdoll.jpg" alt="" loading="lazy"><img src="posters/navmesh.jpg" alt="" loading="lazy"><img src="posters/platformer.jpg" alt="" loading="lazy"></div>See all examples &rarr;</a></li>
 </ul>
 </main>
-<script type="x-shader/x-glsl" id="glsl-common">
-#define GLOW vec3(0.65, 0.7, 1.0)
-#define HORIZON vec3(0.1, 0.09, 0.16)
+<script type="module">
+// Lightning storm over Mjolnir: click to strike, drag to look around.
+(() => {
+  const canvas = document.getElementById("storm");
+  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, depth: false });
+  if (!gl) { canvas.hidden = true; return; }
+
+  const rand = Math.random;
+  const gauss = () => Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 * Math.PI * rand());
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const mix3 = (a, b, t) => a.map((x, i) => lerp(x, b[i], t));
+  const smoothstep = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const add = (a, ...b) => a.map((x, i) => b.reduce((s, v) => s + v[i], x));
+  const sub = (a, b) => a.map((x, i) => x - b[i]);
+  const scale = (a, k) => a.map((x) => x * k);
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const len = (v) => Math.hypot(...v);
+  const norm = (v) => scale(v, 1 / (len(v) || 1));
+
+  // ---------- shaders ----------
+  const HEADER = `#version 300 es
+precision highp float;
 #define THIN 0.1
 #define THICK 3.0
 #define TONES 3.0
-#define SHARPNESS 0.9
+#define SHARPNESS 0.6
 #define BORDER 3.0
-#define EDGE 0.6
-</script>
-<script type="x-shader/x-glsl" id="full-vs">
-out vec2 vUv;
-void main() {
-  vUv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-  gl_Position = vec4(vUv * 2.0 - 1.0, 0.0, 1.0);
-}</script>
-<script type="x-shader/x-glsl" id="sky-fs">
-in vec2 vUv;
-uniform vec3 uFwd, uUp;
-uniform vec2 uView; // tan(fov / 2) * aspect, tan(fov / 2)
-uniform float uFlash;
-out vec4 o;
-void main() {
-  float y = dot(normalize(uFwd + (vUv.y * 2.0 - 1.0) * uView.y * uUp), vec3(0.0, 1.0, 0.0));
-  o = vec4(mix(HORIZON, vec3(0.01, 0.012, 0.03), smoothstep(-0.05, 0.35, y)) + GLOW * uFlash * 0.25, 1.0);
-}</script>
-<script type="x-shader/x-glsl" id="mesh-vs">
+#define EDGE 0.75
+`;
+  // hero colours follow the OS theme
+  const THEMES = {
+    dark: { sky: [0.03, 0.03, 0.06], uGround: [0.015, 0.015, 0.025], uLine: [0.45, 0.55, 0.85], uTint: [0.65, 0.7, 1], uBolt: [0.65, 0.7, 1], uLight: 0 },
+    light: { sky: [0.97, 0.95, 0.97], uGround: [0.92, 0.91, 0.94], uLine: [0.5, 0.5, 0.7], uTint: [-0.3, -0.25, 0], uBolt: [0.12, 0.08, 0.4], uLight: 1 },
+  };
+  const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+  let theme = THEMES[darkQuery.matches ? "dark" : "light"];
+  darkQuery.addEventListener("change", (e) => (theme = THEMES[e.matches ? "dark" : "light"]));
+  const MESH_VS = `
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNrm;
 layout(location = 2) in vec3 aCol;
@@ -99,210 +96,125 @@ out vec3 vPos, vNrm, vCol;
 void main() {
   vPos = aPos; vNrm = aNrm; vCol = aCol;
   gl_Position = uVP * vec4(aPos, 1.0);
-}</script>
-<script type="x-shader/x-glsl" id="mesh-fs">
+}`;
+  const MESH_FS = `
 in vec3 vPos, vNrm, vCol;
-uniform vec3 uEye;
-uniform float uFlash, uHammerGlow, uFloor, uN;
-uniform vec4 uL[16];
+uniform vec3 uEye, uSky, uGround, uLine, uTint; // uTint: what light adds, negative on a light theme
+uniform float uFlash, uGlow, uFloor;
+uniform vec4 uL[8];
 out vec4 o;
 void main() {
-  vec3 n = uFloor > 0.5 ? vec3(0.0, 1.0, 0.0) : normalize(vNrm);
+  vec3 n = normalize(vNrm);
   float L = 0.0;
-  for (int i = 0; i < 16; i++) {
-    if (float(i) >= uN) break;
+  for (int i = 0; i < 8; i++) {
     vec3 d = uL[i].xyz - vPos;
     L += uL[i].w * (max(dot(n, normalize(d)), 0.0) * 0.8 + 0.2) / (1.0 + dot(d, d) / 49.0);
   }
+  float dist = length(vPos - uEye);
   vec3 col;
   if (uFloor > 0.5) {
-    vec2 g = vPos.xz, w = fwidth(g);
-    vec2 a = abs(fract(g - 0.5) - 0.5) / w, b = abs(fract(g / 5.0 - 0.5) - 0.5) / w * 5.0;
-    float dist = length(vPos - uEye);
-    float minor = (1.0 - min(min(a.x, a.y), 1.0)) * 0.5 * (1.0 - smoothstep(0.1, 0.4, max(w.x, w.y)));
-    float major = (1.0 - min(min(b.x, b.y) / 2.0, 1.0)) * 1.0 * (1.0 - smoothstep(0.5, 2.0, max(w.x, w.y)));
-    minor *= 1.0 - smoothstep(12.0, 42.0, dist); // grid thins out well before the fog swallows the floor
-    major *= 1.0 - smoothstep(6.0, 22.0, dist);  // the bright 5m lines go first
-    float lines = minor + major;
-    col = vec3(0.015, 0.015, 0.025) * mix(0.5, 1.0, smoothstep(0.4, 2.5, length(g)));
-    col = mix(col, vec3(0.45, 0.55, 0.85), clamp(lines * (0.5 + L * 2.0 + uFlash * 2.0), 0.0, 1.0));
-    col += GLOW * (L * 0.35 + uFlash * 0.15);
+    vec2 g = abs(fract(vPos.xz - 0.5) - 0.5) / fwidth(vPos.xz);
+    float line = (1.0 - min(min(g.x, g.y), 1.0)) * (1.0 - smoothstep(10.0, 40.0, dist));
+    col = mix(uGround, uLine, clamp(line * (0.3 + L * 2.0 + uFlash * 2.0), 0.0, 1.0));
+    col += uTint * (L * 0.35 + uFlash * 0.15);
   } else {
     float key = max(dot(n, normalize(vec3(-0.4, 0.8, -0.3))), 0.0);
     float rim = pow(1.0 - abs(dot(n, normalize(uEye - vPos))), 2.0);
-    col = vCol * (0.35 + key * 0.55 + GLOW * (L * 0.9 + uFlash * 0.4));
-    col += GLOW * (rim * (0.25 + uHammerGlow * 1.5) + uHammerGlow * 0.15);
+    col = vCol * (0.35 + key * 0.55 + uTint * (L * 0.9 + uFlash * 0.4)) + uTint * rim * (0.25 + uGlow * 1.5);
   }
-  float fog = 1.0 - exp(-pow(length(vPos - uEye) * 0.019, 2.0));
-  o = vec4(mix(col, HORIZON, fog), 1.0);
-}</script>
-<script type="x-shader/x-glsl" id="seg-vs">
+  o = vec4(mix(col, uSky, 1.0 - exp(-pow(dist * 0.019, 2.0))), 1.0);
+}`;
+  // one screen-space capsule per rod segment, into a single-channel emissive target; the line itself
+  // follows examples/creative/thunder/bolt.slang
+  const BOLT_VS = `
 layout(location = 0) in vec3 aA;
 layout(location = 1) in vec3 aB;
-layout(location = 2) in vec4 aMeta; // world radius, intensity, joint width at a and at b
-layout(location = 3) in vec2 aLeft; // how much of the width is left at a and at b
+layout(location = 2) in vec3 aRIF; // world radius, intensity, width flare
+layout(location = 3) in vec2 aW;   // width (0 thin .. 1 thick) at a and at b
+layout(location = 4) in vec3 aE;   // how far up the rod a is, the rod's erosion seed, how much has eroded
 uniform mat4 uVP;
 uniform vec2 uRes;
 uniform float uFocal;
-out vec2 vP, vA, vB, vW, vL, vR; out float vI;
-// quad corners: along the segment (0..1), side (-1..1)
-const vec2 C[6] = vec2[6](vec2(0.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0), vec2(0.0, -1.0), vec2(1.0, 1.0), vec2(0.0, 1.0));
+out vec2 vP, vA, vB, vW; out vec3 vE; out float vR, vI, vF;
+const vec2 C[6] = vec2[6](vec2(0, -1), vec2(1, -1), vec2(1, 1), vec2(0, -1), vec2(1, 1), vec2(0, 1));
 void main() {
   vec2 c = C[gl_VertexID];
   vec4 ca = uVP * vec4(aA, 1.0), cb = uVP * vec4(aB, 1.0);
-  if (ca.w < 0.3 || cb.w < 0.3) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }
-  vec2 sa = (ca.xy / ca.w * 0.5 + 0.5) * uRes, sb = (cb.xy / cb.w * 0.5 + 0.5) * uRes;
-  vec2 t = length(sb - sa) > 1e-4 ? normalize(sb - sa) : vec2(0.0, 1.0), n = vec2(-t.y, t.x);
-  vec2 rp = aMeta.x * uFocal / vec2(ca.w, cb.w);
-  float R = max(max(rp.x, rp.y) * THICK, 0.7) * 5.0 + 2.0;
-  vP = mix(sa, sb, c.x) + t * (c.x * 2.0 - 1.0) * R + n * c.y * R;
-  vA = sa; vB = sb; vR = rp; vW = aMeta.zw; vL = aLeft; vI = aMeta.y;
+  if (ca.w < 0.3 || cb.w < 0.3) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+  vA = (ca.xy / ca.w * 0.5 + 0.5) * uRes; vB = (cb.xy / cb.w * 0.5 + 0.5) * uRes;
+  vec2 t = normalize(vB - vA + 1e-4), n = vec2(-t.y, t.x);
+  vR = max(aRIF.x * uFocal * 2.0 / (ca.w + cb.w), 0.7); vI = aRIF.y; vF = aRIF.z; vW = aW; vE = aE;
+  float R = vR * (THICK * (1.0 + vF) + (1.0 - SHARPNESS) * BORDER) + 2.0;
+  vP = mix(vA, vB, c.x) + t * (c.x * 2.0 - 1.0) * R + n * c.y * R;
   gl_Position = vec4(vP / uRes * 2.0 - 1.0, mix(ca.z / ca.w, cb.z / cb.w, c.x), 1.0);
-}</script>
-<script type="x-shader/x-glsl" id="seg-fs">
-in vec2 vP, vA, vB, vW, vL, vR; in float vI;
+}`;
+  const BOLT_FS = `
+in vec2 vP, vA, vB, vW; in vec3 vE; in float vR, vI, vF;
 out vec4 o;
-// how wide the line is, against the rod's radius: eases from one joint's width to the next's, then
-// settles onto the nearest of the evenly spread tones between thin and thick
+// width against the radius: eases from one joint's width to the next, settling onto one of the tones from thin to thick
 float lineWidth(float w) {
-  float steps = max(TONES - 1.0, 1.0), thickness = w * steps, lower = min(floor(thickness), steps - 1.0);
-  return mix(THIN, THICK, (lower + smoothstep(0.25, 0.75, thickness - lower)) / steps);
+  float steps = TONES - 1.0, x = w * steps, lo = min(floor(x), steps - 1.0);
+  return mix(THIN, THICK, (lo + smoothstep(0.25, 0.75, x - lo)) / steps) * (1.0 + vF);
 }
+float hash(float x) { return fract(sin(x * 127.1 + 311.7) * 43758.5453); }
+float noise(float x, float seed) { float c = floor(x), f = fract(x); return mix(hash(c + seed), hash(c + 1.0 + seed), f * f * (3.0 - 2.0 * f)); }
 void main() {
   vec2 pa = vP - vA, ba = vB - vA;
   float t = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
-  float e = smoothstep(0.0, 1.0, t), left = mix(vL.x, vL.y, e);
-  float r = max(mix(vR.x, vR.y, t) * lineWidth(mix(vW.x, vW.y, e)) * left, 0.7);
-  float d = length(pa - ba * t);
-  float spread = (1.0 - SHARPNESS) * mix(vR.x, vR.y, t) * BORDER;
-  float inner = max(r - EDGE - spread, 0.0), outer = max(r + EDGE + spread, inner + 1e-3);
-  o = vec4(vI * smoothstep(0.0, 0.1, left) * (1.0 - smoothstep(inner, outer, d)), 0.0, 0.0, 1.0);
-}</script>
-<script type="x-shader/x-glsl" id="down-fs">
+  // as the bolt dims it erodes from its edges inward, each point a little faster than the next
+  float up = vE.x + t / 24.0, uneven = 0.6 * noise(up * 9.0, vE.y) + 0.4 * noise(up * 37.0, vE.y + 17.0);
+  float left = clamp(1.0 - vE.z * (1.0 + 0.6 * uneven), 0.0, 1.0);
+  float core = max(vR * lineWidth(mix(vW.x, vW.y, smoothstep(0.0, 1.0, t))), 0.7) * left;
+  float spread = (1.0 - SHARPNESS) * vR * BORDER, inner = max(core - EDGE - spread, 0.0), outer = max(core + EDGE + spread, inner + 1e-3);
+  o = vec4(vI * (1.0 - smoothstep(inner, outer, length(pa - ba * t))) * smoothstep(0.0, 0.1, left), 0.0, 0.0, 1.0);
+}`;
+  const FULL_VS = `
+out vec2 vUv;
+void main() {
+  vUv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  gl_Position = vec4(vUv * 2.0 - 1.0, 0.0, 1.0);
+}`;
+  // 13 taps over a 4x4 texel area, weighted as four overlapping boxes, so no bright pixel is skipped or shimmers
+  const DOWN_FS = `
 in vec2 vUv; uniform sampler2D uSrc; uniform vec2 uTexel; out vec4 o;
-// 13 taps over a 4x4 texel area, weighted as four overlapping boxes, so no bright pixel is skipped or shimmers
 float tap(vec2 d) { return texture(uSrc, vUv + d * uTexel).r; }
 void main() {
-  float e = tap(vec2(0.0));
-  float corners = tap(vec2(-2.0, 2.0)) + tap(vec2(2.0, 2.0)) + tap(vec2(-2.0, -2.0)) + tap(vec2(2.0, -2.0));
-  float edges = tap(vec2(0.0, 2.0)) + tap(vec2(-2.0, 0.0)) + tap(vec2(2.0, 0.0)) + tap(vec2(0.0, -2.0));
-  float inner = tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0)) + tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0));
-  o = vec4(e * 0.125 + corners * 0.03125 + edges * 0.0625 + inner * 0.125, 0.0, 0.0, 1.0);
-}</script>
-<script type="x-shader/x-glsl" id="up-fs">
+  float corners = tap(vec2(-2, 2)) + tap(vec2(2, 2)) + tap(vec2(-2, -2)) + tap(vec2(2, -2));
+  float edges = tap(vec2(0, 2)) + tap(vec2(-2, 0)) + tap(vec2(2, 0)) + tap(vec2(0, -2));
+  float inner = tap(vec2(-1, 1)) + tap(vec2(1, 1)) + tap(vec2(-1, -1)) + tap(vec2(1, -1));
+  o = vec4(tap(vec2(0)) * 0.125 + corners * 0.03125 + edges * 0.0625 + inner * 0.125, 0.0, 0.0, 1.0);
+}`;
+  // 3x3 tent filter, added onto the next larger level
+  const UP_FS = `
 in vec2 vUv; uniform sampler2D uSrc; uniform vec2 uTexel; out vec4 o;
-// 3x3 tent filter, added onto the next larger level
 float tap(vec2 d) { return texture(uSrc, vUv + d * uTexel).r; }
 void main() {
-  float sum = tap(vec2(0.0)) * 4.0
-    + (tap(vec2(0.0, 1.0)) + tap(vec2(-1.0, 0.0)) + tap(vec2(1.0, 0.0)) + tap(vec2(0.0, -1.0))) * 2.0
-    + tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0)) + tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0));
+  float sum = tap(vec2(0)) * 4.0
+    + (tap(vec2(0, 1)) + tap(vec2(-1, 0)) + tap(vec2(1, 0)) + tap(vec2(0, -1))) * 2.0
+    + tap(vec2(-1, 1)) + tap(vec2(1, 1)) + tap(vec2(-1, -1)) + tap(vec2(1, -1));
   o = vec4(sum / 16.0, 0.0, 0.0, 1.0);
-}</script>
-<script type="x-shader/x-glsl" id="comp-fs">
-in vec2 vUv;
-uniform float uBloom;
-uniform sampler2D uScene, uEmis, uBloomTex;
-out vec4 o;
+}`;
+  const COMP_FS = `
+in vec2 vUv; uniform sampler2D uScene, uEmis, uBloom; uniform vec3 uBolt; uniform float uLight; out vec4 o;
+// the core is white; the glow around it adds light on the dark theme and darkens on the light theme
 void main() {
-  float bloom = texture(uBloomTex, vUv).r;
-  vec3 col = texture(uScene, vUv).rgb + GLOW * bloom * uBloom * 0.6 + texture(uEmis, vUv).r;
+  vec3 scene = texture(uScene, vUv).rgb;
+  float core = texture(uEmis, vUv).r, glow = texture(uBloom, vUv).r * 1.2;
+  vec3 col = uLight > 0.5 ? mix(scene, uBolt, clamp(glow * 0.8, 0.0, 1.0)) : scene + uBolt * glow;
+  col = mix(col, vec3(1.0), clamp(core, 0.0, 1.0));
   o = vec4(mix(col, 1.0 - 0.2 * exp(-(col - 0.8) / 0.2), step(0.8, col)), 1.0); // soft shoulder above 0.8
-}</script>
-<script type="module">
-// Call the lightning: bolts out of the night onto a glowing grid.
-// Click to strike, drag to look around. Mjolnir draws strikes in.
-(() => {
-  const canvas = document.getElementById("storm");
-  const figure = canvas.parentElement;
-  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false });
-  if (!gl) { figure.hidden = true; return; }
-  const floatRT = !!gl.getExtension("EXT_color_buffer_float");
+}`;
 
-  // ---------- helpers ----------
-  let seed = Date.now() | 0;
-  const rng = () => {
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  const gauss = () => rng() + rng() + rng() - 1.5;
-  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
-  const add = (a, ...b) => a.map((x, i) => b.reduce((s, v) => s + v[i], x));
-  const sub = (a, b) => a.map((x, i) => x - b[i]);
-  const scale = (a, k) => a.map((x) => x * k);
-  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-  const len = (v) => Math.hypot(v[0], v[1], v[2]);
-  const norm = (v) => scale(v, 1 / (len(v) || 1));
-
-  // column-major perspective * view, from the camera basis (x = right, y = up, z = backward)
-  const viewProjection = (fov, asp, eye, x, y, z) => {
-    const t = 1 / Math.tan(fov / 2), n = 0.3, f = 600, A = (f + n) / (n - f), B = (2 * f * n) / (n - f);
-    const e = [x, y, z].map((v) => -dot(v, eye));
-    return [0, 1, 2].flatMap((i) => [t / asp * x[i], t * y[i], A * z[i], -z[i]]).concat(t / asp * e[0], t * e[1], A * e[2] + B, -e[2]);
-  };
-
-  // ---------- parameters (driven by the control panel) ----------
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const S = {
-    rate: reduce ? 0 : 0.5, rage: reduce ? 0 : 0.5, jag: 0.5, thickness: 2, restrikes: 4,
-    bloom: 2, orbit: !reduce,
-  };
-  // every RAGE_EVERY seconds the storm rolls against S.rage; a hit rages: a few small flickers
-  // (anticipation), one furious strike on Mjolnir (main), then a few normal strikes (overshoot).
-  // Auto strikes hold off until the sequence and RAGE_AFTERGLOW are over.
-  const RAGE_EVERY = 5, RAGE_SMALL = 0.5, RAGE_SMALL_RESTRIKE = 0.4, RAGE_OVERSHOOT_GAP = 0.3, RAGE_AFTERGLOW = 1.0;
-  const ANTICIPATION_PERIOD = 1, ANTICIPATION_COUNT = 8, OVERSHOOT_PERIOD = 0.5, OVERSHOOT_COUNT = 3;
-  const RAGE_POWER = 5, RAGE_WIDTH = 2, RAGE_RESTRIKE = 10;
-  let rageEnd = 0, nextRage = RAGE_EVERY;
-  const rageQueue = [];
-
-  // ---------- Mjolnir: lofted head + wrapped handle, interleaved pos / normal / color ----------
-  // built head-down in hammer units (head centred on y = 0), emitted lifted onto the floor and scaled
-  const HL = 1.5, HH = 0.75, HD = 0.62, HAMMER_S = 0.5, HAMMER_TIP = [0, (2 * HH + 3.53) * HAMMER_S, 0];
-  const verts = [];
-  const tri = (a, b, c, col, away) => {
-    let n = norm(cross(sub(b, a), sub(c, a)));
-    if (dot(n, sub(scale(add(a, b, c), 1 / 3), away)) < 0) { [b, c] = [c, b]; n = scale(n, -1); }
-    for (const p of [a, b, c]) verts.push(p[0] * HAMMER_S, (p[1] + HH) * HAMMER_S, p[2] * HAMMER_S, ...n, ...col);
-  };
-  // cross-sections in the unit square, scaled per section
-  const circle = (n) => Array.from({ length: n }, (_, i) => [Math.cos((i / n) * Math.PI * 2), Math.sin((i / n) * Math.PI * 2)]);
-  const chamfer = (c) => [[1, -1 + c], [1, 1 - c], [1 - c, 1], [-1 + c, 1], [-1, 1 - c], [-1, -1 + c], [-1 + c, -1], [1 - c, -1]];
-  // loft `shape` through sections [t, r1, r2] along x or y, capped at both ends
-  const loft = (axis, secs, shape, col) => {
-    const at = (t, u, v) => (axis === "x" ? [t, u, v] : [u, t, v]), sides = shape.length;
-    const rings = secs.map(([t, r1, r2 = r1]) => shape.map(([u, v]) => at(t, u * r1, v * r2))), axisAt = (i) => at(secs[i][0], 0, 0);
-    for (let i = 0; i + 1 < secs.length; i++) for (let j = 0; j < sides; j++) {
-      const A = rings[i], B = rings[i + 1], j2 = (j + 1) % sides, mid = scale(add(axisAt(i), axisAt(i + 1)), 0.5);
-      tri(A[j], B[j], B[j2], col, mid); tri(A[j], B[j2], A[j2], col, mid);
-    }
-    for (const [r, o] of [[0, secs.length - 1], [secs.length - 1, 0]]) {
-      for (let j = 0; j < sides; j++) tri(axisAt(r), rings[r][j], rings[r][(j + 1) % sides], col, axisAt(o));
-    }
-  };
-  const STEEL = [0.55, 0.6, 0.68], GOLD = [0.85, 0.66, 0.25], LEATHER = [0.3, 0.17, 0.09];
-  const head = (secs, col) => loft("x", secs.map(([t, k]) => [t, HH * k, HD * k]), chamfer(0.2), col);
-  head([[-HL, 0.8], [-HL + 0.1, 0.8], [-HL + 0.1, 1], [HL - 0.1, 1], [HL - 0.1, 0.8], [HL, 0.8]], STEEL);
-  for (const x of [-HL * 0.5, HL * 0.5]) head([[x - 0.05, 1.05], [x + 0.05, 1.05]], GOLD);
-  loft("y", [[HH, 0.25], [HH + 0.25, 0.17]], circle(14), GOLD);                                       // collar
-  loft("y", [[HH + 0.25, 0.14], [HH + 3.25, 0.14]], circle(10), LEATHER);                             // grip
-  loft("y", [[HH + 3.2, 0.2], [HH + 3.3, 0.26], [HH + 3.45, 0.26], [HH + 3.53, 0.15]], circle(14), GOLD); // pommel
-  const hammerData = new Float32Array(verts);
-
-  // ---------- gl wrapper ----------
   const compile = (vs, fs) => {
     const p = gl.createProgram();
-    const header = "#version 300 es\nprecision highp float;\n" + glsl("glsl-common");
-    for (const [type, id] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
       const s = gl.createShader(type);
-      gl.shaderSource(s, header + glsl(id));
-      gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      gl.shaderSource(s, HEADER + src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
       gl.attachShader(p, s);
     }
-    gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    gl.linkProgram(p);
     const cache = {};
     return { p, u: (n) => (cache[n] ??= gl.getUniformLocation(p, n)) };
   };
@@ -314,22 +226,6 @@ void main() {
       typeof v === "number" ? gl.uniform1f(u, v) : v.length === 16 ? gl.uniformMatrix4fv(u, false, v) : gl["uniform" + Math.min(v.length, 4) + "fv"](u, v);
     }
   };
-  const sample = (prog, name, unit, tex) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(prog.u(name), unit); };
-  // `rgba` targets hold colour; the rest hold a single intensity channel
-  const target = (w, h, depth, rgba) => {
-    const tex = gl.createTexture(), fbo = gl.createFramebuffer();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, floatRT ? (rgba ? gl.RGBA16F : gl.R16F) : (rgba ? gl.RGBA8 : gl.R8), w, h);
-    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
-      gl.texParameteri(gl.TEXTURE_2D, k, v);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    if (depth) gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
-    return { tex, fbo, w, h };
-  };
-  const bind = (t) => { gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fbo : null); gl.viewport(0, 0, t ? t.w : canvas.width, t ? t.h : canvas.height); };
-  const emptyVao = gl.createVertexArray();
-  const fullscreen = () => { gl.bindVertexArray(emptyVao); gl.drawArrays(gl.TRIANGLES, 0, 3); };
   // float attributes at locations 0.. with the given component counts
   const vertexArray = (data, sizes, usage = gl.STATIC_DRAW, divisor = 0) => {
     const vao = gl.createVertexArray(), buf = gl.createBuffer(), stride = sizes.reduce((a, b) => a + b) * 4;
@@ -338,199 +234,180 @@ void main() {
     gl.bufferData(gl.ARRAY_BUFFER, data, usage);
     let off = 0;
     sizes.forEach((n, i) => { gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, n, gl.FLOAT, false, stride, off); gl.vertexAttribDivisor(i, divisor); off += n * 4; });
-    gl.bindVertexArray(null);
     return { vao, buf };
   };
+  const sample = (prog, name, unit, tex) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(prog.u(name), unit); };
+  // `rgba` targets hold colour; the rest hold a single intensity channel
+  const floatRT = !!gl.getExtension("EXT_color_buffer_float");
+  const target = (w, h, depth, rgba) => {
+    const tex = gl.createTexture(), fbo = gl.createFramebuffer();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, floatRT ? (rgba ? gl.RGBA16F : gl.R16F) : (rgba ? gl.RGBA8 : gl.R8), w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    if (depth) gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+    return { tex, fbo, w, h };
+  };
+  const bind = (t) => { gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fbo : null); gl.viewport(0, 0, t ? t.w : canvas.width, t ? t.h : canvas.height); };
+  const emptyVao = gl.createVertexArray();
+  const fullscreen = () => { gl.bindVertexArray(emptyVao); gl.drawArrays(gl.TRIANGLES, 0, 3); };
+  const meshProg = compile(MESH_VS, MESH_FS), boltProg = compile(BOLT_VS, BOLT_FS);
+  const downProg = compile(FULL_VS, DOWN_FS), upProg = compile(FULL_VS, UP_FS), compProg = compile(FULL_VS, COMP_FS);
 
-  // ---------- shaders ----------
-  const glsl = (id) => document.getElementById(id).textContent;
-  const skyProg = compile("full-vs", "sky-fs");
-  const meshProg = compile("mesh-vs", "mesh-fs");
-  const segProg = compile("seg-vs", "seg-fs");
-  const downProg = compile("full-vs", "down-fs");
-  const upProg = compile("full-vs", "up-fs");
-  const compProg = compile("full-vs", "comp-fs");
-
-  // ---------- meshes ----------
-  const G = 400;
-  const floor = vertexArray(new Float32Array([[-G, -G], [-G, G], [G, G], [-G, -G], [G, G], [G, -G]].flatMap(([x, z]) => [x, 0, z])), [3]);
-  const hammer = vertexArray(hammerData, [3, 3, 3]);
-  const MAX_SEGS = 8000, SEG_STRIDE = 12; // one instance per bolt segment: a, b, radius, intensity, joint widths
-  const segData = new Float32Array(MAX_SEGS * SEG_STRIDE);
-  const segs = vertexArray(segData.byteLength, [3, 3, 4, 2], gl.DYNAMIC_DRAW, 1);
-
-  // ---------- sizing ----------
-  let scene = null, emis = null, depth = null, down = [], aspect = 1;
-  const syncSize = () => {
-    const dpr = Math.min(devicePixelRatio || 1, 2);
-    const w = Math.max(1, canvas.clientWidth * dpr | 0), h = Math.max(1, canvas.clientHeight * dpr | 0);
-    aspect = w / h;
-    if (scene && canvas.width === w && canvas.height === h) return;
-    canvas.width = w; canvas.height = h;
+  // scene colour and bolt emission share a depth buffer; the bloom chain halves down from the emission
+  let scene = null, emis, depth, down = [];
+  const resize = (w, h) => {
     if (scene) {
       for (const t of [scene, emis, ...down]) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fbo); }
       gl.deleteRenderbuffer(depth);
     }
+    canvas.width = w; canvas.height = h;
     depth = gl.createRenderbuffer();
     gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
     gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
-    [scene, emis] = [target(w, h, depth, true), target(w, h, depth)];
+    scene = target(w, h, depth, true); emis = target(w, h, depth);
     down = [1, 2, 3, 4, 5].map((i) => target(Math.max(1, w >> i), Math.max(1, h >> i)));
   };
 
+  // ---------- meshes: floor quad, then Mjolnir (interleaved pos / normal / color) ----------
+  const G = 400, verts = [];
+  for (const [x, z] of [[-G, -G], [-G, G], [G, G], [-G, -G], [G, G], [G, -G]]) verts.push(x, 0, z, 0, 1, 0, 0, 0, 0);
+  // the hammer is built head-down in hammer units (head centred on y = 0), lifted onto the floor and scaled
+  const HH = 0.75, HS = 0.5, TIP = [0, (2 * HH + 3.53) * HS, 0];
+  const tri = (a, b, c, col, away) => {
+    let n = norm(cross(sub(b, a), sub(c, a)));
+    if (dot(n, sub(scale(add(a, b, c), 1 / 3), away)) < 0) { [b, c] = [c, b]; n = scale(n, -1); }
+    for (const p of [a, b, c]) verts.push(p[0] * HS, (p[1] + HH) * HS, p[2] * HS, ...n, ...col);
+  };
+  // loft a cross-section through sections [t, r1, r2] along x or y, capped at both ends
+  const loft = (axis, secs, shape, col) => {
+    const at = (t, u, v) => (axis === "x" ? [t, u, v] : [u, t, v]), sides = shape.length, last = secs.length - 1;
+    const rings = secs.map(([t, r1, r2 = r1]) => shape.map(([u, v]) => at(t, u * r1, v * r2))), mid = (i) => at(secs[i][0], 0, 0);
+    for (let i = 0; i < last; i++) for (let j = 0; j < sides; j++) {
+      const A = rings[i], B = rings[i + 1], j2 = (j + 1) % sides, away = scale(add(mid(i), mid(i + 1)), 0.5);
+      tri(A[j], B[j], B[j2], col, away); tri(A[j], B[j2], A[j2], col, away);
+    }
+    for (const [r, o] of [[0, last], [last, 0]]) for (let j = 0; j < sides; j++) tri(mid(r), rings[r][j], rings[r][(j + 1) % sides], col, mid(o));
+  };
+  const circle = Array.from({ length: 12 }, (_, i) => [Math.cos(i / 6 * Math.PI), Math.sin(i / 6 * Math.PI)]);
+  const chamfer = [[1, -0.8], [1, 0.8], [0.8, 1], [-0.8, 1], [-1, 0.8], [-1, -0.8], [-0.8, -1], [0.8, -1]];
+  loft("x", [[-1.5, 0.6, 0.5], [-1.4, 0.6, 0.5], [-1.4, HH, 0.62], [1.4, HH, 0.62], [1.4, 0.6, 0.5], [1.5, 0.6, 0.5]], chamfer, [0.55, 0.6, 0.68]);
+  loft("y", [[HH, 0.14], [HH + 3.25, 0.14]], circle, [0.3, 0.17, 0.09]);
+  loft("y", [[HH + 3.2, 0.2], [HH + 3.3, 0.26], [HH + 3.45, 0.26], [HH + 3.53, 0.15]], circle, [0.85, 0.66, 0.25]);
+  const mesh = vertexArray(new Float32Array(verts), [3, 3, 3]), meshCount = verts.length / 9;
+  const MAX_SEGS = 4000, SEG = 14, segData = new Float32Array(MAX_SEGS * SEG);
+  const segs = vertexArray(segData.byteLength, [3, 3, 3, 2, 3], gl.DYNAMIC_DRAW, 1);
+
   // ---------- camera ----------
   const FOV = (50 * Math.PI) / 180, TAN = Math.tan(FOV / 2), LOOK = [0, 1.5, 0];
-  const cam = { yaw: 0.1, pitch: 0.0, dist: 20 };
-  let eye, fwd, right, camUp, viewProj;
+  const cam = { yaw: 0.1, pitch: 0.3, dist: 20 };
+  let aspect = 1, eye, fwd, right, up, viewProj;
   const updateCamera = () => {
     const { yaw, pitch, dist } = cam, cp = Math.cos(pitch);
     eye = add(LOOK, scale([cp * Math.sin(yaw), Math.sin(pitch), cp * Math.cos(yaw)], dist));
-    eye[1] = Math.max(eye[1], 0.4);
-    fwd = norm(sub(LOOK, eye)); right = norm(cross(fwd, [0, 1, 0])); camUp = cross(right, fwd);
-    viewProj = viewProjection(FOV, aspect, eye, right, camUp, scale(fwd, -1));
+    fwd = norm(sub(LOOK, eye)); right = norm(cross(fwd, [0, 1, 0])); up = cross(right, fwd);
+    // column-major perspective * view
+    const t = 1 / TAN, n = 0.3, f = 600, A = (f + n) / (n - f), B = (2 * f * n) / (n - f), z = scale(fwd, -1);
+    const e = [right, up, z].map((v) => -dot(v, eye));
+    viewProj = [0, 1, 2].flatMap((i) => [t / aspect * right[i], t * up[i], A * z[i], -z[i]]).concat(t / aspect * e[0], t * e[1], A * e[2] + B, -e[2]);
   };
-  // where a screen point's ray meets the floor (or a far floor point under it), and whether it hits the hammer
+  // where a screen point's ray meets the floor, and whether it passes by the hammer first
   const pick = (u, v) => {
-    const dir = norm(add(fwd, scale(right, (u * 2 - 1) * TAN * aspect), scale(camUp, (v * 2 - 1) * TAN)));
+    const dir = norm(add(fwd, scale(right, (u * 2 - 1) * TAN * aspect), scale(up, (v * 2 - 1) * TAN)));
     const t = dir[1] < -1e-3 ? Math.min(-eye[1] / dir[1], 60) : 60;
     const hit = add(eye, scale(dir, t));
     hit[1] = 0;
-    // or passes through a vertical cylinder (radius 1.2) around the hammer below its tip
-    let toHammer = Math.hypot(hit[0], hit[2]) < 1.6;
-    const a = dir[0] ** 2 + dir[2] ** 2, b = eye[0] * dir[0] + eye[2] * dir[2], disc = b * b - a * (eye[0] ** 2 + eye[2] ** 2 - 1.44);
-    if (!toHammer && a > 1e-6 && disc >= 0) {
-      const r = Math.sqrt(disc), s0 = Math.max((-b - r) / a, 0), s1 = Math.min((-b + r) / a, t);
-      toHammer = s0 <= s1 && Math.min(eye[1] + dir[1] * s0, eye[1] + dir[1] * s1) < HAMMER_TIP[1] + 0.8;
-    }
-    return { hit, toHammer };
+    const s = -(eye[0] * dir[0] + eye[2] * dir[2]) / (dir[0] ** 2 + dir[2] ** 2 || 1);
+    const near = s > 0 && s < t && Math.hypot(eye[0] + dir[0] * s, eye[2] + dir[2] * s) < 1.2 && eye[1] + dir[1] * s < TIP[1] + 0.8;
+    return { hit, toHammer: near || Math.hypot(hit[0], hit[2]) < 1.6 };
   };
 
   // ---------- bolts ----------
-  const SKY_Y = 18;
-  const bolts = [];
-  let time = 0;
+  const SKY_Y = 18, bolts = [];
+  let time = 0, flash = 0, lastFlash = -1, glow = 0, nextAuto = 0.8;
 
-  // a bolt is bent rods: a primary from sky to ground, then secondary and tertiary rods that run alongside a
-  // stretch of it and rejoin it at both ends. A rod is JOINTS joints {p, w} in rod space (x across, y from the
-  // ground (0) to the sky (1), z depth) that wobble around the straight line, each with a width from 0 (thin) to 1 (thick)
-  const TRUNK_SEGMENTS = 24, JOINTS = TRUNK_SEGMENTS + 1, JAGGED_CELLS = 12;
-  const SMOOTH_FREQUENCY = 1.5, SMOOTH_AMPLITUDE = 0.5, JAGGED_AMPLITUDE = 0.08, SHARP_TURN = Math.PI / 4;
-  const WIDTH_NOISE = 0.2, WIDTH_NOISE_FREQUENCY = 0.4;
+  // the bolt's shape follows examples/creative/thunder/bolt.odin: a primary rod from sky to ground, then
+  // a secondary and two tertiary rods that run alongside a stretch of it and rejoin it at both ends.
+  // A rod is JOINTS joints {p, w} in rod space (x across, y from the ground (0) to the sky (1), z depth)
+  // that wobble around the straight line, each with a width from 0 (thin) to 1 (thick)
+  const SEGMENTS = 24, JOINTS = SEGMENTS + 1, CELLS = 12, JAG = 0.3, RESTRIKES = 1;
   const PRIMARY = { thickness: 1, opacity: 1 };
-  const SECONDARY = { thickness: 0.3, opacity: 0.3, jaggedness: 0.5, deviation: 0.08, shortest: 0.3, longest: 0.6 };
-  const TERTIARY = { thickness: 0.1, opacity: 0.1, jaggedness: 0.25, deviation: 0.06, shortest: 0.3, longest: 0.7 };
-
-  const lerp = (a, b, t) => a + (b - a) * t;
-  const mix3 = (a, b, t) => a.map((x, i) => lerp(x, b[i], t));
-  const smoothstep = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+  const SECONDARY = { thickness: 0.3, jaggedness: 0.5, deviation: 0.08, opacity: 0.3, shortest: 0.3, longest: 0.6 };
+  const TERTIARY = { thickness: 0.1, jaggedness: 0.25, deviation: 0.06, opacity: 0.1, shortest: 0.3, longest: 0.7 };
   // smooth value noise from -1 to 1
   const hash = (n) => { n = Math.imul(n ^ (n >>> 15), 0x2c1b3c6d); n = Math.imul(n ^ (n >>> 12), 0x297a2d39); return ((n ^ (n >>> 15)) >>> 0) / 2147483648 - 1; };
-  const noise = (seed, x) => {
-    const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
-    return lerp(hash(i * 0x9e3779b1 + seed), hash((i + 1) * 0x9e3779b1 + seed), u);
-  };
-  const randSeed = () => (rng() * 4294967296) | 0;
-  const cell = (knots, y, cells) => { const c = y * cells, k = Math.min(Math.floor(c), cells - 1); return mix3(knots[k], knots[k + 1], c - k); };
+  const noise = (seed, x) => { const i = Math.floor(x), f = x - i; return lerp(hash(i * 0x9e3779b1 + seed), hash((i + 1) * 0x9e3779b1 + seed), f * f * (3 - 2 * f)); };
+  const randSeed = () => (rand() * 4294967296) | 0;
+  // jagged offsets: random knots, squashed along the rod, read off linearly
+  const knots = (cells) => Array.from({ length: cells + 1 }, () => [rand() * 2 - 1, (rand() * 2 - 1) * 0.3, rand() * 2 - 1]);
+  const jagged = (k, y) => { const c = y * (k.length - 1), i = Math.min(Math.floor(c), k.length - 2); return mix3(k[i], k[i + 1], c - i); };
 
+  // the primary: a straight line bent by smooth noise and roughened by jagged offsets, still at both ends
+  const shape = () => {
+    const seed = randSeed(), k = knots(CELLS);
+    return brush(Array.from({ length: JOINTS }, (_, i) => {
+      const y = i / SEGMENTS, ends = smoothstep(0, 0.12, Math.min(y, 1 - y)) * JAG, j = jagged(k, y);
+      const smooth = [noise(seed, y * 1.5), 0.3 * noise(seed + 1, y * 1.5), noise(seed + 2, y * 1.5)];
+      return { p: [0, y, 0].map((v, a) => v + (smooth[a] * 0.5 + j[a] * 0.08) * ends) };
+    }));
+  };
+  // a rod that follows a stretch of its parent
+  const branch = (parent, pass) => {
+    const from = rand() * 0.5, to = Math.min(from + pass.shortest + rand() * (pass.longest - pass.shortest), 1), k = knots(Math.floor(CELLS * pass.jaggedness));
+    return brush(Array.from({ length: JOINTS }, (_, i) => {
+      const y = i / SEGMENTS, ends = smoothstep(0, 0.2, Math.min(y, 1 - y)) * JAG, j = jagged(k, y);
+      const at = lerp(from, to, y) * SEGMENTS, s = Math.min(Math.floor(at), SEGMENTS - 1);
+      return { p: mix3(parent[s].p, parent[s + 1].p, at - s).map((v, a) => v + j[a] * pass.deviation * ends) };
+    }));
+  };
   // widths wander between random targets, one per sharp turn, so the channel swells and pinches there
   const brush = (joints) => {
     const seed = randSeed();
-    let start = JOINTS - 1, from = rng();
+    let start = JOINTS - 1, from = rand();
     const flat = (a, b) => { const d = [a.p[0] - b.p[0], a.p[1] - b.p[1]], l = Math.hypot(...d); return l ? [d[0] / l, d[1] / l] : [0, 0]; };
     for (let i = JOINTS - 2; i >= 0; i--) {
       const into = flat(joints[i], joints[i + 1]), out = flat(joints[Math.max(i - 1, 0)], joints[i]);
-      const turn = Math.acos(clamp(into[0] * out[0] + into[1] * out[1], -1, 1));
-      if (i > 0 && turn <= SHARP_TURN) continue;
-      const to = rng();
-      for (let k = start; k >= i; k--) {
-        const t = (start - k) / (start - i);
-        joints[k].w = clamp(lerp(from, to, smoothstep(0, 1, t)) + noise(seed + 3, k * WIDTH_NOISE_FREQUENCY) * WIDTH_NOISE, 0, 1);
-      }
+      if (i > 0 && Math.acos(clamp(into[0] * out[0] + into[1] * out[1], -1, 1)) <= Math.PI / 4) continue;
+      const to = rand();
+      for (let k = start; k >= i; k--)
+        joints[k].w = clamp(lerp(from, to, smoothstep(0, 1, (start - k) / (start - i))) + noise(seed + 3, k * 0.4) * 0.2, 0, 1);
       start = i;
       from = to;
     }
     return joints;
   };
 
-  // a rod laid along base(y, ends), strayed from it by jagged offsets over `cells` cells that fade out
-  // within `edge` of both ends
-  const rod = (cells, amplitude, edge, base) => {
-    const knots = Array.from({ length: cells + 1 }, () => [rng() * 2 - 1, (rng() * 2 - 1) * 0.3, rng() * 2 - 1]);
-    return brush(Array.from({ length: JOINTS }, (_, i) => {
-      const y = i / TRUNK_SEGMENTS, ends = smoothstep(0, edge, Math.min(y, 1 - y)) * S.jag, stray = cell(knots, y, cells);
-      return { p: base(y, ends).map((v, a) => v + stray[a] * amplitude * ends) };
-    }));
-  };
-
-  // the primary: a straight line bent by smooth noise
-  const shape = () => {
-    const seed = randSeed(), smooth = (k, y) => noise(seed + k, y * SMOOTH_FREQUENCY) * SMOOTH_AMPLITUDE;
-    return rod(JAGGED_CELLS, JAGGED_AMPLITUDE, 0.12, (y, ends) => [smooth(0, y) * ends, y + 0.3 * smooth(1, y) * ends, smooth(2, y) * ends]);
-  };
-
-  // a rod that follows a stretch of its parent
-  const companion = (parent, pass) => {
-    const from = rng() * 0.5, to = Math.min(from + pass.shortest + rng() * (pass.longest - pass.shortest), 1);
-    return rod(Math.max(1, Math.floor(JAGGED_CELLS * pass.jaggedness)), pass.deviation, 0.2, (y) => {
-      const at = lerp(from, to, y) * TRUNK_SEGMENTS, k = Math.min(Math.floor(at), TRUNK_SEGMENTS - 1);
-      return mix3(parent[k].p, parent[k + 1].p, at - k);
-    });
-  };
-
-  // sky to floor strike: stepped leader, then a return stroke and re-strikes along the same channel
-  const strike = (to, power, toHammer, { furious = false, size = 1, restrikeScale = 1 } = {}) => {
-    const end = toHammer ? HAMMER_TIP : to;
-    const top = [end[0] + gauss() * 6, SKY_Y - rng() * 1.5, end[2] + gauss() * 6];
+  // a stepped leader grows down from the sky, then the return stroke and re-strikes flash along the same channel
+  const strike = (to, power, toHammer) => {
+    const end = toHammer ? TIP : to, top = [end[0] + gauss() * 3, SKY_Y - rand() * 1.5, end[2] + gauss() * 3];
     const axis = sub(top, end), height = len(axis), up = scale(axis, 1 / height);
     let right = cross(up, norm(sub(eye, end)));
     right = len(right) > 1e-6 ? norm(right) : [1, 0, 0];
-    const depth = cross(right, up);
-    const world = (p) => add(end, scale(right, p[0] * height), scale(up, p[1] * height), scale(depth, p[2] * height));
-    const leaderDur = 0.12 + rng() * 0.1, strokes = [{ t: leaderDur, amp: 1 }];
-    const restrikes = Math.min(Math.floor(S.restrikes * (furious ? RAGE_RESTRIKE : restrikeScale)), 120);
-    for (let i = 0; i < restrikes; i++) strokes.push({ t: strokes[i].t + 0.05 + rng() * 0.09, amp: Math.max(0.75 - i * 0.12, 0.06) });
-
-    const primary = shape();
-    const passes = furious ? [PRIMARY] : [PRIMARY, SECONDARY, TERTIARY, TERTIARY];
-    const radius = 0.035 * S.thickness * (0.7 + Math.min(power, 1.4) * 0.3) * size * (furious ? RAGE_WIDTH : 1), parts = [];
-    // everything that stays fixed for the bolt's life is worked out here, so a frame only fills in what fades
-    for (const pass of passes) {
-      const joints = pass === PRIMARY ? primary : companion(primary, pass), seed = randSeed() % 1000;
-      const at = joints.map((j) => world(j.p)), uneven = joints.map((_, k) => unevenness(seed, k));
-      for (let i = 0; i < TRUNK_SEGMENTS; i++) {
+    const depth = cross(right, up), world = (p) => add(end, scale(right, p[0] * height), scale(up, p[1] * height), scale(depth, p[2] * height));
+    const leader = 0.12 + rand() * 0.1, strokes = [{ t: leader, amp: 1 }];
+    for (let i = 0; i < RESTRIKES; i++) strokes.push({ t: strokes[i].t + 0.05 + rand() * 0.09, amp: Math.max(0.75 - i * 0.12, 0.06) });
+    const radius = 0.035 * (0.7 + Math.min(power, 1.4) * 0.3), primary = shape(), parts = [];
+    for (const pass of [PRIMARY, SECONDARY, TERTIARY, TERTIARY]) {
+      const joints = pass === PRIMARY ? primary : branch(primary, pass), at = joints.map((j) => world(j.p)), seed = rand() * 100;
+      for (let i = 0; i < SEGMENTS; i++) {
         const j0 = joints[i], j1 = joints[i + 1];
-        parts.push({
-          opacity: pass.opacity, w: radius * pass.thickness, u0: uneven[i], u1: uneven[i + 1],
-          t: (1 - (j0.p[1] + j1.p[1]) / 2) * leaderDur,
-          data: new Float32Array([...at[i], ...at[i + 1], 0, 0, j0.w, j1.w, 0, 0]),
-        });
+        parts.push({ a: at[i], b: at[i + 1], wa: j0.w, wb: j1.w, r: radius * pass.thickness, k: pass.opacity, up: i / SEGMENTS, seed, birth: 1 - (j0.p[1] + j1.p[1]) / 2 });
       }
     }
-    bolts.push({ born: time, segs: parts, top, base: end, leaderDur, strokes, power, toHammer, end: strokes.at(-1).t + LINGER_TIME });
+    bolts.push({ born: time, top, end, leader, strokes, power, toHammer, parts, life: strokes.at(-1).t + 1.5 });
   };
-
-  // as the trunk dims the bolt erodes from its edges inward: the line gets thinner until it is gone.
-  // each point along the bolt erodes up to ERODE_UNEVENNESS faster than an even rate, so it thins unevenly
-  // the width flares as the return stroke lands by this much, settling over this many seconds
-  const WIDTH_FLARE = 0.6, FLARE_SETTLING = 0.15;
-  const ERODE_UNEVENNESS = 4.0, ERODE_COARSE = 9, ERODE_FINE = 17, ERODE_GRAIN = 31;
-  const unevenness = (seed, joint) => {
-    const t = joint / TRUNK_SEGMENTS;
-    return 0.2 * (noise(seed, t * ERODE_COARSE) + 1) + 0.15 * (noise(seed + 17, t * ERODE_FINE) + 1) + 0.15 * (noise(seed + 31, t * ERODE_GRAIN) + 1);
-  };
-  const erode = (u, eroded) => clamp(1 - eroded * (1 + ERODE_UNEVENNESS * u), 0, 1);
-
-  // the bolt lingers after its last stroke, so there is time to watch it erode; a raging bolt lingers no longer than a normal one
-  const LINGER_TIME = 3, LINGER_DECAY = 0.7;
-  const trunk = (b, a, tau) => 1.6 * (envelope(b, a, tau) * b.power + (a >= b.leaderDur ? Math.min(b.power, 1.4) * Math.exp(-(a - b.leaderDur) / LINGER_DECAY) : 0));
-
-  const envelope = (b, a, tau) => b.strokes.reduce((e, s) => e + (a >= s.t ? s.amp * Math.exp(-(a - s.t) / tau) : 0), 0)
-    + (a >= b.leaderDur ? 0.12 * Math.exp(-(a - b.leaderDur) / 0.4) : 0);
+  const envelope = (b, age, tau) => b.strokes.reduce((e, s) => e + (age >= s.t ? s.amp * Math.exp((s.t - age) / tau) : 0), 0)
+    + (age >= b.leader ? 0.12 * Math.exp((b.leader - age) / 0.25) : 0);
+  // intensity once the leader has reached the ground
+  const trunk = (b, age) => (envelope(b, age, 0.03) + Math.exp((b.leader - age) / 0.2)) * 1.6 * b.power;
 
   // ---------- input: tap to strike, drag to look around ----------
   let pointer = null;
   canvas.addEventListener("pointerdown", (e) => {
-    try { canvas.setPointerCapture(e.pointerId); } catch {}
+    canvas.setPointerCapture(e.pointerId);
     const r = canvas.getBoundingClientRect();
     pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, drag: false, ...pick((e.clientX - r.left) / r.width, 1 - (e.clientY - r.top) / r.height) };
   });
@@ -545,116 +422,89 @@ void main() {
   });
   const release = (e) => {
     if (!pointer || e.pointerId !== pointer.id) return;
-    if (e.type === "pointerup" && !pointer.drag) strike(pointer.hit, 1 + rng() * 0.5, pointer.toHammer);
+    if (e.type === "pointerup" && !pointer.drag) strike(pointer.hit, 1 + rand() * 0.5, pointer.toHammer);
     pointer = null;
   };
   for (const t of ["pointerup", "pointercancel"]) canvas.addEventListener(t, release);
 
-  // offsets spread over `period`: bunched early for the first few (0, 0.3, 1 for three), evenly for the rest
-  const spread = (n, period, bunched) => Array.from({ length: n }, (_, i) => (n > 1 ? (i / (n - 1)) ** (bunched ? 1.737 : 1) : 0) * period);
-  const rageBegin = () => {
-    const mainAt = time + ANTICIPATION_PERIOD, start = mainAt + RAGE_OVERSHOOT_GAP;
-    for (const o of spread(ANTICIPATION_COUNT, ANTICIPATION_PERIOD, true)) rageQueue.push({ at: time + o, phase: "anticipation" });
-    rageQueue.push({ at: mainAt, phase: "main" });
-    for (const o of spread(OVERSHOOT_COUNT, OVERSHOOT_PERIOD, false)) rageQueue.push({ at: start + o, phase: "overshoot" });
-    rageEnd = start + OVERSHOOT_PERIOD + RAGE_AFTERGLOW;
-  };
-  const rageStrike = (phase) => {
-    const a = rng() * Math.PI * 2, at = [Math.sin(a) * 2, 0, Math.cos(a) * 2];
-    if (phase === "anticipation") strike(at, 0.7 * RAGE_SMALL, true, { size: RAGE_SMALL, restrikeScale: RAGE_SMALL_RESTRIKE });
-    else if (phase === "main") strike(at, RAGE_POWER, true, { furious: true });
-    else strike(at, 0.7 + rng() * 0.7, true);
-  };
-
   // ---------- frame ----------
-  let flash = 0, lastFlash = -1, hammerGlow = 0, nextAuto = 0.8;
-  const lights = new Float32Array(64);
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const lights = new Float32Array(32);
   const update = (dt) => {
     time += dt;
-    if (S.orbit && !pointer) cam.yaw += dt * 0.04;
+    if (!calm && !pointer) cam.yaw += dt * 0.04;
     updateCamera();
-    if (time >= nextRage) {
-      nextRage = time + RAGE_EVERY;
-      if (time >= rageEnd && rng() < S.rage) rageBegin();
+    if (!calm && time >= nextAuto) {
+      const a = rand() * Math.PI * 2, d = 4 + rand() * 40;
+      strike([Math.sin(a) * d, 0, Math.cos(a) * d], 0.7 + rand() * 0.7, rand() < 0.25);
+      nextAuto = time + (0.4 + rand() * 1.6) / 0.8;
     }
-    for (let i = rageQueue.length - 1; i >= 0; i--) if (time >= rageQueue[i].at) rageStrike(rageQueue.splice(i, 1)[0].phase);
-    if (S.rate > 0 && time >= rageEnd && time >= nextAuto) {
-      const a = rng() * Math.PI * 2, d = 4 + rng() * 40;
-      strike([Math.sin(a) * d, 0, Math.cos(a) * d], 0.7 + rng() * 0.7, rng() < 0.25);
-      nextAuto = time + (0.4 + rng() * 1.6) / Math.max(S.rate, 0.05);
-    }
-
+    lights.fill(0);
     let n = 0;
-    const light = (p, i) => { if (n < 16 && i > 0.01) lights.set([...p, i], 4 * n++); };
+    const light = (p, i) => { if (n < 8) lights.set([...p, i], 4 * n++); };
     for (let i = bolts.length - 1; i >= 0; i--) {
-      const b = bolts[i], a = time - b.born;
-      if (a > b.end) { bolts.splice(i, 1); continue; }
-      if (a < b.leaderDur) { light(mix3(b.top, b.base, a / b.leaderDur), 0.2); continue; }
+      const b = bolts[i], age = time - b.born;
+      if (age > b.life) { bolts.splice(i, 1); continue; }
+      if (age < b.leader) { light(add(scale(b.top, 1 - age / b.leader), scale(b.end, age / b.leader)), 0.2); continue; }
       if (!b.struck) {
         b.struck = true;
-        const dist = len(sub(b.base, eye));
-        // full-view flashes are rate limited and only follow the first stroke
-        if (time - lastFlash > 0.45) { flash = Math.max(flash, b.power * clamp(1.4 - dist / 60, 0.3, 1)); lastFlash = time; }
-        if (b.toHammer) hammerGlow = 1;
+        // full-view flashes are rate limited
+        if (time - lastFlash > 0.45) { flash = Math.max(flash, b.power * clamp(1.4 - len(sub(b.end, eye)) / 60, 0.3, 1)); lastFlash = time; }
+        if (b.toHammer) glow = 1;
       }
-      const e = envelope(b, a, 0.06) * b.power;
-      light(b.base, e * 1.2); light(mix3(b.base, b.top, 0.5), e * 0.8); light(b.top, e * 0.8);
+      const e = envelope(b, age, 0.06) * b.power;
+      light(b.end, e * 1.2); light(scale(add(b.end, b.top), 0.5), e * 0.8); light(b.top, e * 0.8);
     }
-    hammerGlow *= Math.exp(-dt / 1.5);
-    if (hammerGlow > 0.02) light(add(HAMMER_TIP, [0, -1, 0]), hammerGlow * 0.4);
+    glow *= Math.exp(-dt / 1.5);
+    light(add(TIP, [0, -1, 0]), glow * 0.4);
     flash *= Math.exp(-dt / 0.25);
-    return n;
   };
 
-  const draw = (nLights) => {
-    const flashU = Math.min(flash, 1) * 0.7;
-
+  const draw = () => {
     // 1. scene: sky, grid floor, hammer
+    const f = Math.min(flash, 1) * 0.7, sky = theme.sky.map((c, i) => c + theme.uTint[i] * f * 0.25);
     bind(scene);
-    gl.clear(gl.DEPTH_BUFFER_BIT);
-    use(skyProg, { uFwd: fwd, uUp: camUp, uView: [TAN * aspect, TAN], uFlash: flashU });
-    fullscreen();
+    gl.clearColor(...sky, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST);
-    use(meshProg, { uVP: viewProj, uEye: eye, uFlash: flashU, uHammerGlow: hammerGlow, uL: lights, uN: nLights, uFloor: 1 });
-    gl.bindVertexArray(floor.vao);
+    const { uGround, uLine, uTint } = theme;
+    use(meshProg, { uVP: viewProj, uEye: eye, uSky: sky, uGround, uLine, uTint, uFlash: f, uGlow: glow, uL: lights, uFloor: 1 });
+    gl.bindVertexArray(mesh.vao);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.uniform1f(meshProg.u("uFloor"), 0);
-    gl.bindVertexArray(hammer.vao);
-    gl.drawArrays(gl.TRIANGLES, 0, hammerData.length / 9);
+    gl.drawArrays(gl.TRIANGLES, 6, meshCount - 6);
 
-    // 2. bolts into the emissive target, depth tested against the scene
+    // 2. bolts into the emissive target, depth tested against the scene: a spark as the leader passes
+    // each segment, then every rod follows the strokes, flaring as the return stroke lands and eroding as it dims
     let v = 0;
     for (const b of bolts) {
-      // the leader lights each segment as it reaches it; after the return stroke every rod follows the strokes
-      const age = time - b.born, struck = age >= b.leaderDur;
-      const trunkI = struck ? trunk(b, age, 0.045) : 0, eroded = struck ? 1 - clamp(trunk(b, age, 0.03), 0, 1) : 0;
-      const flare = struck ? 1 + WIDTH_FLARE * Math.exp(-(age - b.leaderDur) / FLARE_SETTLING) : 1;
-      for (const s of b.segs) {
-        if (age < s.t) continue;
-        const I = (struck ? trunkI : 0.22 + Math.exp(-(age - s.t) / 0.015) * 0.7) * s.opacity;
-        if (I < 0.003 || v >= MAX_SEGS) continue;
-        const d = s.data;
-        d[6] = s.w * flare; d[7] = I; d[10] = erode(s.u0, eroded); d[11] = erode(s.u1, eroded);
-        segData.set(d, SEG_STRIDE * v++);
+      const age = time - b.born, struck = age >= b.leader, I = struck ? trunk(b, age) : 0;
+      const flare = struck ? 0.6 * Math.exp((b.leader - age) / 0.15) : 0, eroded = struck ? 1 - clamp(I, 0, 1) : 0;
+      for (const s of b.parts) {
+        const reached = s.birth * b.leader;
+        if (age < reached || v >= MAX_SEGS) continue;
+        const i = (struck ? I : 0.22 + Math.exp((reached - age) / 0.015) * 0.7) * s.k;
+        segData.set([...s.a, ...s.b, s.r, i, flare, s.wa, s.wb, s.up, s.seed, eroded], SEG * v++);
       }
     }
     bind(emis);
+    gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     if (v) {
       gl.depthMask(false);
       gl.enable(gl.BLEND);
       gl.blendEquation(gl.MAX);
-      use(segProg, { uVP: viewProj, uRes: [canvas.width, canvas.height], uFocal: canvas.height * 0.5 / TAN });
+      use(boltProg, { uVP: viewProj, uRes: [canvas.width, canvas.height], uFocal: canvas.height * 0.5 / TAN });
       gl.bindVertexArray(segs.vao);
       gl.bindBuffer(gl.ARRAY_BUFFER, segs.buf);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, segData, 0, v * SEG_STRIDE);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, segData, 0, v * SEG);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, v);
       gl.disable(gl.BLEND);
       gl.depthMask(true);
     }
     gl.disable(gl.DEPTH_TEST);
 
-    // 3. bloom
+    // 3. bloom: halve down, then smooth each level up onto the next larger one so the widest glow stays smooth
     let src = emis;
     for (const d of down) {
       bind(d);
@@ -663,7 +513,6 @@ void main() {
       fullscreen();
       src = d;
     }
-    // each level is smoothed up onto the next larger one, so the widest glow stays smooth instead of blocky
     gl.enable(gl.BLEND);
     gl.blendEquation(gl.FUNC_ADD);
     gl.blendFunc(gl.ONE, gl.ONE);
@@ -677,66 +526,45 @@ void main() {
 
     // 4. composite
     bind(null);
-    use(compProg, { uBloom: S.bloom });
+    use(compProg, { uBolt: theme.uBolt, uLight: theme.uLight });
     sample(compProg, "uScene", 0, scene.tex);
     sample(compProg, "uEmis", 1, emis.tex);
-    sample(compProg, "uBloomTex", 2, down[0].tex);
+    sample(compProg, "uBloom", 2, down[0].tex);
     fullscreen();
   };
 
-  let visible = true, running = false, last = 0;
+  let visible = true, last = 0;
+  new IntersectionObserver((e) => (visible = e[0].isIntersecting)).observe(canvas);
   const frame = (now) => {
-    if (!visible || document.hidden) { running = false; return; }
     const dt = Math.min((now - last) / 1000, 0.05);
     last = now;
-    syncSize();
-    draw(update(dt));
+    if (visible) {
+      const dpr = Math.min(devicePixelRatio || 1, 2), w = Math.max(1, canvas.clientWidth * dpr | 0), h = Math.max(1, canvas.clientHeight * dpr | 0);
+      if (!scene || canvas.width !== w || canvas.height !== h) resize(w, h);
+      aspect = w / h;
+      update(dt);
+      draw();
+    }
     requestAnimationFrame(frame);
   };
-  const start = () => {
-    if (running || !visible || document.hidden) return;
-    running = true;
-    requestAnimationFrame((now) => { last = now; frame(now); });
-  };
-
-  // ---------- control panel ----------
-  const toggle = figure.querySelector("button"), panel = figure.querySelector("aside");
-  toggle.onclick = () => {
-    panel.hidden = !panel.hidden;
-    toggle.textContent = panel.hidden ? "«" : "»";
-    toggle.setAttribute("aria-expanded", !panel.hidden);
-  };
-  for (const i of panel.querySelectorAll("input[data-key]")) {
-    const { key } = i.dataset, box = i.type === "checkbox";
-    i[box ? "checked" : "value"] = S[key];
-    i.oninput = () => (S[key] = box ? i.checked : +i.value, key === "rate" && (nextAuto = time + 0.3));
-  }
-
-  new IntersectionObserver((e) => { visible = e[0].isIntersecting; start(); }).observe(canvas);
-  document.addEventListener("visibilitychange", start);
-  start();
+  requestAnimationFrame(frame);
 })();
 </script>
 <script>
+  // one video plays at a time, in turn; hovering a card plays (and loops) that one instead
   const vids = [...document.querySelectorAll("main > ul video")];
-  const rest = (v) => v.duration && Math.abs(v.currentTime - v.duration * 0.4) > 0.05 && (v.currentTime = v.duration * 0.4);
   let cur = 0, hover = null, visible = false;
   const sync = () => vids.forEach((v, i) => {
-    const on = visible && i === (hover ?? cur);
     v.loop = i === hover;
-    v.nextElementSibling.hidden = !on;
-    if (on) v.play().catch(() => {});
-    else { v.pause(); if (i !== cur && i !== hover) rest(v); }
+    visible && i === (hover ?? cur) ? v.play().catch(() => {}) : v.pause();
   });
   vids.forEach((v, i) => {
-    v.addEventListener("timeupdate", () => { v.nextElementSibling.value = v.currentTime / (v.duration || 1); });
-    v.addEventListener("ended", () => { cur = (i + 1) % vids.length; vids[cur].currentTime = 0; sync(); });
+    v.onended = () => { cur = (i + 1) % vids.length; vids[cur].currentTime = 0; sync(); };
     const li = v.closest("li");
-    li.addEventListener("mouseenter", () => { hover = i; sync(); });
-    li.addEventListener("mouseleave", () => { hover = null; sync(); });
+    li.onmouseenter = () => { hover = i; sync(); };
+    li.onmouseleave = () => { hover = null; sync(); };
   });
-  new IntersectionObserver((es) => { visible = es.some((e) => e.isIntersecting); sync(); })
-    .observe(document.querySelector("main > ul"));
+  new IntersectionObserver((es) => { visible = es[0].isIntersecting; sync(); }).observe(document.querySelector("main > ul"));
 </script>
 <footer>Built by <a href="https://hucanco.de">hucancode</a> while looking for a job</footer>
 </body>

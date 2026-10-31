@@ -44,15 +44,24 @@ pre {
   background: var(--color-base-200);
   border: var(--border) solid var(--color-base-300);
 }
-figure > video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--color-base-300); }
 details > summary { padding: 0.4rem 0.75rem; cursor: pointer; color: var(--color-neutral); }
 small { color: var(--color-neutral); }
 
 /* layout */
+body > nav a { display: inline-flex; align-items: center; gap: 0.4rem; }
+body > nav a[data-icon]::before {
+  content: ""; width: 16px; height: 16px;
+  background: var(--icon) center / contain no-repeat;
+}
+@media (prefers-color-scheme: dark) { body > nav a[data-icon]::before { filter: invert(1); } }
+body > nav a[data-icon="home"] { --icon: url(icons/home.svg); }
+body > nav a[data-icon="examples"] { --icon: url(icons/examples.svg); }
+body > nav a[data-icon="api"] { --icon: url(icons/api.svg); }
+body > nav a[data-icon="github"] { --icon: url(icons/github.svg); }
 body > nav {
   display: flex;
   gap: 1.5rem;
-  align-items: baseline;
+  align-items: center;
   padding: 0.75rem 1.5rem;
   background: var(--color-base-200);
   border-bottom: var(--border) solid var(--color-base-300);
@@ -60,47 +69,18 @@ body > nav {
 main { max-width: 100rem; margin: 0 auto; padding: 1rem 1.5rem 3rem; }
 main > h2 { margin-top: 4rem; }
 
-/* home: hero */
+/* home */
 header { margin: 0.5rem 0 4rem; text-align: center; }
-/* the night band runs edge to edge; the canvas stays inside main and fades into it */
-header > figure {
-  position: relative; margin: -1.5rem 0 1.5rem;
-  background: #030308; box-shadow: 0 0 0 100vmax #030308; clip-path: inset(0 -100vmax);
-}
 header canvas {
-  display: block; width: 100%; height: clamp(22rem, 60vh, 40rem); touch-action: pan-y; cursor: crosshair;
+  display: block; width: 100%; height: clamp(22rem, 60vh, 40rem); margin: -1.5rem 0 1.5rem;
+  touch-action: pan-y; cursor: crosshair;
   mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
 }
-
-/* hero controls: button + aside, wired up by the script in index.html */
-figure > button {
-  position: absolute; top: 0; right: 0; width: 2em; height: 100%; padding: 2em 0;
-  cursor: pointer;
-  color: rgb(255 255 255 / 0.5); background: rgb(255 255 255 / 0.05);
-  border: none;
-}
-figure > button:hover { color: #fff; background: rgb(255 255 255 / 0.12); }
-aside {
-  position: absolute; top: 0; bottom: 0; right: 2em; width: min(17rem, calc(100% - 1em));
-  overflow: auto; padding: 0.25rem 0.75rem 0.75rem; text-align: left; color-scheme: dark; color: #dde;
-  background: rgb(8 8 16 / 0.85); border-left: var(--border) solid rgb(255 255 255 / 0.12);
-}
-aside h3 { margin: 0.75rem 0 0.25rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: rgb(255 255 255 / 0.5); }
-aside > div { display: grid; gap: 0.15rem; margin: 0.4rem 0; font-size: 0.85rem; }
-aside input[type=range] { width: 100%; margin: 0; }
-aside .check { grid-template-columns: auto 1fr; align-items: center; gap: 0.5rem; }
-aside .check > input { order: -1; margin: 0; }
-
-/* home: features */
 main > ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 1rem; margin: 0; padding: 0; list-style: none; }
 main > ul a { display: flex; flex-direction: column; gap: 0.35rem; }
-main > ul figure { position: relative; margin: 0; border: var(--border) solid var(--color-base-300); }
-main > ul progress {
-  position: absolute; inset: auto 0 0; width: 100%; height: 0.375rem; appearance: none; border: 0;
-  background: rgb(0 0 0 / 0.4);
-}
-main > ul progress::-webkit-progress-value { background: var(--color-primary); }
-main > ul progress::-moz-progress-bar { background: var(--color-primary); }
+main > ul video, .more { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--color-base-300); }
+.more { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; }
+.more img { width: 100%; height: 100%; object-fit: cover; }
 
 /* examples: picker + live stage (the only page whose main > div holds a section) */
 main > div:has(> section) {
