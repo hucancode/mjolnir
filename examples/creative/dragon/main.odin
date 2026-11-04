@@ -49,20 +49,16 @@ Pose :: struct {
 
 REST_POSE :: Pose{0, 12 * DEG, math.PI / 6, math.PI / 4, -25 * DEG, 35 * DEG}
 
-Limb :: enum u8 {
-  NONE,
-  ARM,
-  FOREARM,
-  LEG,
-  SHIN,
-}
-
+// Axis is what a bone turns about: its x or y by its angle, or FREE, facing its aim (skeleton
+// space).
 Axis :: enum u8 {
   X,
   Y,
-  Z,
   FREE,
 }
+
+@(rodata)
+AXES := [Axis][3]f32{.X = X, .Y = Y, .FREE = {}}
 
 Bone :: struct {
   parent: int,
@@ -80,7 +76,6 @@ Link :: struct {
   at:     Slot,
   joint:  Maybe(Joint),
   spine:  bool,
-  limb:   Limb,
   sign:   f32,
   phase:  f32,
   mount:  SlotDef,
@@ -221,11 +216,7 @@ place :: proc(app: ^App) {
     assemble(app)
     return
   }
-  for p, i in app.pieces {
-    x := app.live.pieces[i]
-    world.transform(&app.scene, p.node)^ = x
-    world.set_visible(&app.scene, p.node, true)
-  }
+  for p, i in app.pieces do show(app, p, app.live.pieces[i])
 }
 
 panel :: proc(app: ^App) {
@@ -340,13 +331,13 @@ link :: proc(app: ^App, part: PartKind, parent: int, at: Slot, params: Maybe(Par
   return len(app.links) - 1
 }
 
-limb :: proc(app: ^App, upper, lower: Limb, parent: int, at: Slot, joint: Joint, sign, phase: f32) {
-  arm := upper == .ARM
+// limb hangs an arm (`arm`) or a leg off `parent`: its upper part, swinging by `sign`, and its
+// lower one, both stepping at `phase`.
+limb :: proc(app: ^App, arm: bool, parent: int, at: Slot, joint: Joint, sign, phase: f32) {
   up := link(app, .UPPER_ARM if arm else .THIGH, parent, at)
   low := link(app, .FOREARM if arm else .SHIN, up, .ELBOW if arm else .KNEE)
   app.links[up].joint = joint
-  app.links[up].limb, app.links[low].limb = upper, lower
-  app.links[up].sign, app.links[low].sign = sign, sign
+  app.links[up].sign = sign
   app.links[up].phase, app.links[low].phase = phase, phase
 }
 
@@ -363,10 +354,10 @@ build :: proc(app: ^App) {
   prev = link(app, .BODY_SEGMENT2, prev, .REAR, TAPER_START, true)
   for _ in 0 ..< 3 do prev = link(app, .BODY_SEGMENT2, prev, .REAR, spine = true)
   link(app, .TAIL, prev, .REAR, spine = true)
-  limb(app, .ARM, .FOREARM, shoulders, .FLANK_L, SHOULDER, 1, 0)
-  limb(app, .ARM, .FOREARM, shoulders, .FLANK_R, SHOULDER, -1, 0.5)
-  limb(app, .LEG, .SHIN, hips, .FLANK_L, HIP, 1, 0.5)
-  limb(app, .LEG, .SHIN, hips, .FLANK_R, HIP, -1, 0)
+  limb(app, true, shoulders, .FLANK_L, SHOULDER, 1, 0)
+  limb(app, true, shoulders, .FLANK_R, SHOULDER, -1, 0.5)
+  limb(app, false, hips, .FLANK_L, HIP, 1, 0.5)
+  limb(app, false, hips, .FLANK_R, HIP, -1, 0)
 
   for &l, i in app.links {
     l.mount = slots(l.part, l.params)[.MOUNT].? or_else {}
@@ -387,28 +378,24 @@ build :: proc(app: ^App) {
       origin, r := joined.position, joined.rotation
       append(&app.groups, Group{link = i})
       switch j.kind {
-      case .HINGE:
-        l.first = bone(app, parent.bone, origin, r, .X)
+      case .HINGE, .BALL:
+        hinge := j.kind == .HINGE
+        l.first = bone(app, parent.bone, origin, r, .X if hinge else .FREE)
         l.bone = l.first
         emit(app, parent.bone, joined)
-        hinge_female(app, j, false)
+        if hinge do hinge_female(app, j, false)
+        else do ball_female(app, j)
         emit(app, l.first)
-        hinge_male(app, j, false, false)
+        if hinge do hinge_male(app, j, false, false)
+        else do ball_male(app, j)
       case .DISC_HINGE:
+        // a turntable, then a hinge on it
         l.first = bone(app, parent.bone, origin, r, .Y)
-        swing := bone(app, l.first, {}, linalg.quaternion_angle_axis(HPI, X), .X)
-        l.bone = bone(app, swing, {}, linalg.QUATERNIONF32_IDENTITY, .Y)
+        l.bone = bone(app, l.first, {}, linalg.quaternion_angle_axis(HPI, X), .X)
         emit(app, l.first)
         hinge_female(app, j, true)
-        emit(app, swing)
+        emit(app, l.bone)
         hinge_male(app, j, true, true)
-      case .BALL:
-        l.first = bone(app, parent.bone, origin, r, .FREE)
-        l.bone = l.first
-        emit(app, parent.bone, joined)
-        ball_female(app, j)
-        emit(app, l.first)
-        ball_male(app, j)
       }
       l.seat = geometry.seat(b, l.mount.face)
       if l.mount.axis do l.seat.position = -linalg.mul(l.seat.rotation, l.mount.face.position)
@@ -440,20 +427,21 @@ ride :: proc(app: ^App, pose: Pose) {
     k += 1
   }
   for l in app.links {
-    if l.part == .JAW do app.bones[l.first].angle = pose.jaw
-    if l.limb == .NONE do continue
     phase := (wrap(pose.offset) * STROKES + l.phase) * 2 * math.PI
     angle: f32
-    switch l.limb {
-    case .NONE:
-    case .ARM:
+    #partial switch l.part {
+    case .JAW:
+      angle = pose.jaw
+    case .UPPER_ARM:
       angle = l.sign * (pose.arm_swing + SWING * math.sin(phase))
-    case .LEG:
+    case .THIGH:
       angle = l.sign * (pose.leg_swing + SWING * math.sin(phase))
     case .FOREARM:
       angle = pose.elbow + BEND * math.sin(phase - HPI)
     case .SHIN:
       angle = pose.knee + BEND * math.sin(phase - HPI)
+    case:
+      continue
     }
     app.bones[l.first].angle = angle
   }
@@ -512,18 +500,10 @@ snapshot :: proc(app: ^App, offset: f32, out: ^Snapshot) {
   for b, i in app.bones {
     parent := geometry.TRANSFORM_IDENTITY
     if b.parent >= 0 do parent = out.bones[b.parent]
-    m: quaternion128
-    switch b.axis {
-    case .X:
-      m = linalg.quaternion_angle_axis(b.angle, X)
-    case .Y:
-      m = linalg.quaternion_angle_axis(b.angle, Y)
-    case .Z:
-      m = linalg.quaternion_angle_axis(b.angle, Z)
-    case .FREE:
-      m = linalg.quaternion_inverse(b.rest) * linalg.quaternion_inverse(parent.rotation) * b.aim
-    }
-    out.bones[i] = {geometry.transform_point(parent, b.offset), linalg.normalize(parent.rotation * b.rest * m), 1}
+    at := geometry.transform_point(parent, b.offset)
+    // a FREE bone faces its aim; the others turn about their axis from their rest
+    turn := b.aim if b.axis == .FREE else linalg.normalize(parent.rotation * b.rest * linalg.quaternion_angle_axis(b.angle, AXES[b.axis]))
+    out.bones[i] = {at, turn, 1}
   }
   resize(&out.pieces, len(app.pieces))
   resize(&out.centers, len(app.groups))

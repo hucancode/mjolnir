@@ -220,13 +220,12 @@ Axis :: enum u8 {
 }
 
 Bone :: struct {
-  parent:  int,
-  offset:  [3]f32,
-  rest:    quaternion128,
-  axis:    Axis,
-  channel: int,
-  sign:    f32,
-  node:    world.NodeHandle,
+  parent: int,
+  offset: [3]f32,
+  rest:   quaternion128,
+  axis:   Axis,
+  bind:   Bind,
+  node:   world.NodeHandle,
 }
 
 BonePose :: struct {
@@ -284,7 +283,7 @@ App :: struct {
   part:      string,
   count:     int,
   seed:      u32,
-  legs:      [Side]Leg,
+  leg:       Leg, // the left one: both are alike
   thigh:     f32,
   shin:      f32,
   hip_y:     f32,
@@ -312,8 +311,11 @@ is_limb :: proc(c: Channel) -> bool {
   return c >= .SHOULDER
 }
 
+LEG :: [3]Channel{.HIP, .KNEE, .ANKLE}
+
 is_leg :: proc(c: Channel) -> bool {
-  return c == .HIP || c == .KNEE || c == .ANKLE
+  for l in LEG do if c == l do return true
+  return false
 }
 
 main :: proc() {
@@ -442,25 +444,27 @@ pose :: proc(app: ^App) {
 
 hip_drop :: proc(app: ^App, level: f32) -> f32 {
   t, s := app.thigh, app.shin
-  per_level := t + s - math.sqrt(t * t + s * s + 2 * t * s * math.cos(f32(-math.PI / 3)))
+  per_level := t + s - math.sqrt(t * t + s * s + 2 * t * s * math.cos(CONTROLS[.KNEE].min))
   return clamp(-min(level, 0) * per_level, 0, t + s - abs(t - s) - 0.02)
 }
 
 stand :: proc(app: ^App) {
   rest: Pose
   poses := solve(app, rest[:])
-  leg := app.legs[.L]
+  leg := app.leg
   hip, knee, ankle := poses[leg.hip].position, poses[leg.knee].position, poses[leg.ankle].position
   app.thigh, app.shin = linalg.length(hip - knee), linalg.length(knee - ankle)
   app.hip_y, app.ankle_y = hip.y, ankle.y
   app.root_y = -(ankle.y - REACH + SOLE_Y - FOOT_H)
 }
 
+// material_of is the color a piece's key gets with the current seed.
+material_of :: proc(app: ^App, key: u32) -> render.MaterialHandle {
+  return app.materials[(key ~ app.seed) % len(PALETTE)]
+}
+
 recolor :: proc(app: ^App) {
-  for p in app.pieces {
-    material := app.materials[(p.key ~ app.seed) % len(PALETTE)]
-    render.attach(&app.renderer, p.node, render.MeshAttachment{mesh = app.meshes[p.mesh], material = material})
-  }
+  for p in app.pieces do render.attach(&app.renderer, p.node, render.MeshAttachment{mesh = app.meshes[p.mesh], material = material_of(app, p.key)})
 }
 
 panel :: proc(app: ^App) {
@@ -524,11 +528,10 @@ piece :: proc(app: ^App, f: Frame, mesh: Mesh, scale: [3]f32, position: [3]f32 =
   node := world.spawn(&app.scene, parent = app.bones[f.bone].node)
   placed := geometry.transform_mul(f.place, {position, rotation, scale})
   world.transform(&app.scene, node)^ = placed
-  key := fmt.tprintf("%s %d", app.part, app.count)
-  append(&app.pieces, Piece{node, mesh, hash.fnv32a(transmute([]u8)key)})
+  key := hash.fnv32a(transmute([]u8)fmt.tprintf("%s %d", app.part, app.count))
+  append(&app.pieces, Piece{node, mesh, key})
   if next do app.count += 1
-  material := app.materials[(app.pieces[len(app.pieces) - 1].key ~ app.seed) % len(PALETTE)]
-  render.attach(&app.renderer, node, render.MeshAttachment{mesh = app.meshes[mesh], material = material})
+  render.attach(&app.renderer, node, render.MeshAttachment{mesh = app.meshes[mesh], material = material_of(app, key)})
 }
 
 box :: proc(app: ^App, f: Frame, size, position: [3]f32, rotation := linalg.QUATERNIONF32_IDENTITY, mesh := Mesh.BOX) {
@@ -541,7 +544,7 @@ cylinder :: proc(app: ^App, f: Frame, radius, height: f32, position: [3]f32 = {}
 }
 
 bone :: proc(app: ^App, parent: int, offset: [3]f32 = {}, rest := linalg.QUATERNIONF32_IDENTITY, axis := Axis.X, bind := Bind{}) -> int {
-  append(&app.bones, Bone{parent, offset, rest, axis, bind.channel, bind.sign, world.spawn(&app.scene)})
+  append(&app.bones, Bone{parent, offset, rest, axis, bind, world.spawn(&app.scene)})
   return len(app.bones) - 1
 }
 
@@ -553,7 +556,7 @@ solve :: proc(app: ^App, channels: []f32, origin: [3]f32 = {}) -> []BonePose {
     position += linalg.mul(rotation, b.offset)
     axis: [3]f32
     axis[b.axis] = 1
-    rotation *= b.rest * linalg.quaternion_angle_axis_f32(b.sign * channels[b.channel], axis)
+    rotation *= b.rest * linalg.quaternion_angle_axis_f32(b.bind.sign * channels[b.bind.channel], axis)
     app.poses[i] = {b.node, position, linalg.normalize(rotation)}
   }
   return app.poses[:]
@@ -570,7 +573,7 @@ mounts :: proc(j: Joint) -> (a, b: geometry.Face) {
   return {{0, REACH, 0}, Y, X}, {{0, -REACH, 0}, NEG_Y, X}
 }
 
-joint :: proc(app: ^App, parent: Frame, slot: geometry.Face, j: Joint, binds: [3]Bind, child: geometry.Face) -> (Frame, int) {
+joint :: proc(app: ^App, parent: Frame, slot: geometry.Face, j: Joint, binds: [3]Bind, child: geometry.Face) -> Frame {
   a, b := mounts(j)
   frame := Frame{parent.bone, geometry.transform_mul(parent.place, geometry.seat(slot, a))}
   part(app, j.name)
@@ -602,10 +605,13 @@ joint :: proc(app: ^App, parent: Frame, slot: geometry.Face, j: Joint, binds: [3
   case .BALL:
     dofs[1].axis, dofs[2].axis, count = .Y, .Z, 3
   }
+  // the first dof turns on the female half, each next one on the one before
+  dofs[0].offset, dofs[0].rest = frame.place.position, frame.place.rotation
   bones: [3]int
+  on := frame.bone
   for d, i in dofs[:count] {
-    if i == 0 do bones[i] = bone(app, frame.bone, geometry.transform_point(frame.place, d.offset), frame.place.rotation * d.rest, d.axis, binds[i])
-    else do bones[i] = bone(app, bones[i - 1], d.offset, d.rest, d.axis, binds[i])
+    bones[i] = bone(app, on, d.offset, d.rest, d.axis, binds[i])
+    on = bones[i]
   }
   ride :: proc(bone: int) -> Frame {
     return {bone, geometry.TRANSFORM_IDENTITY}
@@ -618,12 +624,12 @@ joint :: proc(app: ^App, parent: Frame, slot: geometry.Face, j: Joint, binds: [3
     hinge_male(app, ride(bones[1]), j, true, true, true)
   case .WRIST:
     hinge_male(app, ride(bones[0]), j, false, false, true)
-    hinge_female(app, at(ride(bones[0]), {0, WRIST_DROP, 0}, linalg.quaternion_angle_axis(-math.PI / 2, Y)), j, true)
+    hinge_female(app, at(ride(bones[0]), dofs[1].offset, dofs[1].rest), j, true)
     hinge_male(app, ride(bones[1]), j, true, true, true)
   case .BALL:
     ball_male(app, ride(bones[2]), j)
   }
-  return {bones[count - 1], geometry.seat(b, child)}, bones[0]
+  return {bones[count - 1], geometry.seat(b, child)}
 }
 
 jaw_width :: proc(j: Joint) -> f32 {
@@ -687,7 +693,7 @@ build :: proc(app: ^App) {
   cylinder(app, pelvis, HIP_W / 2, DISC_T, {0, -DISC_T, 0})
   cylinder(app, pelvis, HIP_H, DOME_W, {-DOME_W / 2, -DISC_T, 0}, linalg.quaternion_angle_axis(math.PI / 2, Y) * linalg.quaternion_angle_axis(math.PI / 2, X), .HALF_CYLINDER)
 
-  torso, _ := joint(app, pelvis, {{}, Y, Z}, WAIST, {{chan(.WAIST_BEND), 1}, {chan(.TWIST), 1}, {chan(.WAIST_TILT), 1}}, {{}, NEG_Y, Z})
+  torso := joint(app, pelvis, {{}, Y, Z}, WAIST, {{chan(.WAIST_BEND), 1}, {chan(.TWIST), 1}, {chan(.WAIST_TILT), 1}}, {{}, NEG_Y, Z})
   part(app, "torso")
   cw: f32 = CHEST_W - 2 * FLANK_R
   box(app, torso, {CHEST_W * 0.55, TAPER_H + 0.06, CHEST_D * 0.75}, {0, TAPER_H / 2, 0})
@@ -698,7 +704,7 @@ build :: proc(app: ^App) {
   disc_r := shoulder_disc_radius()
   for s in ([2]f32{1, -1}) do cylinder(app, torso, disc_r + 0.07, CONE_LEN, {s * (CHEST_W / 2 - CONE_LEN), SHOULDER_Y, 0}, linalg.quaternion_angle_axis(-s * math.PI / 2, Z), .SHOULDER_CONE)
 
-  head, _ := joint(app, torso, {{0, NECK_Y, 0}, Y, Z}, NECK, {{chan(.HEAD_PITCH), 1}, {chan(.HEAD_YAW), 1}, {}}, {{}, NEG_Y, Z})
+  head := joint(app, torso, {{0, NECK_Y, 0}, Y, Z}, NECK, {{chan(.HEAD_PITCH), 1}, {chan(.HEAD_YAW), 1}, {}}, {{}, NEG_Y, Z})
   part(app, "head")
   cy: f32 = HEAD_R + 0.04
   cylinder(app, head, 0.14, 0.05)
@@ -719,16 +725,16 @@ limbs :: proc(app: ^App, pelvis, torso: Frame, side: Side) {
     return f if side == .L else -f
   }
 
-  arm, _ := joint(app, torso, {{-sgn * CHEST_W / 2, SHOULDER_Y, 0}, -sgn * X, sgn * Z}, SHOULDER, {bind(.SHOULDER, side, -sgn), bind(.ARM_OUT, side, -1), bind(.ARM_TWIST, side, sgn)}, {{}, Y, Z})
+  arm := joint(app, torso, {{-sgn * CHEST_W / 2, SHOULDER_Y, 0}, -sgn * X, sgn * Z}, SHOULDER, {bind(.SHOULDER, side, -sgn), bind(.ARM_OUT, side, -1), bind(.ARM_TWIST, side, sgn)}, {{}, Y, Z})
   part(app, "upper arm")
   cylinder(app, arm, ARM_W / 2, ARM_LEN + 0.08, {0, -ARM_LEN - 0.02, 0})
   cylinder(app, arm, ARM_W * 0.4, ARM_W + 0.14, {-(ARM_W + 0.14) / 2, -ARM_LEN, 0}, linalg.quaternion_angle_axis(-math.PI / 2, Z))
 
-  fore, _ := joint(app, arm, {{0, -ARM_LEN, 0}, NEG_Y, X}, ELBOW, {bind(.ELBOW, side, -sgn), bind(.FORE_TWIST, side, sgn), {}}, {{}, Y, X})
+  fore := joint(app, arm, {{0, -ARM_LEN, 0}, NEG_Y, X}, ELBOW, {bind(.ELBOW, side, -sgn), bind(.FORE_TWIST, side, sgn), {}}, {{}, Y, X})
   part(app, "forearm")
   box(app, fore, {FORE_W, FORE_LEN + 0.02, FORE_W * 0.9}, {0, -(FORE_LEN + 0.02) / 2, 0})
 
-  palm, _ := joint(app, fore, {{0, -FORE_LEN - 0.02, 0}, NEG_Y, X}, WRIST, {bind(.WRIST_BEND, side, -sgn), bind(.WRIST_TILT, side, 1), bind(.WRIST_TWIST, side, sgn)}, {{}, Y, flip(Z, side)})
+  palm := joint(app, fore, {{0, -FORE_LEN - 0.02, 0}, NEG_Y, X}, WRIST, {bind(.WRIST_BEND, side, -sgn), bind(.WRIST_TILT, side, 1), bind(.WRIST_TWIST, side, sgn)}, {{}, Y, flip(Z, side)})
   part(app, "palm")
   box(app, palm, {PALM_W, PALM_H, PALM_D}, {0, -PALM_H / 2 + 0.02, 0})
 
@@ -739,28 +745,25 @@ limbs :: proc(app: ^App, pelvis, torso: Frame, side: Side) {
     parent, at_slot := palm, slot
     for i in 0 ..< 3 {
       w := DIGIT_W * (1 - f32(i) * 0.12)
-      digit, _ := joint(app, parent, at_slot, KNUCKLE, {bind(Channel(int(Channel.CURL_BASE) + i), side, 1), {}, {}}, {{}, Y, X})
+      digit := joint(app, parent, at_slot, KNUCKLE, {bind(Channel(int(Channel.CURL_BASE) + i), side, 1), {}, {}}, {{}, Y, X})
       part(app, fmt.tprintf("digit %d", i))
       box(app, digit, {w, DIGIT_LEN + 0.05, w}, {0, -(DIGIT_LEN + 0.05) / 2 + 0.02, 0})
       parent, at_slot = digit, {{0, -DIGIT_LEN, 0}, NEG_Y, X}
     }
   }
 
-  leg := &app.legs[side]
-  thigh: Frame
-  thigh, leg.hip = joint(app, pelvis, {{-sgn * DOME_W / 2, HIP_Y, 0}, -sgn * X, sgn * Z}, HIP, {bind(.HIP, side, -sgn), {}, {}}, {{}, Y, Z})
+  thigh := joint(app, pelvis, {{-sgn * DOME_W / 2, HIP_Y, 0}, -sgn * X, sgn * Z}, HIP, {bind(.HIP, side, -sgn), {}, {}}, {{}, Y, Z})
   part(app, "thigh")
   box(app, thigh, {THIGH_W, THIGH_LEN + 0.1, THIGH_W + 0.04}, {0, -(THIGH_LEN + 0.1) / 2 + 0.07, 0})
   cylinder(app, thigh, THIGH_W * 0.38, THIGH_W + 0.16, {-(THIGH_W + 0.16) / 2, -THIGH_LEN, 0}, linalg.quaternion_angle_axis(-math.PI / 2, Z))
 
-  shin: Frame
-  shin, leg.knee = joint(app, thigh, {{0, -THIGH_LEN, 0}, NEG_Y, X}, KNEE, {bind(.KNEE, side, -sgn), {}, {}}, {{}, Y, X})
+  shin := joint(app, thigh, {{0, -THIGH_LEN, 0}, NEG_Y, X}, KNEE, {bind(.KNEE, side, -sgn), {}, {}}, {{}, Y, X})
   part(app, "shin")
   cylinder(app, shin, SHIN_W / 2, SHIN_LEN + 0.06, {0, -SHIN_LEN - 0.02, 0})
 
-  foot: Frame
-  foot, leg.ankle = joint(app, shin, {{0, -SHIN_LEN, 0}, NEG_Y, X}, ANKLE, {bind(.ANKLE, side, -sgn), {}, {}}, {{}, Y, flip(X, side)})
+  foot := joint(app, shin, {{0, -SHIN_LEN, 0}, NEG_Y, X}, ANKLE, {bind(.ANKLE, side, -sgn), {}, {}}, {{}, Y, flip(X, side)})
   part(app, "foot")
+  if side == .L do app.leg = {thigh.bone, shin.bone, foot.bone}
   z0: f32 = ANKLE_D / 2
   run: f32 = FOOT_LEN - z0 - TOE_D
   mid: f32 = SOLE_Y - FOOT_H / 2

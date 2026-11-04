@@ -72,7 +72,7 @@ animator_init :: proc(self: ^Animator, rig: ^Rig) -> bool {
   slice.fill(self.limits, JOINT_FREE)
   copy(self.local, skel.rest)
   pose := pose_of(self, skel, linalg.MATRIX4F32_IDENTITY)
-  for i in skel.order do compose_bone(pose, i)
+  pose_compose(pose)
   update_palette(self, skel)
   return true
 }
@@ -96,6 +96,7 @@ pose_of :: proc(self: ^Animator, skel: ^Skeleton, root_world: matrix[4, 4]f32) -
     parents = skel.parents,
     order = skel.order,
     lengths = skel.lengths,
+    rest = skel.rest,
     limits = self.limits,
     root_world = root_world,
     root_inv = linalg.matrix4_inverse(root_world),
@@ -151,7 +152,7 @@ animator_update :: proc(
     }
   }
   pose := pose_of(self, skel, root_world)
-  for i in skel.order do compose_bone(pose, i)
+  pose_compose(pose)
   // the other layers edit the skeleton-space pose
   for i in order {
     l := &self.layers[i]
@@ -235,8 +236,8 @@ bone_locals :: proc(self: ^Animator, skel: ^Skeleton, out: []geometry.Transform)
 }
 
 
-// bone_limits returns the joint limits IK and leg layers keep each bone within, indexed by
-// bone; edit them in place. Every bone starts JOINT_FREE.
+// bone_limits returns the joint limits (stops from the rest pose, JointLimit) IK and leg layers
+// keep each bone within, indexed by bone; edit them in place. Every bone starts JOINT_FREE.
 bone_limits :: proc(self: ^Animator) -> []JointLimit {
   return self.limits
 }

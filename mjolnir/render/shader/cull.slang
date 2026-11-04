@@ -74,8 +74,8 @@ bool in_view(View view, float3 center, float3 extent)
     return true;
 }
 
-// 2D Polyhedral Bounds of a Clipped, Perspective-Projected 3D Sphere: the uv box, false when
-// the sphere crosses the near plane.
+// 2D Polyhedral Bounds of a Clipped, Perspective-Projected 3D Sphere (or an orthographic one's):
+// the uv box, false when the sphere crosses the near plane.
 bool project_sphere(float3 center, float radius, float4x4 proj, float near, float far, out float4 aabb)
 {
     aabb = float4(0);
@@ -92,6 +92,14 @@ bool project_sphere(float3 center, float radius, float4x4 proj, float near, floa
 
     float P00 = proj[0][0];
     float P11 = abs(proj[1][1]);
+
+    // orthographic (w stays 1): the sphere's box is its centre plus and minus the radius
+    if (proj[3][3] == 1.0) {
+        aabb = float4((c.x - r) * P00, (c.y - r) * P11, (c.x + r) * P00, (c.y + r) * P11);
+        aabb = aabb.xwzy * float4(0.5, -0.5, 0.5, -0.5) + float4(0.5);
+        aabb = clamp(aabb, 0.0, 1.0);
+        return (aabb.z > aabb.x) && (aabb.w > aabb.y);
+    }
 
     float3 cr = c * r;
     float czr2 = c.z * c.z - r * r;

@@ -158,10 +158,11 @@ solve :: proc(app: ^App, dt: f32) {
   animator := &app.leg.animators[app.rig]
   limits := animation.bone_limits(animator)
   limit := app.limit_deg * math.RAD_PER_DEG
-  for b in app.bones[1:] do limits[b] = animation.JointLimit{{limit, limit, limit}}
+  for b in app.bones[1:] do limits[b] = animation.JointLimit{-limit, limit}
   if ik, ok := animation.layer_params(animator, app.ik, animation.IKParams); ok {
     ik.target, ik.pole = target, pole
     ik.pole_weight = app.pole_weight
+    ik.middle = u32(len(app.bones) / 2) // a limited chain bends its middle joint toward the pole
     ik.iterations = int(app.iterations)
   }
   animation.layer_fade(animator, app.ik, app.ik_weight)

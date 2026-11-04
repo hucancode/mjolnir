@@ -159,11 +159,6 @@ write :: proc(self: ^Choreo, pose: ^Pose, at: f32) {
 }
 
 @(private = "file")
-rest :: proc(key: int) -> f32 {
-  return HOME[key]
-}
-
-@(private = "file")
 rivals :: proc(key: int) -> []int {
   @(static) waist := [3]int{int(Channel.TWIST), int(Channel.WAIST_BEND), int(Channel.WAIST_TILT)}
   for w in waist do if w == key do return waist[:]
@@ -182,9 +177,9 @@ allowed :: proc(self: ^Choreo, key: int) -> bool {
   c, side := channel_of(key)
   if !is_leg(c) do return true
   other := Side.R if side == .L else Side.L
-  for leg in ([3]Channel{.HIP, .KNEE, .ANKLE}) {
+  for leg in LEG {
     k := chan(leg, other)
-    if self.was[k] != rest(k) || k in self.stirred do return false
+    if self.was[k] != HOME[k] || k in self.stirred do return false
   }
   return true
 }
@@ -198,7 +193,7 @@ push :: proc(self: ^Choreo, key: int, to, t0, dur: f32, e: ease.Ease, settle: f3
     laid = true
   }
   if !laid do append(&self.tracks, Track{key, self.cur[key], to, t0, dur, e, settle, self.power})
-  if to != rest(key) do self.stirred += {key}
+  if to != HOME[key] do self.stirred += {key}
   self.cur[key] = to
 }
 
@@ -206,8 +201,8 @@ push :: proc(self: ^Choreo, key: int, to, t0, dur: f32, e: ease.Ease, settle: f3
 cut :: proc(self: ^Choreo, key: int, to, t0, dur: f32, e: ease.Ease, settle: f32 = 0) {
   push(self, key, to, t0, dur, e, settle)
   if t := twin(self, key); t >= 0 do push(self, t, to, t0, dur, e, settle)
-  if to == rest(key) do return
-  for r in rivals(key) do if r != key && self.cur[r] != rest(r) do push(self, r, rest(r), t0, dur, e, settle)
+  if to == HOME[key] do return
+  for r in rivals(key) do if r != key && self.cur[r] != HOME[r] do push(self, r, HOME[r], t0, dur, e, settle)
 }
 
 @(private = "file")
@@ -286,9 +281,9 @@ plan :: proc(self: ^Choreo, pose: ^Pose) -> f32 {
   }
   resize(&self.tracks, carried)
   if self.mirror {
-    for side in Side do for leg in ([3]Channel{.HIP, .KNEE, .ANKLE}) {
+    for side in Side do for leg in LEG {
       k := chan(leg, side)
-      if k not_in self.locked && self.cur[k] != rest(k) do cut(self, k, rest(k), 0, PERIOD, .Sine_In_Out)
+      if k not_in self.locked && self.cur[k] != HOME[k] do cut(self, k, HOME[k], 0, PERIOD, .Sine_In_Out)
     }
   }
   if self.locked != {} do return improvise(self)

@@ -25,8 +25,8 @@ LEG_CHAINS := [LEG_COUNT]struct {
   {"leg_middle_l_0", "leg_middle_l_5"},
   {"leg_back_l_0", "leg_back_l_5"},
 }
-HIP_LIMIT :: animation.JointLimit{{math.PI / 6, math.PI / 2, math.PI / 6}}
-JOINT_LIMIT :: animation.JointLimit{{math.PI / 2, math.PI / 2, math.PI / 2}}
+HIP_LIMIT :: animation.JointLimit{-[3]f32{math.PI / 6, math.PI / 2, math.PI / 6}, {math.PI / 6, math.PI / 2, math.PI / 6}}
+JOINT_LIMIT :: animation.JointLimit{-math.PI / 2, math.PI / 2}
 STRIDE :: 4.5
 MIN_PERIOD :: 0.3
 MAX_PERIOD :: 3.0

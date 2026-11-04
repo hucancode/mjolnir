@@ -53,7 +53,8 @@ leg_apply :: proc(pose: Pose, bones: []u32, state: []f32, params: LegParams, del
   if d2 := linalg.dot(leg_dir, leg_dir); d2 > 1e-8 do pole_offset = up - leg_dir * linalg.dot(up, leg_dir) / d2
   if linalg.length2(pole_offset) < 1e-8 do pole_offset = {1, 0, 0}
   pole := (root + foot) * 0.5 + linalg.normalize(pole_offset) * 2.0
-  ik_solve(pose, bones, foot, pole, 0.8, 10, 0.01)
+  // a limited leg bends its middle joint (the knee) toward the pole
+  ik_solve(pose, bones, {target = foot, pole = pole, pole_weight = 0.8, iterations = 10, tolerance = 0.01, middle = ik_chain_middle(pose, bones, {})})
 }
 
 // Retarget the foot from the leg root's world position, leading it by the root's velocity,
