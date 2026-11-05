@@ -23,6 +23,7 @@ Leg :: struct {
   last_target: [3]f32, // where the foot last landed
   last_root:   [3]f32,
   time:        f32,
+  middle:      u32, // the knee: ik_chain_middle of the pose the leg started from
 }
 
 @(private)
@@ -42,7 +43,7 @@ leg_state :: #force_inline proc(state: []f32) -> ^Leg {
 leg_apply :: proc(pose: Pose, bones: []u32, state: []f32, params: LegParams, delta_time: f32, fresh: bool) {
   if len(bones) < 2 do return
   leg := leg_state(state)
-  if fresh do leg^ = {target = params.offset, foot = params.offset, last_target = params.offset}
+  if fresh do leg^ = {target = params.offset, foot = params.offset, last_target = params.offset, middle = ik_chain_middle(pose, bones, {})}
   root := pose.positions[bones[0]]
   leg_follow(leg, params, delta_time, to_world(pose, root))
   foot := to_model(pose, leg.foot)
@@ -54,7 +55,7 @@ leg_apply :: proc(pose: Pose, bones: []u32, state: []f32, params: LegParams, del
   if linalg.length2(pole_offset) < 1e-8 do pole_offset = {1, 0, 0}
   pole := (root + foot) * 0.5 + linalg.normalize(pole_offset) * 2.0
   // a limited leg bends its middle joint (the knee) toward the pole
-  ik_solve(pose, bones, {target = foot, pole = pole, pole_weight = 0.8, iterations = 10, tolerance = 0.01, middle = ik_chain_middle(pose, bones, {})})
+  ik_solve(pose, bones, {target = foot, pole = pole, pole_weight = 0.8, iterations = 10, tolerance = 0.01, middle = leg.middle})
 }
 
 // Retarget the foot from the leg root's world position, leading it by the root's velocity,

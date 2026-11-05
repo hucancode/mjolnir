@@ -25,8 +25,14 @@ LEG_CHAINS := [LEG_COUNT]struct {
   {"leg_middle_l_0", "leg_middle_l_5"},
   {"leg_back_l_0", "leg_back_l_5"},
 }
-HIP_LIMIT :: animation.JointLimit{-[3]f32{math.PI / 6, math.PI / 2, math.PI / 6}, {math.PI / 6, math.PI / 2, math.PI / 6}}
-JOINT_LIMIT :: animation.JointLimit{-math.PI / 2, math.PI / 2}
+LEG_LIMITS := [6]animation.JointLimit {
+  {{-0.5, 0, -0.8}, {0.5, 0, 0.8}},
+  {{-0.5, 0, 0}, {0.5, 0, 0}},
+  {{-0.8, 0, 0}, {0.8, 0, 0}},
+  {{-0.3, 0, 0}, {1.0, 0, 0}},
+  {{-0.5, 0, 0}, {0.8, 0, 0}},
+  {},
+}
 STRIDE :: 4.5
 MIN_PERIOD :: 0.3
 MAX_PERIOD :: 3.0
@@ -111,7 +117,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   for chain, i in LEG_CHAINS {
     offset, _ := animation.rest_offset(skel, chain.root, chain.tip)
     bones, _ := animation.bone_chain(skel, chain.root, chain.tip, context.temp_allocator)
-    for b, k in bones do limits[b] = HIP_LIMIT if k == 0 else JOINT_LIMIT
+    for b, k in bones do limits[b] = LEG_LIMITS[k]
     leg := animation.LegParams{offset = offset}
     tripod_step(app, &leg, i)
     app.legs[i] = animation.layer_create(animator, rig, leg, bones)
