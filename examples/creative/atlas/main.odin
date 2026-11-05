@@ -1,4 +1,7 @@
 // Atlas: a robot built from hinges and ball joints, driven by channels. Watch it dance, or pose it.
+// Its feet stand on the floor by mjolnir's leg and foot IK (animation.leg_measure, foot_measure,
+// foot_solve): the dance only says where each sole goes, and the foot lands on its heel, stands
+// flat, peels its heel up and rolls over its hinged toes, which follow it through (LagHistory).
 package main
 
 import "core:fmt"
@@ -206,6 +209,7 @@ ELBOW :: Joint{name = "elbow", kind = .HINGE_TWIST, jaw = 0.14, lug_t = 0.06, lu
 WRIST :: Joint{name = "wrist", kind = .WRIST, jaw = 0.1, lug_t = 0.05, lug_d = 0.2, pin_r = 0.04, clr = 0.008, tang = true}
 KNEE :: Joint{name = "knee", kind = .HINGE, jaw = 0.15, lug_t = 0.07, lug_d = 0.3, pin_r = 0.06, clr = 0.03, tang = true, disc_f = true, disc_m = true}
 ANKLE :: Joint{name = "ankle", kind = .HINGE, jaw = 0.14, lug_t = 0.065, lug_d = 0.26, pin_r = 0.055, clr = 0.03, tang = true, disc_f = true, disc_m = true}
+TOE :: Joint{name = "toe", kind = .PIN, jaw = 0.2, lug_t = 0.02, pin_r = 0.035, clr = 0.005, pin_out = 0.01}
 KNUCKLE :: Joint{name = "knuckle", kind = .PIN, jaw = 0.06, lug_t = 0.01, pin_r = 0.035, clr = 0.005, pin_out = 0.01}
 
 Bind :: struct {
@@ -259,6 +263,25 @@ Leg :: struct {
   hip, knee, ankle: int,
 }
 
+// Foot is a leg standing by IK: its chain (the hip's three dofs, the knee, the ankle: the foot's own
+// joint), its sole in the ankle bone's frame, its toe bone, what leg_measure and foot_measure read
+// off it at rest, and where its sole was, for its toes to follow.
+Foot :: struct {
+  chain:   [5]u32,
+  sole:    [3]f32,
+  toe:     int,
+  leg:     animation.LegRig,
+  foot:    animation.FootRig,
+  history: animation.LagHistory,
+}
+
+// FOOT_TRAIL is how a foot's ball and toes follow its sole: each link where it was over the
+// tenth of a second before the last's.
+FOOT_TRAIL :: animation.Lag{step = 0.08, window = 0.08, samples = 4}
+
+// the corners of make_cube's box, in its frame
+CUBE_CORNERS :: [8][3]f32{{-1, -1, -1}, {1, -1, -1}, {-1, 1, -1}, {1, 1, -1}, {-1, -1, 1}, {1, -1, 1}, {-1, 1, 1}, {1, 1, 1}}
+
 Orb :: struct {
   node:                 world.NodeHandle,
   radius, height, tilt: f32,
@@ -284,6 +307,13 @@ App :: struct {
   count:     int,
   seed:      u32,
   leg:       Leg, // the left one: both are alike
+  rig:       animation.Pose, // the bones as mjolnir's animation sees them, posed by the channels then IK
+  feet:      [Side]Foot,
+  foot_ik:   bool,
+  collect:   Maybe(Side), // building a foot: its pieces' corners go to bone_corners
+  bone_corners: [Side][dynamic]animation.BoneCorner,
+  corners:   [dynamic][3]f32, // foot_measure's
+  conforms:  [dynamic]animation.FootConform,
   thigh:     f32,
   shin:      f32,
   hip_y:     f32,
@@ -324,6 +354,7 @@ main :: proc() {
   app.pose = HOME
   app.current = HOME
   app.dancing = true
+  app.foot_ik = true
   app.tempo = 60 / PERIOD
   app.seed = rand.uint32()
   if !platform.init(&app.platform, 1280, 720, "Atlas") do return
@@ -392,6 +423,19 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
 shutdown :: proc(app: ^App) {
   delete(app.pieces)
+  for &f in app.feet do animation.lag_history_destroy(&f.history)
+  for c in app.bone_corners do delete(c)
+  delete(app.corners)
+  delete(app.conforms)
+  delete(app.rig.local)
+  delete(app.rig.positions)
+  delete(app.rig.rotations)
+  delete(app.rig.scales)
+  delete(app.rig.parents)
+  delete(app.rig.order)
+  delete(app.rig.lengths)
+  delete(app.rig.rest)
+  delete(app.rig.limits)
   choreo_destroy(&app.choreo)
   delete(app.bones)
   delete(app.poses)
@@ -431,15 +475,40 @@ pose :: proc(app: ^App) {
       t := clamp((curl - c.from[0]) / (c.from[1] - c.from[0]), 0, 1)
       solved[chan(Channel(int(Channel.CURL_BASE) + i), side)] = math.lerp(c.to[0], c.to[1], t)
     }
-    hip, knee, ankle := chan(.HIP, side), chan(.KNEE, side), chan(.ANKLE, side)
-    z := app.thigh * math.sin(solved[hip]) + app.shin * math.sin(solved[hip] + solved[knee])
-    y := app.thigh * math.cos(solved[hip]) + app.shin * math.cos(solved[hip] + solved[knee])
-    floor := app.hip_y - drop - app.ankle_y
-    a, b, _ := animation.two_link(app.thigh, app.shin, {min(y, floor), z})
-    solved[hip], solved[knee] = a, b
-    if y >= floor - 1e-6 do solved[ankle] = -(a + b)
   }
-  world.set_world_poses(&app.scene, solve(app, solved[:], {0, app.root_y - drop, 0}))
+  solve(app, solved[:], {0, app.root_y - drop, 0})
+  if app.foot_ik do for side in Side do stand_on(app, side)
+  world.set_world_poses(&app.scene, bone_poses(app))
+}
+
+// stand_on puts foot `side`'s sole where the channels put it, but never below the floor (y = 0),
+// by mjolnir's leg and foot IK: the leg reaches it, the foot lands heel first, stands flat, peels
+// its heel up as the leg runs out of reach and rolls over its toes, which follow it.
+stand_on :: proc(app: ^App, side: Side) {
+  f := &app.feet[side]
+  p := app.rig
+  chain := f.chain[:]
+  ankle := chain[len(chain) - 1]
+  target := p.positions[ankle] + linalg.mul(p.rotations[ankle], f.sole)
+  target.y = max(target.y, 0)
+  animation.lag_record(&f.history, app.time, target[:])
+  trail: [2][3]f32
+  for &t, link in trail {
+    animation.lag_read(&f.history, FOOT_TRAIL, link, app.time, t[:])
+    t -= target
+  }
+  toes := animation.foot_solve(p, chain, f.leg, f.foot, app.corners[:], app.conforms[:], target, trail[0], trail[1])
+  moved := make([]bool, len(p.parents), context.temp_allocator)
+  for b in chain do moved[b] = true
+  animation.pose_propagate(p, moved)
+  animation.foot_conform(p, f.foot, app.corners[:], app.conforms[:], toes)
+}
+
+// bone_poses is the bones as last solved, for the scene.
+bone_poses :: proc(app: ^App) -> []BonePose {
+  resize(&app.poses, len(app.bones))
+  for b, i in app.bones do app.poses[i] = {b.node, app.rig.positions[i], app.rig.rotations[i]}
+  return app.poses[:]
 }
 
 hip_drop :: proc(app: ^App, level: f32) -> f32 {
@@ -449,13 +518,65 @@ hip_drop :: proc(app: ^App, level: f32) -> f32 {
 }
 
 stand :: proc(app: ^App) {
+  rig_init(app)
   rest: Pose
-  poses := solve(app, rest[:])
+  solve(app, rest[:])
   leg := app.leg
-  hip, knee, ankle := poses[leg.hip].position, poses[leg.knee].position, poses[leg.ankle].position
+  hip, knee, ankle := app.rig.positions[leg.hip], app.rig.positions[leg.knee], app.rig.positions[leg.ankle]
   app.thigh, app.shin = linalg.length(hip - knee), linalg.length(knee - ankle)
   app.hip_y, app.ankle_y = hip.y, ankle.y
   app.root_y = -(ankle.y - REACH + SOLE_Y - FOOT_H)
+  // standing on the floor at rest, each leg read for IK: how it bends, its foot's corners
+  solve(app, rest[:], {0, app.root_y, 0})
+  for side in Side {
+    f := &app.feet[side]
+    f.leg = animation.leg_measure(app.rig, f.chain[:], f.sole, ends = 1)
+    f.foot = animation.foot_measure(app.rig, f.chain[:], f.leg, app.bone_corners[side][:], &app.corners, &app.conforms)
+    f.history = animation.lag_history_make(32, 3)
+  }
+}
+
+// rig_init makes the bones' animation.Pose: each bone's rest on its parent, and its stops: its
+// channel's range about its axis, the rest locked; a toe hinges freely enough to lie flat, an ankle
+// as a real one does.
+rig_init :: proc(app: ^App) {
+  n := len(app.bones)
+  app.rig = {
+    local      = make([]geometry.Transform, n),
+    positions  = make([][3]f32, n),
+    rotations  = make([]quaternion128, n),
+    scales     = make([][3]f32, n),
+    parents    = make([]i32, n),
+    order      = make([]u32, n),
+    lengths    = make([]f32, n),
+    rest       = make([]geometry.Transform, n),
+    limits     = make([]animation.JointLimit, n),
+    root_world = linalg.MATRIX4F32_IDENTITY,
+    root_inv   = linalg.MATRIX4F32_IDENTITY,
+  }
+  for b, i in app.bones {
+    app.rig.parents[i], app.rig.order[i] = i32(b.parent), u32(i)
+    app.rig.rest[i] = {b.offset, b.rest, 1}
+    app.rig.lengths[i] = linalg.length(b.offset)
+    app.rig.scales[i] = 1
+    if b.bind.sign == 0 do continue
+    c, _ := channel_of(b.bind.channel)
+    lo, hi := b.bind.sign * CONTROLS[c].min, b.bind.sign * CONTROLS[c].max
+    app.rig.limits[i].lo[b.axis], app.rig.limits[i].hi[b.axis] = min(lo, hi), max(lo, hi)
+  }
+  // the legs' mechanical range, past what the sliders ask: a crouch folds the knee deep, the hip
+  // and ankle following (the sliders' ranges are the dance's, not the joints')
+  stretch :: proc(l: ^animation.JointLimit, axis: Axis, most: f32) {
+    // the way the channel bends it, out to `most`
+    if l.hi[axis] > 0 do l.hi[axis] = most
+    if l.lo[axis] < 0 do l.lo[axis] = -most
+  }
+  for f in app.feet {
+    stretch(&app.rig.limits[f.chain[0]], app.bones[f.chain[0]].axis, 100 * DEG)
+    stretch(&app.rig.limits[f.chain[3]], app.bones[f.chain[3]].axis, 150 * DEG)
+    app.rig.limits[f.chain[4]] = {{-80 * DEG, 0, 0}, {80 * DEG, 0, 0}}
+    app.rig.limits[f.toe] = {{-40 * DEG, 0, 0}, {40 * DEG, 0, 0}}
+  }
 }
 
 // material_of is the color a piece's key gets with the current seed.
@@ -470,9 +591,10 @@ recolor :: proc(app: ^App) {
 panel :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
   defer debugui.end(&app.debug, &app.renderer)
-  if debugui.window(&app.debug, "Settings", {20, 20, 290, 245}) {
+  if debugui.window(&app.debug, "Settings", {20, 20, 290, 270}) {
     mu.layout_row(ctx, {90, -1}, 0)
     mu.checkbox(ctx, "Dance", &app.dancing)
+    mu.checkbox(ctx, "Foot IK", &app.foot_ik)
     if .CHANGE in mu.checkbox(ctx, "Mirror", &app.choreo.mirror) do choreo_rewire(&app.choreo)
     mu.layout_row(ctx, {-1}, 0)
     if .SUBMIT in mu.button(ctx, "New colors") {
@@ -528,6 +650,9 @@ piece :: proc(app: ^App, f: Frame, mesh: Mesh, scale: [3]f32, position: [3]f32 =
   node := world.spawn(&app.scene, parent = app.bones[f.bone].node)
   placed := geometry.transform_mul(f.place, {position, rotation, scale})
   world.transform(&app.scene, node)^ = placed
+  if side, ok := app.collect.?; ok && (mesh == .BOX || mesh == .FOOT_SLOPE || mesh == .HEEL_SLOPE) {
+    for c in CUBE_CORNERS do append(&app.bone_corners[side], animation.BoneCorner{u32(f.bone), geometry.transform_point(placed, c)})
+  }
   key := hash.fnv32a(transmute([]u8)fmt.tprintf("%s %d", app.part, app.count))
   append(&app.pieces, Piece{node, mesh, key})
   if next do app.count += 1
@@ -548,18 +673,16 @@ bone :: proc(app: ^App, parent: int, offset: [3]f32 = {}, rest := linalg.QUATERN
   return len(app.bones) - 1
 }
 
-solve :: proc(app: ^App, channels: []f32, origin: [3]f32 = {}) -> []BonePose {
-  resize(&app.poses, len(app.bones))
+// solve poses the bones by `channels` (each bone turned about its axis on its rest), the root at
+// `origin`: app.rig, for IK to edit and the scene to show.
+solve :: proc(app: ^App, channels: []f32, origin: [3]f32 = {}) {
   for b, i in app.bones {
-    position, rotation := origin, linalg.QUATERNIONF32_IDENTITY
-    if b.parent >= 0 do position, rotation = app.poses[b.parent].position, app.poses[b.parent].rotation
-    position += linalg.mul(rotation, b.offset)
     axis: [3]f32
     axis[b.axis] = 1
-    rotation *= b.rest * linalg.quaternion_angle_axis_f32(b.bind.sign * channels[b.bind.channel], axis)
-    app.poses[i] = {b.node, position, linalg.normalize(rotation)}
+    app.rig.local[i] = {b.offset, linalg.normalize(b.rest * linalg.quaternion_angle_axis_f32(b.bind.sign * channels[b.bind.channel], axis)), 1}
+    if b.parent < 0 do app.rig.local[i].position += origin
   }
-  return app.poses[:]
+  animation.pose_compose(app.rig)
 }
 
 mounts :: proc(j: Joint) -> (a, b: geometry.Face) {
@@ -764,15 +887,26 @@ limbs :: proc(app: ^App, pelvis, torso: Frame, side: Side) {
   foot := joint(app, shin, {{0, -SHIN_LEN, 0}, NEG_Y, X}, ANKLE, {bind(.ANKLE, side, -sgn), {}, {}}, {{}, Y, flip(X, side)})
   part(app, "foot")
   if side == .L do app.leg = {thigh.bone, shin.bone, foot.bone}
+  // the hip's three dofs (the swing, then two locked), the knee, the ankle; the sole under it
+  hip := u32(thigh.bone - 2)
+  app.feet[side].chain = {hip, hip + 1, u32(thigh.bone), u32(shin.bone), u32(foot.bone)}
+  app.feet[side].sole = geometry.transform_point(foot.place, {0, SOLE_Y - FOOT_H, 0})
+  app.collect = side
+  defer app.collect = nil
   z0: f32 = ANKLE_D / 2
   run: f32 = FOOT_LEN - z0 - TOE_D
   mid: f32 = SOLE_Y - FOOT_H / 2
   toe_h: f32 = FOOT_H * 0.45
   box(app, foot, {FOOT_W, FOOT_H, ANKLE_D}, {0, mid, 0})
   box(app, foot, {FOOT_W, FOOT_H, run}, {0, mid, z0 + run / 2}, mesh = .FOOT_SLOPE)
-  box(app, foot, {FOOT_W * 0.92, toe_h, TOE_D}, {0, SOLE_Y - FOOT_H + toe_h / 2, z0 + run + TOE_D / 2})
   box(app, foot, {FOOT_W, FOOT_H, HEEL_D}, {0, mid, -z0 - HEEL_D / 2})
   box(app, foot, {FOOT_W, FOOT_H, HEEL_CAP_D}, {0, mid, -z0 - HEEL_D - HEEL_CAP_D / 2}, linalg.quaternion_angle_axis(math.PI, Y), .HEEL_SLOPE)
+  // the toes, on a hinge at the ball: they lie flat as the foot rolls over them
+  toe_y: f32 = SOLE_Y - FOOT_H + toe_h / 2
+  toe := joint(app, foot, {{0, toe_y, z0 + run}, Z, X}, TOE, {{}, {}, {}}, {{}, Y, X})
+  app.feet[side].toe = toe.bone
+  part(app, "toe")
+  box(app, toe, {FOOT_W * 0.92, TOE_D, toe_h}, {0, -TOE_D / 2, 0})
 }
 
 shoulder_disc_radius :: proc() -> f32 {

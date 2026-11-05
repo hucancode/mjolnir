@@ -17,7 +17,7 @@ package mjolnir
 // API conventions, the same in every package:
 //   A module's init/shutdown own it for the application; teardown drops what a map made.
 //   make_x returns a value (make_point_light, make_material, make_cube); x_create stores one
-//   and returns a handle (light_create); x_init fills a struct the caller owns (spline_init,
+//   and returns a handle (light_create); x_init fills a struct the caller owns (arc_init,
 //   font.init); x_destroy frees either. A generational handle (world, physics, ui,
 //   animation layers, navigation agents) that went stale is ignored; a plain u32 handle (render)
 //   is not checked, so never destroy one twice. A package's `destroy` group frees any of its

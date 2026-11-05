@@ -194,6 +194,8 @@ layer_apply :: proc(pose: Pose, l: ^Layer, bones: []u32, state: []f32, delta_tim
     path_apply(pose, bones, state, p, delta_time)
   case LegParams:
     leg_apply(pose, bones, state, p, delta_time, l.fresh)
+  case FollowParams:
+    follow_apply(pose, bones, state, p, delta_time, l.fresh)
   case CustomParams:
     if p.apply != nil do p.apply(pose, bones, state, p.values, delta_time, l.fresh)
   }
@@ -278,9 +280,10 @@ valid_layer :: #force_inline proc(self: ^Animator, layer: LayerHandle) -> bool {
 //   ClipParams: bones it animates, nil = all
 //   IKParams, LegParams: a chain, root first, each bone the parent of the next (bone_chain)
 //   TailParams, PathParams: a chain of at least 2 bones, head first (bone_chain_down)
+//   FollowParams: the bones that follow, head first (link k is bones[k])
 //   CustomParams: whatever its apply edits
 // Layers run in priority order, lowest first, then by creation. The default puts clips (0)
-// before tails, paths, legs and custom layers (100), and those before IK (200).
+// before tails, paths, legs, follows and custom layers (100), and those before IK (200).
 // Fails on an unknown clip, a bone out of range or a broken chain.
 layer_create :: proc(
   self: ^Animator,
@@ -318,6 +321,9 @@ layer_create :: proc(
   case LegParams:
     if !is_chain(skel, bones) do return
     state = LEG_STATE
+  case FollowParams:
+    if len(bones) == 0 do return
+    state = follow_state_size(p, len(bones))
   case CustomParams:
     state = int(p.state)
   case:
@@ -453,7 +459,7 @@ clip_seek :: proc(self: ^Animator, layer: LayerHandle, time: f32) -> bool {
   return true
 }
 
-// path_points sets the path of a path layer to a Catmull-Rom spline through `points` (copied),
+// path_points sets the path of a path layer to a smooth arc (geometry.Arc) through `points` (copied),
 // a loop when `closed` (needs 3 points). False if it is not a path layer or has < 2 points.
 path_points :: proc(self: ^Animator, layer: LayerHandle, points: [][3]f32, closed := false) -> bool {
   if !valid_layer(self, layer) || len(points) < 2 do return false
@@ -462,7 +468,7 @@ path_points :: proc(self: ^Animator, layer: LayerHandle, points: [][3]f32, close
   loop := closed && len(points) >= 3
   travelled := self.state[l.state.start]
   pool_remove(self, l.state, true)
-  size := path_state_size(len(points), loop)
+  size := path_state_size(len(points))
   l.state = {u32(len(self.state)), u32(size)}
   resize(&self.state, len(self.state) + size)
   state := range_of(self.state[:], l.state)

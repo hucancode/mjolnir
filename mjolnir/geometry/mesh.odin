@@ -159,10 +159,10 @@ mesh_merge :: proc(parts: []Mesh, transforms: []Transform) -> Mesh {
   return {vertices = vertices, indices = indices}
 }
 
-// destroy frees a mesh, BVH, spline or chain, as its *_destroy does.
+// destroy frees a mesh, BVH, arc or chain, as its *_destroy does.
 destroy :: proc {
   mesh_destroy,
   bvh_destroy,
-  spline_destroy,
+  arc_destroy,
   chain_destroy,
 }

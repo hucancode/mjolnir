@@ -6,16 +6,20 @@ import "core:math/linalg"
 // LegParams makes a leg step: its foot stays planted while the leg's root moves, then lifts
 // and lands at a new spot ahead once per cycle. Its layer's bones are the leg, hip first,
 // each bone the parent of the next (bone_chain); joint limits come from bone_limits. Run one
-// layer per leg and shift time_offset to set the gait.
+// layer per leg and shift time_offset to set the gait. Any leg bends the way its rest pose and
+// stops say (leg_measure, leg_pole): a knee forward, a hock back, a spider's knee up.
 LegParams :: struct {
   offset:         [3]f32, // rest foot position relative to the leg's root, world space
   lift_height:    f32,
   lift_frequency: f32, // seconds per step cycle
   lift_duration:  f32, // seconds the foot is in the air per cycle
   time_offset:    f32, // phase shift of the step cycle
+  ends:           u32, // how many bones at the leg's end are the foot's own (an ankle): they don't reach
+  swivel:         f32, // radians turning the knee about the line from hip to foot
 }
 
-// A leg's state, world space.
+// A leg's state: its step, world space; how it bends (leg_measure, at rest) and how the bone it
+// hangs from was turned then, skeleton space.
 @(private)
 Leg :: struct {
   target:      [3]f32, // where the foot wants to be
@@ -23,7 +27,8 @@ Leg :: struct {
   last_target: [3]f32, // where the foot last landed
   last_root:   [3]f32,
   time:        f32,
-  middle:      u32, // the knee: ik_chain_middle of the pose the leg started from
+  rig:         LegRig,
+  hip:         [4]f32, // the turn of the bone above the leg at rest (x, y, z, w)
 }
 
 @(private)
@@ -38,24 +43,25 @@ leg_state :: #force_inline proc(state: []f32) -> ^Leg {
   return (^Leg)(raw_data(state))
 }
 
-// Step the foot after the leg's root, then reach it with IK.
+// Step the foot after the leg's root, then reach it with IK, the leg bending as it does at rest,
+// turned with the bone it hangs from.
 @(private)
 leg_apply :: proc(pose: Pose, bones: []u32, state: []f32, params: LegParams, delta_time: f32, fresh: bool) {
   if len(bones) < 2 do return
   leg := leg_state(state)
-  if fresh do leg^ = {target = params.offset, foot = params.offset, last_target = params.offset, middle = ik_chain_middle(pose, bones, {})}
+  above := pose.parents[bones[0]]
+  if fresh {
+    leg^ = {target = params.offset, foot = params.offset, last_target = params.offset}
+    rest := pose_at_rest(pose)
+    leg.rig = leg_measure(rest, bones, {}, params.ends)
+    q := rest.rotations[above] if above >= 0 else linalg.QUATERNIONF32_IDENTITY
+    leg.hip = {q.x, q.y, q.z, q.w}
+  }
   root := pose.positions[bones[0]]
   leg_follow(leg, params, delta_time, to_world(pose, root))
-  foot := to_model(pose, leg.foot)
-  // pole above the leg's midpoint, perpendicular to the leg, so the knee bends up and out
-  leg_dir := foot - root
-  up := [3]f32{0, 1, 0}
-  pole_offset := up
-  if d2 := linalg.dot(leg_dir, leg_dir); d2 > 1e-8 do pole_offset = up - leg_dir * linalg.dot(up, leg_dir) / d2
-  if linalg.length2(pole_offset) < 1e-8 do pole_offset = {1, 0, 0}
-  pole := (root + foot) * 0.5 + linalg.normalize(pole_offset) * 2.0
-  // a limited leg bends its middle joint (the knee) toward the pole
-  ik_solve(pose, bones, {target = foot, pole = pole, pole_weight = 0.8, iterations = 10, tolerance = 0.01, middle = leg.middle})
+  turn := linalg.QUATERNIONF32_IDENTITY
+  if above >= 0 do turn = pose.rotations[above] * linalg.quaternion_inverse(quaternion(x = leg.hip.x, y = leg.hip.y, z = leg.hip.z, w = leg.hip.w))
+  leg_reach(pose, bones, leg.rig, to_model(pose, leg.foot), params.swivel, turn)
 }
 
 // Retarget the foot from the leg root's world position, leading it by the root's velocity,

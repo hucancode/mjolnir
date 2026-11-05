@@ -21,7 +21,8 @@ IKParams :: struct {
   tolerance:   f32, // stop this close to target; 0 = 0.001
   end:         [3]f32, // the point that reaches, in the last bone's frame (a sole, a palm); 0 = the last bone itself
   ends:        u32, // how many bones at the chain's end are the end's own joints (an ankle, a wrist): they don't reach
-  hold:        bool, // the end's own joints turn to keep its facing from before the solve (a planted foot); else they keep their turns
+  hold:        bool, // the end's own joints turn to keep its facing from before the solve (a planted foot), giving last (the rest of the chain turns it first); else they keep their turns
+  face:        quaternion128, // with hold, the facing kept, in skeleton space, instead of the one from before the solve; 0 = that one
   middle:      u32, // limited chains: index in the chain of the joint the pole places (ik_chain_middle); 0 = none
 }
 
@@ -224,30 +225,35 @@ ccd_turn :: proc(c: Ccd, k: int, axis: int, at, want: [3]f32) {
 // it (straight, or out of reach, it still bends the pole's way). ok is false when the pole is on
 // that line.
 @(private = "file")
-ccd_middle :: proc(c: Ccd, mid: int, target, pole: [3]f32) -> (want: [3]f32, ok: bool) {
+ccd_middle :: proc(c: Ccd, mid: int, target, pole: [3]f32) -> (want, line, side: [3]f32, ok: bool) {
   r := c.pose.positions[c.bones[mid - 1]]
   at := c.pose.positions[c.bones[mid]]
   la, lb := linalg.length(at - r), linalg.length(ccd_end(c) - at)
   d := linalg.length(target - r)
   if d < 1e-5 do return
-  line := (target - r) / d
+  line = (target - r) / d
   toward := (pole - r) - linalg.dot(pole - r, line) * line
   if linalg.length2(toward) < 1e-10 do return
+  side = linalg.normalize(toward)
   // never quite on the line, so the pole's side still says which way it bends
   h := 0.01 * la
   if d < la + lb {
     x := clamp((la * la - lb * lb + d * d) / (2 * d), -la, la)
     h = max(h, math.sqrt(max(0, la * la - x * x)))
   }
-  return r + line * math.sqrt(max(0, la * la - h * h)) + linalg.normalize(toward) * h, true
+  return r + line * math.sqrt(max(0, la * la - h * h)) + side * h, line, side, true
 }
 
 // Reach a limited chain by damped least squares over its joints' turns, from the pose it has: its
-// end onto the target, its middle joint toward where the pole puts it and, with `hold`, its end
+// end onto the target, its middle joint toward where the pole puts it (across the line to the
+// target only, and never pulled back from further out the pole's side: it picks the way the chain
+// bends, the end's rows how far it reaches, so a middle joint on a stop near full reach never pulls
+// the end off the target) and, with `hold`, its end
 // facing as it did, weighed together; then a few steps with the facing let go settle the first two
 // exactly (they always agree, so the facing gives up only what they need). Each step moves the
 // joints the least that does it, within their stops (a joint on a stop the step pushes further onto
-// sits that step out). The end's own joints reach too when they hold, and keep their turns otherwise.
+// sits that step out). The end's own joints reach too when they hold, stiffly (the rest of the
+// chain turns the end first, they give what it can't), and keep their turns otherwise.
 @(private = "file")
 limited_reach :: proc(pose: Pose, bones: []u32, params: IKParams) {
   c := ccd_init(pose, bones, params.end)
@@ -258,7 +264,7 @@ limited_reach :: proc(pose: Pose, bones: []u32, params: IKParams) {
   iterations := params.iterations if params.iterations > 0 else 10
   tolerance := params.tolerance if params.tolerance > 0 else 0.001
   last := bones[n - 1]
-  keep := pose.rotations[last]
+  keep := params.face if params.face != 0 else pose.rotations[last]
   // the joints' turns being solved
   Dof :: struct {
     k, axis: int,
@@ -279,16 +285,28 @@ limited_reach :: proc(pose: Pose, bones: []u32, params: IKParams) {
   step := make([]f32, m, context.temp_allocator)
   active := make([]bool, m, context.temp_allocator)
   SETTLE :: 6
+  OWN_STIFF :: 100
   for it in 0 ..< iterations + SETTLE {
     facing := params.hold && it < iterations
     ccd_pose(c, 0)
     end := ccd_end(c)
     err: [ROWS]f32
     err[0], err[1], err[2] = expand_values(params.target - end)
+    // the middle row says which way the chain bends, not how far it reaches: it pulls the middle
+    // joint across the line to the target (into the pole's plane, out to the pole's side), never
+    // along it, and never back from a side it is already further out to (a joint on a stop the end
+    // reaches past holds it there): what the end needs of it the end's rows ask
     at: [3]f32
+    keep_mid: [2][3]f32 // the directions the middle row lets go of
     if mid > 0 {
       at = pose.positions[bones[mid]]
-      if want, ok := ccd_middle(c, mid, params.target, params.pole); ok do err[3], err[4], err[5] = expand_values(want - at)
+      if want, line, side, ok := ccd_middle(c, mid, params.target, params.pole); ok {
+        off := want - at
+        keep_mid[0] = line
+        if linalg.dot(off, side) < 0 do keep_mid[1] = side
+        for v in keep_mid do off -= v * linalg.dot(off, v)
+        err[3], err[4], err[5] = expand_values(off)
+      }
     }
     if facing {
       // the turn from how it faces to how it faced, as a rotation vector
@@ -306,7 +324,11 @@ limited_reach :: proc(pose: Pose, bones: []u32, params: IKParams) {
       pivot := pose.positions[bones[d.k]]
       col: [ROWS]f32
       col[0], col[1], col[2] = expand_values(linalg.cross(axis, end - pivot))
-      if d.k < mid do col[3], col[4], col[5] = expand_values(linalg.cross(axis, at - pivot))
+      if d.k < mid {
+        v := linalg.cross(axis, at - pivot)
+        for u in keep_mid do v -= u * linalg.dot(v, u)
+        col[3], col[4], col[5] = expand_values(v)
+      }
       if facing do col[6], col[7], col[8] = expand_values(axis * length)
       jac[j] = col
     }
@@ -322,8 +344,10 @@ limited_reach :: proc(pose: Pose, bones: []u32, params: IKParams) {
       if !active[j] do step[j] = 0
     }
     // (JᵀW²J + λ²I) step = JᵀW²e over the active turns
+    // the end's own joints are stiff: the chain faces it first, they give only what it can't
     for i in 0 ..< m do for j in 0 ..< m {
-      sum: f32 = damping * damping if i == j else 0
+      sum: f32 = 0
+      if i == j do sum = damping * damping * (OWN_STIFF if dofs[i].k >= reaching else 1)
       if active[i] && active[j] do for r in 0 ..< ROWS do sum += jac[i][r] * weight[r] * weight[r] * jac[j][r]
       a[i * m + j] = sum
     }

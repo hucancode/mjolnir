@@ -105,7 +105,7 @@ LayerHandle :: distinct containers.Handle
 ClipHandle :: distinct u32
 
 // LayerParams is what a layer does: play a clip, or edit the pose with an IK chain, a tail
-// spring, a path, a stepping leg or your own CustomApply. Its fields are inputs only: edit
+// spring, a path, a stepping leg, a follow-through or your own CustomApply. Its fields are inputs only: edit
 // them any time through layer_params.
 LayerParams :: union {
   ClipParams,
@@ -113,6 +113,7 @@ LayerParams :: union {
   TailParams,
   PathParams,
   LegParams,
+  FollowParams,
   CustomParams,
 }
 

@@ -128,6 +128,27 @@ pose_compose :: proc(pose: Pose) {
   for i in pose.order do compose_bone(pose, i)
 }
 
+// pose_at_rest is `pose`'s skeleton at rest (its local rest transforms, composed), in arrays of
+// its own (temp-allocated), to read how it is built; a pose without rest transforms, as posed.
+pose_at_rest :: proc(pose: Pose) -> Pose {
+  n := len(pose.parents)
+  out := pose
+  out.local = make([]geometry.Transform, n, context.temp_allocator)
+  out.positions = make([][3]f32, n, context.temp_allocator)
+  out.rotations = make([]quaternion128, n, context.temp_allocator)
+  out.scales = make([][3]f32, n, context.temp_allocator)
+  if len(pose.rest) == n {
+    copy(out.local, pose.rest)
+    pose_compose(out)
+    return out
+  }
+  copy(out.local, pose.local)
+  copy(out.positions, pose.positions)
+  copy(out.rotations, pose.rotations)
+  copy(out.scales, pose.scales)
+  return out
+}
+
 // pose_propagate moves the descendants of the `moved` bones (indexed by bone) that are not
 // moved themselves, keeping their local transforms.
 pose_propagate :: proc(pose: Pose, moved: []bool) {

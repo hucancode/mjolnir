@@ -113,7 +113,7 @@ App :: struct {
   input:     input.State,
   debug:     debugui.Context,
   orbit:     render.Orbit,
-  loop:      geometry.Spline([3]f32),
+  loop:      geometry.Arc([3]f32),
   total:     f32,
   meshes:    map[Unit]render.MeshHandle,
   materials: [len(PALETTE)]render.MaterialHandle,
@@ -144,8 +144,8 @@ main :: proc() {
   if !platform.init(&app.platform, 1280, 720, "Dragon") do return
   if !render.init(&app.renderer, app.platform.window) do return
   if !world.init(&app.scene) do return
-  if !geometry.spline_init_closed(&app.loop, LOOP[:], 2048) do return
-  app.total = geometry.spline_arc_length(app.loop)
+  if !geometry.arc_init(&app.loop, LOOP[:], closed = true, samples = 2048) do return
+  app.total = geometry.arc_length(app.loop)
   mjolnir.run(
     mjolnir.Loop(App) {
       app = app,
@@ -448,7 +448,7 @@ ride :: proc(app: ^App, pose: Pose) {
 }
 
 position_at :: proc(app: ^App, s: f32) -> [3]f32 {
-  return geometry.spline_sample_uniform(app.loop, s - math.floor(s / app.total) * app.total)
+  return geometry.arc_sample_uniform(app.loop, s - math.floor(s / app.total) * app.total)
 }
 
 tangent_at :: proc(app: ^App, s: f32) -> [3]f32 {

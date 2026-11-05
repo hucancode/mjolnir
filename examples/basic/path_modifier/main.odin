@@ -1,4 +1,4 @@
-// Procedural bone modifier following a spline.
+// Procedural bone modifier following an arc.
 package main
 
 import "core:log"
@@ -29,7 +29,7 @@ App :: struct {
   snake:       gltf.Instance,
   path:        animation.LayerHandle,
   points:      [CONTROL_POINTS][3]f32,
-  spline:      geometry.Spline([3]f32),
+  arc:         geometry.Arc([3]f32),
   offset:      f32,
   speed:       f32,
   fit_length:  f32,
@@ -63,7 +63,7 @@ main :: proc() {
 }
 
 shutdown :: proc(app: ^App) {
-  geometry.destroy(&app.spline)
+  geometry.destroy(&app.arc)
   gltf.destroy(&app.snake, &app.scene, &app.renderer)
   gltf.destroy(&app.snake_model, &app.renderer)
   world.shutdown(&app.scene)
@@ -101,8 +101,8 @@ rebuild_path :: proc(app: ^App) {
     u := f32(i) / CONTROL_POINTS * math.TAU
     p = {app.radius * math.cos(u), app.height * math.sin(u * lobes), app.radius * math.sin(u)}
   }
-  geometry.destroy(&app.spline)
-  geometry.spline_init_closed(&app.spline, app.points[:])
+  geometry.destroy(&app.arc)
+  geometry.arc_init(&app.arc, app.points[:], closed = true)
   animation.path_points(&app.snake.animators[0], app.path, app.points[:], closed = true)
 }
 
@@ -111,7 +111,7 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.platform, &app.input)
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
-  path_length := geometry.spline_arc_length(app.spline)
+  path_length := geometry.arc_length(app.arc)
   if app.auto_play && path_length > 0 {
     app.offset = math.mod_f32(app.offset + app.speed * dt, path_length)
   }
@@ -122,11 +122,11 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 draw_path :: proc(app: ^App) {
-  path_length := geometry.spline_arc_length(app.spline)
+  path_length := geometry.arc_length(app.arc)
   if path_length <= 0 do return
-  prev := geometry.spline_sample_uniform(app.spline, 0)
+  prev := geometry.arc_sample_uniform(app.arc, 0)
   for i in 1 ..= PATH_DEBUG_SAMPLES {
-    cur := geometry.spline_sample_uniform(app.spline, f32(i) / PATH_DEBUG_SAMPLES * path_length)
+    cur := geometry.arc_sample_uniform(app.arc, f32(i) / PATH_DEBUG_SAMPLES * path_length)
     render.debug_segment(&app.renderer, prev, cur, color = {1, 0.85, 0.1, 1}, bypass_depth = true)
     prev = cur
   }
@@ -142,7 +142,7 @@ debug_ui :: proc(app: ^App) {
   if debugui.window(&app.debug, "Path Modifier", {20, 20, 200, 380}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Auto play", &app.auto_play)
-    mu.label(ctx, "Offset"); mu.slider(ctx, &app.offset, 0, geometry.spline_arc_length(app.spline))
+    mu.label(ctx, "Offset"); mu.slider(ctx, &app.offset, 0, geometry.arc_length(app.arc))
     mu.label(ctx, "Speed"); mu.slider(ctx, &app.speed, 0, 10)
     mu.label(ctx, "Fit length"); mu.slider(ctx, &app.fit_length, 0.5, 12)
     reshaped: mu.Result_Set

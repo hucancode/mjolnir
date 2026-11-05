@@ -17,56 +17,49 @@ PathParams :: struct {
 @(private = "file")
 PATH_SAMPLES :: 200
 
-// A path layer's state: [travelled, point count, points (3 floats each), times, arc lengths,
-// arc times].
+// A path layer's state: [travelled, point count, closed, points (3 floats each), arc lengths,
+// arc table's s].
 @(private)
-PATH_HEADER :: 2
+PATH_HEADER :: 3
 
 @(private = "file")
-path_spline :: proc(state: []f32) -> (spline: geometry.Spline([3]f32), ok: bool) {
+path_arc :: proc(state: []f32) -> (arc: geometry.Arc([3]f32), ok: bool) {
   if len(state) <= PATH_HEADER do return {}, false
   n := int(state[1])
   p := PATH_HEADER
-  spline.points = ([^][3]f32)(raw_data(state[p:]))[:n]
+  arc.points = ([^][3]f32)(raw_data(state[p:]))[:n]
+  arc.closed = state[2] != 0
   p += 3 * n
-  spline.times = state[p:][:n]
-  p += n
-  spline.arc_table = geometry.SplineArcTable([3]f32) {
-    arc_lengths = state[p:][:PATH_SAMPLES],
-    times       = state[p + PATH_SAMPLES:][:PATH_SAMPLES],
+  arc.table = geometry.ArcTable {
+    lengths = state[p:][:PATH_SAMPLES],
+    at      = state[p + PATH_SAMPLES:][:PATH_SAMPLES],
   }
-  return spline, true
+  return arc, true
 }
 
 // How many state floats a path through `count` points takes.
 @(private)
-path_state_size :: proc(count: int, closed: bool) -> int {
-  n := count + 3 if closed else count
-  return PATH_HEADER + 4 * n + 2 * PATH_SAMPLES
+path_state_size :: proc(count: int) -> int {
+  return PATH_HEADER + 3 * count + 2 * PATH_SAMPLES
 }
 
-// Fill a path layer's state (sized by path_state_size) with a spline through `points`.
+// Fill a path layer's state (sized by path_state_size) with an arc through `points`.
 @(private)
 path_fill :: proc(state: []f32, points: [][3]f32, closed: bool) {
-  n := len(points) + 3 if closed else len(points)
-  state[1] = f32(n)
-  spline, _ := path_spline(state)
-  if closed {
-    geometry.spline_closed_points(points, spline.points, spline.times)
-  } else {
-    copy(spline.points, points)
-    for &t, i in spline.times do t = f32(i)
-  }
-  table := spline.arc_table.?
-  geometry.spline_arc_fill(spline, table.arc_lengths, table.times, 0, f32(len(points)) if closed else f32(n - 1))
+  state[1] = f32(len(points))
+  state[2] = 1 if closed else 0
+  arc, _ := path_arc(state)
+  copy(arc.points, points)
+  table := arc.table.?
+  geometry.arc_table_fill(arc, table.lengths, table.at)
 }
 
 @(private)
 path_apply :: proc(pose: Pose, bones: []u32, state: []f32, params: PathParams, delta_time: f32) {
   n := len(bones)
-  spline, ok := path_spline(state)
+  arc, ok := path_arc(state)
   if !ok do return
-  total := geometry.spline_arc_length(spline)
+  total := geometry.arc_length(arc)
   if n < 2 || total <= 0 do return
   wrap :: proc(s, total: f32, loop: bool) -> f32 {
     return s - math.floor(s / total) * total if loop else clamp(s, 0, total)
@@ -80,11 +73,11 @@ path_apply :: proc(pose: Pose, bones: []u32, state: []f32, params: PathParams, d
   fit := params.length if params.length > 0 else head
   along: f32 = 0
   for b, i in bones {
-    pose.positions[b] = geometry.spline_sample_uniform(spline, wrap(head - along / chain * fit, total, params.loop))
+    pose.positions[b] = geometry.arc_sample_uniform(arc, wrap(head - along / chain * fit, total, params.loop))
     if i < n - 1 do along += pose.lengths[bones[i + 1]]
   }
   for i in 0 ..< n - 1 do aim_bone(pose, bones[i], pose.positions[bones[i + 1]] - pose.positions[bones[i]])
   last := bones[n - 1]
-  ahead := geometry.spline_sample_uniform(spline, wrap(head - fit - 0.01, total, params.loop))
+  ahead := geometry.arc_sample_uniform(arc, wrap(head - fit - 0.01, total, params.loop))
   aim_bone(pose, last, ahead - pose.positions[last])
 }
