@@ -529,3 +529,81 @@ test_nine_slice_keeps_its_corners :: proc(t: ^testing.T) {
 	testing.expect_value(t, vertices[4 * 4 + 2].pos, [2]f32{90, 50})
 	testing.expect_value(t, vertices[4 * 4 + 2].uv, [2]f32{0.75, 0.75})
 }
+
+@(test)
+test_raise_draws_above_same_z_siblings :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	a := node_create(&f.ui, {size = fixed(100, 100), interactive = true})
+	b := node_create(&f.ui, {size = fixed(100, 100), interactive = true})
+	top := node_create(&f.ui, {size = fixed(10, 10), z = 10})
+	update(&f.ui, VIEWPORT, &f.font)
+	testing.expect_value(t, f.ui.draw_order[1], b)
+	raise(&f.ui, a)
+	update(&f.ui, VIEWPORT, &f.font)
+	testing.expect_value(t, f.ui.draw_order[1], a)
+	testing.expect_value(t, f.ui.draw_order[2], top)
+	s, acc: input.State
+	input.cursor_event(&acc, {50, 50})
+	input.drain(&acc, &s)
+	update_input(&f.ui, &s)
+	testing.expect(t, hovered(&f.ui, a) && !hovered(&f.ui, b), "the raised node picks first")
+}
+
+@(test)
+test_move_stops_at_window_edge :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	w := node_create(&f.ui, {size = fixed(80, 80), offset = {700, 0}})
+	update(&f.ui, VIEWPORT, &f.font)
+	move(&f.ui, w, {100, -30})
+	update(&f.ui, VIEWPORT, &f.font)
+	testing.expect_value(t, rect(&f.ui, w).pos, [2]f32{720, 0})
+	move(&f.ui, w, {-50, 10})
+	update(&f.ui, VIEWPORT, &f.font)
+	testing.expect_value(t, rect(&f.ui, w).pos, [2]f32{670, 10})
+}
+
+@(test)
+test_move_stays_inside_parent :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	panel := node_create(&f.ui, {size = fixed(200, 200), offset = {100, 100}})
+	w := node_create(&f.ui, {parent = panel, position = .ABSOLUTE, size = fixed(50, 50)})
+	update(&f.ui, VIEWPORT, &f.font)
+	move(&f.ui, w, {-40, 500})
+	update(&f.ui, VIEWPORT, &f.font)
+	testing.expect_value(t, rect(&f.ui, w).pos, [2]f32{100, 250})
+}
+
+@(test)
+test_move_pulls_back_after_shrink :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	w := node_create(&f.ui, {size = fixed(80, 80), offset = {700, 500}})
+	update(&f.ui, VIEWPORT, &f.font)
+	// the same height, narrower: the frame keeps its scale and loses width
+	small := [2]f32{600, 600}
+	update(&f.ui, small, &f.font)
+	move(&f.ui, w, {})
+	update(&f.ui, small, &f.font)
+	r := rect(&f.ui, w)
+	testing.expect(t, r.pos.x + r.size.x <= small.x + 0.001, "pulled back inside the window")
+}
+
+@(test)
+test_move_scaled_window :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	w := node_create(&f.ui, {size = fixed(80, 80)})
+	update(&f.ui, VIEWPORT * 2, &f.font)
+	move(&f.ui, w, {40, 20})
+	testing.expect_value(t, node(&f.ui, w).offset, [2]f32{20, 10})
+	update(&f.ui, VIEWPORT * 2, &f.font)
+	testing.expect_value(t, rect(&f.ui, w).pos, [2]f32{40, 20})
+}

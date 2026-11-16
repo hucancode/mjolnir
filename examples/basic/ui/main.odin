@@ -125,7 +125,7 @@ Bar :: struct {
 }
 
 Panel :: struct {
-  root, title, close: ui.NodeHandle,
+  root, bar, title, close: ui.NodeHandle,
 }
 
 Toast :: struct {
@@ -162,7 +162,6 @@ App :: struct {
   ghost:       ui.NodeHandle,
   panels:      [Window]Panel,
   open:        [Window]bool,
-  top_z:       i32,
   bag_slots:   [BAG_SIZE]Slot,
   quest_list:  ui.NodeHandle,
   quest_rows:  [len(QUESTS)]ui.NodeHandle,
@@ -384,10 +383,10 @@ build_hud :: proc(app: ^App) {
 panel_create :: proc(app: ^App, w: Window, title: string, width: f32, offset: [2]f32) -> (body: ui.NodeHandle) {
   p := &app.panels[w]
   p.root = ui.node_create(&app.gui, {direction = .COLUMN, size = {{.FIXED, width}, {}}, offset = offset, interactive = true, hidden = true, style = app.s.window})
-  bar := add(app, p.root, {size = {ui.grow(), {.FIXED, 36}}, padding = {14, 0, 6, 0}, align = {.START, .CENTER}, interactive = true, style = app.s.title_bar})
-  p.title = label(app, bar, title, 17, app.s.title)
-  add(app, bar, {size = {ui.grow(), {}}})
-  p.close = add(app, bar, {size = ui.fixed(26, 26), align = {.CENTER, .CENTER}, interactive = true, style = app.s.close})
+  p.bar = add(app, p.root, {size = {ui.grow(), {.FIXED, 36}}, padding = {14, 0, 6, 0}, align = {.START, .CENTER}, interactive = true, style = app.s.title_bar})
+  p.title = label(app, p.bar, title, 17, app.s.title)
+  add(app, p.bar, {size = {ui.grow(), {}}})
+  p.close = add(app, p.bar, {size = ui.fixed(26, 26), align = {.CENTER, .CENTER}, interactive = true, style = app.s.close})
   label(app, p.close, "x", 16)
   return add(app, p.root, {direction = .COLUMN, size = {ui.grow(), {}}, padding = {16, 14, 16, 16}, gap = 12})
 }
@@ -460,15 +459,14 @@ draw :: proc(app: ^App) -> bool {
 open_window :: proc(app: ^App, w: Window, open := true) {
   app.open[w] = open
   if !open do return
-  app.top_z += 1
-  ui.node(&app.gui, app.panels[w].root).z = app.top_z
+  ui.raise(&app.gui, app.panels[w].root)
 }
 
 topmost :: proc(app: ^App) -> (top: Window, ok: bool) {
-  z := min(i32)
+  order := min(i32)
   for w in Window do if app.open[w] {
-    if wz := ui.node(&app.gui, app.panels[w].root).z; wz > z {
-      top, z, ok = w, wz, true
+    if o := ui.node(&app.gui, app.panels[w].root).order; o > order {
+      top, order, ok = w, o, true
     }
   }
   return
@@ -480,9 +478,8 @@ handle_windows :: proc(app: ^App) {
     if !app.open[w] do continue
     if input.mouse_pressed(&app.input, .LEFT) && ui.pressed(gui, p.root) do open_window(app, w)
     if p.close != {} && ui.clicked(gui, p.close) do app.open[w] = false
-    if p.close != {} && ui.pressed(gui, ui.node(gui, p.close).parent) && !ui.pressed(gui, p.close) {
-      ui.node(gui, p.root).offset += ui.to_reference(gui, app.input.mouse_delta)
-    }
+    drag := p.bar != {} && ui.pressed(gui, p.bar) && !ui.pressed(gui, p.close) && input.mouse_down(&app.input, .LEFT)
+    ui.move(gui, p.root, app.input.mouse_delta if drag else 0)
   }
 }
 

@@ -342,6 +342,32 @@ set_text :: proc(self: ^UI, handle: NodeHandle, text: string) {
   self.dirty = true
 }
 
+// raise draws a node and its subtree above its siblings of the same z (a window clicked to the
+// front) and makes it last in their flow order. Laid out by the next update.
+raise :: proc(self: ^UI, handle: NodeHandle) {
+  n, ok := node(self, handle)
+  if !ok do return
+  n.order = self.next_order
+  self.next_order += 1
+}
+
+// move shifts a node's offset by `delta` window pixels (input.State.mouse_delta, to drag a
+// window), stopping at the edges of its parent's rect, a root's being the window, as of the last
+// update. A node larger than that keeps its top-left inside. A zero delta pulls back a node the
+// window shrank past.
+move :: proc(self: ^UI, handle: NodeHandle, delta: [2]f32) {
+  n, ok := node(self, handle)
+  if !ok || !laid_out(self, handle) || self.frame.scale <= 0 do return
+  r := self.rects[handle.index]
+  bounds := Rect{{}, self.frame.size * self.frame.scale}
+  if p := n.parent; laid_out(self, p) do bounds = self.rects[p.index]
+  target := r.pos + delta
+  for axis in 0 ..< 2 {
+    target[axis] = max(min(target[axis], bounds.pos[axis] + bounds.size[axis] - r.size[axis]), bounds.pos[axis])
+  }
+  n.offset += (target - r.pos) / self.frame.scale
+}
+
 // rect returns the laid-out rect of a live node in window pixels; zero before its first update
 // or for a stale handle.
 rect :: proc(self: ^UI, handle: NodeHandle) -> Rect {
