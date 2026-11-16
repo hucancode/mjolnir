@@ -28,6 +28,21 @@ Size :: struct {
   value: f32,
 }
 
+// fixed is a node size of w by h reference units.
+fixed :: proc(w, h: f32) -> [2]Size {
+  return {{.FIXED, w}, {.FIXED, h}}
+}
+
+// grow is a Size sharing the parent's free space by `weight` (0 counts as 1).
+grow :: proc(weight: f32 = 0) -> Size {
+  return {.GROW, weight}
+}
+
+// percent is a Size of `fraction` (0..1) of the parent's content box.
+percent :: proc(fraction: f32) -> Size {
+  return {.PERCENT, fraction}
+}
+
 // Align places content within a box on one axis.
 Align :: enum u8 {
   START,
@@ -74,17 +89,34 @@ Node :: struct {
   focusable:   bool,
   // content, drawn in the style's color: one line of text, or wrapped lines when `wrap`
   text:        string, // owned; change it with set_text
-  font_size:   f32, // pixels
+  font_size:   f32, // reference units; 0 takes UI.font_size
   wrap:        bool,
+  // a line wider than the content box ends in ELLIPSIS (lines that do not wrap)
+  truncate:    bool,
   // Looks, after every layout input: changing only these repaints without a layout.
   // how it is drawn, in the look of its interaction (Interaction)
   style:       StyleHandle,
   // drawn in its ACTIVE look (a selected tab, a checked box), and so is its subtree
   active:      bool,
+  // multiplies every color the node and its subtree draw (fade a toast out with its alpha, dim
+  // a disabled slot); zero is none
+  tint:        [4]u8,
   // content: a texture the renderer knows (render.TextureHandle) drawn over the fill; 0 is none
   image:       u32,
-  // the part of the image shown, 0..1 of it; zero size shows all of it
-  image_rect:  Rect,
+  // the texture coordinates of the image's top-left, top-right, bottom-right and bottom-left
+  // corners (a sheet's cell, a turned atlas entry); zero shows all of it
+  image_uv:    [4][2]f32,
+  // the image cut in nine to frame the node (a skinned panel); zero borders stretch it whole
+  slice:       Slice,
+  // the image is sampled bilinearly (icons scaled up or down), else nearest (pixel art)
+  smooth:      bool,
+}
+
+// Slice cuts an image in nine: its corners keep their size, its edges stretch along the node's
+// sides and its centre fills the rest.
+Slice :: struct {
+  border: [4]f32, // left, top, right, bottom on the node, in reference units
+  uv:     [4]f32, // the same cuts in the image, 0..1 of its width and height
 }
 
 // Interaction picks a node's look in its StyleSet. A node that is not interactive takes the
@@ -115,20 +147,27 @@ StyleHandle :: distinct u32
 // Rect is an axis-aligned rectangle: top-left `pos` and `size`.
 Rect :: anchor.Rect
 
-// Line is one laid-out line of a text node: text[start:end], `width` wide, its
-// top-left at `pos`, to draw at font size `size`, all in window pixels.
+// Line is one laid-out line of a text node: text[start:end], followed by ELLIPSIS when
+// `ellipsis` (a truncated line), `width` wide in all, its top-left at `pos`, to draw at font size
+// `size`, all in window pixels.
 Line :: struct {
   start, end: int,
   pos:        [2]f32,
   width:      f32,
   size:       f32,
+  ellipsis:   bool,
 }
+
+// ELLIPSIS ends a truncated line (Node.truncate).
+ELLIPSIS :: "..."
 
 // UI is a node tree with its layout, mesh and input state. Set up with init, free with shutdown.
 UI :: struct {
   // the frame nodes are laid out in, fitted to the window by update; shrink it to magnify
   // everything (a UI scale)
   reference:  [2]f32,
+  // the font size of text nodes that give none, in reference units
+  font_size:  f32,
   // the looks nodes name by Node.style; edit them in place to restyle every node using one
   styles:     [dynamic]StyleSet,
   // shown nodes, back to front: what is drawn, in order
@@ -136,17 +175,20 @@ UI :: struct {
   using _:    UI_State,
 }
 
-// Batch is a run of the mesh drawn with one texture inside one clip, both in framebuffer pixels;
-// its indices count from its first vertex.
+// Batch is a run of the mesh drawn with one texture inside one clip, in window pixels; its
+// indices count from its first vertex.
 Batch :: struct {
   first_vertex, vertex_count: u32,
   first_index, index_count:   u32,
   // a texture the renderer knows, 0 for none (white), or FONT_TEXTURE
   texture:                    u32,
   clip:                       Rect,
+  // sampled bilinearly (Node.smooth)
+  smooth:                     bool,
 }
 
-// FONT_TEXTURE stands for the font's glyph atlas in Batch.texture: the renderer's copy of it.
+// FONT_TEXTURE stands for the font's glyph atlas in Batch.texture: the renderer's copy of it,
+// sampled with uvs in atlas texels (font.Glyph's), which hold as the atlas grows.
 FONT_TEXTURE :: max(u32)
 
 @(private)
@@ -178,19 +220,20 @@ UI_State :: struct {
   indices:      [dynamic]u32,
   batches:      [dynamic]Batch,
   // what the last update saw, to tell what changed since: nodes and styles as they were, the
-  // input state painted, the atlas size glyph uvs were divided by
+  // input state painted, the default font size laid out with
   dirty:        bool, // a node was created or destroyed, or its text set
   last_nodes:   [dynamic]Node,
   last_styles:  [dynamic]StyleSet,
   last_hovered: NodeHandle,
   last_pressed: NodeHandle,
-  atlas_size:   [2]u32,
+  last_font:    f32,
 }
 
 // init prepares `self` to hold up to `max_nodes` nodes, laid out in `reference`, a frame of
-// your choosing that layout fits to the window.
-init :: proc(self: ^UI, reference := [2]f32{1024, 768}, max_nodes: u32 = 4096) {
+// your choosing that layout fits to the window, with text `font_size` big unless a node says.
+init :: proc(self: ^UI, reference := [2]f32{1024, 768}, max_nodes: u32 = 4096, font_size: f32 = 16) {
   self.reference = reference
+  self.font_size = font_size
   containers.slots_init(&self.slots, max_nodes)
   self.nodes = make([]Node, max_nodes)
   style_create(self, {color = {255, 255, 255, 255}})
@@ -343,8 +386,8 @@ look :: proc(self: ^UI, handle: NodeHandle) -> Style {
   return self.styles[n.style][self.interaction[handle.index]]
 }
 
-// mesh returns what the last update painted, in framebuffer pixels: draw each batch's slice of
-// the vertices and indices, in order, with its texture inside its clip.
+// mesh returns what the last update painted, in window pixels snapped to framebuffer pixels: draw
+// each batch's slice of the vertices and indices, in order, with its texture inside its clip.
 mesh :: proc(self: ^UI) -> (vertices: []geometry.Vertex2D, indices: []u32, batches: []Batch) {
   return self.vertices[:], self.indices[:], self.batches[:]
 }

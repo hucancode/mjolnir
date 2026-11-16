@@ -118,13 +118,15 @@ LightType :: enum u32 {
 // Vertex2D is one vertex of the 2D overlay.
 Vertex2D :: geometry.Vertex2D
 
-// OverlayBatch is a run of overlay indices drawn with one texture inside one scissor (x, y, w, h).
+// OverlayBatch is a run of overlay indices drawn with one texture and sampler (rhi.SamplerType)
+// inside one scissor (x, y, w, h).
 @(private)
 OverlayBatch :: struct {
   first_index: u32,
   index_count: u32,
   scissor:     [4]i32,
   texture:     TextureHandle,
+  sampler:     u32,
 }
 
 // The tables render writes, one copy per frame in flight (table); their sizes are given at

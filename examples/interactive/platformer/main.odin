@@ -517,8 +517,8 @@ draw :: proc(app: ^App) -> bool {
 draw_hud :: proc(app: ^App) {
   white :: [4]u8{255, 255, 255, 255}
   hud := [?]render.OverlayCommand {
-    {shape = render.OverlayText{text = fmt.tprintf("Coins: %d / %d", app.score, app.coin_count), position = {20, 20}, size = 28, color = white}},
-    {shape = render.OverlayText{text = "You made it!" if app.won else "Arrows/WASD run, Space jumps", position = {20, 60}, size = 22, color = white}},
+    render.OverlayText{text = fmt.tprintf("Coins: %d / %d", app.score, app.coin_count), position = {20, 20}, size = 28, color = white},
+    render.OverlayText{text = "You made it!" if app.won else "Arrows/WASD run, Space jumps", position = {20, 60}, size = 22, color = white},
   }
   render.stage_overlay(&app.renderer, hud[:], &app.font)
 }

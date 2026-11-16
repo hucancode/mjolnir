@@ -72,15 +72,34 @@ orbit_drag :: proc(
   render.camera_orbit(camera, self^)
 }
 
-// stage_ui brings gui up to date for r's window at p's DPI scale (ui.update) and stages its mesh
-// over what is staged so far (render.stage_overlay_mesh), glyphs sampled from
-// render.font_texture. It returns what the update redid.
-stage_ui :: proc(r: ^render.Renderer, p: ^platform.Platform, gui: ^ui.UI, f: ^font.Font) -> (laid_out, painted: bool) {
+// stage_ui brings gui up to date for r's window at p's DPI scale (ui.update) and stages its mesh,
+// at `z_order`, together with your 2D `commands` (render.stage_overlay): commands below z_order
+// draw under the UI, above it over the UI, at it under it. Text, the UI's and the commands', draws
+// in f. It returns what the update redid.
+stage_ui :: proc(
+  r: ^render.Renderer,
+  p: ^platform.Platform,
+  gui: ^ui.UI,
+  f: ^font.Font,
+  commands: []render.OverlayCommand = nil,
+  z_order: i32 = 0,
+) -> (
+  laid_out, painted: bool,
+) {
   laid_out, painted = ui.update(gui, render.window_size(r), f, platform.dpi_scale(p))
   vertices, indices, batches := ui.mesh(gui)
+  staged := make([dynamic]render.OverlayCommand, 0, len(commands) + len(batches), context.temp_allocator)
+  append(&staged, ..commands)
   for b in batches {
-    texture := render.font_texture(r, f) if b.texture == ui.FONT_TEXTURE else render.TextureHandle(b.texture)
-    render.stage_overlay_mesh(r, vertices[b.first_vertex:][:b.vertex_count], indices[b.first_index:][:b.index_count], texture, b.clip)
+    append(&staged, render.OverlayMesh {
+      vertices = vertices[b.first_vertex:][:b.vertex_count],
+      indices = indices[b.first_index:][:b.index_count],
+      texture = render.FONT_ATLAS if b.texture == ui.FONT_TEXTURE else render.TextureHandle(b.texture),
+      smooth = b.smooth,
+      z_order = z_order,
+      clip = b.clip,
+    })
   }
+  render.stage_overlay(r, staged[:], f)
   return
 }

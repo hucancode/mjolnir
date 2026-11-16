@@ -18,6 +18,8 @@ import "mjolnir/world"
 
 REFERENCE :: [2]f32{1280, 720}
 SHEET :: [2]f32{20, 9}
+BOX_TILE :: 6
+COIN_TILE :: 151
 BAG_COLUMNS :: 6
 BAG_SIZE :: 24
 HOTBAR :: 8
@@ -83,7 +85,7 @@ Quest :: struct {
 
 QUESTS := [?]Quest {
   {"Slime Season", "The vale is crawling with slimes again. The miller asks you to thin them out before the harvest.", "Slimes defeated 4 / 10\nReward 50 gold"},
-  {"Shiny Things", "A jeweller in town pays well for sapphires. Slimes swallow them, for reasons nobody understands.", "Sapphires 1 / 5\nReward 120 gold"},
+  {"Shiny Things Hidden in Slime Bellies", "A jeweller in town pays well for sapphires. Slimes swallow them, for reasons nobody understands.", "Sapphires 1 / 5\nReward 120 gold"},
   {"Green Thumb", "The alchemist needs fresh sprouts for her tonics. They fall out of the slimes, oddly enough.", "Sprouts 3 / 6\nReward 40 gold"},
   {"Locked Out", "The old crypt is sealed by a golden key that one of the slimes is said to carry.", "Golden key 0 / 1\nReward 200 gold"},
   {"Seasoned", "Prove yourself in the field. The captain only talks to veterans.", "Level 7 / 10\nReward 150 gold"},
@@ -109,13 +111,13 @@ MENU_BUTTONS := [Window]struct {
 Styles :: struct {
   text, dim, gold, title, small:            ui.StyleHandle,
   panel, window, title_bar, close, button:  ui.StyleHandle,
-  slot, icon, cooldown, bar, hp, mp, xp:    ui.StyleHandle,
+  slot, icon, bar, hp, mp, xp:              ui.StyleHandle,
   map_, enemy, player, tooltip, dim_screen: ui.StyleHandle,
   toast, track, row, row_text:              ui.StyleHandle,
 }
 
 Slot :: struct {
-  frame, icon, cooldown, count: ui.NodeHandle,
+  frame, icon, count: ui.NodeHandle,
 }
 
 Bar :: struct {
@@ -147,6 +149,7 @@ App :: struct {
   knight:      gltf.Model,
   hero:        gltf.Instance,
   sheet:       render.TextureHandle,
+  tiles:       []render.SpriteFrame,
   s:           Styles,
   map_frame:   ui.NodeHandle,
   tracker:     ui.NodeHandle,
@@ -173,6 +176,7 @@ App :: struct {
   bag:         [BAG_SIZE]Stack,
   actions:     [HOTBAR]Action,
   cooldowns:   [HOTBAR]f32,
+  sweeps:      [HOTBAR]f32,
   toasts:      [dynamic]Toast,
   tracked:     [len(QUESTS)]bool,
   quest:       int,
@@ -204,6 +208,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
   app.sheet = render.texture_create(&app.renderer, #load("assets/kenney_pixel_platformer/Tilemap/tilemap_packed.png"))
+  app.tiles = render.sprite_frames_grid(u32(SHEET.x), u32(SHEET.y), allocator = context.allocator)
   app.knight = gltf.model_create(&app.renderer, #load("assets/kaykit_adventurers/Knight.glb"))
   app.hero = gltf.instance_create(&app.knight, &app.scene, &app.renderer)
   for name in KNIGHT_PROPS do if node, found := world.find(&app.scene, name, app.hero.root); found do world.set_visible(&app.scene, node, false)
@@ -232,6 +237,7 @@ sample_data :: proc(app: ^App) {
 
 shutdown :: proc(app: ^App) {
   delete(app.toasts)
+  delete(app.tiles)
   ui.shutdown(&app.gui)
   font.destroy(&app.font)
   gltf.destroy(&app.hero, &app.scene, &app.renderer)
@@ -276,7 +282,6 @@ create_styles :: proc(app: ^App) {
   slot_active.fill = rgba(40, 34, 20, 230)
   s.slot = ui.style_create(gui, slot, slot_hover, slot_hover, slot_active)
   s.icon = ui.style_create(gui, {color = WHITE}, nil, nil, ui.Style{color = rgba(255, 255, 255, 70)})
-  s.cooldown = ui.style_create(gui, {fill = rgba(0, 0, 0, 170), color = WHITE})
   s.bar = ui.style_create(gui, {fill = rgba(8, 8, 12, 200), border = 1, border_color = rgba(0, 0, 0, 255), color = WHITE})
   s.hp = ui.style_create(gui, {fill = rgba(196, 48, 52)})
   s.mp = ui.style_create(gui, {fill = rgba(52, 108, 220)})
@@ -286,7 +291,7 @@ create_styles :: proc(app: ^App) {
   s.player = ui.style_create(gui, {fill = rgba(250, 230, 120)})
   s.tooltip = ui.style_create(gui, {fill = rgba(10, 10, 16), border = 1, border_color = rgba(130, 108, 66)})
   s.dim_screen = ui.style_create(gui, {fill = rgba(0, 0, 0, 150)})
-  s.toast = ui.style_create(gui, {fill = rgba(10, 10, 16, 190), color = WHITE}, nil, nil, ui.Style{fill = rgba(10, 10, 16, 90), color = rgba(235, 235, 242, 110)})
+  s.toast = ui.style_create(gui, {fill = rgba(10, 10, 16, 190), color = WHITE})
   s.track = ui.style_create(gui, {fill = rgba(10, 12, 18), border = 1, border_color = EDGE})
   row := ui.Style{color = WHITE}
   row_hover := ui.Style{fill = rgba(50, 54, 72), color = WHITE}
@@ -295,58 +300,48 @@ create_styles :: proc(app: ^App) {
   s.row_text = ui.style_create(gui, {color = WHITE}, nil, nil, ui.Style{color = GOLD})
 }
 
-fixed :: proc(w, h: f32) -> [2]ui.Size {
-  return {{.FIXED, w}, {.FIXED, h}}
-}
-
 add :: proc(app: ^App, parent: ui.NodeHandle, n: ui.Node) -> ui.NodeHandle {
   n := n
   n.parent = parent
   return ui.node_create(&app.gui, n)
 }
 
-label :: proc(app: ^App, parent: ui.NodeHandle, text: string, size: f32 = 16, style: ui.StyleHandle = 0, n: ui.Node = {}) -> ui.NodeHandle {
+label :: proc(app: ^App, parent: ui.NodeHandle, text: string, size: f32 = 0, style: ui.StyleHandle = 0, n: ui.Node = {}) -> ui.NodeHandle {
   n := n
   n.text, n.font_size, n.style = text, size, style if style != 0 else app.s.text
   return add(app, parent, n)
 }
 
 button :: proc(app: ^App, parent: ui.NodeHandle, text: string, width: f32 = 0, height: f32 = 34, style: ui.StyleHandle = 0) -> ui.NodeHandle {
-  size := fixed(width, height) if width > 0 else [2]ui.Size{{}, {.FIXED, height}}
+  size := ui.fixed(width, height) if width > 0 else [2]ui.Size{{}, {.FIXED, height}}
   b := add(app, parent, {size = size, padding = {14, 0, 14, 0}, align = {.CENTER, .CENTER}, interactive = true, style = style if style != 0 else app.s.button})
-  label(app, b, text, 16)
+  label(app, b, text)
   return b
-}
-
-tile_rect :: proc(tile: u32) -> ui.Rect {
-  cell := 1 / SHEET
-  return {{f32(tile % u32(SHEET.x)), f32(tile / u32(SHEET.x))} * cell, cell}
 }
 
 slot :: proc(app: ^App, parent: ui.NodeHandle, size: f32, key := "") -> Slot {
   s: Slot
-  s.frame = add(app, parent, {size = fixed(size, size), padding = {6, 6, 6, 6}, interactive = true, style = app.s.slot})
-  s.icon = add(app, s.frame, {size = {{.PERCENT, 1}, {.PERCENT, 1}}, style = app.s.icon, hidden = true, image = u32(app.sheet)})
-  s.cooldown = add(app, s.frame, {position = .ABSOLUTE, anchor = {0, 1}, size = {{.PERCENT, 1}, {.PERCENT, 0}}, align = {.CENTER, .CENTER}, style = app.s.cooldown, hidden = true})
+  s.frame = add(app, parent, {size = ui.fixed(size, size), padding = {6, 6, 6, 6}, interactive = true, style = app.s.slot})
+  s.icon = add(app, s.frame, {size = {ui.percent(1), ui.percent(1)}, style = app.s.icon, hidden = true, image = u32(app.sheet)})
   s.count = label(app, s.frame, "", 13, app.s.text, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-4, -2}})
   if key != "" do label(app, s.frame, key, 12, app.s.dim, {position = .ABSOLUTE, offset = {4, 2}})
   return s
 }
 
 bar :: proc(app: ^App, parent: ui.NodeHandle, width, height: f32, fill: ui.StyleHandle, font_size: f32 = 13) -> Bar {
-  back := add(app, parent, {size = fixed(width, height), style = app.s.bar})
+  back := add(app, parent, {size = ui.fixed(width, height), style = app.s.bar})
   b: Bar
-  b.fill = add(app, back, {size = {{.PERCENT, 1}, {.PERCENT, 1}}, style = fill})
+  b.fill = add(app, back, {size = {ui.percent(1), ui.percent(1)}, style = fill})
   if font_size > 0 do b.label = label(app, back, "", font_size, app.s.text, {position = .ABSOLUTE, anchor = {0.5, 0.5}})
   return b
 }
 
 build_hud :: proc(app: ^App) {
   s := &app.s
-  screen := ui.node_create(&app.gui, {size = {{.PERCENT, 1}, {.PERCENT, 1}}})
+  screen := ui.node_create(&app.gui, {size = {ui.percent(1), ui.percent(1)}})
 
   frame := add(app, screen, {position = .ABSOLUTE, offset = {16, 16}, padding = {10, 10, 12, 10}, gap = 12, align = {.START, .CENTER}, style = s.panel})
-  badge := add(app, frame, {size = fixed(56, 56), align = {.CENTER, .CENTER}, direction = .COLUMN, style = s.slot})
+  badge := add(app, frame, {size = ui.fixed(56, 56), align = {.CENTER, .CENTER}, direction = .COLUMN, style = s.icon, image = u32(app.sheet), image_uv = app.tiles[BOX_TILE].uv, slice = {border = 12, uv = 1.0 / 3}})
   label(app, badge, "LV", 11, s.dim)
   label(app, badge, "7", 24, s.gold)
   column := add(app, frame, {direction = .COLUMN, gap = 5})
@@ -357,11 +352,11 @@ build_hud :: proc(app: ^App) {
 
   top_right := add(app, screen, {position = .ABSOLUTE, anchor = {1, 0}, offset = {-16, 16}, direction = .COLUMN, gap = 6, align = {.END, .START}})
   label(app, top_right, "Whispering Vale", 18, s.gold)
-  app.map_frame = add(app, top_right, {size = fixed(176, 176), clip = true, style = s.map_})
-  add(app, app.map_frame, {position = .ABSOLUTE, anchor = {0.5, 0.5}, size = fixed(10, 10), style = s.player, z = 1})
-  for m in MAP_MARKERS do add(app, app.map_frame, {position = .ABSOLUTE, anchor = m, size = fixed(7, 7), style = s.enemy})
+  app.map_frame = add(app, top_right, {size = ui.fixed(176, 176), clip = true, style = s.map_})
+  add(app, app.map_frame, {position = .ABSOLUTE, anchor = {0.5, 0.5}, size = ui.fixed(10, 10), style = s.player, z = 1})
+  for m in MAP_MARKERS do add(app, app.map_frame, {position = .ABSOLUTE, anchor = m, size = ui.fixed(7, 7), style = s.enemy})
   gold := add(app, top_right, {gap = 6, align = {.END, .CENTER}, padding = {8, 4, 8, 4}, style = s.panel})
-  add(app, gold, {size = fixed(18, 18), style = s.icon, image = u32(app.sheet), image_rect = tile_rect(151)})
+  add(app, gold, {size = ui.fixed(18, 18), style = s.icon, image = u32(app.sheet), image_uv = app.tiles[COIN_TILE].uv})
   label(app, gold, "35", 16, s.gold)
 
   tracker := add(app, screen, {position = .ABSOLUTE, anchor = {0, 0.4}, offset = {16, 0}, direction = .COLUMN, gap = 6, padding = {12, 10, 12, 10}, style = s.panel})
@@ -383,23 +378,23 @@ build_hud :: proc(app: ^App) {
   app.tooltip = ui.node_create(&app.gui, {direction = .COLUMN, gap = 4, padding = {12, 10, 12, 10}, z = 5000, hidden = true, style = s.tooltip})
   app.tip_title = label(app, app.tooltip, "", 16, s.gold)
   app.tip_text = label(app, app.tooltip, "", 14, s.small, {size = {{.FIXED, 230}, {}}, wrap = true})
-  app.ghost = ui.node_create(&app.gui, {size = fixed(44, 44), z = 6000, hidden = true, style = s.icon, image = u32(app.sheet)})
+  app.ghost = ui.node_create(&app.gui, {size = ui.fixed(44, 44), z = 6000, hidden = true, style = s.icon, image = u32(app.sheet)})
 }
 
 panel_create :: proc(app: ^App, w: Window, title: string, width: f32, offset: [2]f32) -> (body: ui.NodeHandle) {
   p := &app.panels[w]
   p.root = ui.node_create(&app.gui, {direction = .COLUMN, size = {{.FIXED, width}, {}}, offset = offset, interactive = true, hidden = true, style = app.s.window})
-  bar := add(app, p.root, {size = {{.GROW, 0}, {.FIXED, 36}}, padding = {14, 0, 6, 0}, align = {.START, .CENTER}, interactive = true, style = app.s.title_bar})
+  bar := add(app, p.root, {size = {ui.grow(), {.FIXED, 36}}, padding = {14, 0, 6, 0}, align = {.START, .CENTER}, interactive = true, style = app.s.title_bar})
   p.title = label(app, bar, title, 17, app.s.title)
-  add(app, bar, {size = {{.GROW, 0}, {}}})
-  p.close = add(app, bar, {size = fixed(26, 26), align = {.CENTER, .CENTER}, interactive = true, style = app.s.close})
+  add(app, bar, {size = {ui.grow(), {}}})
+  p.close = add(app, bar, {size = ui.fixed(26, 26), align = {.CENTER, .CENTER}, interactive = true, style = app.s.close})
   label(app, p.close, "x", 16)
-  return add(app, p.root, {direction = .COLUMN, size = {{.GROW, 0}, {}}, padding = {16, 14, 16, 16}, gap = 12})
+  return add(app, p.root, {direction = .COLUMN, size = {ui.grow(), {}}, padding = {16, 14, 16, 16}, gap = 12})
 }
 
 modal_create :: proc(app: ^App, w: Window, title: string) -> (body: ui.NodeHandle) {
   p := &app.panels[w]
-  p.root = ui.node_create(&app.gui, {size = {{.PERCENT, 1}, {.PERCENT, 1}}, align = {.CENTER, .CENTER}, interactive = true, hidden = true, style = app.s.dim_screen})
+  p.root = ui.node_create(&app.gui, {size = {ui.percent(1), ui.percent(1)}, align = {.CENTER, .CENTER}, interactive = true, hidden = true, style = app.s.dim_screen})
   box := add(app, p.root, {direction = .COLUMN, padding = {28, 22, 28, 24}, gap = 14, align = {.CENTER, .START}, style = app.s.window})
   p.title = label(app, box, title, 26, app.s.gold)
   return box
@@ -414,24 +409,24 @@ build_windows :: proc(app: ^App) {
     if i % BAG_COLUMNS == 0 do row = add(app, grid, {gap = 6})
     b = slot(app, row, 56)
   }
-  footer := add(app, body, {size = {{.GROW, 0}, {}}, gap = 8, align = {.START, .CENTER}})
-  add(app, footer, {size = fixed(20, 20), style = s.icon, image = u32(app.sheet), image_rect = tile_rect(151)})
+  footer := add(app, body, {size = {ui.grow(), {}}, gap = 8, align = {.START, .CENTER}})
+  add(app, footer, {size = ui.fixed(20, 20), style = s.icon, image = u32(app.sheet), image_uv = app.tiles[COIN_TILE].uv})
   label(app, footer, "35 gold", 16, s.gold)
-  label(app, body, "Drag to move, drop on the hotbar to bind, right click to use.", 13, s.dim, {size = {{.GROW, 0}, {}}, wrap = true})
+  label(app, body, "Drag to move, drop on the hotbar to bind, right click to use.", 13, s.dim, {size = {ui.grow(), {}}, wrap = true})
 
   body = panel_create(app, .QUESTS, "Quest Log", 560, {120, 120})
-  split := add(app, body, {gap = 14, size = {{.GROW, 0}, {.FIXED, 300}}})
-  app.quest_list = add(app, split, {direction = .COLUMN, size = {{.FIXED, 200}, {.GROW, 0}}, gap = 2, padding = {4, 4, 4, 4}, clip = true, interactive = true, style = s.track})
+  split := add(app, body, {gap = 14, size = {ui.grow(), {.FIXED, 300}}})
+  app.quest_list = add(app, split, {direction = .COLUMN, size = {{.FIXED, 200}, ui.grow()}, gap = 2, padding = {4, 4, 4, 4}, clip = true, interactive = true, style = s.track})
   for &r, i in app.quest_rows {
-    r = add(app, app.quest_list, {size = {{.GROW, 0}, {.FIXED, 58}}, padding = {10, 0, 10, 0}, align = {.START, .CENTER}, interactive = true, style = s.row})
-    label(app, r, QUESTS[i].title, 15, s.row_text)
+    r = add(app, app.quest_list, {size = {ui.grow(), {.FIXED, 58}}, padding = {10, 0, 10, 0}, align = {.START, .CENTER}, interactive = true, style = s.row})
+    label(app, r, QUESTS[i].title, 15, s.row_text, {size = {ui.grow(), {}}, truncate = true})
   }
-  detail := add(app, split, {direction = .COLUMN, size = {{.GROW, 0}, {.GROW, 0}}, gap = 10})
-  app.quest_name = label(app, detail, "", 20, s.gold)
-  app.quest_text = label(app, detail, "", 14, s.small, {size = {{.GROW, 0}, {}}, wrap = true})
+  detail := add(app, split, {direction = .COLUMN, size = {ui.grow(), ui.grow()}, gap = 10})
+  app.quest_name = label(app, detail, "", 20, s.gold, {size = {ui.grow(), {}}, wrap = true})
+  app.quest_text = label(app, detail, "", 14, s.small, {size = {ui.grow(), {}}, wrap = true})
   app.quest_goal = label(app, detail, "", 15, s.text)
-  add(app, detail, {size = {{}, {.GROW, 0}}})
-  app.track = add(app, detail, {size = fixed(120, 34), align = {.CENTER, .CENTER}, interactive = true, style = s.button})
+  add(app, detail, {size = {{}, ui.grow()}})
+  app.track = add(app, detail, {size = ui.fixed(120, 34), align = {.CENTER, .CENTER}, interactive = true, style = s.button})
   app.track_label = label(app, app.track, "Track", 16)
 
   body = modal_create(app, .PAUSE, "Paused")
@@ -451,7 +446,9 @@ update :: proc(app: ^App, dt: f32) {
   refresh(app, dt)
   camera := render.main_camera(&app.renderer)
   mjolnir.orbit_drag(&app.orbit, camera, &app.input)
-  mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font)
+  sweeps := make([dynamic]render.OverlayCommand, context.temp_allocator)
+  for h, i in app.hotbar do if app.sweeps[i] > 0 do cooldown_sweep(&sweeps, ui.rect(&app.gui, h.frame), app.sweeps[i])
+  mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font, sweeps[:])
   mjolnir.update(&app.scene, &app.renderer, dt)
   gltf.animate(&app.hero, &app.knight, &app.scene, &app.renderer, dt)
 }
@@ -591,7 +588,7 @@ show :: proc(app: ^App, h: ui.NodeHandle, shown: bool) {
 set_icon :: proc(app: ^App, s: Slot, tile: u32, shown: bool) {
   icon := ui.node(&app.gui, s.icon)
   icon.hidden = !shown
-  icon.image_rect = tile_rect(tile)
+  icon.image_uv = app.tiles[tile].uv
 }
 
 set_bar :: proc(app: ^App, b: Bar, value, total: f32) {
@@ -623,14 +620,11 @@ refresh :: proc(app: ^App, dt: f32) {
     set_icon(app, h, tile, app.actions[i] != nil)
     ui.set_text(gui, h.count, count)
     app.cooldowns[i] = max(app.cooldowns[i] - dt, 0)
-    left := app.cooldowns[i]
-    cooldown := ui.node(gui, h.cooldown)
-    cooldown.hidden = left <= 0
-    cooldown.size.y = {.PERCENT, math.ceil(left / total * 20) / 20}
+    app.sweeps[i] = app.cooldowns[i] / total
   }
   for &t in app.toasts {
     t.life -= dt
-    ui.node(gui, t.node).active = t.life < 1
+    ui.node(gui, t.node).tint = {255, 255, 255, u8(255 * clamp(t.life, 0, 1))}
   }
   for len(app.toasts) > 0 && app.toasts[0].life <= 0 {
     ui.destroy(gui, app.toasts[0].node)
@@ -646,7 +640,7 @@ refresh :: proc(app: ^App, dt: f32) {
   ghost := ui.node(gui, app.ghost)
   ghost.hidden = app.dragging < 0
   if app.dragging >= 0 {
-    ghost.image_rect = tile_rect(ITEMS[app.bag[app.dragging].item].tile)
+    ghost.image_uv = app.tiles[ITEMS[app.bag[app.dragging].item].tile].uv
     ghost.offset = ui.to_reference(gui, app.input.cursor) - 22
   }
 
@@ -679,4 +673,21 @@ tooltip :: proc(app: ^App) {
   screen := ui.to_reference(gui, render.window_size(&app.renderer))
   at := ui.to_reference(gui, app.input.cursor) + 18
   tip.offset = {min(at.x, screen.x - size.x - 8), min(at.y, screen.y - size.y - 8)}
+}
+
+cooldown_sweep :: proc(commands: ^[dynamic]render.OverlayCommand, area: ui.Rect, left: f32) {
+  SEGMENTS :: 48
+  SHADE :: [4]u8{0, 0, 0, 170}
+  center := area.pos + area.size / 2
+  radius := linalg.length(area.size) / 2
+  n := max(int(math.ceil(left * SEGMENTS)), 1)
+  vertices := make([]render.Vertex2D, n + 2, context.temp_allocator)
+  indices := make([]u32, n * 3, context.temp_allocator)
+  vertices[0] = {pos = center, color = SHADE}
+  for k in 0 ..= n {
+    a := math.TAU * (1 - left * f32(n - k) / f32(n))
+    vertices[k + 1] = {pos = center + radius * [2]f32{math.sin(a), -math.cos(a)}, color = SHADE}
+  }
+  for k in 0 ..< n do indices[k * 3], indices[k * 3 + 1], indices[k * 3 + 2] = 0, u32(k + 1), u32(k + 2)
+  append(commands, render.OverlayMesh{vertices = vertices, indices = indices, z_order = 1, clip = area})
 }

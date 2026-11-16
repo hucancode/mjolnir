@@ -94,8 +94,8 @@ draw :: proc(app: ^App) -> bool {
 
 draw_hud :: proc(app: ^App) {
   hud := [?]render.OverlayCommand {
-    {shape = render.OverlayText{text = fmt.tprintf("Score: %d", app.state.score), position = {20, 20}, size = 32, color = {255, 255, 255, 255}}},
-    {shape = render.OverlayText{text = fmt.tprintf("High: %d", app.state.high_score), position = {20, 60}, size = 24, color = {255, 220, 100, 255}}},
+    render.OverlayText{text = fmt.tprintf("Score: %d", app.state.score), position = {20, 20}, size = 32, color = {255, 255, 255, 255}},
+    render.OverlayText{text = fmt.tprintf("High: %d", app.state.high_score), position = {20, 60}, size = 24, color = {255, 220, 100, 255}},
   }
   render.stage_overlay(&app.renderer, hud[:], &app.font)
 }

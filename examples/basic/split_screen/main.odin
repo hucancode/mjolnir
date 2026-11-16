@@ -93,7 +93,7 @@ update :: proc(app: ^App, dt: f32) {
     }
     render.camera_resize(&app.renderer, p.camera, half)
     image := render.camera_image(&app.renderer, p.camera, .FINAL_IMAGE, previous_frame = true)
-    views[i] = {shape = render.OverlayQuad{position = {f32(i) * size.x / 2, 0}, size = {size.x / 2, size.y}, color = 255, texture = image}}
+    views[i] = render.OverlayQuad{position = {f32(i) * size.x / 2, 0}, size = {size.x / 2, size.y}, color = 255, texture = image}
   }
   render.stage_overlay(&app.renderer, views[:])
   mjolnir.update(&app.scene, &app.renderer, dt)

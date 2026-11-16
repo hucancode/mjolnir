@@ -1080,8 +1080,7 @@ draw_hud :: proc(app: ^App) {
   } else {
     hud(app, &commands)
   }
-  render.stage_overlay(&app.renderer, commands[:], &app.font)
-  mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font)
+  mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font, commands[:])
 }
 
 hud :: proc(app: ^App, commands: ^[dynamic]render.OverlayCommand) {
@@ -1110,10 +1109,10 @@ hud :: proc(app: ^App, commands: ^[dynamic]render.OverlayCommand) {
 }
 
 text :: proc(commands: ^[dynamic]render.OverlayCommand, s: string, position: [2]f32, size: f32, color: [4]u8 = 255) {
-  append(commands, render.OverlayCommand{shape = render.OverlayText{text = s, position = position, size = size, color = color}})
+  append(commands, render.OverlayText{text = s, position = position, size = size, color = color})
 }
 
 bar :: proc(commands: ^[dynamic]render.OverlayCommand, position, size: [2]f32, fraction: f32, color: [4]u8) {
-  append(commands, render.OverlayCommand{shape = render.OverlayQuad{position = position, size = size, color = {0, 0, 0, 160}}})
-  append(commands, render.OverlayCommand{shape = render.OverlayQuad{position = position + 2, size = {(size.x - 4) * clamp(fraction, 0, 1), size.y - 4}, color = color}})
+  append(commands, render.OverlayQuad{position = position, size = size, color = {0, 0, 0, 160}})
+  append(commands, render.OverlayQuad{position = position + 2, size = {(size.x - 4) * clamp(fraction, 0, 1), size.y - 4}, color = color})
 }

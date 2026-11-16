@@ -51,7 +51,7 @@ material :: proc(self: ^Renderer, handle: MaterialHandle) -> (^Material, bool) #
 // make_material returns a Material for material_create. type picks how it draws: .SPRITE
 // draws a camera-facing QUAD_XY as one frame of sprite_frames in albedo_texture (each node its
 // own frame, MeshAttachment.frame; the frame's size times the node's x and y scale is its size,
-// a negative scale mirrors it; pixels under half alpha are cut out and the nearer sprite covers
+// a negative scale mirrors it; MeshAttachment.turned lays it in the node's XY plane instead; pixels under half alpha are cut out and the nearer sprite covers
 // the farther); a type from material_shader_create is drawn by that shader, which reads params
 // (its own values) and any other field.
 make_material :: proc(

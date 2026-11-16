@@ -1,6 +1,7 @@
 // Sprite: a camera-facing billboard at the node's position showing the node's frame of the
 // material's sprite frames (none: the whole albedo texture), the frame's quad scaled by the
-// node's world scale (mirrored when the scale is) and drawn depth_offset toward the camera.
+// node's world scale (mirrored when the scale is) and drawn depth_offset toward the camera; a
+// turned sprite's quad lies in the node's XY plane instead, through its whole transform.
 // Pixels under half alpha are cut out; the rest write depth, so depth orders overlapping sprites.
 #include "common.slang"
 
@@ -63,7 +64,11 @@ VertexOut vs_main(VertexIn v)
     // the quad's corners are at +-1, its uv 0 at the top-left
     float2 corner = frame.offset + v.position.xy * 0.5 * frame.size;
     float3 camera_back = camera.view[2].xyz;
-    float3 vertex_pos = world_pos + camera_right * (corner.x * scale_x) + camera_up * (corner.y * scale_y) + camera_back * node.depth_offset;
+    float3 vertex_pos = world_pos + camera_right * (corner.x * scale_x) + camera_up * (corner.y * scale_y);
+    if ((node.flags & NODE_FLAG_TURNED) != 0) {
+        vertex_pos = mul(world, float4(corner, 0.0, 1.0)).xyz;
+    }
+    vertex_pos += camera_back * node.depth_offset;
     float2 top = lerp(frame.uv[0], frame.uv[1], v.uv.x);
     float2 bottom = lerp(frame.uv[3], frame.uv[2], v.uv.x);
     VertexOut o;

@@ -26,10 +26,6 @@ teardown :: proc(f: ^Fixture) {
 	font.destroy(&f.font)
 }
 
-fixed :: proc(w, h: f32) -> [2]Size {
-	return {{.FIXED, w}, {.FIXED, h}}
-}
-
 @(test)
 test_row_flow_padding_gap_align :: proc(t: ^testing.T) {
 	f: Fixture
@@ -404,23 +400,24 @@ test_mesh_batches_by_texture_and_clip :: proc(t: ^testing.T) {
 	defer teardown(&f)
 	solid := style_create(&f.ui, {fill = {255, 255, 255, 255}, border = 2, border_color = {0, 0, 0, 255}})
 	panel := node_create(&f.ui, {size = fixed(200, 100), clip = true, style = solid})
-	node_create(&f.ui, {parent = panel, size = fixed(20, 20), image = 9, image_rect = {{0.5, 0}, {0.5, 0.25}}})
+	node_create(&f.ui, {parent = panel, size = fixed(20, 20), image = 9, image_uv = {{0.5, 0}, {1, 0}, {1, 0.25}, {0.5, 0.25}}})
 	node_create(&f.ui, {parent = panel, text = "ok", font_size = 16})
 	update(&f.ui, VIEWPORT, &f.font, 2)
 	vertices, indices, batches := mesh(&f.ui)
 	testing.expect_value(t, len(batches), 3)
 	testing.expect_value(t, batches[0].texture, 0)
 	testing.expect_value(t, batches[0].vertex_count, 5 * 4)
-	testing.expect_value(t, batches[0].clip, Rect{{}, VIEWPORT * 2})
+	testing.expect_value(t, batches[0].clip, Rect{{}, VIEWPORT})
 	testing.expect_value(t, batches[1].texture, 9)
-	testing.expect_value(t, batches[1].clip, Rect{{}, {400, 200}})
+	testing.expect_value(t, batches[1].clip, Rect{{}, {200, 100}})
 	first := vertices[batches[1].first_vertex:]
 	testing.expect_value(t, first[0].uv, [2]f32{0.5, 0})
 	testing.expect_value(t, first[2].uv, [2]f32{1, 0.25})
-	testing.expect_value(t, first[2].pos, [2]f32{40, 40})
+	testing.expect_value(t, first[2].pos, [2]f32{20, 20})
 	testing.expect_value(t, batches[2].texture, FONT_TEXTURE)
+	atlas := font.atlas_size(&f.font)
 	for v in vertices[batches[2].first_vertex:][:batches[2].vertex_count] {
-		testing.expect(t, v.uv.x >= 0 && v.uv.x <= 1 && v.uv.y >= 0 && v.uv.y <= 1, "glyph uvs in the atlas")
+		testing.expect(t, v.uv.x >= 0 && v.uv.x <= f32(atlas.x) && v.uv.y >= 0 && v.uv.y <= f32(atlas.y), "glyph uvs in atlas texels")
 	}
 	for b in batches do for i in indices[b.first_index:][:b.index_count] do testing.expect(t, i < b.vertex_count, "indices count from the batch")
 }
@@ -458,4 +455,77 @@ test_clipping_grow_node_scrolls_instead_of_growing :: proc(t: ^testing.T) {
 	update(&f.ui, VIEWPORT, &f.font)
 	testing.expect_value(t, rect(&f.ui, list).size.y, 120)
 	testing.expect_value(t, max_scroll(&f.ui, list), [2]f32{0, 80})
+}
+
+@(test)
+test_tint_multiplies_down_the_subtree :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	solid := style_create(&f.ui, {fill = {255, 255, 255, 255}})
+	panel := node_create(&f.ui, {size = fixed(100, 100), style = solid, tint = {255, 255, 255, 51}})
+	node_create(&f.ui, {parent = panel, size = fixed(10, 10), style = solid, tint = {255, 0, 0, 255}})
+	update(&f.ui, VIEWPORT, &f.font)
+	vertices, _, _ := mesh(&f.ui)
+	testing.expect_value(t, vertices[0].color, [4]u8{255, 255, 255, 51})
+	testing.expect_value(t, vertices[4].color, [4]u8{255, 0, 0, 51})
+	// a look only: no layout
+	node(&f.ui, panel).tint = {}
+	laid_out, painted := update(&f.ui, VIEWPORT, &f.font)
+	testing.expect(t, !laid_out && painted, "tint repaints without a layout")
+}
+
+@(test)
+test_truncated_line_fits_with_an_ellipsis :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	text := "a label far too long for its box"
+	label := node_create(&f.ui, {size = {{.FIXED, 80}, {}}, text = text, truncate = true})
+	update(&f.ui, VIEWPORT, &f.font)
+	ls := lines(&f.ui, label)
+	testing.expect_value(t, len(ls), 1)
+	testing.expect(t, ls[0].ellipsis, "cut short")
+	testing.expect(t, ls[0].end < len(text) && ls[0].end > 0, "keeps a prefix")
+	testing.expect(t, ls[0].width <= 80, "fits its box")
+	// a line that fits is left whole
+	node(&f.ui, label).size.x = {.FIXED, 1000}
+	update(&f.ui, VIEWPORT, &f.font)
+	ls = lines(&f.ui, label)
+	testing.expect(t, !ls[0].ellipsis && ls[0].end == len(text), "whole")
+}
+
+@(test)
+test_text_takes_the_default_font_size :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	label := node_create(&f.ui, {text = "Hi"})
+	update(&f.ui, VIEWPORT, &f.font)
+	testing.expect_value(t, lines(&f.ui, label)[0].size, f.ui.font_size)
+	f.ui.font_size = 32
+	laid_out, _ := update(&f.ui, VIEWPORT, &f.font)
+	testing.expect(t, laid_out, "a new default lays out again")
+	testing.expect_value(t, lines(&f.ui, label)[0].size, 32)
+}
+
+@(test)
+test_nine_slice_keeps_its_corners :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	frame := node_create(&f.ui, {size = fixed(100, 60), image = 3, smooth = true, slice = {border = {10, 10, 10, 10}, uv = {0.25, 0.25, 0.25, 0.25}}})
+	_ = frame
+	update(&f.ui, VIEWPORT, &f.font)
+	vertices, _, batches := mesh(&f.ui)
+	testing.expect_value(t, len(batches), 1)
+	testing.expect(t, batches[0].smooth, "smooth sampling")
+	testing.expect_value(t, batches[0].vertex_count, 9 * 4)
+	// the top-left cell: 10 x 10 on screen, the image's top-left quarter
+	testing.expect_value(t, vertices[2].pos, [2]f32{10, 10})
+	testing.expect_value(t, vertices[2].uv, [2]f32{0.25, 0.25})
+	// the centre stretches
+	testing.expect_value(t, vertices[4 * 4].pos, [2]f32{10, 10})
+	testing.expect_value(t, vertices[4 * 4 + 2].pos, [2]f32{90, 50})
+	testing.expect_value(t, vertices[4 * 4 + 2].uv, [2]f32{0.75, 0.75})
 }

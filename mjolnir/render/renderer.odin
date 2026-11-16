@@ -204,10 +204,11 @@ Renderer_State :: struct {
   overlay_batches:        [dynamic]OverlayBatch,
   // the overlay was drawn or a tick ended since it was staged: the next stage_overlay replaces it
   overlay_stale:          bool,
-  // sampled by text commands: the uploaded font.atlas version and its size
-  overlay_font_atlas:     TextureHandle,
-  overlay_font_version:   u64,
-  overlay_font_size:      [2]u32,
+  // a draw was dropped past the overlay's capacity since it was cleared (warned once)
+  overlay_full:           bool,
+  // sampled by text commands: each font's uploaded atlas, the least recently used replaced
+  overlay_fonts:          [OVERLAY_FONTS]OverlayFont,
+  overlay_font_clock:     u64,
   // the window's, as frame last measured it: maps window coordinates to pixels
   dpi_scale:              f32,
   mutex:                  sync.Recursive_Mutex,

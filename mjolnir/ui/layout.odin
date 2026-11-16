@@ -6,6 +6,7 @@ import "../font"
 import "core:mem"
 import "core:slice"
 import "core:strings"
+import "core:unicode/utf8"
 
 @(private = "file")
 ALIGN_FACTOR := [Align]f32 {
@@ -19,14 +20,13 @@ ALIGN_FACTOR := [Align]f32 {
 // (nil for a tree without text; pass the same font every time). Every node is laid out in the
 // reference frame scaled up or down until one axis matches the window, so the window is the
 // reference widened on the other axis; roots sit in it as ABSOLUTE nodes do in their parent.
-// Rects, clips and lines come out in window pixels, the mesh in framebuffer pixels.
-// Only what changed since the last update is redone; it returns what it redid.
+// Rects, clips, lines and the mesh come out in window pixels, the mesh's edges and glyphs on
+// framebuffer pixels. Only what changed since the last update is redone; it returns what it redid.
 update :: proc(self: ^UI, window: [2]f32, f: ^font.Font, dpi: f32 = 1) -> (laid_out, painted: bool) {
   n := int(self.slots.high_water)
   frame := anchor.frame(self.reference, window)
-  atlas := font.atlas_size(f) if f != nil else {}
-  laid_out = self.dirty || frame != self.frame || dpi != self.dpi || n != len(self.last_nodes)
-  painted = laid_out || atlas != self.atlas_size || self.hovered != self.last_hovered || self.pressed != self.last_pressed
+  laid_out = self.dirty || frame != self.frame || dpi != self.dpi || n != len(self.last_nodes) || self.font_size != self.last_font
+  painted = laid_out || self.hovered != self.last_hovered || self.pressed != self.last_pressed
   painted ||= len(self.styles) != len(self.last_styles) || mem.compare(slice.to_bytes(self.styles[:]), slice.to_bytes(self.last_styles[:])) != 0
   if !laid_out && mem.compare(slice.to_bytes(self.nodes[:n]), slice.to_bytes(self.last_nodes[:])) != 0 {
     painted = true
@@ -40,7 +40,7 @@ update :: proc(self: ^UI, window: [2]f32, f: ^font.Font, dpi: f32 = 1) -> (laid_
   paint(self, f, dpi)
   self.dirty = false
   self.dpi = dpi
-  self.atlas_size = font.atlas_size(f) if f != nil else {}
+  self.last_font = self.font_size
   self.last_hovered, self.last_pressed = self.hovered, self.pressed
   resize(&self.last_nodes, n)
   copy(self.last_nodes[:], self.nodes[:n])
@@ -128,6 +128,12 @@ build_tree :: proc(self: ^UI) {
   for k := 0; k < len(self.topo); k += 1 do append(&self.topo, ..children_of(self, self.topo[k]))
 }
 
+// The font size a text node is laid out at, in reference units.
+@(private = "file")
+text_size :: proc(self: ^UI, nd: ^Node) -> f32 {
+  return nd.font_size if nd.font_size > 0 else self.font_size
+}
+
 // Padding along `axis`, both sides.
 @(private = "file")
 padding :: proc(nd: ^Node, axis: int) -> f32 {
@@ -170,16 +176,17 @@ fit_axis :: proc(self: ^UI, f: ^font.Font, axis: int) {
     }
     if main && count > 1 do content += nd.gap * f32(count - 1)
     if len(nd.text) > 0 {
+      size := text_size(self, nd)
       if axis == 0 {
         // wrapped text breaks down to its longest word
         text := nd.text
         if nd.wrap {
-          for word in strings.fields_iterator(&text) do content = max(content, font.measure(f, word, nd.font_size))
+          for word in strings.fields_iterator(&text) do content = max(content, font.measure(f, word, size))
         } else {
-          for line in strings.split_lines_iterator(&text) do content = max(content, font.measure(f, line, nd.font_size))
+          for line in strings.split_lines_iterator(&text) do content = max(content, font.measure(f, line, size))
         }
       } else {
-        content = max(content, f32(self.line_ranges[i][1]) * font.line_height(f, nd.font_size))
+        content = max(content, f32(self.line_ranges[i][1]) * font.line_height(f, size))
       }
     }
     self.fit[i][axis] = content + padding(nd, axis)
@@ -187,11 +194,11 @@ fit_axis :: proc(self: ^UI, f: ^font.Font, axis: int) {
 }
 
 // The least a node shrinks to along `axis` when it does not fit its content: a clipping node
-// scrolls what does not fit, so only its padding counts.
+// scrolls what does not fit and a truncating one cuts its lines short, so only its padding counts.
 @(private = "file")
 least :: proc(self: ^UI, i: u32, axis: int) -> f32 {
   nd := &self.nodes[i]
-  if nd.clip && nd.size[axis].kind != .FIT do return padding(nd, axis)
+  if (nd.clip || (nd.truncate && axis == 0)) && nd.size[axis].kind != .FIT do return padding(nd, axis)
   return self.fit[i][axis]
 }
 
@@ -249,7 +256,7 @@ size_axis :: proc(self: ^UI, axis: int) {
 }
 
 // Break every text node into lines: at newlines, and when `wrap`, before
-// the word that would cross the content width.
+// the word that would cross the content width; when `truncate`, cut lines that cross it.
 @(private = "file")
 wrap_text :: proc(self: ^UI, f: ^font.Font) {
   clear(&self.lines)
@@ -257,6 +264,7 @@ wrap_text :: proc(self: ^UI, f: ^font.Font) {
     nd := &self.nodes[i]
     first := len(self.lines)
     width := self.rects[i].size.x - padding(nd, 0)
+    size := text_size(self, nd)
     start := 0
     for start <= len(nd.text) && len(nd.text) > 0 {
       end := strings.index_byte(nd.text[start:], '\n')
@@ -267,7 +275,7 @@ wrap_text :: proc(self: ^UI, f: ^font.Font) {
         for space := line_start; space < end; {
           next := strings.index_byte(nd.text[space + 1:end], ' ')
           next = end if next < 0 else space + 1 + next
-          if next > line_start && space > line_start && font.measure(f, nd.text[line_start:next], nd.font_size) > width {
+          if next > line_start && space > line_start && font.measure(f, nd.text[line_start:next], size) > width {
             append(&self.lines, Line{start = line_start, end = space})
             line_start = space + 1
           }
@@ -278,7 +286,25 @@ wrap_text :: proc(self: ^UI, f: ^font.Font) {
       start = end + 1
     }
     self.line_ranges[i] = {first, len(self.lines) - first}
-    for &line in self.lines[first:] do line.width = font.measure(f, nd.text[line.start:line.end], nd.font_size)
+    for &line in self.lines[first:] do line.width = font.measure(f, nd.text[line.start:line.end], size)
+    if nd.truncate && !nd.wrap do truncate(self, nd, self.lines[first:], width, size, f)
+  }
+}
+
+// Cuts the lines wider than `width` before the last character that leaves room for ELLIPSIS.
+@(private = "file")
+truncate :: proc(self: ^UI, nd: ^Node, lines: []Line, width, size: f32, f: ^font.Font) {
+  dots := font.measure(f, ELLIPSIS, size)
+  for &line in lines {
+    if line.width <= width do continue
+    end := line.end
+    for end > line.start {
+      end -= 1
+      for end > line.start && !utf8.rune_start(nd.text[end]) do end -= 1
+      if font.measure(f, nd.text[line.start:end], size) + dots <= width do break
+    }
+    line.end, line.ellipsis = end, true
+    line.width = font.measure(f, nd.text[line.start:end], size) + dots
   }
 }
 
@@ -300,7 +326,7 @@ place :: proc(self: ^UI, f: ^font.Font) {
     content_size := r.size - {padding(nd, 0), padding(nd, 1)}
     // text lines, aligned in the content box
     if lr := self.line_ranges[i]; lr[1] > 0 {
-      lh := font.line_height(f, nd.font_size)
+      lh := font.line_height(f, text_size(self, nd))
       y := content_pos.y + (content_size.y - lh * f32(lr[1])) * ALIGN_FACTOR[nd.align[1]]
       for &line, k in self.lines[lr[0]:][:lr[1]] {
         line.pos = {content_pos.x + (content_size.x - line.width) * ALIGN_FACTOR[nd.align[0]], y + f32(k) * lh}
@@ -357,7 +383,7 @@ to_window :: proc(self: ^UI) {
   for i in self.topo {
     self.rects[i] = anchor.to_window(self.rects[i], self.frame)
     self.clips[i] = anchor.to_window(self.clips[i], self.frame)
-    size := self.nodes[i].font_size * s
+    size := text_size(self, &self.nodes[i]) * s
     for &line in self.lines[self.line_ranges[i][0]:][:self.line_ranges[i][1]] {
       line.pos *= s
       line.width *= s

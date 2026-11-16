@@ -1,4 +1,4 @@
-// Sprite atlas: packed sprite frames walking an isometric field; point at one to see its health, click to hit it.
+// Sprite atlas: packed sprite frames walking an isometric field; point at one to mark it and see its health bar, both sprites in the world, click to hit it.
 package main
 
 import "core:log"
@@ -24,6 +24,10 @@ HEAD :: 1.6
 HP :: 5
 WALK :: render.SpriteClip{first = 0, count = 2, fps = 4}
 HAT :: 2
+BAR_BACK :: 3
+BAR_FILL :: 4
+MARK :: 5
+BAR :: [2]f32{1, 0.14}
 
 BODY_ART :: [16]string {
   "....kkkkkk..",
@@ -53,6 +57,17 @@ HAT_ART :: [6]string {
   ".kkkkkkkkkk.",
 }
 
+MARK_ART :: [8]string {
+  "..yyyy..",
+  ".y....y.",
+  "y......y",
+  "y......y",
+  "y......y",
+  "y......y",
+  ".y....y.",
+  "..yyyy..",
+}
+
 Walker :: struct {
   body:   world.NodeHandle,
   hat:    world.NodeHandle,
@@ -71,6 +86,9 @@ App :: struct {
   walkers:  [WALKERS]Walker,
   hovered:  int,
   time:     f32,
+  bar_back: world.NodeHandle,
+  bar_fill: world.NodeHandle,
+  mark:     world.NodeHandle,
 }
 
 main :: proc() {
@@ -122,6 +140,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   for row, y in hat {
     for x in 0 ..< len(row) do paint(&pixels, 24 + 5 - y, x, row[x])
   }
+  for y in 16 ..< 18 do for x in 0 ..< 4 do paint(&pixels, x, y, 'k' if x < 2 else 'r')
+  mark := MARK_ART
+  for row, y in mark {
+    for x in 0 ..< len(row) do paint(&pixels, x, 18 + y, row[x])
+  }
   texture := render.texture_create(&app.renderer, pixels[:], {ATLAS, ATLAS})
   if texture == 0 do return .FAIL
   uv :: proc(x, y: f32) -> [2]f32 {return {x, y} / ATLAS}
@@ -129,6 +152,9 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     {uv = {uv(0, 0), uv(12, 0), uv(12, 16), uv(0, 16)}, offset = {0, 8}, size = {12, 16}},
     {uv = {uv(12, 0), uv(24, 0), uv(24, 16), uv(12, 16)}, offset = {0, 8}, size = {12, 16}},
     {uv = {uv(30, 0), uv(30, 12), uv(24, 12), uv(24, 0)}, offset = {0, 18}, size = {12, 6}},
+    {uv = {uv(0.5, 16.5), uv(1.5, 16.5), uv(1.5, 17.5), uv(0.5, 17.5)}, size = {1, 1}},
+    {uv = {uv(2.5, 16.5), uv(3.5, 16.5), uv(3.5, 17.5), uv(2.5, 17.5)}, offset = {0.5, 0}, size = {1, 1}},
+    {uv = {uv(0, 18), uv(8, 18), uv(8, 26), uv(0, 26)}, size = {8, 8}},
   }
   set := render.sprite_frames_create(&app.renderer, frames[:])
   if set == 0 do return .FAIL
@@ -146,6 +172,14 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
     sprite.frame, sprite.depth_offset = HAT, 0.01
     w.hat = mjolnir.spawn(&app.scene, &app.renderer, sprite, parent = w.body)
   }
+  bar := render.primitive(&app.renderer, .QUAD_XY, material, no_shadow = true)
+  bar.frame = BAR_BACK
+  app.bar_back = mjolnir.spawn(&app.scene, &app.renderer, bar, scale = {BAR.x + 0.04, BAR.y + 0.04, 1})
+  bar.frame, bar.depth_offset = BAR_FILL, 0.01
+  app.bar_fill = mjolnir.spawn(&app.scene, &app.renderer, bar)
+  ring := render.primitive(&app.renderer, .QUAD_XY, material, no_shadow = true)
+  ring.frame, ring.turned = MARK, true
+  app.mark = mjolnir.spawn(&app.scene, &app.renderer, ring, scale = PIXEL * 2)
   app.hovered = -1
   return .READY
 }
@@ -195,20 +229,17 @@ update :: proc(app: ^App, dt: f32) {
 }
 
 hud :: proc(app: ^App) {
-  if app.hovered < 0 {
-    render.stage_overlay(&app.renderer, nil)
-    return
-  }
+  shown := app.hovered >= 0
+  for n in ([]world.NodeHandle{app.bar_back, app.bar_fill, app.mark}) do world.set_visible(&app.scene, n, shown)
+  if !shown do return
   w := app.walkers[app.hovered]
-  head, ok := render.world_to_screen(&app.renderer, {w.pos.x, HEAD, w.pos.y})
-  if !ok do return
-  BAR :: [2]f32{60, 8}
-  top := head - {BAR.x / 2, BAR.y}
-  commands := [?]render.OverlayCommand {
-    {shape = render.OverlayQuad{position = top - 1, size = BAR + 2, color = {20, 20, 24, 220}}},
-    {shape = render.OverlayQuad{position = top, size = {BAR.x * f32(w.hp) / HP, BAR.y}, color = {220, 60, 50, 255}}, z_order = 1},
-  }
-  render.stage_overlay(&app.renderer, commands[:])
+  world.transform(&app.scene, app.bar_back).position = {w.pos.x, HEAD, w.pos.y}
+  fill := world.transform(&app.scene, app.bar_fill)
+  fill.position = {w.pos.x - BAR.x / 2, HEAD, w.pos.y}
+  fill.scale = {BAR.x * f32(w.hp) / HP, BAR.y, 1}
+  mark := world.transform(&app.scene, app.mark)
+  mark.position = {w.pos.x, 0.01, w.pos.y}
+  mark.rotation = linalg.quaternion_angle_axis(app.time, [3]f32{0, 1, 0}) * linalg.quaternion_angle_axis(-f32(math.PI) / 2, [3]f32{1, 0, 0})
 }
 
 draw :: proc(app: ^App) -> bool {

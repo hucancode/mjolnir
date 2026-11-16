@@ -162,12 +162,10 @@ end :: proc(self: ^Context, r: ^render.Renderer) {
     if last_index == run.first_index do continue
     // indices are relative to the run's first vertex
     for &idx in self.indices[run.first_index:last_index] do idx -= u32(run.first_vertex)
-    append(&self.commands, render.OverlayCommand{
-      shape = render.OverlayMesh{
-        vertices = self.vertices[run.first_vertex:last_vertex],
-        indices = self.indices[run.first_index:last_index],
-        texture = self.atlas,
-      },
+    append(&self.commands, render.OverlayMesh{
+      vertices = self.vertices[run.first_vertex:last_vertex],
+      indices = self.indices[run.first_index:last_index],
+      texture = self.atlas,
       z_order = max(i32),
       clip = run.clip,
     })

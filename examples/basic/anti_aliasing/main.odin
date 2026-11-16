@@ -89,7 +89,7 @@ update :: proc(app: ^App, dt: f32) {
   for view, i in app.views {
     render.camera_resize(&app.renderer, view, view_size(app))
     image := render.camera_image(&app.renderer, view, .FINAL_IMAGE, previous_frame = true)
-    quads[i] = {shape = render.OverlayQuad{position = {f32(i) * size.x / 2, 0}, size = {size.x / 2, size.y}, color = 255, texture = image}}
+    quads[i] = render.OverlayQuad{position = {f32(i) * size.x / 2, 0}, size = {size.x / 2, size.y}, color = 255, texture = image}
   }
   render.stage_overlay(&app.renderer, quads[:])
   debug_ui(app)

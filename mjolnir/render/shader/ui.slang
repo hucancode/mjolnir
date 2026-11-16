@@ -1,4 +1,4 @@
-// The 2D overlay: pixel-space vertices through an orthographic projection, one texture per
+// The 2D overlay: pixel-space vertices through an orthographic projection, one texture and sampler per
 // batch (a push on Vulkan, the pass's single texture group on wgpu). Glyph atlases are white
 // with coverage in alpha, so one multiply serves glyphs, solid quads (white texture) and images.
 // Vertex colours are sRGB, as authored; they are made linear here, as the sRGB target expects.
@@ -6,9 +6,8 @@
 
 struct OverlayPush {
     float4x4 projection;
-#if !BACKEND_WGPU
-    uint texture_id;
-#endif
+    uint texture_id; // the bindless index on Vulkan; wgpu binds the texture instead
+    uint sampler_id;
 }
 PUSH_BLOCK(OverlayPush, overlay)
 
@@ -38,8 +37,11 @@ VertexOut vs_main([vk::location(0)] float2 position : POSITION, [vk::location(1)
 float4 fs_main(VertexOut v) : SV_Target0
 {
 #if BACKEND_WGPU
+    // a sampler cannot be picked into a variable here: branch on the batch's (uniform) choice
+    if (overlay.sampler_id == SAMPLER_LINEAR_CLAMP)
+        return v.color * batch_texture.Sample(linear_clamp, v.uv);
     return v.color * batch_texture.Sample(nearest_clamp, v.uv);
 #else
-    return v.color * textures[NonUniformResourceIndex(overlay.texture_id)].Sample(samplers[SAMPLER_NEAREST_CLAMP], v.uv);
+    return v.color * textures[NonUniformResourceIndex(overlay.texture_id)].Sample(sampler_of(overlay.sampler_id), v.uv);
 #endif
 }

@@ -116,8 +116,8 @@ update :: proc(app: ^App, dt: f32) {
   if input.key_pressed(&app.input, .L) do load(app)
   if input.key_pressed(&app.input, .C) do clear_boxes(app)
   hud := [?]render.OverlayCommand {
-    {shape = render.OverlayText{text = fmt.tprintf("%d boxes: %s", len(app.nodes), app.status), position = {20, 20}, size = 24, color = 255}},
-    {shape = render.OverlayText{text = "left click: place   right drag: turn   S: save   L: load   C: clear", position = {20, 54}, size = 18, color = {200, 200, 200, 255}}},
+    render.OverlayText{text = fmt.tprintf("%d boxes: %s", len(app.nodes), app.status), position = {20, 20}, size = 24, color = 255},
+    render.OverlayText{text = "left click: place   right drag: turn   S: save   L: load   C: clear", position = {20, 54}, size = 18, color = {200, 200, 200, 255}},
   }
   render.stage_overlay(&app.renderer, hud[:], &app.font)
   mjolnir.update(&app.scene, &app.renderer, dt)

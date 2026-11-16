@@ -11,6 +11,7 @@ import "rhi"
 OverlayPush :: struct {
   projection: matrix[4, 4]f32,
   texture:    TextureHandle,
+  sampler:    u32,
 }
 
 @(private)
@@ -62,7 +63,7 @@ overlay_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
     if s.z <= 0 || s.w <= 0 do continue
     dev.cmd_set_scissor(&self.gpu, cmd, u32(s.x), u32(s.y), u32(s.z), u32(s.w))
     texture_bind(self, cmd, .SINGLE, batch.texture)
-    push.texture = batch.texture
+    push.texture, push.sampler = batch.texture, batch.sampler
     dev.cmd_push(&self.gpu, cmd, &push, size_of(push))
     dev.cmd_draw_indexed(&self.gpu, cmd, batch.index_count, 1, batch.first_index, 0, 0)
   }

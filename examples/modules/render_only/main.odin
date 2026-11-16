@@ -45,7 +45,7 @@ draw :: proc(frame: int) {
   render.camera_orbit(render.main_camera(r), orbit)
   render.debug_axes(r, {0, 0.01, 0})
   render.debug_circle(r, {0, 0.02, 0}, {0, 1, 0}, 4)
-  render.stage_overlay(r, {{shape = render.OverlayText{"render only: slots placed by hand", {16, 16}, 24, {255, 255, 255, 255}}}}, &f)
+  render.stage_overlay(r, {render.OverlayText{text = "render only: slots placed by hand", position = {16, 16}, size = 24, color = 255}}, &f)
   render.update(r, 1.0 / 60)
   render.frame(r)
 }
