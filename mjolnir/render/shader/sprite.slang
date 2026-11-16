@@ -1,10 +1,13 @@
-// Sprite: a camera-facing billboard at the node's position, scaled by its world scale (mirrored
-// when the scale is), showing cell frame_index (row-major) of the albedo sprite sheet. Pixels
-// under half alpha are cut out; the rest write depth, so depth orders overlapping sprites.
+// Sprite: a camera-facing billboard at the node's position showing the node's frame of the
+// material's sprite frames (none: the whole albedo texture), the frame's quad scaled by the
+// node's world scale (mirrored when the scale is) and drawn depth_offset toward the camera.
+// Pixels under half alpha are cut out; the rest write depth, so depth orders overlapping sprites.
 #include "common.slang"
 
 SCENE_BUFFER(Node, nodes, 1, 1)
+SCENE_BUFFER(SpriteFrame, sprite_frames, 21, 2)
 SCENE_BUFFER(Material, materials, 3, 3)
+#include "sprite_frame.slang"
 
 struct MeshPush { uint camera_index; }
 PUSH_BLOCK(MeshPush, mesh_push)
@@ -56,13 +59,15 @@ VertexOut vs_main(VertexIn v)
     float mirror = sign(determinant(mat3_of(world)));
     float scale_x = length(column3(world, 0)) * mirror;
     float scale_y = length(column3(world, 1));
-    float3 vertex_pos = world_pos + camera_right * (v.position.x * scale_x) + camera_up * (v.position.y * scale_y);
-    float2 frame_size = float2(1.0 / float(sprite.frame_columns), 1.0 / float(sprite.frame_rows));
-    uint cell = sprite.frame_index % (sprite.frame_columns * sprite.frame_rows);
-    uint column = cell % sprite.frame_columns;
-    uint row = cell / sprite.frame_columns;
+    SpriteFrame frame = sprite_frame_of(sprite, node);
+    // the quad's corners are at +-1, its uv 0 at the top-left
+    float2 corner = frame.offset + v.position.xy * 0.5 * frame.size;
+    float3 camera_back = camera.view[2].xyz;
+    float3 vertex_pos = world_pos + camera_right * (corner.x * scale_x) + camera_up * (corner.y * scale_y) + camera_back * node.depth_offset;
+    float2 top = lerp(frame.uv[0], frame.uv[1], v.uv.x);
+    float2 bottom = lerp(frame.uv[3], frame.uv[2], v.uv.x);
     VertexOut o;
-    o.uv = v.uv * frame_size + float2(float(column), float(row)) * frame_size;
+    o.uv = lerp(top, bottom, v.uv.y);
     o.color = v.color * sprite.base_color_factor;
     o.position = vertex_pos;
 #if !BACKEND_WGPU

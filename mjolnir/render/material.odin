@@ -32,12 +32,10 @@ Material :: struct {
   emissive_factor:            f32,
   type:                       MaterialType,
   base_color_factor:          [4]f32,
-  // .SPRITE: sheet size in cells and the cell shown, row-major and wrapped to the sheet; animate
-  // by setting frame_index as time advances
-  frame_columns:              u32,
-  frame_rows:                 u32,
-  frame_index:                u32,
-  _:                          u32,
+  // .SPRITE: the frames its sprites pick from (MeshAttachment.frame, sprite_frame); none shows
+  // the whole albedo texture
+  sprite_frames:              SpriteFramesHandle,
+  _:                          [3]u32,
   // your shader's own values (material_shader_create), read as m.params[i]; the built-in types
   // ignore them
   params:                     [4][4]f32,
@@ -51,11 +49,11 @@ material :: proc(self: ^Renderer, handle: MaterialHandle) -> (^Material, bool) #
 }
 
 // make_material returns a Material for material_create. type picks how it draws: .SPRITE
-// shows cell frame_index (row-major) of a frame_columns x frame_rows sheet in albedo_texture
-// on a camera-facing QUAD_XY (the node's x and y scale set its size, so scale non-square cells
-// by their aspect; a negative scale mirrors it; the nearer sprite covers the farther); a type
-// from material_shader_create is drawn by that shader, which reads params (its own values) and
-// any other field.
+// draws a camera-facing QUAD_XY as one frame of sprite_frames in albedo_texture (each node its
+// own frame, MeshAttachment.frame; the frame's size times the node's x and y scale is its size,
+// a negative scale mirrors it; pixels under half alpha are cut out and the nearer sprite covers
+// the farther); a type from material_shader_create is drawn by that shader, which reads params
+// (its own values) and any other field.
 make_material :: proc(
   type: MaterialType = .PBR,
   albedo_texture: TextureHandle = NO_TEXTURE,
@@ -66,9 +64,7 @@ make_material :: proc(
   roughness_factor: f32 = 1.0,
   emissive_factor: f32 = 0.0,
   base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-  frame_columns: u32 = 1,
-  frame_rows: u32 = 1,
-  frame_index: u32 = 0,
+  sprite_frames: SpriteFramesHandle = 0,
   params: [4][4]f32 = {},
 ) -> Material {
   return {
@@ -81,18 +77,14 @@ make_material :: proc(
     roughness_factor           = roughness_factor,
     emissive_factor            = emissive_factor,
     base_color_factor          = base_color_factor,
-    frame_columns              = frame_columns,
-    frame_rows                 = frame_rows,
-    frame_index                = frame_index,
+    sprite_frames              = sprite_frames,
     params                     = params,
   }
 }
 
 // material_create stores `m` (make_material fills one); it lives until material_destroy or
-// teardown. A sprite sheet of 0 columns or rows counts as 1.
+// teardown.
 material_create :: proc(self: ^Renderer, m: Material) -> (handle: MaterialHandle, ok: bool) #optional_ok {
-  m := m
-  m.frame_columns, m.frame_rows = max(m.frame_columns, 1), max(m.frame_rows, 1)
   return MaterialHandle(resource_create(self, .MATERIALS, m) or_return), true
 }
 

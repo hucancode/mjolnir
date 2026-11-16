@@ -66,12 +66,6 @@ ONE_WAY :: u64(1 << 1)
 PLAYER :: u64(1 << 2)
 TRIGGER :: u64(1 << 3)
 
-Sheet :: struct {
-  texture: render.TextureHandle,
-  columns: u32,
-  rows:    u32,
-}
-
 Tile :: enum {
   GRASS_LEFT,
   GRASS,
@@ -120,7 +114,6 @@ Player :: struct {
   node:        world.NodeHandle,
   body:        b2.BodyId,
   shape:       b2.ShapeId,
-  look:        render.MaterialHandle,
   start:       [2]f32,
   facing:      f32,
   air_time:    f32,
@@ -137,7 +130,6 @@ Enemy :: struct {
   node:        world.NodeHandle,
   body:        b2.BodyId,
   shape:       b2.ShapeId,
-  look:        render.MaterialHandle,
   left, right: f32,
   squash_time: f32,
   alive:       bool,
@@ -150,9 +142,8 @@ App :: struct {
   input:      input.State,
   font:       font.Font,
   phys:       b2.WorldId,
-  tiles:      [Tile]render.MaterialHandle,
-  coin_look:  render.MaterialHandle,
-  flag_look:  render.MaterialHandle,
+  tiles:      render.MaterialHandle,
+  flag_node:  world.NodeHandle,
   backdrop:   world.NodeHandle,
   player:     Player,
   coins:      [dynamic]Coin,
@@ -205,39 +196,32 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   sun := render.light_create(&app.renderer, render.make_directional_light())
   mjolnir.spawn(&app.scene, &app.renderer, sun, rotation = linalg.quaternion_from_forward_and_up([3]f32{-0.4, -1, -0.3}, [3]f32{0, 1, 0}))
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
-  tile_sheet := load_sheet(app, #load("assets/kenney_pixel_platformer/Tilemap/tilemap_packed.png"), 20, 9)
+  app.tiles = load_sheet(app, #load("assets/kenney_pixel_platformer/Tilemap/tilemap_packed.png"), 20, 9)
   character_sheet := load_sheet(app, #load("assets/kenney_pixel_platformer/Tilemap/tilemap-characters_packed.png"), 9, 3)
   backdrop_sheet := load_sheet(app, #load("assets/kenney_pixel_platformer/Tilemap/tilemap-backgrounds_packed.png"), 8, 3)
-
-  for frame, tile in TILE_FRAMES do app.tiles[tile] = sprite_look(app, tile_sheet, frame)
-  app.coin_look = sprite_look(app, tile_sheet, COIN_FRAMES[0])
-  app.flag_look = sprite_look(app, tile_sheet, FLAG_FRAMES[0])
   build_backdrop(app, backdrop_sheet)
   build_level(app, character_sheet)
   app.coin_count = len(app.coins)
   return .READY
 }
 
-load_sheet :: proc(app: ^App, png: []u8, columns, rows: u32) -> Sheet {
-  return {render.texture_create(&app.renderer, png), columns, rows}
+load_sheet :: proc(app: ^App, png: []u8, columns, rows: u32) -> render.MaterialHandle {
+  frames := render.sprite_frames_create(&app.renderer, render.sprite_frames_grid(columns, rows))
+  return render.material_create(&app.renderer, render.make_material(.SPRITE, albedo_texture = render.texture_create(&app.renderer, png), sprite_frames = frames))
 }
 
-sprite_look :: proc(app: ^App, sheet: Sheet, frame: u32) -> render.MaterialHandle {
-  return render.material_create(&app.renderer, render.make_material(.SPRITE, albedo_texture = sheet.texture, frame_columns = sheet.columns, frame_rows = sheet.rows, frame_index = frame))
+spawn_sprite :: proc(app: ^App, sheet: render.MaterialHandle, frame: u32, position: [3]f32, size: f32 = 1, parent: world.NodeHandle = {}) -> world.NodeHandle {
+  sprite := render.primitive(&app.renderer, .QUAD_XY, sheet, no_shadow = true)
+  sprite.frame = frame
+  return mjolnir.spawn(&app.scene, &app.renderer, sprite, position, parent = parent, scale = size)
 }
 
-spawn_sprite :: proc(app: ^App, look: render.MaterialHandle, position: [3]f32, size: f32 = 1, parent: world.NodeHandle = {}) -> world.NodeHandle {
-  return mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, look, no_shadow = true), position, parent = parent, scale = size / 2)
-}
-
-build_backdrop :: proc(app: ^App, sheet: Sheet) {
-  looks: [Backdrop]render.MaterialHandle
-  for frame, backdrop in BACKDROP_FRAMES do looks[backdrop] = sprite_look(app, sheet, frame)
+build_backdrop :: proc(app: ^App, sheet: render.MaterialHandle) {
   app.backdrop = world.spawn(&app.scene, {0, 0, Z_BACKGROUND})
   for x := -f32(COLUMNS); x < f32(COLUMNS) * 1.5; x += BACKGROUND_SIZE {
     for row in -2 ..< 16 {
       backdrop: Backdrop = .SKY if row > HORIZON else .HILLS if row == HORIZON else .MEADOW
-      spawn_sprite(app, looks[backdrop], {x, f32(row) * BACKGROUND_SIZE, 0}, BACKGROUND_SIZE, app.backdrop)
+      spawn_sprite(app, sheet, BACKDROP_FRAMES[backdrop], {x, f32(row) * BACKGROUND_SIZE, 0}, BACKGROUND_SIZE, app.backdrop)
     }
   }
 }
@@ -251,25 +235,25 @@ cell :: proc(column, row: int) -> u8 {
   return LEVEL[row][column]
 }
 
-build_level :: proc(app: ^App, characters: Sheet) {
+build_level :: proc(app: ^App, characters: render.MaterialHandle) {
   for row in 0 ..< ROWS {
     for column in 0 ..< COLUMNS {
       center := cell_center(column, row)
       switch cell(column, row) {
       case '#':
-        spawn_sprite(app, app.tiles[ground_tile(column, row)], {center.x, center.y, Z_TILES})
+        spawn_sprite(app, app.tiles, TILE_FRAMES[ground_tile(column, row)], {center.x, center.y, Z_TILES})
       case '=':
         tile: Tile = .ONE_WAY_LEFT if cell(column - 1, row) != '=' else .ONE_WAY_RIGHT if cell(column + 1, row) != '=' else .ONE_WAY
-        spawn_sprite(app, app.tiles[tile], {center.x, center.y, Z_TILES})
+        spawn_sprite(app, app.tiles, TILE_FRAMES[tile], {center.x, center.y, Z_TILES})
       case '^':
-        spawn_sprite(app, app.tiles[.SPIKES], {center.x, center.y, Z_TILES})
+        spawn_sprite(app, app.tiles, TILE_FRAMES[.SPIKES], {center.x, center.y, Z_TILES})
         _, spike := sensor_create(app, .staticBody, center - {0, 0.25}, {0.4, 0.25})
         append(&app.spikes, spike)
       case 'c':
         body, shape := sensor_create(app, .staticBody, center, {0.3, 0.3})
-        append(&app.coins, Coin{spawn_sprite(app, app.coin_look, {center.x, center.y, Z_ITEMS}), body, shape})
+        append(&app.coins, Coin{spawn_sprite(app, app.tiles, COIN_FRAMES[0], {center.x, center.y, Z_ITEMS}), body, shape})
       case 'F':
-        spawn_sprite(app, app.flag_look, {center.x, center.y, Z_ITEMS})
+        app.flag_node = spawn_sprite(app, app.tiles, FLAG_FRAMES[0], {center.x, center.y, Z_ITEMS})
         _, app.flag = sensor_create(app, .staticBody, center, {0.4, 0.5})
       case 'e':
         spawn_enemy(app, characters, column, row)
@@ -327,12 +311,11 @@ sensor_create :: proc(app: ^App, type: b2.BodyType, position, half: [2]f32) -> (
   return body, b2.CreatePolygonShape(body, shape, &box)
 }
 
-spawn_player :: proc(app: ^App, characters: Sheet, position: [2]f32) {
+spawn_player :: proc(app: ^App, characters: render.MaterialHandle, position: [2]f32) {
   p := &app.player
   p.start = position
   p.facing = 1
-  p.look = sprite_look(app, characters, PLAYER_STAND)
-  p.node = spawn_sprite(app, p.look, {position.x, position.y, Z_CHARACTERS}, CHARACTER_SIZE)
+  p.node = spawn_sprite(app, characters, PLAYER_STAND, {position.x, position.y, Z_CHARACTERS}, CHARACTER_SIZE)
   p.body = body_create(app, .dynamicBody, position)
   box := b2.MakeBox(PLAYER_HALF.x, PLAYER_HALF.y)
   shape := b2.DefaultShapeDef()
@@ -343,18 +326,17 @@ spawn_player :: proc(app: ^App, characters: Sheet, position: [2]f32) {
   p.shape = b2.CreatePolygonShape(p.body, shape, &box)
 }
 
-spawn_enemy :: proc(app: ^App, characters: Sheet, column, row: int) {
+spawn_enemy :: proc(app: ^App, characters: render.MaterialHandle, column, row: int) {
   left, right := column, column
   for cell(left - 1, row) == '.' && cell(left - 1, row + 1) == '#' do left -= 1
   for cell(right + 1, row) == '.' && cell(right + 1, row + 1) == '#' do right += 1
   position := cell_center(column, row) - {0, 0.5 - ENEMY_HALF.y}
   enemy := Enemy {
-    look  = sprite_look(app, characters, ENEMY_WALK[0]),
     left  = cell_center(left, row).x,
     right = cell_center(right, row).x,
     alive = true,
   }
-  enemy.node = spawn_sprite(app, enemy.look, {position.x, position.y, Z_CHARACTERS}, CHARACTER_SIZE)
+  enemy.node = spawn_sprite(app, characters, ENEMY_WALK[0], {position.x, position.y, Z_CHARACTERS}, CHARACTER_SIZE)
   enemy.body, enemy.shape = sensor_create(app, .kinematicBody, position, ENEMY_HALF)
   b2.Body_SetLinearVelocity(enemy.body, {ENEMY_SPEED, 0})
   append(&app.enemies, enemy)
@@ -468,7 +450,7 @@ stomp :: proc(app: ^App, enemy: ^Enemy) {
   enemy.alive = false
   enemy.squash_time = SQUASH_TIME
   b2.DestroyBody(enemy.body)
-  render.material(&app.renderer, enemy.look).frame_index = ENEMY_SQUASHED
+  render.sprite_frame(&app.renderer, enemy.node, ENEMY_SQUASHED)
   velocity := b2.Body_GetLinearVelocity(app.player.body)
   b2.Body_SetLinearVelocity(app.player.body, {velocity.x, STOMP_BOUNCE})
 }
@@ -481,14 +463,14 @@ respawn :: proc(app: ^App) {
 
 animate :: proc(app: ^App) {
   tick := int(app.time * ANIMATION_FPS)
-  render.material(&app.renderer, app.coin_look).frame_index = COIN_FRAMES[tick / 2 % 2]
-  render.material(&app.renderer, app.flag_look).frame_index = FLAG_FRAMES[tick / 2 % 2]
+  for coin in app.coins do render.sprite_frame(&app.renderer, coin.node, COIN_FRAMES[tick / 2 % 2])
+  render.sprite_frame(&app.renderer, app.flag_node, FLAG_FRAMES[tick / 2 % 2])
 
   p := &app.player
   position := b2.Body_GetPosition(p.body)
   grounded := p.air_time < COYOTE_TIME
   stepping := !grounded || (app.run != 0 && tick % 2 == 0)
-  render.material(&app.renderer, p.look).frame_index = PLAYER_STEP if stepping else PLAYER_STAND
+  render.sprite_frame(&app.renderer, p.node, PLAYER_STEP if stepping else PLAYER_STAND)
   place_character(app, p.node, position - {0, PLAYER_HALF.y}, -p.facing)
 
   #reverse for &enemy, i in app.enemies {
@@ -500,14 +482,14 @@ animate :: proc(app: ^App) {
       continue
     }
     feet := b2.Body_GetPosition(enemy.body) - {0, ENEMY_HALF.y}
-    render.material(&app.renderer, enemy.look).frame_index = ENEMY_WALK[tick % 2]
+    render.sprite_frame(&app.renderer, enemy.node, ENEMY_WALK[tick % 2])
     place_character(app, enemy.node, feet, math.sign(b2.Body_GetLinearVelocity(enemy.body).x))
   }
 }
 
 place_character :: proc(app: ^App, node: world.NodeHandle, feet: [2]f32, facing: f32) {
   world.transform(&app.scene, node).position = {feet.x, feet.y + CHARACTER_SIZE / 2, Z_CHARACTERS}
-  world.transform(&app.scene, node).scale = {facing * CHARACTER_SIZE / 2, CHARACTER_SIZE / 2, 1}
+  world.transform(&app.scene, node).scale = {facing * CHARACTER_SIZE, CHARACTER_SIZE, 1}
 }
 
 follow_player :: proc(app: ^App) {

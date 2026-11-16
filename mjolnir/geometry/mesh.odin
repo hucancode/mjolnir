@@ -20,7 +20,7 @@ Vertex :: struct {
 }
 
 // Vertex2D is a vertex of 2D screen-space geometry (a UI, an overlay): a pixel position, a
-// texture coordinate and a color.
+// texture coordinate and an sRGB color (as authored, e.g. CSS hex).
 Vertex2D :: struct {
   pos:   [2]f32,
   uv:    [2]f32,

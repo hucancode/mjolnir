@@ -98,8 +98,9 @@ MaterialType :: enum u32 {
   TRANSPARENT,
   WIREFRAME,
   RANDOM_COLOR,
-  // camera-facing billboard showing one cell of the albedo sprite sheet, unlit; a negative scale
-  // mirrors it, pixels under half alpha are cut out and depth orders overlapping sprites
+  // camera-facing billboard showing the node's frame of the material's sprite frames, unlit; a
+  // negative scale mirrors it, pixels under half alpha are cut out and depth orders overlapping
+  // sprites
   SPRITE,
 }
 
@@ -149,6 +150,8 @@ Table :: enum {
   LIGHT_PLACEMENTS,
   EMITTER_PLACEMENTS,
   FORCE_FIELD_PLACEMENTS,
+  // the frames of every sprite frame set (sprite_frames_create)
+  SPRITE_FRAMES,
 }
 
 // SkinnedVertex is a vertex the skinning pass wrote, read by vertex shaders in place of the

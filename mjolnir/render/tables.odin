@@ -35,6 +35,7 @@ TABLES := [Table]struct {
   .LIGHT_PLACEMENTS = {size_of(LightPlacement), MAX_LIGHTS},
   .EMITTER_PLACEMENTS = {size_of(EmitterPlacement), MAX_EMITTERS},
   .FORCE_FIELD_PLACEMENTS = {size_of(ForceFieldPlacement), MAX_FORCE_FIELDS},
+  .SPRITE_FRAMES = {size_of(SpriteFrame), MAX_SPRITE_FRAMES},
 }
 
 // The frame in flight frame records next: it picks this frame's copy of per-frame resources.

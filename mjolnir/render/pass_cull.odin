@@ -339,16 +339,17 @@ draw_list_draw :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, k
       }
     }
   } else {
-    draw_batches(self, cmd, slot, list, keys, pipelines, materials)
+    draw_batches(self, cmd, slot, list, keys, pipelines, materials, f)
   }
 }
 
 // The batched draw loop: an indirect draw per batch, its nodes the instance stream at the
 // batch's range, walking each key's batches in batch_order. Where a draw's first instance places
 // the stream (Caps.indirect_first_instance) the stream is bound once and a run of consecutive
-// batch ids that draw alike is one multi-draw.
+// batch ids that draw alike is one multi-draw. Material draws start with the MESH scene group
+// bound; a type reading another (MaterialShaderDesc.scene) binds its own.
 @(private = "file")
-draw_batches :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, keys: []u32, pipelines: []rhi.Pipeline, materials: bool) {
+draw_batches :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, keys: []u32, pipelines: []rhi.Pipeline, materials: bool, f: u32) {
   order := self.batch_order[:]
   if len(order) == 0 do return
   batches := write_table(self, .BATCHES, Batch)
@@ -357,12 +358,19 @@ draw_batches :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, key
   first_instance := dev.caps(&self.gpu).indirect_first_instance
   types := material_types()
   if first_instance do dev.cmd_bind_vertex(&self.gpu, cmd, 1, dl.buffer, 0)
+  bound_scene := ScenePass.MESH
   for key, t in keys {
     // this key's entries
     lo, _ := slice.binary_search_by(order, u64(key) << 44, proc(e, k: u64) -> slice.Ordering {return slice.cmp(e, k)})
     hi, _ := slice.binary_search_by(order, u64(key + 1) << 44, proc(e, k: u64) -> slice.Ordering {return slice.cmp(e, k)})
     if lo >= hi do continue
     dev.cmd_bind_pipeline(&self.gpu, cmd, pipelines[t])
+    if materials {
+      scene := types[MaterialType(key)].scene if key < u32(len(MaterialType)) else .NONE
+      if scene == .NONE do scene = .MESH
+      if scene != bound_scene do scene_bind(self, cmd, scene, f)
+      bound_scene = scene
+    }
     bound: u32
     for k := lo; k < hi; {
       id := u32(order[k] & 0xFFFFF)

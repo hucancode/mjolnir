@@ -12,6 +12,8 @@
 SCENE_BUFFER(Node, nodes, 1, 1)
 SCENE_BUFFER(MeshData, meshes, 2, 2)
 SCENE_BUFFER(Material, materials, 3, 3)
+SCENE_BUFFER(SpriteFrame, sprite_frames, 21, 6)
+#include "sprite_frame.slang"
 
 static const float DEPTH_BIAS = 0.0001;
 // draw lists per view, one per material type (render.DRAW_LIST_HEADER)
@@ -175,6 +177,15 @@ bool in_frustum_and_visible(View view, Node node, uint type)
     float3 world_center = world_center4.xyz / max(world_center4.w, 1e-6);
     float3x3 abs_world3 = abs(mat3_of(world));
     float3 world_extent = mul(abs_world3, local_extent);
+    if (type == MATERIAL_SPRITE) {
+        // a billboard turns with the camera: the sphere around its frame's quad
+        SpriteFrame frame = sprite_frame_of(materials[node.material_id], node);
+        // the basis columns' lengths
+        float3 scale = sqrt(mul(float3(1, 1, 1), mat3_of(world) * mat3_of(world)));
+        float reach = length(abs(frame.offset) + 0.5 * abs(frame.size)) * max(max(scale.x, scale.y), scale.z) + abs(node.depth_offset);
+        world_center = mul(world, float4(0, 0, 0, 1)).xyz;
+        world_extent = float3(reach, reach, reach);
+    }
 
     if (!in_view(view, world_center, world_extent)) return false;
     if (((view.occlusion_mask >> type) & 1) != 0 &&

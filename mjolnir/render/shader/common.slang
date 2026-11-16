@@ -96,8 +96,9 @@ struct Node {
     uint skin_vertex_base;
     // mesh layer: a view with it in hidden_layers skips the node
     uint layer;
-    uint _node_pad1;
-    uint _node_pad2;
+    // a sprite's frame in its material's frame set, and how far toward the camera it is drawn
+    uint frame;
+    float depth_offset;
 }
 
 struct MeshData {
@@ -123,12 +124,21 @@ struct Material {
     // MaterialType: a built-in one (MATERIAL_*) or a user shader's past them
     uint material_type;
     float4 base_color_factor;
-    uint frame_columns;
-    uint frame_rows;
-    uint frame_index;
-    uint _pad;
+    // SpriteFramesHandle: the first of its frames + 1, 0 for none
+    uint sprite_frames;
+    uint _pad0;
+    uint _pad1;
+    uint _pad2;
     // a user shader's own values
     float4 params[4];
+}
+
+// One frame of a sprite frame set: the texture corners its top-left, top-right, bottom-right
+// and bottom-left show, and its quad's centre and size by the node's scale (y up).
+struct SpriteFrame {
+    float2 uv[4];
+    float2 offset;
+    float2 size;
 }
 
 struct Light {
@@ -248,6 +258,12 @@ float4 clip_output(float4 p)
 static const float4 CLIP_DISCARD = float4(2.0, 2.0, 2.0, 1.0);
 
 // The rotation and scale of a transform.
+// An sRGB-encoded colour (as authored, e.g. CSS hex) as the linear colour shaders blend.
+float3 srgb_to_linear(float3 c)
+{
+    return select(c <= 0.04045, c / 12.92, pow((c + 0.055) / 1.055, 2.4));
+}
+
 float3x3 mat3_of(float4x4 m)
 {
     return float3x3(m[0].xyz, m[1].xyz, m[2].xyz);

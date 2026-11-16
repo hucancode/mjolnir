@@ -1,6 +1,7 @@
 // The 2D overlay: pixel-space vertices through an orthographic projection, one texture per
 // batch (a push on Vulkan, the pass's single texture group on wgpu). Glyph atlases are white
 // with coverage in alpha, so one multiply serves glyphs, solid quads (white texture) and images.
+// Vertex colours are sRGB, as authored; they are made linear here, as the sRGB target expects.
 #include "common.slang"
 
 struct OverlayPush {
@@ -28,7 +29,7 @@ VertexOut vs_main([vk::location(0)] float2 position : POSITION, [vk::location(1)
 {
     VertexOut o;
     o.clip = clip_output(mul(overlay.projection, float4(position, 0.0, 1.0)));
-    o.color = color;
+    o.color = float4(srgb_to_linear(color.rgb), color.a);
     o.uv = uv;
     return o;
 }

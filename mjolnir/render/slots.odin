@@ -68,7 +68,9 @@ Node :: struct #packed {
   flags:                 NodeFlagSet,
   skin_vertex_base:      u32,
   layer:                 u32,
-  _:                     [2]u32,
+  // a sprite's frame in its material's frame set, and how far toward the camera it is drawn
+  frame:                 u32,
+  depth_offset:          f32,
 }
 #assert(size_of(Node) == 96)
 
@@ -82,6 +84,11 @@ MeshAttachment :: struct {
   bones:     BonesHandle,
   // below MAX_LAYERS
   layer:     u32,
+  // a .SPRITE material's: the frame of its set shown (wrapped to the set; sprite_frame changes
+  // it), and how far toward the camera it is drawn, in world units, to order sprites at one spot
+  // (a character's layers) without moving them apart
+  frame:        u32,
+  depth_offset: f32,
 }
 
 // SlotHandle is a scene slot: any u32 below MAX_SLOTS you pick, e.g. a scene graph node's
@@ -239,7 +246,7 @@ attach :: proc(self: ^Renderer, slot: $H, attachment: Attachment) {
   if node == nil do return
   unbind(self, slot)
   batch_leave(self, slot)
-  node.mesh_id, node.material_id, node.layer = 0, 0, 0
+  node.mesh_id, node.material_id, node.layer, node.frame, node.depth_offset = 0, 0, 0, 0, 0
   node.flags -= {.CASTS_SHADOW}
   switch a in attachment {
   case MeshAttachment:
@@ -247,6 +254,7 @@ attach :: proc(self: ^Renderer, slot: $H, attachment: Attachment) {
     if a.layer < MAX_LAYERS do node.layer = a.layer
     else do log.errorf("Layer %d exceeds MAX_LAYERS", a.layer)
     batch_join(self, slot, node.mesh_id, node.material_id)
+    node.frame, node.depth_offset = sprite_frame_wrap(self, node.material_id, a.frame), a.depth_offset
     if !a.no_shadow do node.flags += {.CASTS_SHADOW}
     skin(self, slot, a.bones)
   case LightHandle:
@@ -318,7 +326,7 @@ attachment :: proc(
   node := write_table(self, .NODES, Node)[slot]
   when T == MeshAttachment {
     if node.mesh_id == 0 do return
-    att = {mesh = MeshHandle(node.mesh_id), material = MaterialHandle(node.material_id), no_shadow = .CASTS_SHADOW not_in node.flags, layer = node.layer}
+    att = {mesh = MeshHandle(node.mesh_id), material = MaterialHandle(node.material_id), no_shadow = .CASTS_SHADOW not_in node.flags, layer = node.layer, frame = node.frame, depth_offset = node.depth_offset}
     if .SKINNED not_in node.flags do return att, true
     att.bones = BonesHandle(node.attachment_data_index + 1)
     return att, true

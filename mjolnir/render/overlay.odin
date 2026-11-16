@@ -6,7 +6,7 @@ import "core:log"
 import "core:slice"
 
 // Positions and sizes are window coordinates (window_size), as input.State reports the cursor;
-// render scales them by the DPI scale. A zero `clip` is the whole window.
+// render scales them by the DPI scale. Colors are sRGB, as authored. A zero `clip` is the whole window.
 
 // OverlayQuad draws a solid or textured rectangle.
 OverlayQuad :: struct {

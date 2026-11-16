@@ -150,6 +150,8 @@ Renderer_State :: struct {
   mesh_slabs:             [MeshStream]containers.SlabAllocator,
   // the palettes' ranges of the bone table (BonesHandle is a palette's first bone + 1)
   bone_ranges:            containers.Ranges,
+  // the frame sets' ranges of the sprite frame table (SpriteFramesHandle is a set's first + 1)
+  sprite_frame_ranges:    containers.Ranges,
   // the skinned vertex ranges of skinned slots (pass_skin.odin)
   skin_ranges:            containers.Ranges,
   // `time` as of the last submitted frame: particles are emitted and simulated up to it, an
@@ -266,6 +268,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
     draw_list_create(self, SHADOW_DRAW_SLOT_BASE + frame, shadow = true) or_return
   }
   containers.ranges_init(&self.bone_ranges, MAX_BONES)
+  containers.ranges_init(&self.sprite_frame_ranges, MAX_SPRITE_FRAMES)
   containers.ranges_init(&self.skin_ranges, MAX_SKINNED_VERTICES)
   self.cameras = make([]Camera, MAX_ACTIVE_CAMERAS)
   self.camera_targets = make([]CameraTargets, MAX_ACTIVE_CAMERAS)
@@ -288,6 +291,7 @@ mark_resources :: proc(self: ^Renderer) {
   for &slots in self.slots do containers.slots_mark(&slots)
   for &slab in self.mesh_slabs do containers.slab_mark(&slab)
   containers.ranges_mark(&self.bone_ranges)
+  containers.ranges_mark(&self.sprite_frame_ranges)
 }
 
 // teardown ends a map in one go, waiting for the GPU: the renderer is back to how init left
@@ -328,6 +332,7 @@ teardown :: proc(self: ^Renderer) {
   self.node_count = 0
   when !BINDLESS do batches_reset(self)
   containers.ranges_rewind(&self.bone_ranges)
+  containers.ranges_rewind(&self.sprite_frame_ranges)
   containers.ranges_rewind(&self.skin_ranges)
   clear_entry(self, .SKIN_OWNERS, 0, self.skinned_vertex_count)
   self.skinned_vertex_count = 0
@@ -371,6 +376,7 @@ shutdown :: proc(self: ^Renderer) {
   delete(self.bursts)
   for &slab in self.mesh_slabs do containers.slab_destroy(&slab)
   containers.ranges_destroy(&self.bone_ranges)
+  containers.ranges_destroy(&self.sprite_frame_ranges)
   containers.ranges_destroy(&self.skin_ranges)
   for &slots in self.slots do containers.slots_destroy(&slots)
   delete(self.cameras)

@@ -39,6 +39,8 @@ MaterialShaderDesc :: struct {
   // pulls its vertices from the index buffer where there are no line polygons nor primitive
   // indices (WebGPU): its draws are non-indexed
   pulled:    bool,
+  // the scene group it reads on a device without bindless (resources.odin SCENE_PASSES)
+  scene:     ScenePass,
 }
 
 // The built-in material types.
@@ -50,7 +52,7 @@ material_types :: proc() -> [MaterialType]MaterialShaderDesc {
     .WIREFRAME    = {source = shader_source("wireframe"), cull = .NONE, blend = .ALPHA, wireframe = true, pulled = true},
     .RANDOM_COLOR = {source = shader_source("random_color"), cull = .BACK, blend = .ALPHA, pulled = true},
     // cut-out pixels: opaque, depth-ordered
-    .SPRITE       = {source = shader_source("sprite"), cull = .NONE, blend = .ALPHA, opaque = true},
+    .SPRITE       = {source = shader_source("sprite"), cull = .NONE, blend = .ALPHA, opaque = true, scene = .SPRITE},
   }
 }
 
@@ -61,7 +63,7 @@ material_pipeline_create :: proc(self: ^Renderer, pass: MaterialPass, desc: Mate
     &self.gpu,
     {
       shader = desc.source,
-      layout = pipeline_layout(self, .MESH, .MATERIAL),
+      layout = pipeline_layout(self, desc.scene if desc.scene != .NONE else .MESH, .MATERIAL),
       vertex = mesh_vertex_streams(),
       topology = .LINE_LIST if desc.wireframe && !BINDLESS else .TRIANGLE_LIST,
       cull = desc.cull,

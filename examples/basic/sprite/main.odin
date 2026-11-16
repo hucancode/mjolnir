@@ -14,13 +14,8 @@ import "mjolnir/world"
 SHEET_COLUMNS :: 6
 SHEET_ROWS :: 17
 CELL_ASPECT :: f32(69.0 / 44.0)
-SPRITE_HEIGHT :: 2.5
+SPRITE_HEIGHT :: 5
 FPS :: 8.0
-
-Clip :: struct {
-  first: u32,
-  count: u32,
-}
 
 State :: enum {
   FALLEN,
@@ -42,24 +37,24 @@ Action :: enum {
   LONG_JUMP,
 }
 
-STATE_CLIPS := [State]Clip {
-  .IDLE           = {0, 6},
-  .RUN            = {6, 8},
-  .FALLEN         = {36, 1},
-  .HANG           = {54, 6},
-  .HANG_SLIDE     = {60, 3},
-  .CLIMB          = {91, 8},
+STATE_CLIPS := [State]render.SpriteClip {
+  .IDLE           = {first = 0, count = 6, fps = FPS},
+  .RUN            = {first = 6, count = 8, fps = FPS},
+  .FALLEN         = {first = 36, count = 1, fps = FPS},
+  .HANG           = {first = 54, count = 6, fps = FPS},
+  .HANG_SLIDE     = {first = 60, count = 3, fps = FPS},
+  .CLIMB          = {first = 91, count = 8, fps = FPS},
 }
 
-ACTION_CLIPS := [Action]Clip {
-  .ATTACK     = {14, 12},
-  .FATAL      = {28, 10},
-  .HURT       = {37, 4},
-  .JUMP       = {42, 8},
-  .RUN_ATTACK = {76, 8},
-  .STOP       = {73, 3},
-  .DASH       = {84, 7},
-  .LONG_JUMP  = {63, 10},
+ACTION_CLIPS := [Action]render.SpriteClip {
+  .ATTACK     = {first = 14, count = 12, fps = FPS, once = true},
+  .FATAL      = {first = 28, count = 10, fps = FPS, once = true},
+  .HURT       = {first = 37, count = 4, fps = FPS, once = true},
+  .JUMP       = {first = 42, count = 8, fps = FPS, once = true},
+  .RUN_ATTACK = {first = 76, count = 8, fps = FPS, once = true},
+  .STOP       = {first = 73, count = 3, fps = FPS, once = true},
+  .DASH       = {first = 84, count = 7, fps = FPS, once = true},
+  .LONG_JUMP  = {first = 63, count = 10, fps = FPS, once = true},
 }
 
 App :: struct {
@@ -69,7 +64,7 @@ App :: struct {
   input:    input.State,
   orbit:    render.Orbit,
   debug:    debugui.Context,
-  sprite:   render.MaterialHandle,
+  sprite:   world.NodeHandle,
   state:    State,
   action:   Action,
   acting:   bool,
@@ -113,10 +108,11 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   if !debugui.init(&app.debug, &app.renderer) do return .FAIL
   app.state = .IDLE
-  sprite_ok: bool
-  app.sprite, sprite_ok = render.material_create(&app.renderer, render.make_material(.SPRITE, albedo_texture = tex, frame_columns = SHEET_COLUMNS, frame_rows = SHEET_ROWS))
-  if !sprite_ok do return .FAIL
-  mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, app.sprite, no_shadow = true), {0, 1.5, 0}, scale = {SPRITE_HEIGHT * CELL_ASPECT, SPRITE_HEIGHT, 1})
+  frames := render.sprite_frames_create(&app.renderer, render.sprite_frames_grid(SHEET_COLUMNS, SHEET_ROWS))
+  if frames == 0 do return .FAIL
+  material := render.material_create(&app.renderer, render.make_material(.SPRITE, albedo_texture = tex, sprite_frames = frames))
+  if material == 0 do return .FAIL
+  app.sprite = mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XY, material, no_shadow = true), {0, 1.5, 0}, scale = {SPRITE_HEIGHT * CELL_ASPECT, SPRITE_HEIGHT, 1})
 
   return .READY
 }
@@ -127,15 +123,13 @@ update :: proc(app: ^App, dt: f32) {
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input, rotate_with = {})
   app.elapsed += dt
-  clip := ACTION_CLIPS[app.action] if app.acting else STATE_CLIPS[app.state]
-  step := u32(app.elapsed * FPS)
-  if app.acting && step >= clip.count {
+  frame, done := render.sprite_clip_frame(ACTION_CLIPS[app.action] if app.acting else STATE_CLIPS[app.state], app.elapsed)
+  if app.acting && done {
     app.acting = false
     app.elapsed = 0
-    clip = STATE_CLIPS[app.state]
-    step = 0
+    frame, _ = render.sprite_clip_frame(STATE_CLIPS[app.state], 0)
   }
-  render.material(&app.renderer, app.sprite).frame_index = clip.first + step % clip.count
+  render.sprite_frame(&app.renderer, app.sprite, frame)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 

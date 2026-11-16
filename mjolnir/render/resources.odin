@@ -16,6 +16,8 @@ ScenePass :: enum {
   NONE,
   // material vertex and fragment shaders
   MESH,
+  // the sprite material's vertex and fragment shaders
+  SPRITE,
   // the lighting compute shader
   LIGHTING,
   // the ambient occlusion compute shader
@@ -52,6 +54,7 @@ SceneBuffer :: enum {
   LIGHT_PLACEMENTS,
   EMITTER_PLACEMENTS,
   FORCE_FIELD_PLACEMENTS,
+  SPRITE_FRAMES,
   // the mesh streams, in MeshStream order
   VERTICES,
   INDICES,
@@ -103,6 +106,7 @@ SCENE_SET :: [?]SceneBuffer {
   .LIGHT_PLACEMENTS,
   .EMITTER_PLACEMENTS,
   .FORCE_FIELD_PLACEMENTS,
+  .SPRITE_FRAMES,
 }
 // The scene groups of a device without bindless: the buffers each pass reads (or, for
 // compute, writes), in binding order.
@@ -115,10 +119,12 @@ SCENE_PASSES := [ScenePass]struct {
 } {
   .NONE              = {},
   .MESH              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .SKINNED_VERTICES, .VERTICES, .INDICES, .LIGHTS}, {.VERTEX, .FRAGMENT}, {}},
+  // MESH is at WebGPU's 8 storage buffers a stage: the sprite pass takes its own
+  .SPRITE            = {{.VIEWS, .NODES, .SPRITE_FRAMES, .MATERIALS}, {.VERTEX, .FRAGMENT}, {}},
   .LIGHTING          = {{.VIEWS, .LIGHTS, .NODES, .LIGHT_PLACEMENTS}, {.COMPUTE}, {}},
   .AMBIENT_OCCLUSION = {{.VIEWS}, {.COMPUTE}, {}},
   .SHADOW            = {{.VIEWS, .NODES, .MESHES, .SKINNED_VERTICES}, {.VERTEX}, {}},
-  .CULL              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .BATCHES, .NODE_BATCH}, {.COMPUTE}, {}},
+  .CULL              = {{.VIEWS, .NODES, .MESHES, .MATERIALS, .BATCHES, .NODE_BATCH, .SPRITE_FRAMES}, {.COMPUTE}, {}},
   .PARTICLE_EMIT     = {{.NODES, .EMITTERS, .PARTICLES, .EMITTER_PLACEMENTS}, {.COMPUTE}, {.PARTICLES}},
   .PARTICLE_SIMULATE = {{.NODES, .FORCE_FIELDS, .PARTICLES, .PARTICLE_ALIVE, .FORCE_FIELD_PLACEMENTS}, {.COMPUTE}, {.PARTICLES, .PARTICLE_ALIVE}},
   .PARTICLE_DRAW     = {{.VIEWS, .PARTICLES, .PARTICLE_ALIVE}, {.VERTEX}, {}},

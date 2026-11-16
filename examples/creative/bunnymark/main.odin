@@ -13,7 +13,7 @@ import "mjolnir/render"
 import "mjolnir/world"
 
 VIEW_HEIGHT :: 10.0
-BUNNY_SIZE :: 0.5
+BUNNY_SIZE :: 1
 GRAVITY :: 9.0
 SPAWN_PER_TICK :: 100
 SPAWN_SPEED :: 4.0

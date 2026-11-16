@@ -46,13 +46,10 @@ ORBIT_LIGHTS :: 6
 TORCH_INTENSITY :: 40
 MAX_BALLS :: 40
 
-SpriteClip :: struct {
-  first, count: u32,
-}
-SPRITE_IDLE :: SpriteClip{0, 6}
-SPRITE_RUN :: SpriteClip{6, 8}
-SPRITE_ACTIONS := [?]SpriteClip{{14, 12}, {42, 8}, {84, 7}, {76, 8}, {63, 10}}
 SPRITE_FPS :: 10
+SPRITE_IDLE :: render.SpriteClip{0, 6, SPRITE_FPS, false}
+SPRITE_RUN :: render.SpriteClip{6, 8, SPRITE_FPS, false}
+SPRITE_ACTIONS := [?]render.SpriteClip{{14, 12, SPRITE_FPS, true}, {42, 8, SPRITE_FPS, true}, {84, 7, SPRITE_FPS, true}, {76, 8, SPRITE_FPS, true}, {63, 10, SPRITE_FPS, true}}
 SPRITE_HEIGHT :: 2
 SPRITE_ASPECT :: f32(69.0 / 44.0)
 SPRITE_LANE :: [2]f32{3.4, 6.6}
@@ -88,10 +85,8 @@ App :: struct {
   lights_root:   world.NodeHandle,
   portal_camera: render.CameraHandle,
   portal:        render.MaterialHandle,
-  sprite:        render.MaterialHandle,
   sprite_node:   world.NodeHandle,
-  sprite_clip:   SpriteClip,
-  sprite_once:   bool,
+  sprite_clip:   render.SpriteClip,
   sprite_time:   f32,
   sprite_left:   f32,
   sprite_x:      f32,
@@ -231,10 +226,11 @@ portal :: proc(app: ^App) {
   screen := mesh(app, render.primitive(r, .QUAD_XY, app.portal, no_shadow = true), {-21.45, 3.2, MID}, {2.1, 2.1, 1})
   world.transform(&app.scene, screen).rotation = linalg.quaternion_angle_axis(math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   sheet := render.texture_create(r, #load("assets/Warrior_Sheet-Effect.png"))
-  app.sprite = render.material_create(r, render.make_material(.SPRITE, albedo_texture = sheet, frame_columns = 6, frame_rows = 17))
-  app.sprite_node = mesh(app, render.primitive(r, .QUAD_XY, app.sprite, no_shadow = true), {})
+  frames := render.sprite_frames_create(r, render.sprite_frames_grid(6, 17))
+  sprite := render.material_create(r, render.make_material(.SPRITE, albedo_texture = sheet, sprite_frames = frames))
+  app.sprite_node = mesh(app, render.primitive(r, .QUAD_XY, sprite, no_shadow = true), {})
   app.sprite_x, app.sprite_facing = SPRITE_LANE.x, 1
-  sprite_play(app, SPRITE_IDLE, false, 3)
+  sprite_play(app, SPRITE_IDLE, 3)
 }
 
 hidden_city :: proc(app: ^App) {
@@ -348,32 +344,30 @@ draw :: proc(app: ^App) -> bool {
   return mjolnir.frame(&app.platform, &app.renderer)
 }
 
-sprite_play :: proc(app: ^App, clip: SpriteClip, once: bool, seconds: f32 = 0) {
-  app.sprite_clip, app.sprite_once, app.sprite_time, app.sprite_left = clip, once, 0, seconds
+sprite_play :: proc(app: ^App, clip: render.SpriteClip, seconds: f32 = 0) {
+  app.sprite_clip, app.sprite_time, app.sprite_left = clip, 0, seconds
 }
 
 sprite_step :: proc(app: ^App, dt: f32) {
   app.sprite_time += dt
   app.sprite_left -= dt
-  frame := u32(app.sprite_time * SPRITE_FPS)
+  _, done := render.sprite_clip_frame(app.sprite_clip, app.sprite_time)
   running := app.sprite_clip == SPRITE_RUN
-  if app.sprite_once && frame >= app.sprite_clip.count {
-    sprite_play(app, SPRITE_IDLE, false, 2 + 3 * rand.float32())
-    frame = 0
-  } else if !app.sprite_once && app.sprite_left <= 0 {
+  if done {
+    sprite_play(app, SPRITE_IDLE, 2 + 3 * rand.float32())
+  } else if !app.sprite_clip.once && app.sprite_left <= 0 {
     roll := rand.float32()
-    if !running && roll < 0.5 do sprite_play(app, SPRITE_RUN, false, 2 + 3 * rand.float32())
-    else if roll < 0.8 do sprite_play(app, rand.choice(SPRITE_ACTIONS[:]), true)
-    else do sprite_play(app, SPRITE_IDLE, false, 2 + 2 * rand.float32())
-    frame = 0
+    if !running && roll < 0.5 do sprite_play(app, SPRITE_RUN, 2 + 3 * rand.float32())
+    else if roll < 0.8 do sprite_play(app, rand.choice(SPRITE_ACTIONS[:]))
+    else do sprite_play(app, SPRITE_IDLE, 2 + 2 * rand.float32())
   }
   if app.sprite_clip == SPRITE_RUN {
     app.sprite_x += app.sprite_facing * SPRITE_SPEED * dt
     if app.sprite_x < SPRITE_LANE.x || app.sprite_x > SPRITE_LANE.y do app.sprite_facing = -app.sprite_facing
     app.sprite_x = clamp(app.sprite_x, SPRITE_LANE.x, SPRITE_LANE.y)
   }
-  clip := app.sprite_clip
-  render.material(&app.renderer, app.sprite).frame_index = clip.first + (min(frame, clip.count - 1) if app.sprite_once else frame % clip.count)
+  frame, _ := render.sprite_clip_frame(app.sprite_clip, app.sprite_time)
+  render.sprite_frame(&app.renderer, app.sprite_node, frame)
   world.transform(&app.scene, app.sprite_node).position = {app.sprite_x, SPRITE_HEIGHT / 2, MID}
-  world.transform(&app.scene, app.sprite_node).scale = {app.sprite_facing * SPRITE_HEIGHT * SPRITE_ASPECT / 2, SPRITE_HEIGHT / 2, 1}
+  world.transform(&app.scene, app.sprite_node).scale = {app.sprite_facing * SPRITE_HEIGHT * SPRITE_ASPECT, SPRITE_HEIGHT, 1}
 }
