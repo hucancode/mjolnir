@@ -31,6 +31,7 @@ jobs:
       - name: Setup Odin
         uses: laytan/setup-odin@v2
         with:
+          release: dev-2026-10
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # wasm-ld links the live WebGPU builds of the examples; make media renders on lavapipe
