@@ -197,6 +197,8 @@ Renderer_State :: struct {
   batch_order:            [dynamic]u64,
   // by MaterialType, your shaders' after the built-in ones; 0 where free
   material_pipelines:     [MaterialPass][DRAW_LISTS]rhi.Pipeline,
+  // the sprite shader's second draw: its semi-transparent pixels, blended, not writing depth
+  sprite_blend_pipeline:  rhi.Pipeline,
   // the 2D overlay (overlay.odin): this frame's vertices and indices, at most
   // OVERLAY_MAX_VERTICES and OVERLAY_MAX_INDICES, in batches of one scissor and texture
   overlay_vertices:       [dynamic]Vertex2D,

@@ -2,7 +2,8 @@
 // material's sprite frames (none: the whole albedo texture), the frame's quad scaled by the
 // node's world scale (mirrored when the scale is) and drawn depth_offset toward the camera; a
 // turned sprite's quad lies in the node's XY plane instead, through its whole transform.
-// Pixels under half alpha are cut out; the rest write depth, so depth orders overlapping sprites.
+// Opaque pixels write depth, so depth orders overlapping sprites; semi-transparent pixels are
+// blended in a second draw over them, depth-tested without writing, in no particular order.
 #include "common.slang"
 
 SCENE_BUFFER(Node, nodes, 1, 1)
@@ -10,7 +11,7 @@ SCENE_BUFFER(SpriteFrame, sprite_frames, 21, 2)
 SCENE_BUFFER(Material, materials, 3, 3)
 #include "sprite_frame.slang"
 
-struct MeshPush { uint camera_index; }
+struct MeshPush { uint camera_index; uint sun_light; uint sun_node; uint sprite_blend; }
 PUSH_BLOCK(MeshPush, mesh_push)
 
 #if BACKEND_WGPU
@@ -90,8 +91,9 @@ float4 fs_main(VertexOut v) : SV_Target0
 #else
     float4 color = textures[NonUniformResourceIndex(v.texture_index)].Sample(samplers[SAMPLER_NEAREST_CLAMP], v.uv) * v.color;
 #endif
-    // reconsider this if we want to support semi-transparent sprite
-    if (color.a < 0.5) {
+    // the first draw keeps the opaque pixels (they write depth), the second blends the rest
+    bool opaque = color.a >= 0.999;
+    if (opaque == (mesh_push.sprite_blend != 0) || color.a <= 0.0) {
         discard;
     }
     return color;

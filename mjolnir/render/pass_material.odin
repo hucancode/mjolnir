@@ -51,7 +51,7 @@ material_types :: proc() -> [MaterialType]MaterialShaderDesc {
     .TRANSPARENT  = {source = shader_source("transparent"), cull = .BACK, blend = .ALPHA},
     .WIREFRAME    = {source = shader_source("wireframe"), cull = .NONE, blend = .ALPHA, wireframe = true, pulled = true},
     .RANDOM_COLOR = {source = shader_source("random_color"), cull = .BACK, blend = .ALPHA, pulled = true},
-    // cut-out pixels: opaque, depth-ordered
+    // opaque pixels write depth; semi-transparent ones are drawn again blended (sprite_blend_pipeline)
     .SPRITE       = {source = shader_source("sprite"), cull = .NONE, blend = .ALPHA, opaque = true, scene = .SPRITE},
   }
 }
@@ -120,6 +120,9 @@ material_init :: proc(self: ^Renderer) -> bool {
       self.material_pipelines[pass][int(type)] = material_pipeline_create(self, pass, types[type]) or_return
     }
   }
+  blend := types[.SPRITE]
+  blend.opaque = false
+  self.sprite_blend_pipeline = material_pipeline_create(self, .FORWARD, blend) or_return
   return true
 }
 
@@ -130,6 +133,8 @@ MeshPush :: struct {
   // the sun's light and node (Renderer.sun), light 0 for none
   sun_light:    u32,
   sun_node:     u32,
+  // 1 in the sprite shader's blended draw
+  sprite_blend: u32,
 }
 
 // The forward pass draws particles first. A camera draws nothing until a cull has written its
@@ -173,6 +178,13 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
   if ready {
     mesh_buffers_bind(self, cmd)
     draw_list_draw(self, cmd, slot, 0, keys[:count], pipelines[:count], f)
+    if pass == .FORWARD && self.sprite_blend_pipeline != 0 {
+      push.sprite_blend = 1
+      pipeline_bind(self, cmd, self.sprite_blend_pipeline, .MESH, f, &push, .MATERIAL)
+      mesh_buffers_bind(self, cmd)
+      sprite_key := []u32{u32(MaterialType.SPRITE)}
+      draw_list_draw(self, cmd, slot, 0, sprite_key, []rhi.Pipeline{self.sprite_blend_pipeline}, f)
+    }
   }
   dev.cmd_end_pass(&self.gpu, cmd)
 }
