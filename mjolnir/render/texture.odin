@@ -46,8 +46,16 @@ texture_destroy :: proc(self: ^Renderer, handle: TextureHandle) {
   containers.slots_free(texture_pool(self, handle), u32(handle))
 }
 
-// NO_TEXTURE is the TextureHandle of none, as materials, emitters and draw2d commands hold it.
+// NO_TEXTURE is the TextureHandle of none, as materials, emitters and canvases hold it.
 NO_TEXTURE :: 0
+
+// texture_size returns a texture's size in texels (a ui.Skin's region, an image drawn at its
+// own size); zero for none.
+texture_size :: proc(self: ^Renderer, handle: TextureHandle) -> [2]u32 {
+  lock(self)
+  if handle == NO_TEXTURE || !containers.slots_live(texture_pool(self, handle), u32(handle)) do return {}
+  return dev.texture_desc(&self.gpu, handle).extent
+}
 
 // texture_create makes a 2D texture that lives until texture_destroy or teardown, from either
 //   raw pixels, size.x by size.y texels of format (A8 samples as white with alpha = the pixel);

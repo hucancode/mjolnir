@@ -1,4 +1,4 @@
-package anchor
+package ui
 
 // Horizontal is how a rect holds to the left and right of its frame.
 Horizontal :: enum u8 {
@@ -24,6 +24,18 @@ Anchor :: struct {
 // Rect is an axis-aligned rectangle: top-left `pos` and `size`.
 Rect :: struct {
   pos, size: [2]f32,
+}
+
+// contains reports whether `p` is inside `r`, edges included.
+contains :: proc(r: Rect, p: [2]f32) -> bool {
+  return p.x >= r.pos.x && p.y >= r.pos.y && p.x <= r.pos.x + r.size.x && p.y <= r.pos.y + r.size.y
+}
+
+// intersect returns the part of `a` inside `b`; zero sized when they do not overlap.
+intersect :: proc(a, b: Rect) -> Rect {
+  lo := [2]f32{max(a.pos.x, b.pos.x), max(a.pos.y, b.pos.y)}
+  hi := [2]f32{min(a.pos.x + a.size.x, b.pos.x + b.size.x), min(a.pos.y + a.size.y, b.pos.y + b.size.y)}
+  return {lo, {max(hi.x - lo.x, 0), max(hi.y - lo.y, 0)}}
 }
 
 // Frame is a reference frame fitted to a window: `scale` maps reference units to window units,

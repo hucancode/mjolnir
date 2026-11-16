@@ -12,6 +12,7 @@ import "mjolnir/font"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
+import "mjolnir/ui"
 import "mjolnir/world"
 
 GRID :: 15
@@ -49,6 +50,7 @@ App :: struct {
   renderer: render.Renderer,
   input:    input.State,
   font:     font.Font,
+  hud:     ui.Canvas,
   orbit:    render.Orbit,
   mixer:    audio.Audio,
   eat:      audio.Sound,
@@ -78,6 +80,7 @@ shutdown :: proc(app: ^App) {
   delete(app.game.body)
   delete(app.game.body_nodes)
   font.destroy(&app.font)
+  ui.destroy(&app.hud)
   audio.shutdown(&app.mixer)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
@@ -90,11 +93,12 @@ draw :: proc(app: ^App) -> bool {
 }
 
 draw_hud :: proc(app: ^App) {
-  hud := [?]render.OverlayCommand {
-    render.OverlayText{text = fmt.tprintf("Score: %d", app.game.score), position = {20, 20}, size = 28, color = {255, 255, 255, 255}},
-    render.OverlayText{text = fmt.tprintf("Best: %d", app.game.best), position = {20, 60}, size = 24, color = {255, 220, 100, 255}},
-  }
-  render.stage_overlay(&app.renderer, hud[:], &app.font)
+  hud := &app.hud
+  ui.reset(hud)
+  hud.dpi = platform.dpi_scale(&app.platform)
+  ui.text(hud, &app.font, fmt.tprintf("Score: %d", app.game.score), {20, 20}, 28, 255)
+  ui.text(hud, &app.font, fmt.tprintf("Best: %d", app.game.best), {20, 60}, 24, {255, 220, 100, 255})
+  render.stage_overlay(&app.renderer, {hud}, &app.font)
 }
 
 spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, pos: [3]f32 = {}, scale: [3]f32 = {1, 1, 1}) -> world.NodeHandle {

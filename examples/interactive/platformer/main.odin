@@ -12,6 +12,7 @@ import "mjolnir/font"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
+import "mjolnir/ui"
 import "mjolnir/world"
 
 LEVEL := [?]string {
@@ -141,6 +142,7 @@ App :: struct {
   renderer:   render.Renderer,
   input:      input.State,
   font:       font.Font,
+  hud:       ui.Canvas,
   phys:       b2.WorldId,
   tiles:      render.MaterialHandle,
   flag_node:  world.NodeHandle,
@@ -184,6 +186,7 @@ shutdown :: proc(app: ^App) {
   delete(app.enemies)
   delete(app.spikes)
   font.destroy(&app.font)
+  ui.destroy(&app.hud)
   b2.DestroyWorld(app.phys)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
@@ -515,10 +518,10 @@ draw :: proc(app: ^App) -> bool {
 }
 
 draw_hud :: proc(app: ^App) {
-  white :: [4]u8{255, 255, 255, 255}
-  hud := [?]render.OverlayCommand {
-    render.OverlayText{text = fmt.tprintf("Coins: %d / %d", app.score, app.coin_count), position = {20, 20}, size = 28, color = white},
-    render.OverlayText{text = "You made it!" if app.won else "Arrows/WASD run, Space jumps", position = {20, 60}, size = 22, color = white},
-  }
-  render.stage_overlay(&app.renderer, hud[:], &app.font)
+  hud := &app.hud
+  ui.reset(hud)
+  hud.dpi = platform.dpi_scale(&app.platform)
+  ui.text(hud, &app.font, fmt.tprintf("Coins: %d / %d", app.score, app.coin_count), {20, 20}, 28, 255)
+  ui.text(hud, &app.font, "You made it!" if app.won else "Arrows/WASD run, Space jumps", {20, 60}, 22, 255)
+  render.stage_overlay(&app.renderer, {hud}, &app.font)
 }

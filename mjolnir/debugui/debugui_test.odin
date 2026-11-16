@@ -2,12 +2,12 @@
 #+private file
 package debugui
 
-import "../anchor"
+import "../ui"
 import "core:testing"
 import mu "vendor:microui"
 
 // tick runs one microui frame in a window of size `window`, with a window declared in `reference`, and returns where microui put it.
-tick :: proc(self: ^Context, reference, window: [2]f32, rect: mu.Rect, pin: anchor.Anchor) -> mu.Rect {
+tick :: proc(self: ^Context, reference, window: [2]f32, rect: mu.Rect, pin: ui.Anchor) -> mu.Rect {
   self.reference = reference
   self.size = window
   mu.begin(&self.mu)
@@ -16,7 +16,7 @@ tick :: proc(self: ^Context, reference, window: [2]f32, rect: mu.Rect, pin: anch
   return mu.get_container(&self.mu, "W").rect
 }
 
-declare :: proc(self: ^Context, rect: mu.Rect, pin: anchor.Anchor) {
+declare :: proc(self: ^Context, rect: mu.Rect, pin: ui.Anchor) {
   if window(self, "W", rect, pin) {}
 }
 

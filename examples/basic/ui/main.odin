@@ -1,4 +1,4 @@
-// A game HUD on the retained ui, over sample data: bars, hotbar, minimap, quest tracker, toasts, a draggable inventory and quest log, and pause and quit dialogs.
+// A game HUD on the retained ux, over sample data: bars, hotbar, a skinned minimap, quest tracker, chat, toasts, draggable inventory, quest log and settings windows, and pause and quit dialogs.
 package main
 
 import "core:fmt"
@@ -14,11 +14,14 @@ import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/ui"
+import "mjolnir/ux"
 import "mjolnir/world"
 
 REFERENCE :: [2]f32{1280, 720}
 SHEET :: [2]f32{20, 9}
+TILE :: 18
 BOX_TILE :: 6
+BUSH_TILE :: 17
 COIN_TILE :: 151
 BAG_COLUMNS :: 6
 BAG_SIZE :: 24
@@ -97,39 +100,37 @@ MAP_MARKERS := [?][2]f32{{0.2, 0.3}, {0.75, 0.2}, {0.8, 0.7}, {0.3, 0.8}, {0.55,
 Window :: enum u8 {
   INVENTORY,
   QUESTS,
+  SETTINGS,
   PAUSE,
 }
 
 MENU_BUTTONS := [Window]struct {
-  label, key: string,
+  label: string,
+  key:   input.Key,
 } {
-  .INVENTORY = {"Bag", "I"},
-  .QUESTS    = {"Quests", "J"},
-  .PAUSE     = {"Menu", "Esc"},
+  .INVENTORY = {"Bag", .I},
+  .QUESTS    = {"Quests", .J},
+  .SETTINGS  = {"Options", .O},
+  .PAUSE     = {"Menu", .ESCAPE},
 }
 
 Styles :: struct {
-  text, dim, gold, title, small:            ui.StyleHandle,
-  panel, window, title_bar, close, button:  ui.StyleHandle,
-  slot, icon, bar, hp, mp, xp:              ui.StyleHandle,
-  map_, enemy, player, tooltip, dim_screen: ui.StyleHandle,
-  toast, track, row, row_text:              ui.StyleHandle,
+  text, dim, gold, small:                    ux.StyleHandle,
+  panel, button, slot, icon, badge:          ux.StyleHandle,
+  bar, hp, mp, xp, map_, enemy, player:      ux.StyleHandle,
+  tooltip, dim_screen, toast, row, row_text: ux.StyleHandle,
 }
 
 Slot :: struct {
-  frame, icon, count: ui.NodeHandle,
+  frame, icon, count: ux.NodeHandle,
 }
 
 Bar :: struct {
-  fill, label: ui.NodeHandle,
-}
-
-Panel :: struct {
-  root, bar, title, close: ui.NodeHandle,
+  fill, label: ux.NodeHandle,
 }
 
 Toast :: struct {
-  node: ui.NodeHandle,
+  node: ux.NodeHandle,
   life: f32,
 }
 
@@ -144,42 +145,44 @@ App :: struct {
   renderer:    render.Renderer,
   input:       input.State,
   font:        font.Font,
-  gui:         ui.UI,
+  gui:         ux.UI,
+  sweeps:      ui.Canvas,
   orbit:       render.Orbit,
   knight:      gltf.Model,
   hero:        gltf.Instance,
   sheet:       render.TextureHandle,
   tiles:       []render.SpriteFrame,
   s:           Styles,
-  map_frame:   ui.NodeHandle,
-  tracker:     ui.NodeHandle,
+  hero_name:   ux.NodeHandle,
+  map_frame:   ux.NodeHandle,
+  tracker:     ux.NodeHandle,
+  chat:        ux.NodeHandle,
   hotbar:      [HOTBAR]Slot,
-  menu:        [Window]ui.NodeHandle,
-  toast_list:  ui.NodeHandle,
-  tooltip:     ui.NodeHandle,
-  tip_title:   ui.NodeHandle,
-  tip_text:    ui.NodeHandle,
-  ghost:       ui.NodeHandle,
-  panels:      [Window]Panel,
-  open:        [Window]bool,
+  menu:        [Window]ux.NodeHandle,
+  toast_list:  ux.NodeHandle,
+  tooltip:     ux.NodeHandle,
+  tip_title:   ux.NodeHandle,
+  tip_text:    ux.NodeHandle,
+  ghost:       ux.NodeHandle,
+  windows:     [Window]ux.NodeHandle,
   bag_slots:   [BAG_SIZE]Slot,
-  quest_list:  ui.NodeHandle,
-  quest_rows:  [len(QUESTS)]ui.NodeHandle,
-  quest_name:  ui.NodeHandle,
-  quest_text:  ui.NodeHandle,
-  quest_goal:  ui.NodeHandle,
-  track:       ui.NodeHandle,
-  track_label: ui.NodeHandle,
-  resume:      ui.NodeHandle,
-  quit:        ui.NodeHandle,
+  quest_rows:  [len(QUESTS)]ux.NodeHandle,
+  quest_name:  ux.NodeHandle,
+  quest_text:  ux.NodeHandle,
+  quest_goal:  ux.NodeHandle,
+  track:       ux.NodeHandle,
+  track_label: ux.NodeHandle,
+  name_box:    ux.NodeHandle,
+  map_check:   ux.NodeHandle,
+  scale_knob:  ux.NodeHandle,
+  resume:      ux.NodeHandle,
+  quit:        ux.NodeHandle,
   bag:         [BAG_SIZE]Stack,
   actions:     [HOTBAR]Action,
   cooldowns:   [HOTBAR]f32,
-  sweeps:      [HOTBAR]f32,
   toasts:      [dynamic]Toast,
   tracked:     [len(QUESTS)]bool,
   quest:       int,
-  minimap:     bool,
   dragging:    int,
   quitting:    bool,
 }
@@ -215,7 +218,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   mjolnir.spawn(&app.scene, &app.renderer, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, no_shadow = true), scale = 8)
   app.orbit = render.make_orbit({0, 2.2, 4.5}, {0, 1, 0})
   sample_data(app)
-  ui.init(&app.gui, REFERENCE)
+  ux.init(&app.gui, REFERENCE)
   create_styles(app)
   build_hud(app)
   build_windows(app)
@@ -231,13 +234,13 @@ sample_data :: proc(app: ^App) {
   app.actions = {Skill.SPIKES, Skill.THORNS, Skill.FROST, Skill.RALLY, Item.POTION, Item.MUSHROOM, nil, nil}
   app.tracked[0], app.tracked[1] = true, true
   app.dragging = -1
-  app.minimap = true
 }
 
 shutdown :: proc(app: ^App) {
   delete(app.toasts)
   delete(app.tiles)
-  ui.shutdown(&app.gui)
+  ui.destroy(&app.sweeps)
+  ux.shutdown(&app.gui)
   font.destroy(&app.font)
   gltf.destroy(&app.hero, &app.scene, &app.renderer)
   gltf.destroy(&app.knight, &app.renderer)
@@ -251,193 +254,193 @@ rgba :: proc(r, g, b: u8, a: u8 = 255) -> [4]u8 {
   return {r, g, b, a}
 }
 
+tile_skin :: proc(app: ^App, first, cells: u32, border, scale: f32, mode := [2]ui.SkinMode{}) -> ui.Skin {
+  top_left := app.tiles[first].uv[0]
+  bottom_right := app.tiles[first + (cells - 1) * u32(SHEET.x) + cells - 1].uv[2]
+  uv := [4][2]f32{top_left, {bottom_right.x, top_left.y}, bottom_right, {top_left.x, bottom_right.y}}
+  return {image = u32(app.sheet), uv = uv, size = f32(cells * TILE), border = border, scale = scale, mode = mode}
+}
+
 create_styles :: proc(app: ^App) {
   gui := &app.gui
   WHITE :: [4]u8{235, 235, 242, 255}
   GOLD :: [4]u8{236, 196, 104, 255}
   EDGE :: [4]u8{74, 80, 104, 255}
   s := &app.s
-  s.text = ui.style_create(gui, {color = WHITE})
-  s.dim = ui.style_create(gui, {color = rgba(160, 166, 184)})
-  s.gold = ui.style_create(gui, {color = GOLD})
-  s.title = ui.style_create(gui, {color = GOLD})
-  s.small = ui.style_create(gui, {color = rgba(210, 214, 228)})
-  s.panel = ui.style_create(gui, {fill = rgba(16, 18, 26, 215), border = 1, border_color = EDGE})
-  s.window = ui.style_create(gui, {fill = rgba(20, 22, 32), border = 2, border_color = rgba(110, 92, 58)})
-  s.title_bar = ui.style_create(gui, {fill = rgba(38, 34, 30), color = GOLD}, ui.Style{fill = rgba(48, 42, 34), color = GOLD})
-  s.close = ui.style_create(gui, {color = rgba(200, 190, 170)}, ui.Style{fill = rgba(170, 50, 45), color = WHITE})
-  button := ui.Style{fill = rgba(48, 54, 74), border = 1, border_color = rgba(88, 96, 124), color = WHITE}
+  s.text = ux.style_create(gui, {color = WHITE})
+  s.dim = ux.style_create(gui, {color = rgba(160, 166, 184)})
+  s.gold = ux.style_create(gui, {color = GOLD})
+  s.small = ux.style_create(gui, {color = rgba(210, 214, 228)})
+  s.panel = ux.style_create(gui, {fill = rgba(16, 18, 26, 215), border = 1, border_color = EDGE})
+  button := ux.Style{fill = rgba(48, 54, 74), border = 1, border_color = rgba(88, 96, 124), color = WHITE}
   hover := button
   hover.fill, hover.border_color = rgba(66, 74, 100), GOLD
   press := button
   press.fill = rgba(34, 38, 52)
   active := button
   active.fill, active.border_color, active.color = rgba(132, 98, 44), GOLD, WHITE
-  s.button = ui.style_create(gui, button, hover, press, active)
-  slot := ui.Style{fill = rgba(12, 14, 20, 230), border = 1, border_color = EDGE}
+  s.button = ux.style_create(gui, button, hover, press, active)
+  slot := ux.Style{fill = rgba(12, 14, 20, 230), border = 1, border_color = EDGE}
   slot_hover := slot
   slot_hover.border_color = GOLD
   slot_active := slot
   slot_active.fill = rgba(40, 34, 20, 230)
-  s.slot = ui.style_create(gui, slot, slot_hover, slot_hover, slot_active)
-  s.icon = ui.style_create(gui, {color = WHITE}, nil, nil, ui.Style{color = rgba(255, 255, 255, 70)})
-  s.bar = ui.style_create(gui, {fill = rgba(8, 8, 12, 200), border = 1, border_color = rgba(0, 0, 0, 255), color = WHITE})
-  s.hp = ui.style_create(gui, {fill = rgba(196, 48, 52)})
-  s.mp = ui.style_create(gui, {fill = rgba(52, 108, 220)})
-  s.xp = ui.style_create(gui, {fill = rgba(160, 120, 236)})
-  s.map_ = ui.style_create(gui, {fill = rgba(28, 52, 40, 225), border = 2, border_color = rgba(110, 92, 58)})
-  s.enemy = ui.style_create(gui, {fill = rgba(230, 70, 60)})
-  s.player = ui.style_create(gui, {fill = rgba(250, 230, 120)})
-  s.tooltip = ui.style_create(gui, {fill = rgba(10, 10, 16), border = 1, border_color = rgba(130, 108, 66)})
-  s.dim_screen = ui.style_create(gui, {fill = rgba(0, 0, 0, 150)})
-  s.toast = ui.style_create(gui, {fill = rgba(10, 10, 16, 190), color = WHITE})
-  s.track = ui.style_create(gui, {fill = rgba(10, 12, 18), border = 1, border_color = EDGE})
-  row := ui.Style{color = WHITE}
-  row_hover := ui.Style{fill = rgba(50, 54, 72), color = WHITE}
-  row_active := ui.Style{fill = rgba(96, 74, 38), color = GOLD}
-  s.row = ui.style_create(gui, row, row_hover, row_hover, row_active)
-  s.row_text = ui.style_create(gui, {color = WHITE}, nil, nil, ui.Style{color = GOLD})
+  s.slot = ux.style_create(gui, slot, slot_hover, slot_hover, slot_active)
+  s.icon = ux.style_create(gui, {color = WHITE}, nil, nil, ux.Style{color = rgba(255, 255, 255, 70)})
+  s.badge = ux.style_create(gui, {skin = tile_skin(app, BOX_TILE, 1, 6, 2)})
+  s.bar = ux.style_create(gui, {fill = rgba(8, 8, 12, 200), border = 1, border_color = rgba(0, 0, 0, 255), color = WHITE})
+  s.hp = ux.style_create(gui, {fill = rgba(196, 48, 52)})
+  s.mp = ux.style_create(gui, {fill = rgba(52, 108, 220)})
+  s.xp = ux.style_create(gui, {fill = rgba(160, 120, 236)})
+  s.map_ = ux.style_create(gui, {fill = rgba(28, 52, 40, 225), skin = tile_skin(app, BUSH_TILE, 3, TILE, 1, {.REPEAT, .REPEAT})})
+  s.enemy = ux.style_create(gui, {fill = rgba(230, 70, 60)})
+  s.player = ux.style_create(gui, {fill = rgba(250, 230, 120)})
+  s.tooltip = ux.style_create(gui, {fill = rgba(10, 10, 16), border = 1, border_color = rgba(130, 108, 66)})
+  s.dim_screen = ux.style_create(gui, {fill = rgba(0, 0, 0, 150)})
+  s.toast = ux.style_create(gui, {fill = rgba(10, 10, 16, 190), color = WHITE})
+  row := ux.Style{color = WHITE}
+  row_hover := ux.Style{fill = rgba(50, 54, 72), color = WHITE}
+  row_active := ux.Style{fill = rgba(96, 74, 38), color = GOLD}
+  s.row = ux.style_create(gui, row, row_hover, row_hover, row_active)
+  s.row_text = ux.style_create(gui, {color = WHITE}, nil, nil, ux.Style{color = GOLD})
+  t := &gui.theme
+  t.text, t.button, t.heading = s.text, s.button, s.gold
+  t.window = ux.style_create(gui, {fill = rgba(20, 22, 32), border = 2, border_color = rgba(110, 92, 58)})
+  t.title = ux.style_create(gui, {fill = rgba(38, 34, 30)}, ux.Style{fill = rgba(48, 42, 34)})
+  t.close = ux.style_create(gui, {color = rgba(200, 190, 170)}, ux.Style{fill = rgba(170, 50, 45), color = WHITE})
+  t.panel = ux.style_create(gui, {fill = rgba(10, 12, 18), border = 1, border_color = EDGE})
 }
 
-add :: proc(app: ^App, parent: ui.NodeHandle, n: ui.Node) -> ui.NodeHandle {
+add :: proc(app: ^App, parent: ux.NodeHandle, n: ux.Node) -> ux.NodeHandle {
   n := n
   n.parent = parent
-  return ui.node_create(&app.gui, n)
+  return ux.node_create(&app.gui, n)
 }
 
-label :: proc(app: ^App, parent: ui.NodeHandle, text: string, size: f32 = 0, style: ui.StyleHandle = 0, n: ui.Node = {}) -> ui.NodeHandle {
-  n := n
-  n.text, n.font_size, n.style = text, size, style if style != 0 else app.s.text
-  return add(app, parent, n)
-}
-
-button :: proc(app: ^App, parent: ui.NodeHandle, text: string, width: f32 = 0, height: f32 = 34, style: ui.StyleHandle = 0) -> ui.NodeHandle {
-  size := ui.fixed(width, height) if width > 0 else [2]ui.Size{{}, {.FIXED, height}}
-  b := add(app, parent, {size = size, padding = {14, 0, 14, 0}, align = {.CENTER, .CENTER}, interactive = true, style = style if style != 0 else app.s.button})
-  label(app, b, text)
-  return b
-}
-
-slot :: proc(app: ^App, parent: ui.NodeHandle, size: f32, key := "") -> Slot {
+slot :: proc(app: ^App, parent: ux.NodeHandle, size: f32, key := "") -> Slot {
   s: Slot
-  s.frame = add(app, parent, {size = ui.fixed(size, size), padding = {6, 6, 6, 6}, interactive = true, style = app.s.slot})
-  s.icon = add(app, s.frame, {size = {ui.percent(1), ui.percent(1)}, style = app.s.icon, hidden = true, image = u32(app.sheet)})
-  s.count = label(app, s.frame, "", 13, app.s.text, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-4, -2}})
-  if key != "" do label(app, s.frame, key, 12, app.s.dim, {position = .ABSOLUTE, offset = {4, 2}})
+  s.frame = add(app, parent, {size = ux.fixed(size, size), padding = {6, 6, 6, 6}, interactive = true, style = app.s.slot})
+  s.icon = add(app, s.frame, {size = {ux.percent(1), ux.percent(1)}, style = app.s.icon, hidden = true, image = u32(app.sheet), overlay = true})
+  s.count = add(app, s.frame, {font_size = 13, style = app.s.text, position = .ABSOLUTE, anchor = {1, 1}, offset = {-4, -2}})
+  if key != "" do add(app, s.frame, {text = key, font_size = 12, style = app.s.dim, position = .ABSOLUTE, offset = {4, 2}})
   return s
 }
 
-bar :: proc(app: ^App, parent: ui.NodeHandle, width, height: f32, fill: ui.StyleHandle, font_size: f32 = 13) -> Bar {
-  back := add(app, parent, {size = ui.fixed(width, height), style = app.s.bar})
+bar :: proc(app: ^App, parent: ux.NodeHandle, width, height: f32, fill: ux.StyleHandle, font_size: f32 = 13) -> Bar {
+  back := add(app, parent, {size = ux.fixed(width, height), style = app.s.bar})
   b: Bar
-  b.fill = add(app, back, {size = {ui.percent(1), ui.percent(1)}, style = fill})
-  if font_size > 0 do b.label = label(app, back, "", font_size, app.s.text, {position = .ABSOLUTE, anchor = {0.5, 0.5}})
+  b.fill = add(app, back, {size = {ux.percent(1), ux.percent(1)}, style = fill})
+  if font_size > 0 do b.label = add(app, back, {font_size = font_size, style = app.s.text, position = .ABSOLUTE, anchor = {0.5, 0.5}})
   return b
 }
 
 build_hud :: proc(app: ^App) {
+  gui := &app.gui
   s := &app.s
-  screen := ui.node_create(&app.gui, {size = {ui.percent(1), ui.percent(1)}})
+  screen := ux.node_create(gui, {size = {ux.percent(1), ux.percent(1)}})
 
   frame := add(app, screen, {position = .ABSOLUTE, offset = {16, 16}, padding = {10, 10, 12, 10}, gap = 12, align = {.START, .CENTER}, style = s.panel})
-  badge := add(app, frame, {size = ui.fixed(56, 56), align = {.CENTER, .CENTER}, direction = .COLUMN, style = s.icon, image = u32(app.sheet), image_uv = app.tiles[BOX_TILE].uv, slice = {border = 12, uv = 1.0 / 3}})
-  label(app, badge, "LV", 11, s.dim)
-  label(app, badge, "7", 24, s.gold)
+  badge := add(app, frame, {size = ux.fixed(56, 56), align = {.CENTER, .CENTER}, direction = .COLUMN, style = s.badge})
+  ux.label(gui, badge, "LV", 11, s.dim)
+  ux.label(gui, badge, "7", 24, s.gold)
   column := add(app, frame, {direction = .COLUMN, gap = 5})
-  label(app, column, "Sir Aldric", 17, s.gold)
+  app.hero_name = ux.label(gui, column, "Sir Aldric", 17, s.gold)
   set_bar(app, bar(app, column, 250, 18, s.hp), 240, 300)
   set_bar(app, bar(app, column, 250, 14, s.mp, 11), 90, 130)
   set_bar(app, bar(app, column, 250, 6, s.xp, 0), 140, 200)
 
   top_right := add(app, screen, {position = .ABSOLUTE, anchor = {1, 0}, offset = {-16, 16}, direction = .COLUMN, gap = 6, align = {.END, .START}})
-  label(app, top_right, "Whispering Vale", 18, s.gold)
-  app.map_frame = add(app, top_right, {size = ui.fixed(176, 176), clip = true, style = s.map_})
-  add(app, app.map_frame, {position = .ABSOLUTE, anchor = {0.5, 0.5}, size = ui.fixed(10, 10), style = s.player, z = 1})
-  for m in MAP_MARKERS do add(app, app.map_frame, {position = .ABSOLUTE, anchor = m, size = ui.fixed(7, 7), style = s.enemy})
+  ux.label(gui, top_right, "Whispering Vale", 18, s.gold)
+  app.map_frame = add(app, top_right, {size = ux.fixed(176, 176), clip = true, style = s.map_})
+  add(app, app.map_frame, {position = .ABSOLUTE, anchor = {0.5, 0.5}, size = ux.fixed(10, 10), style = s.player, z = 1})
+  for m in MAP_MARKERS do add(app, app.map_frame, {position = .ABSOLUTE, anchor = m, size = ux.fixed(7, 7), style = s.enemy})
   gold := add(app, top_right, {gap = 6, align = {.END, .CENTER}, padding = {8, 4, 8, 4}, style = s.panel})
-  add(app, gold, {size = ui.fixed(18, 18), style = s.icon, image = u32(app.sheet), image_uv = app.tiles[COIN_TILE].uv})
-  label(app, gold, "35", 16, s.gold)
+  add(app, gold, {size = ux.fixed(18, 18), style = s.icon, image = u32(app.sheet), image_uv = app.tiles[COIN_TILE].uv})
+  ux.label(gui, gold, "35", 16, s.gold)
 
   tracker := add(app, screen, {position = .ABSOLUTE, anchor = {0, 0.4}, offset = {16, 0}, direction = .COLUMN, gap = 6, padding = {12, 10, 12, 10}, style = s.panel})
-  label(app, tracker, "Quests", 16, s.gold)
-  app.tracker = label(app, tracker, "", 14, s.small)
+  ux.label(gui, tracker, "Quests", 16, s.gold)
+  app.tracker = ux.label(gui, tracker, "", 14, s.small)
+
+  chat := add(app, screen, {position = .ABSOLUTE, anchor = {0, 1}, offset = {16, -16}, direction = .COLUMN, gap = 6, padding = {10, 8, 10, 10}, style = s.panel})
+  ux.label(gui, chat, "Enter to chat", 12, s.dim)
+  app.chat = ux.text_box(gui, chat, "", 280)
 
   hotbar := add(app, screen, {position = .ABSOLUTE, anchor = {0.5, 1}, offset = {0, -16}, gap = 6, padding = {8, 8, 8, 8}, style = s.panel})
   for &h, i in app.hotbar do h = slot(app, hotbar, 56, fmt.tprint(i + 1))
 
   menu := add(app, screen, {position = .ABSOLUTE, anchor = {1, 1}, offset = {-16, -16}, gap = 6, padding = {8, 8, 8, 8}, style = s.panel})
-  for &b, w in app.menu do if MENU_BUTTONS[w].label != "" {
-    b = add(app, menu, {direction = .COLUMN, size = {{.FIXED, 62}, {.FIXED, 50}}, align = {.CENTER, .CENTER}, interactive = true, style = s.button})
-    label(app, b, MENU_BUTTONS[w].label, 15)
-    label(app, b, MENU_BUTTONS[w].key, 11, s.dim)
+  for &b, w in app.menu {
+    b = add(app, menu, {direction = .COLUMN, size = ux.fixed(62, 50), align = {.CENTER, .CENTER}, interactive = true, style = s.button})
+    ux.label(gui, b, MENU_BUTTONS[w].label, 15)
+    ux.label(gui, b, "Esc" if MENU_BUTTONS[w].key == .ESCAPE else fmt.tprint(MENU_BUTTONS[w].key), 11, s.dim)
   }
 
   app.toast_list = add(app, screen, {position = .ABSOLUTE, anchor = {0.5, 1}, offset = {0, -110}, direction = .COLUMN, gap = 6, align = {.CENTER, .END}})
 
-  app.tooltip = ui.node_create(&app.gui, {direction = .COLUMN, gap = 4, padding = {12, 10, 12, 10}, z = 5000, hidden = true, style = s.tooltip})
-  app.tip_title = label(app, app.tooltip, "", 16, s.gold)
-  app.tip_text = label(app, app.tooltip, "", 14, s.small, {size = {{.FIXED, 230}, {}}, wrap = true})
-  app.ghost = ui.node_create(&app.gui, {size = ui.fixed(44, 44), z = 6000, hidden = true, style = s.icon, image = u32(app.sheet)})
+  app.tooltip = ux.node_create(gui, {direction = .COLUMN, gap = 4, padding = {12, 10, 12, 10}, z = 5000, hidden = true, style = s.tooltip})
+  app.tip_title = ux.label(gui, app.tooltip, "", 16, s.gold)
+  app.tip_text = add(app, app.tooltip, {font_size = 14, style = s.small, size = {{.FIXED, 230}, {}}, wrap = true})
+  app.ghost = ux.node_create(gui, {size = ux.fixed(44, 44), z = 6000, hidden = true, style = s.icon, image = u32(app.sheet)})
 }
 
-panel_create :: proc(app: ^App, w: Window, title: string, width: f32, offset: [2]f32) -> (body: ui.NodeHandle) {
-  p := &app.panels[w]
-  p.root = ui.node_create(&app.gui, {direction = .COLUMN, size = {{.FIXED, width}, {}}, offset = offset, interactive = true, hidden = true, style = app.s.window})
-  p.bar = add(app, p.root, {size = {ui.grow(), {.FIXED, 36}}, padding = {14, 0, 6, 0}, align = {.START, .CENTER}, interactive = true, style = app.s.title_bar})
-  p.title = label(app, p.bar, title, 17, app.s.title)
-  add(app, p.bar, {size = {ui.grow(), {}}})
-  p.close = add(app, p.bar, {size = ui.fixed(26, 26), align = {.CENTER, .CENTER}, interactive = true, style = app.s.close})
-  label(app, p.close, "x", 16)
-  return add(app, p.root, {direction = .COLUMN, size = {ui.grow(), {}}, padding = {16, 14, 16, 16}, gap = 12})
-}
-
-modal_create :: proc(app: ^App, w: Window, title: string) -> (body: ui.NodeHandle) {
-  p := &app.panels[w]
-  p.root = ui.node_create(&app.gui, {size = {ui.percent(1), ui.percent(1)}, align = {.CENTER, .CENTER}, interactive = true, hidden = true, style = app.s.dim_screen})
-  box := add(app, p.root, {direction = .COLUMN, padding = {28, 22, 28, 24}, gap = 14, align = {.CENTER, .START}, style = app.s.window})
-  p.title = label(app, box, title, 26, app.s.gold)
-  return box
+window :: proc(app: ^App, w: Window, title: string, width: f32, offset: [2]f32) -> (body: ux.NodeHandle) {
+  app.windows[w], body, _ = ux.window(&app.gui, title, width, offset)
+  ux.node(&app.gui, app.windows[w]).hidden = true
+  return
 }
 
 build_windows :: proc(app: ^App) {
+  gui := &app.gui
   s := &app.s
-  body := panel_create(app, .INVENTORY, "Inventory", 400, {700, 150})
+  body := window(app, .INVENTORY, "Inventory", 400, {700, 150})
   grid := add(app, body, {direction = .COLUMN, gap = 6})
-  row: ui.NodeHandle
+  row: ux.NodeHandle
   for &b, i in app.bag_slots {
     if i % BAG_COLUMNS == 0 do row = add(app, grid, {gap = 6})
     b = slot(app, row, 56)
   }
-  footer := add(app, body, {size = {ui.grow(), {}}, gap = 8, align = {.START, .CENTER}})
-  add(app, footer, {size = ui.fixed(20, 20), style = s.icon, image = u32(app.sheet), image_uv = app.tiles[COIN_TILE].uv})
-  label(app, footer, "35 gold", 16, s.gold)
-  label(app, body, "Drag to move, drop on the hotbar to bind, right click to use.", 13, s.dim, {size = {ui.grow(), {}}, wrap = true})
+  footer := add(app, body, {size = {ux.grow(), {}}, gap = 8, align = {.START, .CENTER}})
+  add(app, footer, {size = ux.fixed(20, 20), style = s.icon, image = u32(app.sheet), image_uv = app.tiles[COIN_TILE].uv})
+  ux.label(gui, footer, "35 gold", 16, s.gold)
+  add(app, body, {text = "Drag to move, drop on the hotbar to bind, right click to use.", font_size = 13, style = s.dim, size = {ux.grow(), {}}, wrap = true})
 
-  body = panel_create(app, .QUESTS, "Quest Log", 560, {120, 120})
-  split := add(app, body, {gap = 14, size = {ui.grow(), {.FIXED, 300}}})
-  app.quest_list = add(app, split, {direction = .COLUMN, size = {{.FIXED, 200}, ui.grow()}, gap = 2, padding = {4, 4, 4, 4}, clip = true, interactive = true, style = s.track})
+  body = window(app, .QUESTS, "Quest Log", 560, {120, 120})
+  split := add(app, body, {gap = 14, size = {ux.grow(), {.FIXED, 300}}})
+  list := ux.scroll_view(gui, split, {{.FIXED, 200}, ux.grow()})
   for &r, i in app.quest_rows {
-    r = add(app, app.quest_list, {size = {ui.grow(), {.FIXED, 58}}, padding = {10, 0, 10, 0}, align = {.START, .CENTER}, interactive = true, style = s.row})
-    label(app, r, QUESTS[i].title, 15, s.row_text, {size = {ui.grow(), {}}, truncate = true})
+    r = add(app, list, {size = {ux.grow(), {.FIXED, 58}}, padding = {10, 0, 10, 0}, align = {.START, .CENTER}, interactive = true, style = s.row})
+    add(app, r, {text = QUESTS[i].title, font_size = 15, style = s.row_text, size = {ux.grow(), {}}, truncate = true})
   }
-  detail := add(app, split, {direction = .COLUMN, size = {ui.grow(), ui.grow()}, gap = 10})
-  app.quest_name = label(app, detail, "", 20, s.gold, {size = {ui.grow(), {}}, wrap = true})
-  app.quest_text = label(app, detail, "", 14, s.small, {size = {ui.grow(), {}}, wrap = true})
-  app.quest_goal = label(app, detail, "", 15, s.text)
-  add(app, detail, {size = {{}, ui.grow()}})
-  app.track = add(app, detail, {size = ui.fixed(120, 34), align = {.CENTER, .CENTER}, interactive = true, style = s.button})
-  app.track_label = label(app, app.track, "Track", 16)
+  detail := add(app, split, {direction = .COLUMN, size = {ux.grow(), ux.grow()}, gap = 10})
+  app.quest_name = add(app, detail, {font_size = 20, style = s.gold, size = {ux.grow(), {}}, wrap = true})
+  app.quest_text = add(app, detail, {font_size = 14, style = s.small, size = {ux.grow(), {}}, wrap = true})
+  app.quest_goal = ux.label(gui, detail, "", 15)
+  add(app, detail, {size = {{}, ux.grow()}})
+  app.track = add(app, detail, {size = ux.fixed(120, 34), align = {.CENTER, .CENTER}, interactive = true, style = s.button})
+  app.track_label = ux.label(gui, app.track, "Track", 16)
 
-  body = modal_create(app, .PAUSE, "Paused")
-  app.resume = button(app, body, "Resume", 220, 40)
-  app.quit = button(app, body, "Quit to desktop", 220, 40)
+  body = window(app, .SETTINGS, "Options", 340, {460, 200})
+  name := add(app, body, {gap = 10, align = {.START, .CENTER}})
+  ux.label(gui, name, "Name", 15, s.small)
+  app.name_box = ux.text_box(gui, name, "Sir Aldric", 220)
+  app.map_check = ux.check(gui, body, "Show minimap", true)
+  scale := add(app, body, {gap = 10, align = {.START, .CENTER}})
+  ux.label(gui, scale, "UI scale", 15, s.small)
+  app.scale_knob = ux.slider(gui, scale, 0.5, 180)
+
+  root := ux.node_create(gui, {size = {ux.percent(1), ux.percent(1)}, align = {.CENTER, .CENTER}, interactive = true, hidden = true, style = s.dim_screen})
+  app.windows[.PAUSE] = root
+  box := add(app, root, {direction = .COLUMN, padding = {28, 22, 28, 24}, gap = 14, align = {.CENTER, .START}, style = gui.theme.window})
+  ux.label(gui, box, "Paused", 26, s.gold)
+  app.resume = ux.button(gui, box, "Resume", ux.fixed(220, 40))
+  app.quit = ux.button(gui, box, "Quit to desktop", ux.fixed(220, 40))
 }
 
 update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
-  ui.update_input(&app.gui, &app.input)
-  handle_windows(app)
+  mjolnir.update_ui_input(&app.platform, &app.gui, &app.input)
   handle_hud(app)
   handle_inventory(app)
   handle_panels(app)
@@ -445,9 +448,8 @@ update :: proc(app: ^App, dt: f32) {
   refresh(app, dt)
   camera := render.main_camera(&app.renderer)
   mjolnir.orbit_drag(&app.orbit, camera, &app.input)
-  sweeps := make([dynamic]render.OverlayCommand, context.temp_allocator)
-  for h, i in app.hotbar do if app.sweeps[i] > 0 do cooldown_sweep(&sweeps, ui.rect(&app.gui, h.frame), app.sweeps[i])
-  mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font, sweeps[:])
+  draw_sweeps(app)
+  mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font, {&app.sweeps})
   mjolnir.update(&app.scene, &app.renderer, dt)
   gltf.animate(&app.hero, &app.knight, &app.scene, &app.renderer, dt)
 }
@@ -456,88 +458,84 @@ draw :: proc(app: ^App) -> bool {
   return !app.quitting && mjolnir.frame(&app.platform, &app.renderer)
 }
 
+is_open :: proc(app: ^App, w: Window) -> bool {
+  return !ux.node(&app.gui, app.windows[w]).hidden
+}
+
 open_window :: proc(app: ^App, w: Window, open := true) {
-  app.open[w] = open
-  if !open do return
-  ui.raise(&app.gui, app.panels[w].root)
+  ux.node(&app.gui, app.windows[w]).hidden = !open
+  if open do ux.raise(&app.gui, app.windows[w])
 }
 
 topmost :: proc(app: ^App) -> (top: Window, ok: bool) {
   order := min(i32)
-  for w in Window do if app.open[w] {
-    if o := ui.node(&app.gui, app.panels[w].root).order; o > order {
+  for w in Window do if is_open(app, w) {
+    if o := ux.node(&app.gui, app.windows[w]).order; o > order {
       top, order, ok = w, o, true
     }
   }
   return
 }
 
-handle_windows :: proc(app: ^App) {
-  gui := &app.gui
-  for &p, w in app.panels {
-    if !app.open[w] do continue
-    if input.mouse_pressed(&app.input, .LEFT) && ui.pressed(gui, p.root) do open_window(app, w)
-    if p.close != {} && ui.clicked(gui, p.close) do app.open[w] = false
-    drag := p.bar != {} && ui.pressed(gui, p.bar) && !ui.pressed(gui, p.close) && input.mouse_down(&app.input, .LEFT)
-    ui.move(gui, p.root, app.input.mouse_delta if drag else 0)
-  }
-}
-
 handle_hud :: proc(app: ^App) {
   gui := &app.gui
-  for b, w in app.menu do if b != {} && ui.clicked(gui, b) do open_window(app, w, !app.open[w])
-  for h, i in app.hotbar do if ui.clicked(gui, h.frame) && input.mouse_released(&app.input, .LEFT) && app.dragging < 0 do use_action(app, i)
-  for h, i in app.hotbar do if ui.clicked(gui, h.frame) && input.mouse_released(&app.input, .RIGHT) do app.actions[i] = nil
+  for b, w in app.menu do if ux.clicked(gui, b) do open_window(app, w, !is_open(app, w))
+  for h, i in app.hotbar {
+    if ux.clicked(gui, h.frame) do use_action(app, i)
+    if ux.clicked(gui, h.frame, .RIGHT) do app.actions[i] = nil
+  }
+  if ux.submitted(gui, app.chat) {
+    if said := ux.node(gui, app.chat).text; said != "" do toast(app, fmt.tprintf("%s: %s", ux.node(gui, app.hero_name).text, said))
+    ux.set_text(gui, app.chat, "")
+    ux.focus(gui, {})
+  }
 }
 
 handle_inventory :: proc(app: ^App) {
   gui := &app.gui
-  s := &app.input
-  if app.open[.INVENTORY] && input.mouse_pressed(s, .LEFT) {
-    for b, i in app.bag_slots do if ui.hovered(gui, b.frame) && app.bag[i].item != .NONE do app.dragging = i
-  }
-  if app.open[.INVENTORY] && input.mouse_released(s, .RIGHT) {
-    for b, i in app.bag_slots do if ui.clicked(gui, b.frame) do use_item(app, app.bag[i].item)
-  }
-  if app.dragging < 0 || !input.mouse_released(s, .LEFT) do return
-  from := app.dragging
   app.dragging = -1
-  for b, i in app.bag_slots do if ui.hovered(gui, b.frame) && i != from {
-    app.bag[from], app.bag[i] = app.bag[i], app.bag[from]
-  }
-  for h, i in app.hotbar do if ui.hovered(gui, h.frame) {
-    item := app.bag[from].item
-    if ITEMS[item].consumable do app.actions[i] = item
-    else do toast(app, fmt.tprintf("%s cannot be used from the hotbar", ITEMS[item].name))
+  for b, i in app.bag_slots {
+    item := app.bag[i].item
+    if item == .NONE do continue
+    if ux.pressed(gui, b.frame) do app.dragging = i
+    if ux.clicked(gui, b.frame, .RIGHT) do use_item(app, item)
+    for to, j in app.bag_slots do if ux.dropped(gui, b.frame, to.frame) do app.bag[i], app.bag[j] = app.bag[j], app.bag[i]
+    for to, j in app.hotbar do if ux.dropped(gui, b.frame, to.frame) {
+      if ITEMS[item].consumable do app.actions[j] = item
+      else do toast(app, fmt.tprintf("%s cannot be used from the hotbar", ITEMS[item].name))
+    }
   }
 }
 
 handle_panels :: proc(app: ^App) {
   gui := &app.gui
-  for r, i in app.quest_rows do if ui.clicked(gui, r) do app.quest = i
-  if ui.clicked(gui, app.track) do app.tracked[app.quest] = !app.tracked[app.quest]
-  if ui.hovered(gui, app.quest_list) {
-    list := ui.node(gui, app.quest_list)
-    list.scroll.y = clamp(list.scroll.y - app.input.scroll.y * 24, 0, ui.max_scroll(gui, app.quest_list).y)
+  for r, i in app.quest_rows do if ux.clicked(gui, r) do app.quest = i
+  if ux.clicked(gui, app.track) do app.tracked[app.quest] = !app.tracked[app.quest]
+  if ux.clicked(gui, app.resume) do open_window(app, .PAUSE, false)
+  if ux.clicked(gui, app.quit) do app.quitting = true
+  if ux.submitted(gui, app.name_box) || ux.changed(gui, app.name_box) {
+    ux.set_text(gui, app.hero_name, ux.node(gui, app.name_box).text)
   }
-  if ui.clicked(gui, app.resume) do app.open[.PAUSE] = false
-  if ui.clicked(gui, app.quit) do app.quitting = true
+  if ux.changed(gui, app.map_check) do toast(app, "Minimap shown" if ux.node(gui, app.map_check).active else "Minimap hidden")
+  if ux.changed(gui, app.scale_knob) {
+    gui.reference = REFERENCE / (0.75 + ux.node(gui, app.scale_knob).anchor.x * 0.5)
+  }
 }
 
 handle_keys :: proc(app: ^App) {
   s := &app.input
   if s.keyboard_captured do return
   if input.key_pressed(s, .ESCAPE) {
-    if w, ok := topmost(app); ok do app.open[w] = false
+    if w, ok := topmost(app); ok do open_window(app, w, false)
     else do open_window(app, .PAUSE)
   }
-  if app.open[.PAUSE] do return
-  toggles := [?]struct {
-    key: input.Key,
-    w:   Window,
-  }{{.I, .INVENTORY}, {.J, .QUESTS}}
-  for t in toggles do if input.key_pressed(s, t.key) do open_window(app, t.w, !app.open[t.w])
-  if input.key_pressed(s, .M) do app.minimap = !app.minimap
+  if is_open(app, .PAUSE) do return
+  for w in Window do if w != .PAUSE && input.key_pressed(s, MENU_BUTTONS[w].key) do open_window(app, w, !is_open(app, w))
+  if input.key_pressed(s, .ENTER) do ux.focus(&app.gui, app.chat)
+  if input.key_pressed(s, .M) {
+    check := ux.node(&app.gui, app.map_check)
+    check.active = !check.active
+  }
   for i in 0 ..< HOTBAR do if input.key_pressed(s, input.Key(int(input.Key.NUM_1) + i)) do use_action(app, i)
 }
 
@@ -571,82 +569,74 @@ has :: proc(app: ^App, item: Item) -> (count: int) {
 
 toast :: proc(app: ^App, text: string) {
   if len(app.toasts) == TOASTS {
-    ui.destroy(&app.gui, app.toasts[0].node)
+    ux.destroy(&app.gui, app.toasts[0].node)
     ordered_remove(&app.toasts, 0)
   }
-  node := label(app, app.toast_list, text, 15, app.s.toast, {padding = {12, 6, 12, 6}})
+  node := add(app, app.toast_list, {text = text, font_size = 15, style = app.s.toast, padding = {12, 6, 12, 6}})
   append(&app.toasts, Toast{node, TOAST_SECONDS})
 }
 
-show :: proc(app: ^App, h: ui.NodeHandle, shown: bool) {
-  ui.node(&app.gui, h).hidden = !shown
-}
-
 set_icon :: proc(app: ^App, s: Slot, tile: u32, shown: bool) {
-  icon := ui.node(&app.gui, s.icon)
+  icon := ux.node(&app.gui, s.icon)
   icon.hidden = !shown
   icon.image_uv = app.tiles[tile].uv
 }
 
 set_bar :: proc(app: ^App, b: Bar, value, total: f32) {
-  ui.node(&app.gui, b.fill).size.x = {.PERCENT, clamp(value / max(total, 1), 0, 1)}
-  if b.label != {} do ui.set_text(&app.gui, b.label, fmt.tprintf("%.0f / %.0f", value, total))
+  ux.node(&app.gui, b.fill).size.x = {.PERCENT, clamp(value / max(total, 1), 0, 1)}
+  if b.label != {} do ux.set_text(&app.gui, b.label, fmt.tprintf("%.0f / %.0f", value, total))
 }
 
 refresh :: proc(app: ^App, dt: f32) {
   gui := &app.gui
-  for w in Window do show(app, app.panels[w].root, app.open[w])
-  show(app, app.map_frame, app.minimap)
+  ux.node(gui, app.map_frame).hidden = !ux.node(gui, app.map_check).active
 
   b := strings.builder_make(context.temp_allocator)
   for q, i in QUESTS do if app.tracked[i] do fmt.sbprintf(&b, "%s%s", "\n" if strings.builder_len(b) > 0 else "", q.title)
-  ui.set_text(gui, app.tracker, strings.to_string(b) if strings.builder_len(b) > 0 else "No quests tracked")
+  ux.set_text(gui, app.tracker, strings.to_string(b) if strings.builder_len(b) > 0 else "No quests tracked")
 
   for h, i in app.hotbar {
     tile: u32
     count := ""
-    total: f32 = 1
     switch a in app.actions[i] {
     case Skill:
       tile = SKILLS[a].tile
-      total = SKILLS[a].cooldown
     case Item:
       tile = ITEMS[a].tile
       count = fmt.tprint(has(app, a))
     }
     set_icon(app, h, tile, app.actions[i] != nil)
-    ui.set_text(gui, h.count, count)
+    ux.set_text(gui, h.count, count)
     app.cooldowns[i] = max(app.cooldowns[i] - dt, 0)
-    app.sweeps[i] = app.cooldowns[i] / total
   }
   for &t in app.toasts {
     t.life -= dt
-    ui.node(gui, t.node).tint = {255, 255, 255, u8(255 * clamp(t.life, 0, 1))}
+    ux.node(gui, t.node).tint = {255, 255, 255, u8(255 * clamp(t.life, 0, 1))}
   }
   for len(app.toasts) > 0 && app.toasts[0].life <= 0 {
-    ui.destroy(gui, app.toasts[0].node)
+    ux.destroy(gui, app.toasts[0].node)
     ordered_remove(&app.toasts, 0)
   }
 
   for b, i in app.bag_slots {
     stack := app.bag[i]
     set_icon(app, b, ITEMS[stack.item].tile, stack.item != .NONE)
-    ui.node(gui, b.icon).active = i == app.dragging
-    ui.set_text(gui, b.count, fmt.tprint(stack.count) if stack.count > 1 else "")
+    ux.node(gui, b.icon).active = i == app.dragging
+    ux.set_text(gui, b.count, fmt.tprint(stack.count) if stack.count > 1 else "")
   }
-  ghost := ui.node(gui, app.ghost)
+  ghost := ux.node(gui, app.ghost)
   ghost.hidden = app.dragging < 0
   if app.dragging >= 0 {
     ghost.image_uv = app.tiles[ITEMS[app.bag[app.dragging].item].tile].uv
-    ghost.offset = ui.to_reference(gui, app.input.cursor) - 22
+    ux.place(gui, app.ghost, app.input.cursor - ux.rect(gui, app.ghost).size / 2)
   }
 
-  for r, i in app.quest_rows do ui.node(gui, r).active = i == app.quest
+  for r, i in app.quest_rows do ux.node(gui, r).active = i == app.quest
   q := QUESTS[app.quest]
-  ui.set_text(gui, app.quest_name, q.title)
-  ui.set_text(gui, app.quest_text, q.text)
-  ui.set_text(gui, app.quest_goal, q.goal)
-  ui.set_text(gui, app.track_label, "Untrack" if app.tracked[app.quest] else "Track")
+  ux.set_text(gui, app.quest_name, q.title)
+  ux.set_text(gui, app.quest_text, q.text)
+  ux.set_text(gui, app.quest_goal, q.goal)
+  ux.set_text(gui, app.track_label, "Untrack" if app.tracked[app.quest] else "Track")
 
   tooltip(app)
 }
@@ -654,37 +644,44 @@ refresh :: proc(app: ^App, dt: f32) {
 tooltip :: proc(app: ^App) {
   gui := &app.gui
   title, text := "", ""
-  if app.dragging < 0 {
-    for b, i in app.bag_slots do if app.open[.INVENTORY] && ui.hovered(gui, b.frame) && app.bag[i].item != .NONE {
+  if app.dragging < 0 && is_open(app, .INVENTORY) {
+    for b, i in app.bag_slots do if ux.hovered(gui, b.frame) && app.bag[i].item != .NONE {
       info := ITEMS[app.bag[i].item]
       title = info.name
       text = fmt.tprintf("%s\nWorth %d gold%s", info.text, info.value, "\nRight click to use" if info.consumable else "")
     }
   }
-  tip := ui.node(gui, app.tooltip)
-  tip.hidden = title == ""
-  if tip.hidden do return
-  ui.set_text(gui, app.tip_title, title)
-  ui.set_text(gui, app.tip_text, text)
-  size := ui.to_reference(gui, ui.rect(gui, app.tooltip).size)
-  screen := ui.to_reference(gui, render.window_size(&app.renderer))
-  at := ui.to_reference(gui, app.input.cursor) + 18
-  tip.offset = {min(at.x, screen.x - size.x - 8), min(at.y, screen.y - size.y - 8)}
+  ux.node(gui, app.tooltip).hidden = title == ""
+  if title == "" do return
+  ux.set_text(gui, app.tip_title, title)
+  ux.set_text(gui, app.tip_text, text)
+  ux.place(gui, app.tooltip, app.input.cursor + 18)
 }
 
-cooldown_sweep :: proc(commands: ^[dynamic]render.OverlayCommand, area: ui.Rect, left: f32) {
+draw_sweeps :: proc(app: ^App) {
   SEGMENTS :: 48
   SHADE :: [4]u8{0, 0, 0, 170}
-  center := area.pos + area.size / 2
-  radius := linalg.length(area.size) / 2
-  n := max(int(math.ceil(left * SEGMENTS)), 1)
-  vertices := make([]render.Vertex2D, n + 2, context.temp_allocator)
-  indices := make([]u32, n * 3, context.temp_allocator)
-  vertices[0] = {pos = center, color = SHADE}
-  for k in 0 ..= n {
-    a := math.TAU * (1 - left * f32(n - k) / f32(n))
-    vertices[k + 1] = {pos = center + radius * [2]f32{math.sin(a), -math.cos(a)}, color = SHADE}
+  c := &app.sweeps
+  ui.reset(c)
+  c.dpi = platform.dpi_scale(&app.platform)
+  for h, i in app.hotbar {
+    total: f32 = 1
+    if skill, ok := app.actions[i].(Skill); ok do total = SKILLS[skill].cooldown
+    left := app.cooldowns[i] / total
+    if left <= 0 do continue
+    area := ux.rect(&app.gui, h.frame)
+    c.z, c.clip = ux.layer(&app.gui, h.icon), area
+    center := area.pos + area.size / 2
+    radius := linalg.length(area.size) / 2
+    n := max(int(math.ceil(left * SEGMENTS)), 1)
+    vertices := make([]ui.Vertex2D, n + 2, context.temp_allocator)
+    indices := make([]u32, n * 3, context.temp_allocator)
+    vertices[0] = {pos = center, color = SHADE}
+    for k in 0 ..= n {
+      a := math.TAU * (1 - left * f32(n - k) / f32(n))
+      vertices[k + 1] = {pos = center + radius * [2]f32{math.sin(a), -math.cos(a)}, color = SHADE}
+    }
+    for k in 0 ..< n do indices[k * 3], indices[k * 3 + 1], indices[k * 3 + 2] = 0, u32(k + 1), u32(k + 2)
+    ui.triangles(c, vertices, indices)
   }
-  for k in 0 ..< n do indices[k * 3], indices[k * 3 + 1], indices[k * 3 + 2] = 0, u32(k + 1), u32(k + 2)
-  append(commands, render.OverlayMesh{vertices = vertices, indices = indices, z_order = 1, clip = area})
 }

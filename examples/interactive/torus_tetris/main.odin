@@ -12,6 +12,7 @@ import "mjolnir/geometry"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
+import "mjolnir/ui"
 import "mjolnir/world"
 
 GRID_W :: 20
@@ -59,6 +60,7 @@ App :: struct {
   renderer: render.Renderer,
   input:    input.State,
   font:     font.Font,
+  hud:     ui.Canvas,
   orbit:    render.Orbit,
   state:    State,
 }
@@ -82,6 +84,7 @@ main :: proc() {
 
 shutdown :: proc(app: ^App) {
   font.destroy(&app.font)
+  ui.destroy(&app.hud)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
@@ -93,11 +96,12 @@ draw :: proc(app: ^App) -> bool {
 }
 
 draw_hud :: proc(app: ^App) {
-  hud := [?]render.OverlayCommand {
-    render.OverlayText{text = fmt.tprintf("Score: %d", app.state.score), position = {20, 20}, size = 32, color = {255, 255, 255, 255}},
-    render.OverlayText{text = fmt.tprintf("High: %d", app.state.high_score), position = {20, 60}, size = 24, color = {255, 220, 100, 255}},
-  }
-  render.stage_overlay(&app.renderer, hud[:], &app.font)
+  hud := &app.hud
+  ui.reset(hud)
+  hud.dpi = platform.dpi_scale(&app.platform)
+  ui.text(hud, &app.font, fmt.tprintf("Score: %d", app.state.score), {20, 20}, 32, 255)
+  ui.text(hud, &app.font, fmt.tprintf("High: %d", app.state.high_score), {20, 60}, 24, {255, 220, 100, 255})
+  render.stage_overlay(&app.renderer, {hud}, &app.font)
 }
 
 wrap_col :: proc(c: i32) -> i32 { return c %% GRID_W }

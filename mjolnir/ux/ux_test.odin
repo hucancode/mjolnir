@@ -1,10 +1,11 @@
 #+build !js
 #+private file
-package ui
+package ux
 
 import "../containers"
 import "../font"
 import "../input"
+import "../ui"
 import "core:testing"
 
 TEST_FONT :: #load("../../assets/Outfit-Regular.ttf")
@@ -12,8 +13,9 @@ TEST_FONT :: #load("../../assets/Outfit-Regular.ttf")
 VIEWPORT :: [2]f32{800, 600}
 
 Fixture :: struct {
-	ui:   UI,
-	font: font.Font,
+	ui:         UI,
+	font:       font.Font,
+	acc, input: input.State,
 }
 
 setup :: proc(f: ^Fixture) {
@@ -24,6 +26,46 @@ setup :: proc(f: ^Fixture) {
 teardown :: proc(f: ^Fixture) {
 	shutdown(&f.ui)
 	font.destroy(&f.font)
+}
+
+// What one input tick does besides moving the cursor.
+Tick :: struct {
+	left:      Maybe(input.Action), // the left button pressed or released
+	held:      []input.Key, // down through the tick (shift, control)
+	keys:      []input.Key, // pressed
+	text:      string, // typed
+	clipboard: string,
+	scroll:    [2]f32,
+}
+
+// One tick: input with the cursor at `at`, then an update.
+feed :: proc(f: ^Fixture, at: [2]f32, t: Tick = {}) {
+	input.cursor_event(&f.acc, at)
+	if a, ok := t.left.?; ok do input.button_event(&f.acc, .LEFT, a)
+	for k in t.held do input.key_event(&f.acc, k, .PRESS)
+	for k in t.keys do input.key_event(&f.acc, k, .PRESS)
+	for r in t.text do input.char_event(&f.acc, r)
+	if t.scroll != {} do input.scroll_event(&f.acc, t.scroll)
+	input.drain(&f.acc, &f.input)
+	for k in t.held do input.key_event(&f.acc, k, .RELEASE)
+	for k in t.keys do input.key_event(&f.acc, k, .RELEASE)
+	update_input(&f.ui, &f.input, t.clipboard)
+	update(&f.ui, VIEWPORT, &f.font)
+}
+
+hover :: proc(f: ^Fixture, at: [2]f32) {
+	feed(f, at)
+}
+
+// A left click at `at`: press, then release.
+click_at :: proc(f: ^Fixture, at: [2]f32) {
+	feed(f, at, {left = .PRESS})
+	feed(f, at, {left = .RELEASE})
+}
+
+// Types into the focused text.
+type :: proc(f: ^Fixture, t: Tick) {
+	feed(f, f.input.cursor, t)
 }
 
 @(test)
@@ -363,13 +405,13 @@ test_hover_repaints_in_the_hovered_look :: proc(t: ^testing.T) {
 	button_style := style_create(&f.ui, look, hot)
 	button := node_create(&f.ui, {size = fixed(100, 40), interactive = true, style = button_style})
 	update(&f.ui, VIEWPORT, &f.font)
-	vertices, _, _ := mesh(&f.ui)
+	vertices, _, _ := ui.mesh(canvas(&f.ui))
 	testing.expect_value(t, vertices[0].color, look.fill)
 	s := input.State{cursor = {50, 20}}
 	update_input(&f.ui, &s)
 	laid_out, painted := update(&f.ui, VIEWPORT, &f.font)
 	testing.expect(t, !laid_out && painted, "hover repaints without a layout")
-	vertices, _, _ = mesh(&f.ui)
+	vertices, _, _ = ui.mesh(canvas(&f.ui))
 	testing.expect_value(t, vertices[0].color, hot.fill)
 	_ = button
 }
@@ -387,9 +429,9 @@ test_label_takes_its_buttons_interaction :: proc(t: ^testing.T) {
 	s := input.State{cursor = {190, 35}}
 	update_input(&f.ui, &s)
 	update(&f.ui, VIEWPORT, &f.font)
-	vertices, _, batches := mesh(&f.ui)
+	vertices, _, batches := ui.mesh(canvas(&f.ui))
 	testing.expect_value(t, len(batches), 1)
-	testing.expect_value(t, batches[0].texture, FONT_TEXTURE)
+	testing.expect_value(t, batches[0].texture, ui.FONT_TEXTURE)
 	testing.expect_value(t, vertices[0].color, red)
 }
 
@@ -403,7 +445,7 @@ test_mesh_batches_by_texture_and_clip :: proc(t: ^testing.T) {
 	node_create(&f.ui, {parent = panel, size = fixed(20, 20), image = 9, image_uv = {{0.5, 0}, {1, 0}, {1, 0.25}, {0.5, 0.25}}})
 	node_create(&f.ui, {parent = panel, text = "ok", font_size = 16})
 	update(&f.ui, VIEWPORT, &f.font, 2)
-	vertices, indices, batches := mesh(&f.ui)
+	vertices, indices, batches := ui.mesh(canvas(&f.ui))
 	testing.expect_value(t, len(batches), 3)
 	testing.expect_value(t, batches[0].texture, 0)
 	testing.expect_value(t, batches[0].vertex_count, 5 * 4)
@@ -414,7 +456,7 @@ test_mesh_batches_by_texture_and_clip :: proc(t: ^testing.T) {
 	testing.expect_value(t, first[0].uv, [2]f32{0.5, 0})
 	testing.expect_value(t, first[2].uv, [2]f32{1, 0.25})
 	testing.expect_value(t, first[2].pos, [2]f32{20, 20})
-	testing.expect_value(t, batches[2].texture, FONT_TEXTURE)
+	testing.expect_value(t, batches[2].texture, ui.FONT_TEXTURE)
 	atlas := font.atlas_size(&f.font)
 	for v in vertices[batches[2].first_vertex:][:batches[2].vertex_count] {
 		testing.expect(t, v.uv.x >= 0 && v.uv.x <= f32(atlas.x) && v.uv.y >= 0 && v.uv.y <= f32(atlas.y), "glyph uvs in atlas texels")
@@ -466,7 +508,7 @@ test_tint_multiplies_down_the_subtree :: proc(t: ^testing.T) {
 	panel := node_create(&f.ui, {size = fixed(100, 100), style = solid, tint = {255, 255, 255, 51}})
 	node_create(&f.ui, {parent = panel, size = fixed(10, 10), style = solid, tint = {255, 0, 0, 255}})
 	update(&f.ui, VIEWPORT, &f.font)
-	vertices, _, _ := mesh(&f.ui)
+	vertices, _, _ := ui.mesh(canvas(&f.ui))
 	testing.expect_value(t, vertices[0].color, [4]u8{255, 255, 255, 51})
 	testing.expect_value(t, vertices[4].color, [4]u8{255, 0, 0, 51})
 	// a look only: no layout
@@ -510,24 +552,23 @@ test_text_takes_the_default_font_size :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_nine_slice_keeps_its_corners :: proc(t: ^testing.T) {
+test_skin_follows_the_interaction :: proc(t: ^testing.T) {
 	f: Fixture
 	setup(&f)
 	defer teardown(&f)
-	frame := node_create(&f.ui, {size = fixed(100, 60), image = 3, smooth = true, slice = {border = {10, 10, 10, 10}, uv = {0.25, 0.25, 0.25, 0.25}}})
-	_ = frame
+	normal := Style{skin = {image = 3, size = {30, 30}, border = {10, 10, 10, 10}}}
+	hot := normal
+	hot.skin.image = 4
+	b := node_create(&f.ui, {size = fixed(100, 60), interactive = true, style = style_create(&f.ui, normal, hot)})
 	update(&f.ui, VIEWPORT, &f.font)
-	vertices, _, batches := mesh(&f.ui)
+	_, _, batches := ui.mesh(canvas(&f.ui))
 	testing.expect_value(t, len(batches), 1)
-	testing.expect(t, batches[0].smooth, "smooth sampling")
+	testing.expect_value(t, batches[0].texture, 3)
 	testing.expect_value(t, batches[0].vertex_count, 9 * 4)
-	// the top-left cell: 10 x 10 on screen, the image's top-left quarter
-	testing.expect_value(t, vertices[2].pos, [2]f32{10, 10})
-	testing.expect_value(t, vertices[2].uv, [2]f32{0.25, 0.25})
-	// the centre stretches
-	testing.expect_value(t, vertices[4 * 4].pos, [2]f32{10, 10})
-	testing.expect_value(t, vertices[4 * 4 + 2].pos, [2]f32{90, 50})
-	testing.expect_value(t, vertices[4 * 4 + 2].uv, [2]f32{0.75, 0.75})
+	hover(&f, rect(&f.ui, b).pos + 5)
+	update(&f.ui, VIEWPORT, &f.font)
+	_, _, batches = ui.mesh(canvas(&f.ui))
+	testing.expect_value(t, batches[0].texture, 4)
 }
 
 @(test)
@@ -603,7 +644,235 @@ test_move_scaled_window :: proc(t: ^testing.T) {
 	w := node_create(&f.ui, {size = fixed(80, 80)})
 	update(&f.ui, VIEWPORT * 2, &f.font)
 	move(&f.ui, w, {40, 20})
-	testing.expect_value(t, node(&f.ui, w).offset, [2]f32{20, 10})
+	// a root is re-anchored where it lands: 40 of the 1440 window pixels it has room for
+	testing.expect_value(t, node(&f.ui, w).anchor, [2]f32{40.0 / 1440, 20.0 / 1040})
+	testing.expect_value(t, node(&f.ui, w).offset, [2]f32{})
 	update(&f.ui, VIEWPORT * 2, &f.font)
 	testing.expect_value(t, rect(&f.ui, w).pos, [2]f32{40, 20})
+	// and keeps its place, proportionally, as the window grows
+	update(&f.ui, VIEWPORT * 4, &f.font)
+	testing.expect_value(t, rect(&f.ui, w).pos, [2]f32{80, 40})
+}
+
+// A focused text box holding `text`, its caret at the end.
+editing :: proc(f: ^Fixture, text: string, width: f32 = 200) -> NodeHandle {
+	box := text_box(&f.ui, {}, text, width)
+	update(&f.ui, VIEWPORT, &f.font)
+	r := rect(&f.ui, box)
+	click_at(f, r.pos + r.size - 2)
+	return box
+}
+
+@(test)
+test_text_box_types_and_deletes :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	box := editing(&f, "")
+	testing.expect(t, focused(&f.ui, box), "a click focuses it")
+	testing.expect(t, rect(&f.ui, box).size.y > 10, "empty, it keeps a line's height")
+	type(&f, {text = "héllo"})
+	testing.expect_value(t, node(&f.ui, box).text, "héllo")
+	testing.expect(t, changed(&f.ui, box), "typing changes it")
+	type(&f, {keys = {.BACKSPACE}})
+	type(&f, {keys = {.LEFT}})
+	type(&f, {keys = {.LEFT}})
+	type(&f, {keys = {.BACKSPACE}})
+	testing.expect_value(t, node(&f.ui, box).text, "hll")
+	type(&f, {keys = {.DELETE}})
+	testing.expect_value(t, node(&f.ui, box).text, "hl")
+	type(&f, {keys = {.HOME}})
+	type(&f, {text = ">"})
+	testing.expect_value(t, node(&f.ui, box).text, ">hl")
+	type(&f, {keys = {.ENTER}})
+	testing.expect(t, submitted(&f.ui, box), "enter submits")
+	type(&f, {keys = {.ESCAPE}})
+	testing.expect(t, !focused(&f.ui, box), "escape lets go")
+	type(&f, {text = "x"})
+	testing.expect_value(t, node(&f.ui, box).text, ">hl")
+}
+
+@(test)
+test_text_box_selects_copies_and_pastes :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	box := editing(&f, "one two")
+	type(&f, {held = {.LEFT_SHIFT}, keys = {.LEFT}})
+	type(&f, {held = {.LEFT_SHIFT}, keys = {.LEFT}})
+	type(&f, {held = {.LEFT_SHIFT}, keys = {.LEFT}})
+	lo, hi := selection(&f.ui)
+	testing.expect_value(t, [2]int{lo, hi}, [2]int{4, 7})
+	type(&f, {held = {.LEFT_CONTROL}, keys = {.X}})
+	testing.expect_value(t, copied(&f.ui), "two")
+	testing.expect_value(t, node(&f.ui, box).text, "one ")
+	type(&f, {held = {.LEFT_SUPER}, keys = {.V}, clipboard = "2\nlines"})
+	testing.expect_value(t, node(&f.ui, box).text, "one 2lines")
+	type(&f, {held = {.LEFT_CONTROL}, keys = {.A}})
+	type(&f, {text = "z"})
+	testing.expect_value(t, node(&f.ui, box).text, "z")
+	set_text(&f.ui, box, "")
+	lo, hi = selection(&f.ui)
+	testing.expect_value(t, hi, 0)
+}
+
+@(test)
+test_text_box_click_places_the_caret :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	box := editing(&f, "abcdef")
+	line := lines(&f.ui, box)[0]
+	click_at(&f, line.pos + {font.measure(&f.font, "abc", line.size), 4})
+	lo, hi := selection(&f.ui)
+	testing.expect_value(t, [2]int{lo, hi}, [2]int{3, 3})
+	// shift-click extends from there
+	end := line.pos + {line.width + 1, 4}
+	feed(&f, end, {left = .PRESS, held = {.LEFT_SHIFT}})
+	feed(&f, end, {left = .RELEASE})
+	lo, hi = selection(&f.ui)
+	testing.expect_value(t, [2]int{lo, hi}, [2]int{3, 6})
+}
+
+@(test)
+test_text_box_scrolls_to_the_caret :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	box := editing(&f, "", 60)
+	type(&f, {text = "a long line that does not fit"})
+	r := rect(&f.ui, box)
+	x := caret_x(&f.ui, box, &f.font, len(node(&f.ui, box).text))
+	testing.expect(t, node(&f.ui, box).scroll.x > 0, "the text scrolled")
+	testing.expect(t, x <= r.pos.x + r.size.x && x >= r.pos.x, "the caret shows")
+	type(&f, {keys = {.HOME}})
+	testing.expect_value(t, node(&f.ui, box).scroll.x, 0)
+}
+
+@(test)
+test_check_toggles :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	c := check(&f.ui, {}, "Sound")
+	update(&f.ui, VIEWPORT, &f.font)
+	click_at(&f, rect(&f.ui, c).pos + 4)
+	testing.expect(t, node(&f.ui, c).active, "checked")
+	testing.expect(t, changed(&f.ui, c), "changed the tick it flips")
+	click_at(&f, rect(&f.ui, c).pos + 4)
+	testing.expect(t, !node(&f.ui, c).active, "unchecked")
+}
+
+@(test)
+test_window_drags_raises_and_closes :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	a, _, _ := window(&f.ui, "A", 200, {10, 10})
+	b, _, close := window(&f.ui, "B", 200, {20, 20})
+	update(&f.ui, VIEWPORT, &f.font)
+	// a press on A's visible bar brings it over B
+	feed(&f, {12, 15}, {left = .PRESS})
+	testing.expect(t, node(&f.ui, a).order > node(&f.ui, b).order, "pressed to the front")
+	feed(&f, {112, 65})
+	feed(&f, {112, 65}, {left = .RELEASE})
+	testing.expect_value(t, rect(&f.ui, a).pos, [2]f32{110, 60})
+	click_at(&f, rect(&f.ui, close).pos + 4)
+	testing.expect(t, node(&f.ui, b).hidden, "closed")
+}
+
+@(test)
+test_slider_knob_drags_along_its_track :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	knob := slider(&f.ui, {}, 0, 112)
+	update(&f.ui, VIEWPORT, &f.font)
+	at := rect(&f.ui, knob).pos + 4
+	feed(&f, at, {left = .PRESS})
+	feed(&f, at + {50, 30})
+	testing.expect_value(t, node(&f.ui, knob).anchor, [2]f32{0.5, 0.5})
+	testing.expect(t, changed(&f.ui, knob), "dragging changes it")
+	feed(&f, at + {500, 0})
+	testing.expect_value(t, node(&f.ui, knob).anchor.x, 1)
+}
+
+@(test)
+test_wheel_scrolls_the_clipping_node :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	view := scroll_view(&f.ui, {}, fixed(100, 100))
+	for _ in 0 ..< 10 do node_create(&f.ui, {parent = view, size = fixed(50, 40)})
+	update(&f.ui, VIEWPORT, &f.font)
+	feed(&f, {50, 50}, {scroll = {0, -1}})
+	testing.expect_value(t, node(&f.ui, view).scroll.y, f.ui.font_size * 3)
+	feed(&f, {50, 50}, {scroll = {0, -100}})
+	testing.expect_value(t, node(&f.ui, view).scroll.y, max_scroll(&f.ui, view).y)
+}
+
+@(test)
+test_overlay_node_leaves_a_layer :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	style := style_create(&f.ui, {fill = {255, 0, 0, 255}})
+	a := node_create(&f.ui, {size = fixed(10, 10), style = style, overlay = true})
+	b := node_create(&f.ui, {size = fixed(10, 10), style = style})
+	update(&f.ui, VIEWPORT, &f.font)
+	_, _, batches := ui.mesh(canvas(&f.ui))
+	testing.expect_value(t, len(batches), 2)
+	testing.expect_value(t, layer(&f.ui, a), 1)
+	testing.expect_value(t, batches[0].z, 0)
+	testing.expect_value(t, batches[1].z, 2)
+	testing.expect_value(t, layer(&f.ui, b), 3)
+}
+
+@(test)
+test_text_box_draws_a_caret_only_when_focused :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	box := text_box(&f.ui, {}, "", 200)
+	update(&f.ui, VIEWPORT, &f.font)
+	vertices, _, _ := ui.mesh(canvas(&f.ui))
+	testing.expect_value(t, len(vertices), 5 * 4)
+	focus(&f.ui, box)
+	update(&f.ui, VIEWPORT, &f.font)
+	vertices, _, _ = ui.mesh(canvas(&f.ui))
+	testing.expect_value(t, len(vertices), 6 * 4)
+}
+
+@(test)
+test_clicked_tells_the_button :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	b := node_create(&f.ui, {size = fixed(50, 50), interactive = true})
+	update(&f.ui, VIEWPORT, &f.font)
+	input.button_event(&f.acc, .RIGHT, .PRESS)
+	feed(&f, {10, 10})
+	input.button_event(&f.acc, .RIGHT, .RELEASE)
+	feed(&f, {10, 10})
+	testing.expect(t, clicked(&f.ui, b, .RIGHT), "right clicked")
+	testing.expect(t, !clicked(&f.ui, b), "not left clicked")
+}
+
+@(test)
+test_dropped_from_one_node_onto_another :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	a := node_create(&f.ui, {size = fixed(50, 50), offset = {0, 0}, interactive = true})
+	icon := node_create(&f.ui, {parent = a, size = fixed(40, 40)})
+	b := node_create(&f.ui, {size = fixed(50, 50), offset = {100, 0}, interactive = true})
+	update(&f.ui, VIEWPORT, &f.font)
+	feed(&f, {10, 10}, {left = .PRESS})
+	feed(&f, {110, 10})
+	feed(&f, {110, 10}, {left = .RELEASE})
+	testing.expect(t, dropped(&f.ui, a, b), "dropped from a onto b")
+	testing.expect(t, !dropped(&f.ui, b, a), "not the other way")
+	testing.expect(t, !clicked(&f.ui, a) && !clicked(&f.ui, b), "a drop is no click")
+	click_at(&f, {10, 10})
+	testing.expect(t, !dropped(&f.ui, a, a) && !dropped(&f.ui, icon, b) && clicked(&f.ui, a), "a click is no drop")
 }

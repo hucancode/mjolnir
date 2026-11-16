@@ -9,6 +9,7 @@ import "mjolnir/geometry"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
+import "mjolnir/ui"
 import "mjolnir/world"
 
 SPEED :: 4
@@ -83,7 +84,8 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.platform, &app.input)
   size := render.window_size(&app.renderer)
   half := half_size(app)
-  views: [2]render.OverlayCommand
+  views: ui.Canvas
+  defer ui.destroy(&views)
   for &p, i in app.players {
     move := [3]f32{input.axis(&app.input, p.keys[0], p.keys[1]), 0, input.axis(&app.input, p.keys[2], p.keys[3])}
     p.position += move * SPEED * dt
@@ -93,9 +95,9 @@ update :: proc(app: ^App, dt: f32) {
     }
     render.camera_resize(&app.renderer, p.camera, half)
     image := render.camera_image(&app.renderer, p.camera, .FINAL_IMAGE, previous_frame = true)
-    views[i] = render.OverlayQuad{position = {f32(i) * size.x / 2, 0}, size = {size.x / 2, size.y}, color = 255, texture = image}
+    ui.rect(&views, {{f32(i) * size.x / 2, 0}, {size.x / 2, size.y}}, 255, u32(image))
   }
-  render.stage_overlay(&app.renderer, views[:])
+  render.stage_overlay(&app.renderer, {&views})
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 

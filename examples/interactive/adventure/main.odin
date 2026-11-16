@@ -22,6 +22,7 @@ import "mjolnir/physics"
 import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/ui"
+import "mjolnir/ux"
 import "mjolnir/world"
 
 DEBUG :: #config(DEBUG, false)
@@ -302,8 +303,8 @@ SCREENS := [Screen]fsm.State(App, Screen) {
 }
 
 Panel :: struct {
-  root, title, stats:  ui.NodeHandle,
-  retry, next, heroes: ui.NodeHandle,
+  root, title, stats:  ux.NodeHandle,
+  retry, next, heroes: ux.NodeHandle,
 }
 
 App :: struct {
@@ -313,7 +314,8 @@ App :: struct {
   input:        input.State,
   phys:         physics.World,
   font:         font.Font,
-  gui:          ui.UI,
+  hud:          ui.Canvas,
+  gui:          ux.UI,
   panel:        Panel,
   orbit:        render.Orbit,
   show_debug:   bool,
@@ -398,7 +400,7 @@ main :: proc() {
 setup :: proc(app: ^App) -> mjolnir.Setup {
   if !render.ready(&app.renderer) do return .WAIT
   if !font.init(&app.font, #load("assets/Outfit-Regular.ttf")) do return .FAIL
-  ui.init(&app.gui, {1280, 720})
+  ux.init(&app.gui, {1280, 720}, font_size = 20)
   build_panel(app)
   fsm.start(&app.screen, SCREENS, app, .SELECT)
   return .READY
@@ -411,8 +413,9 @@ shutdown :: proc(app: ^App) {
   delete(app.projectiles)
   delete(app.props)
   delete(app.bodies)
-  ui.shutdown(&app.gui)
+  ux.shutdown(&app.gui)
   font.destroy(&app.font)
+  ui.destroy(&app.hud)
   physics.shutdown(&app.phys)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
@@ -1018,47 +1021,42 @@ draw_collider :: proc(app: ^App, body: physics.Body) {
 build_panel :: proc(app: ^App) {
   gui := &app.gui
   p := &app.panel
-  screen := ui.node_create(gui, {size = {{.PERCENT, 1}, {.PERCENT, 1}}})
-  panel_style := ui.style_create(gui, {fill = {20, 20, 30, 230}})
-  p.root = ui.node_create(gui, {parent = screen, position = .ABSOLUTE, anchor = {0.5, 0.5}, direction = .COLUMN, padding = {28, 24, 28, 24}, gap = 14, align = {.CENTER, .CENTER}, hidden = true, style = panel_style})
-  p.title = ui.node_create(gui, {parent = p.root, text = "Victory", font_size = 40})
-  p.stats = ui.node_create(gui, {parent = p.root, font_size = 20})
-  row := ui.node_create(gui, {parent = p.root, gap = 12})
-  button_style := ui.style_create(gui, {fill = {150, 60, 45, 255}}, ui.Style{fill = {200, 90, 60, 255}})
-  button :: proc(gui: ^ui.UI, parent: ui.NodeHandle, label: string, style: ui.StyleHandle) -> ui.NodeHandle {
-    b := ui.node_create(gui, {parent = parent, size = {{.FIXED, 150}, {.FIXED, 44}}, align = {.CENTER, .CENTER}, interactive = true, style = style})
-    ui.node_create(gui, {parent = b, text = label, font_size = 20})
-    return b
-  }
-  p.retry = button(gui, row, "Retry", button_style)
-  p.next = button(gui, row, "Next level", button_style)
-  p.heroes = button(gui, row, "Change hero", button_style)
+  screen := ux.node_create(gui, {size = {{.PERCENT, 1}, {.PERCENT, 1}}})
+  panel_style := ux.style_create(gui, {fill = {20, 20, 30, 230}})
+  p.root = ux.node_create(gui, {parent = screen, position = .ABSOLUTE, anchor = {0.5, 0.5}, direction = .COLUMN, padding = {28, 24, 28, 24}, gap = 14, align = {.CENTER, .CENTER}, hidden = true, style = panel_style})
+  p.title = ux.node_create(gui, {parent = p.root, text = "Victory", font_size = 40})
+  p.stats = ux.node_create(gui, {parent = p.root, font_size = 20})
+  row := ux.node_create(gui, {parent = p.root, gap = 12})
+  gui.theme.button = ux.style_create(gui, {fill = {150, 60, 45, 255}}, ux.Style{fill = {200, 90, 60, 255}})
+  p.retry = ux.button(gui, row, "Retry", ux.fixed(150, 44))
+  p.next = ux.button(gui, row, "Next level", ux.fixed(150, 44))
+  p.heroes = ux.button(gui, row, "Change hero", ux.fixed(150, 44))
 }
 
 enter_result :: proc(app: ^App) {
   last := app.level == len(LEVELS) - 1
-  ui.set_text(&app.gui, app.panel.title, ("Victory!" if !last else "The crypt is cleared!") if app.won else "Defeated")
-  ui.set_text(&app.gui, app.panel.stats, fmt.tprintf("Level %d   Score %d", app.level + 1, app.score))
-  ui.node(&app.gui, app.panel.next).hidden = !app.won || last
-  ui.node(&app.gui, app.panel.root).hidden = false
+  ux.set_text(&app.gui, app.panel.title, ("Victory!" if !last else "The crypt is cleared!") if app.won else "Defeated")
+  ux.set_text(&app.gui, app.panel.stats, fmt.tprintf("Level %d   Score %d", app.level + 1, app.score))
+  ux.node(&app.gui, app.panel.next).hidden = !app.won || last
+  ux.node(&app.gui, app.panel.root).hidden = false
 }
 
 exit_result :: proc(app: ^App) {
-  ui.node(&app.gui, app.panel.root).hidden = true
+  ux.node(&app.gui, app.panel.root).hidden = true
 }
 
 update_result :: proc(app: ^App, dt: f32) -> Screen {
-  ui.update_input(&app.gui, &app.input)
+  mjolnir.update_ui_input(&app.platform, &app.gui, &app.input)
   gltf.animate(&app.player.instance, &app.heroes[app.hero], &app.scene, &app.renderer, dt)
   for &e in app.enemies do gltf.animate(&e.instance, &app.foes[e.kind], &app.scene, &app.renderer, dt)
   switch {
-  case ui.clicked(&app.gui, app.panel.retry):
+  case ux.clicked(&app.gui, app.panel.retry):
     if !app.won do app.score = 0
     return .LEVEL
-  case ui.clicked(&app.gui, app.panel.next):
+  case ux.clicked(&app.gui, app.panel.next):
     app.level += 1
     return .LEVEL
-  case ui.clicked(&app.gui, app.panel.heroes):
+  case ux.clicked(&app.gui, app.panel.heroes):
     return .SELECT
   }
   return .RESULT
@@ -1069,31 +1067,33 @@ draw :: proc(app: ^App) -> bool {
 }
 
 draw_hud :: proc(app: ^App) {
-  commands := make([dynamic]render.OverlayCommand, context.temp_allocator)
+  commands := &app.hud
+  ui.reset(commands)
+  commands.dpi = platform.dpi_scale(&app.platform)
   screen := render.window_size(&app.renderer)
   if app.screen.current == .SELECT {
     hero := HEROES[app.hero]
-    text(&commands, "Choose your hero", {40, 36}, 40)
-    text(&commands, fmt.tprintf("%s   health %.0f   speed %.1f   damage %.0f", hero.name, hero.health, hero.speed, hero.damage), {40, 90}, 24)
-    text(&commands, "A / D choose     Enter start", {40, 126}, 20, {200, 200, 210, 255})
-    text(&commands, CREDITS, {40, screen.y - 40}, 16, {200, 200, 210, 255})
+    ui.text(commands, &app.font, "Choose your hero", {40, 36}, 40)
+    ui.text(commands, &app.font, fmt.tprintf("%s   health %.0f   speed %.1f   damage %.0f", hero.name, hero.health, hero.speed, hero.damage), {40, 90}, 24)
+    ui.text(commands, &app.font, "A / D choose     Enter start", {40, 126}, 20, {200, 200, 210, 255})
+    ui.text(commands, &app.font, CREDITS, {40, screen.y - 40}, 16, {200, 200, 210, 255})
   } else {
-    hud(app, &commands)
+    hud(app, commands)
   }
-  mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font, commands[:])
+  mjolnir.stage_ui(&app.renderer, &app.platform, &app.gui, &app.font, {commands})
 }
 
-hud :: proc(app: ^App, commands: ^[dynamic]render.OverlayCommand) {
+hud :: proc(app: ^App, commands: ^ui.Canvas) {
   p := &app.player
   bar(commands, {40, 36}, {300, 22}, p.health / HEROES[app.hero].health, {220, 50, 50, 255})
-  text(commands, fmt.tprintf("Level %d / %d    Score %d", app.level + 1, len(LEVELS), app.score), {40, 68}, 22)
+  ui.text(commands, &app.font, fmt.tprintf("Level %d / %d    Score %d", app.level + 1, len(LEVELS), app.score), {40, 68}, 22)
   y: f32 = 100
   for time, power in p.buffs {
     if time <= 0 do continue
-    text(commands, fmt.tprintf("%v %.0fs", power, time), {40, y}, 18, {140, 230, 140, 255})
+    ui.text(commands, &app.font, fmt.tprintf("%v %.0fs", power, time), {40, y}, 18, {140, 230, 140, 255})
     y += 24
   }
-  text(commands, "WASD run   Space jump   Left click attack   Right drag look   F1 debug", {40, y + 8}, 16, {200, 200, 210, 255})
+  ui.text(commands, &app.font, "WASD run   Space jump   Left click attack   Right drag look   F1 debug", {40, y + 8}, 16, {200, 200, 210, 255})
   for &e in app.enemies {
     if e.health <= 0 do continue
     head := enemy_position(app, &e) + {0, 2.4 * FOES[e.kind].scale, 0}
@@ -1103,16 +1103,12 @@ hud :: proc(app: ^App, commands: ^[dynamic]render.OverlayCommand) {
     line := point.y - 6
     #reverse for step in e.trace {
       line -= 16
-      text(commands, fmt.tprintf("%s %v", step.name, step.status), {point.x - 30, line}, 13, TRACE_COLORS[step.status])
+      ui.text(commands, &app.font, fmt.tprintf("%s %v", step.name, step.status), {point.x - 30, line}, 13, TRACE_COLORS[step.status])
     }
   }
 }
 
-text :: proc(commands: ^[dynamic]render.OverlayCommand, s: string, position: [2]f32, size: f32, color: [4]u8 = 255) {
-  append(commands, render.OverlayText{text = s, position = position, size = size, color = color})
-}
-
-bar :: proc(commands: ^[dynamic]render.OverlayCommand, position, size: [2]f32, fraction: f32, color: [4]u8) {
-  append(commands, render.OverlayQuad{position = position, size = size, color = {0, 0, 0, 160}})
-  append(commands, render.OverlayQuad{position = position + 2, size = {(size.x - 4) * clamp(fraction, 0, 1), size.y - 4}, color = color})
+bar :: proc(commands: ^ui.Canvas, position, size: [2]f32, fraction: f32, color: [4]u8) {
+  ui.rect(commands, {position, size}, {0, 0, 0, 160})
+  ui.rect(commands, {position + 2, {(size.x - 4) * clamp(fraction, 0, 1), size.y - 4}}, color)
 }

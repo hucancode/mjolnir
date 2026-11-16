@@ -5,6 +5,7 @@ import "core:log"
 import "vendor:glfw"
 import "mjolnir/font"
 import "mjolnir/render"
+import "mjolnir/ui"
 
 FRAMES :: #config(FRAMES, 0)
 
@@ -21,6 +22,7 @@ main :: proc() {
   for !render.ready(r) do glfw.PollEvents()
   if !setup() do return
   defer font.destroy(&f)
+  defer ui.destroy(&hud)
   for frame := 0; !glfw.WindowShouldClose(window) && (FRAMES == 0 || frame < FRAMES); frame += 1 {
     glfw.PollEvents()
     draw(frame)

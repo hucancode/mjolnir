@@ -1,6 +1,6 @@
 #+build !js
 #+private file
-package anchor
+package ui
 
 import "core:testing"
 

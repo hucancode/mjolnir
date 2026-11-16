@@ -11,6 +11,7 @@ import "mjolnir/geometry"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
+import "mjolnir/ui"
 import "mjolnir/world"
 
 SAVE_PATH :: "boxes.json"
@@ -25,6 +26,7 @@ App :: struct {
   renderer: render.Renderer,
   input:    input.State,
   font:     font.Font,
+  hud:     ui.Canvas,
   orbit:    render.Orbit,
   save:     Save,
   nodes:    [dynamic]world.NodeHandle,
@@ -65,6 +67,7 @@ shutdown :: proc(app: ^App) {
   delete(app.save.boxes)
   delete(app.nodes)
   font.destroy(&app.font)
+  ui.destroy(&app.hud)
   world.shutdown(&app.scene)
   render.shutdown(&app.renderer)
   platform.shutdown(&app.platform)
@@ -115,11 +118,12 @@ update :: proc(app: ^App, dt: f32) {
   if input.key_pressed(&app.input, .S) do save(app)
   if input.key_pressed(&app.input, .L) do load(app)
   if input.key_pressed(&app.input, .C) do clear_boxes(app)
-  hud := [?]render.OverlayCommand {
-    render.OverlayText{text = fmt.tprintf("%d boxes: %s", len(app.nodes), app.status), position = {20, 20}, size = 24, color = 255},
-    render.OverlayText{text = "left click: place   right drag: turn   S: save   L: load   C: clear", position = {20, 54}, size = 18, color = {200, 200, 200, 255}},
-  }
-  render.stage_overlay(&app.renderer, hud[:], &app.font)
+  hud := &app.hud
+  ui.reset(hud)
+  hud.dpi = platform.dpi_scale(&app.platform)
+  ui.text(hud, &app.font, fmt.tprintf("%d boxes: %s", len(app.nodes), app.status), {20, 20}, 24, 255)
+  ui.text(hud, &app.font, "left click: place   right drag: turn   S: save   L: load   C: clear", {20, 54}, 18, {200, 200, 200, 255})
+  render.stage_overlay(&app.renderer, {hud}, &app.font)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 

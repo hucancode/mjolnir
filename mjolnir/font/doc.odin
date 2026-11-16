@@ -2,4 +2,4 @@
 // then measure strings or lay out their glyphs against its atlas.
 package font
 
-// Layer 1: foundation
+// Layer 0: core

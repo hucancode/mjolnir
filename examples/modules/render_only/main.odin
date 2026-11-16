@@ -6,6 +6,7 @@ import "core:math/linalg"
 import "mjolnir/font"
 import "mjolnir/geometry"
 import "mjolnir/render"
+import "mjolnir/ui"
 
 RING :: 12
 FLOOR, TORUS, LAMP, SPOT :: render.SlotHandle(0), render.SlotHandle(1), render.SlotHandle(2), render.SlotHandle(3)
@@ -13,6 +14,7 @@ SUN :: render.SlotHandle(4 + RING)
 
 r: ^render.Renderer
 f: font.Font
+hud: ui.Canvas
 orbit: render.Orbit
 
 setup :: proc() -> bool {
@@ -45,7 +47,9 @@ draw :: proc(frame: int) {
   render.camera_orbit(render.main_camera(r), orbit)
   render.debug_axes(r, {0, 0.01, 0})
   render.debug_circle(r, {0, 0.02, 0}, {0, 1, 0}, 4)
-  render.stage_overlay(r, {render.OverlayText{text = "render only: slots placed by hand", position = {16, 16}, size = 24, color = 255}}, &f)
+  ui.reset(&hud)
+  ui.text(&hud, &f, "render only: slots placed by hand", {16, 16}, 24, 255)
+  render.stage_overlay(r, {&hud}, &f)
   render.update(r, 1.0 / 60)
   render.frame(r)
 }

@@ -1,7 +1,7 @@
 // Mjolnir is a game engine made of building blocks: each package does one job and your app glues
 // them together. This package runs the main loop: fill a Loop with your callbacks and call run.
-// The rest is optional glue for the usual case: spawn, update, frame, sync_bodies, orbit_drag
-// and stage_ui.
+// The rest is optional glue for the usual case: spawn, update, frame, sync_bodies, orbit_drag,
+// stage_ui and update_ui_input.
 package mjolnir
 
 // Layer 3: glue
@@ -12,13 +12,13 @@ package mjolnir
 //      them, e.g. render.stage_transforms(&r, world.changes(&w)) or
 //      world.set_world_poses(&w, physics.body_poses(&p)).
 //   1  foundation: self-contained tools a system builds on, and the GPU backends
-//   0  core: containers, geometry math and the render hardware interface (rhi)
+//   0  core: containers, geometry math, fonts and the render hardware interface (rhi)
 //
 // API conventions, the same in every package:
 //   A module's init/shutdown own it for the application; teardown drops what a map made.
 //   make_x returns a value (make_point_light, make_material, make_cube); x_create stores one
 //   and returns a handle (light_create); x_init fills a struct the caller owns (arc_init,
-//   font.init); x_destroy frees either. A generational handle (world, physics, ui,
+//   font.init); x_destroy frees either. A generational handle (world, physics, ux,
 //   animation layers, navigation agents) that went stale is ignored; a plain u32 handle (render)
 //   is not checked, so never destroy one twice. A package's `destroy` group frees any of its
 //   kinds by argument type, and world.spawn is world.node_create.

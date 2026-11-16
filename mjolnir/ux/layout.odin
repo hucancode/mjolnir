@@ -1,8 +1,8 @@
-package ui
+package ux
 
-import "../anchor"
 import "../containers"
 import "../font"
+import "../ui"
 import "core:mem"
 import "core:slice"
 import "core:strings"
@@ -21,12 +21,15 @@ ALIGN_FACTOR := [Align]f32 {
 // reference frame scaled up or down until one axis matches the window, so the window is the
 // reference widened on the other axis; roots sit in it as ABSOLUTE nodes do in their parent.
 // Rects, clips, lines and the mesh come out in window pixels, the mesh's edges and glyphs on
-// framebuffer pixels. Only what changed since the last update is redone; it returns what it redid.
+// framebuffer pixels. A press on the focused text places its caret, which the text scrolls to keep
+// in view. Only what changed since the last update is redone; it returns what it redid.
 update :: proc(self: ^UI, window: [2]f32, f: ^font.Font, dpi: f32 = 1) -> (laid_out, painted: bool) {
   n := int(self.slots.high_water)
-  frame := anchor.frame(self.reference, window)
+  frame := ui.frame(self.reference, window)
   laid_out = self.dirty || frame != self.frame || dpi != self.dpi || n != len(self.last_nodes) || self.font_size != self.last_font
+  self.dpi = dpi
   painted = laid_out || self.hovered != self.last_hovered || self.pressed != self.last_pressed
+  painted ||= self.focused != self.last_focused || [2]int{self.caret, self.mark} != self.last_caret || self.text_press != .NONE
   painted ||= len(self.styles) != len(self.last_styles) || mem.compare(slice.to_bytes(self.styles[:]), slice.to_bytes(self.last_styles[:])) != 0
   if !laid_out && mem.compare(slice.to_bytes(self.nodes[:n]), slice.to_bytes(self.last_nodes[:])) != 0 {
     painted = true
@@ -36,12 +39,16 @@ update :: proc(self: ^UI, window: [2]f32, f: ^font.Font, dpi: f32 = 1) -> (laid_
     }
   }
   if laid_out do layout(self, frame, f)
+  if f != nil && edit_caret(self, f) {
+    layout(self, frame, f)
+    laid_out, painted = true, true
+  }
   if !painted do return
   paint(self, f, dpi)
   self.dirty = false
-  self.dpi = dpi
   self.last_font = self.font_size
-  self.last_hovered, self.last_pressed = self.hovered, self.pressed
+  self.last_hovered, self.last_pressed, self.last_focused = self.hovered, self.pressed, self.focused
+  self.last_caret = {self.caret, self.mark}
   resize(&self.last_nodes, n)
   copy(self.last_nodes[:], self.nodes[:n])
   resize(&self.last_styles, len(self.styles))
@@ -49,10 +56,48 @@ update :: proc(self: ^UI, window: [2]f32, f: ^font.Font, dpi: f32 = 1) -> (laid_
   return
 }
 
+// Places the focused text's caret where a press on it landed, then scrolls the text to show the
+// caret; true when the scroll changed, which needs another layout.
+@(private = "file")
+edit_caret :: proc(self: ^UI, f: ^font.Font) -> bool {
+  h := self.focused
+  nd, ok := node(self, h)
+  if !ok || !nd.editable || int(h.index) >= len(self.rects) || len(lines(self, h)) == 0 {
+    self.text_press = .NONE
+    return false
+  }
+  if self.text_press != .NONE {
+    line := lines(self, h)[0]
+    best, best_d := line.start, max(f32)
+    for at := line.start; at <= line.end; {
+      if d := abs(caret_x(self, h, f, at) - self.cursor.x); d < best_d do best, best_d = at, d
+      if at == line.end do break
+      _, size := utf8.decode_rune_in_string(nd.text[at:])
+      at += size
+    }
+    self.caret = best
+    if self.text_press == .PLACE do self.mark = best
+    self.text_press = .NONE
+  }
+  r := self.rects[h.index]
+  s := self.frame.scale
+  left := r.pos.x + nd.padding[0] * s
+  right := r.pos.x + r.size.x - nd.padding[2] * s
+  x := caret_x(self, h, f, self.caret)
+  shift: f32
+  if x > right do shift = x - right
+  else if x < left do shift = x - left
+  // no blank past the end while the text is scrolled
+  else if end := caret_x(self, h, f, len(nd.text)); nd.scroll.x > 0 && end < right do shift = max(end - right, -nd.scroll.x * s)
+  if abs(shift) < 0.01 do return false
+  nd.scroll.x = max(nd.scroll.x + shift / s, 0)
+  return true
+}
+
 // A fixed sequence of passes over the nodes in tree order: widths resolve before text wraps,
 // heights after.
 @(private = "file")
-layout :: proc(self: ^UI, frame: anchor.Frame, f: ^font.Font) {
+layout :: proc(self: ^UI, frame: ui.Frame, f: ^font.Font) {
   self.frame = frame
   n := int(self.slots.high_water)
   resize(&self.rects, n)
@@ -175,7 +220,7 @@ fit_axis :: proc(self: ^UI, f: ^font.Font, axis: int) {
       count += 1
     }
     if main && count > 1 do content += nd.gap * f32(count - 1)
-    if len(nd.text) > 0 {
+    if len(nd.text) > 0 || nd.editable {
       size := text_size(self, nd)
       if axis == 0 {
         // wrapped text breaks down to its longest word
@@ -266,7 +311,8 @@ wrap_text :: proc(self: ^UI, f: ^font.Font) {
     width := self.rects[i].size.x - padding(nd, 0)
     size := text_size(self, nd)
     start := 0
-    for start <= len(nd.text) && len(nd.text) > 0 {
+    // an empty edited text keeps one line, for the caret
+    for start <= len(nd.text) && (len(nd.text) > 0 || nd.editable) {
       end := strings.index_byte(nd.text[start:], '\n')
       end = len(nd.text) if end < 0 else start + end
       line_start := start
@@ -324,15 +370,15 @@ place :: proc(self: ^UI, f: ^font.Font) {
     }
     content_pos := r.pos + {nd.padding[0], nd.padding[1]}
     content_size := r.size - {padding(nd, 0), padding(nd, 1)}
-    // text lines, aligned in the content box
+    // text lines, aligned in the content box, scrolled with the children
     if lr := self.line_ranges[i]; lr[1] > 0 {
       lh := font.line_height(f, text_size(self, nd))
       y := content_pos.y + (content_size.y - lh * f32(lr[1])) * ALIGN_FACTOR[nd.align[1]]
       for &line, k in self.lines[lr[0]:][:lr[1]] {
-        line.pos = {content_pos.x + (content_size.x - line.width) * ALIGN_FACTOR[nd.align[0]], y + f32(k) * lh}
+        line.pos = {content_pos.x + (content_size.x - line.width) * ALIGN_FACTOR[nd.align[0]], y + f32(k) * lh} - nd.scroll
       }
     }
-    child_clip := intersect(self.clips[i], r^) if nd.clip else self.clips[i]
+    child_clip := ui.intersect(self.clips[i], r^) if nd.clip else self.clips[i]
     m := flow_axis(nd)
     total: f32
     count := 0
@@ -381,8 +427,8 @@ place :: proc(self: ^UI, f: ^font.Font) {
 to_window :: proc(self: ^UI) {
   s := self.frame.scale
   for i in self.topo {
-    self.rects[i] = anchor.to_window(self.rects[i], self.frame)
-    self.clips[i] = anchor.to_window(self.clips[i], self.frame)
+    self.rects[i] = ui.to_window(self.rects[i], self.frame)
+    self.clips[i] = ui.to_window(self.clips[i], self.frame)
     size := text_size(self, &self.nodes[i]) * s
     for &line in self.lines[self.line_ranges[i][0]:][:self.line_ranges[i][1]] {
       line.pos *= s
@@ -392,9 +438,3 @@ to_window :: proc(self: ^UI) {
   }
 }
 
-@(private = "file")
-intersect :: proc(a, b: Rect) -> Rect {
-  lo := [2]f32{max(a.pos.x, b.pos.x), max(a.pos.y, b.pos.y)}
-  hi := [2]f32{min(a.pos.x + a.size.x, b.pos.x + b.size.x), min(a.pos.y + a.size.y, b.pos.y + b.size.y)}
-  return {lo, {max(hi.x - lo.x, 0), max(hi.y - lo.y, 0)}}
-}

@@ -10,6 +10,7 @@ import "mjolnir/debugui"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
+import "mjolnir/ui"
 import "mjolnir/world"
 
 BARS :: 24
@@ -85,13 +86,14 @@ update :: proc(app: ^App, dt: f32) {
   render.lock(&app.renderer)
   platform.read_input(&app.platform, &app.input)
   size := render.window_size(&app.renderer)
-  quads: [2]render.OverlayCommand
+  quads: ui.Canvas
+  defer ui.destroy(&quads)
   for view, i in app.views {
     render.camera_resize(&app.renderer, view, view_size(app))
     image := render.camera_image(&app.renderer, view, .FINAL_IMAGE, previous_frame = true)
-    quads[i] = render.OverlayQuad{position = {f32(i) * size.x / 2, 0}, size = {size.x / 2, size.y}, color = 255, texture = image}
+    ui.rect(&quads, {{f32(i) * size.x / 2, 0}, {size.x / 2, size.y}}, 255, u32(image))
   }
-  render.stage_overlay(&app.renderer, quads[:])
+  render.stage_overlay(&app.renderer, {&quads})
   debug_ui(app)
   main_camera := render.main_camera(&app.renderer)
   mjolnir.orbit_drag(&app.orbit, main_camera, &app.input)

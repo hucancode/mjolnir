@@ -7,6 +7,7 @@ import "physics"
 import "platform"
 import "render"
 import "ui"
+import "ux"
 import "world"
 
 @(private = "file")
@@ -72,34 +73,25 @@ orbit_drag :: proc(
   render.camera_orbit(camera, self^)
 }
 
-// stage_ui brings gui up to date for r's window at p's DPI scale (ui.update) and stages its mesh,
-// at `z_order`, together with your 2D `commands` (render.stage_overlay): commands below z_order
-// draw under the UI, above it over the UI, at it under it. Text, the UI's and the commands', draws
-// in f. It returns what the update redid.
-stage_ui :: proc(
-  r: ^render.Renderer,
-  p: ^platform.Platform,
-  gui: ^ui.UI,
-  f: ^font.Font,
-  commands: []render.OverlayCommand = nil,
-  z_order: i32 = 0,
-) -> (
-  laid_out, painted: bool,
-) {
-  laid_out, painted = ui.update(gui, render.window_size(r), f, platform.dpi_scale(p))
-  vertices, indices, batches := ui.mesh(gui)
-  staged := make([dynamic]render.OverlayCommand, 0, len(commands) + len(batches), context.temp_allocator)
-  append(&staged, ..commands)
-  for b in batches {
-    append(&staged, render.OverlayMesh {
-      vertices = vertices[b.first_vertex:][:b.vertex_count],
-      indices = indices[b.first_index:][:b.index_count],
-      texture = render.FONT_ATLAS if b.texture == ui.FONT_TEXTURE else render.TextureHandle(b.texture),
-      smooth = b.smooth,
-      z_order = z_order,
-      clip = b.clip,
-    })
-  }
+// stage_ui brings gui up to date for r's window at p's DPI scale (ux.update) and stages its canvas
+// with your `canvases` (render.stage_overlay), every batch sorted by z: the UI draws at z 0 and up,
+// so draw under it at a negative z, over one of its nodes at ux.layer and over all of it at
+// max(i32). Give your canvases p's DPI scale (ui.Canvas.dpi). Text draws in f. It returns what the
+// update redid.
+stage_ui :: proc(r: ^render.Renderer, p: ^platform.Platform, gui: ^ux.UI, f: ^font.Font, canvases: []^ui.Canvas = nil) -> (laid_out, painted: bool) {
+  laid_out, painted = ux.update(gui, render.window_size(r), f, platform.dpi_scale(p))
+  staged := make([dynamic]^ui.Canvas, 0, len(canvases) + 1, context.temp_allocator)
+  append(&staged, ux.canvas(gui))
+  append(&staged, ..canvases)
   render.stage_overlay(r, staged[:], f)
   return
+}
+
+// update_ui_input runs gui's input tick (ux.update_input) with p's clipboard: Ctrl or Cmd with V
+// pastes it into the focused text, with C or X copies the selection onto it.
+update_ui_input :: proc(p: ^platform.Platform, gui: ^ux.UI, s: ^input.State) {
+  command := input.key_down(s, .LEFT_CONTROL) || input.key_down(s, .RIGHT_CONTROL) || input.key_down(s, .LEFT_SUPER) || input.key_down(s, .RIGHT_SUPER)
+  clipboard := platform.clipboard(p, context.temp_allocator) if command && input.key_pressed(s, .V) else ""
+  ux.update_input(gui, s, clipboard)
+  if copied := ux.copied(gui); copied != "" do platform.set_clipboard(p, copied)
 }

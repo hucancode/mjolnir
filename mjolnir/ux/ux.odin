@@ -1,8 +1,8 @@
-package ui
+package ux
 
-import "../anchor"
 import "../containers"
-import "../geometry"
+import "../input"
+import "../ui"
 import "core:strings"
 
 // NodeHandle identifies a UI node; stale after node_destroy.
@@ -57,8 +57,9 @@ Position :: enum u8 {
   ABSOLUTE, // placed by anchor and offset in the parent's rect
 }
 
-// Node is one UI node. The application sets its layout inputs and its looks; ui writes its
-// rect, clip, text lines and mesh on update.
+// Node is one UI node. The application sets its layout inputs, its looks and its behaviour; ux
+// writes its rect, clip, text lines and mesh on update, its text while it is edited, `active`
+// when it toggles, `anchor` and `offset` when it is dragged and `order` when it is raised.
 Node :: struct {
   // the node this one sits in; none for a root, which sits in the window
   parent:      NodeHandle,
@@ -74,9 +75,9 @@ Node :: struct {
   anchor:      [2]f32,
   // added to the placed position, flow or absolute
   offset:      [2]f32,
-  // children are clipped to this node's rect
+  // its text and children are clipped to its rect
   clip:        bool,
-  // children shift by -scroll
+  // its text and children shift by -scroll
   scroll:      [2]f32,
   hidden:      bool, // hides the subtree
   // added to the parent's z; higher draws and picks on top
@@ -93,6 +94,8 @@ Node :: struct {
   wrap:        bool,
   // a line wider than the content box ends in ELLIPSIS (lines that do not wrap)
   truncate:    bool,
+  // focused, its text is typed into: one line, with a caret and a selection (see update_input)
+  editable:    bool,
   // Looks, after every layout input: changing only these repaints without a layout.
   // how it is drawn, in the look of its interaction (Interaction)
   style:       StyleHandle,
@@ -101,22 +104,25 @@ Node :: struct {
   // multiplies every color the node and its subtree draw (fade a toast out with its alpha, dim
   // a disabled slot); zero is none
   tint:        [4]u8,
-  // content: a texture the renderer knows (render.TextureHandle) drawn over the fill; 0 is none
+  // content: a texture the renderer knows (render.TextureHandle) drawn over the fill and skin,
+  // stretched over the rect, in the style's color; 0 is none. Frame it with a Style.skin instead.
   image:       u32,
   // the texture coordinates of the image's top-left, top-right, bottom-right and bottom-left
   // corners (a sheet's cell, a turned atlas entry); zero shows all of it
   image_uv:    [4][2]f32,
-  // the image cut in nine to frame the node (a skinned panel); zero borders stretch it whole
-  slice:       Slice,
   // the image is sampled bilinearly (icons scaled up or down), else nearest (pixel art)
   smooth:      bool,
-}
-
-// Slice cuts an image in nine: its corners keep their size, its edges stretch along the node's
-// sides and its centre fills the rest.
-Slice :: struct {
-  border: [4]f32, // left, top, right, bottom on the node, in reference units
-  uv:     [4]f32, // the same cuts in the image, 0..1 of its width and height
+  // the application draws over it at layer(h): the nodes after it draw over that drawing
+  overlay:     bool,
+  // Behaviour, handled by update_input.
+  // a click flips `active` (a check box, a toggle button)
+  toggle:      bool,
+  // a press inside raises it (raise), as a window comes to the front
+  front:       bool,
+  // dragging this node moves that one (move): a title bar its window, a slider knob itself
+  drags:       NodeHandle,
+  // a click hides that one (a close button its window)
+  hides:       NodeHandle,
 }
 
 // Interaction picks a node's look in its StyleSet. A node that is not interactive takes the
@@ -128,10 +134,12 @@ Interaction :: enum u8 {
   ACTIVE, // Node.active, unless the node itself is pressed
 }
 
-// Style is one look: a fill, a border inside the rect, and the color the content (text, image)
-// is drawn in.
+// Style is one look: a fill, a skin over it (a nine-patch image, its texels in reference units
+// times Skin.scale), a border inside the rect, and the color the content (text, image, caret) is
+// drawn in.
 Style :: struct {
   fill:         [4]u8, // alpha 0 fills nothing
+  skin:         ui.Skin, // image 0 is none
   border:       f32, // width in reference units
   border_color: [4]u8,
   color:        [4]u8, // text color, image tint
@@ -145,7 +153,7 @@ StyleSet :: [Interaction]Style
 StyleHandle :: distinct u32
 
 // Rect is an axis-aligned rectangle: top-left `pos` and `size`.
-Rect :: anchor.Rect
+Rect :: ui.Rect
 
 // Line is one laid-out line of a text node: text[start:end], followed by ELLIPSIS when
 // `ellipsis` (a truncated line), `width` wide in all, its top-left at `pos`, to draw at font size
@@ -172,30 +180,17 @@ UI :: struct {
   styles:     [dynamic]StyleSet,
   // shown nodes, back to front: what is drawn, in order
   draw_order: [dynamic]NodeHandle,
+  // the styles the widget procs (button, window, ...) give their nodes; init fills it with a
+  // plain look, restyle it in place or point it at your own styles
+  theme:      Theme,
   using _:    UI_State,
 }
-
-// Batch is a run of the mesh drawn with one texture inside one clip, in window pixels; its
-// indices count from its first vertex.
-Batch :: struct {
-  first_vertex, vertex_count: u32,
-  first_index, index_count:   u32,
-  // a texture the renderer knows, 0 for none (white), or FONT_TEXTURE
-  texture:                    u32,
-  clip:                       Rect,
-  // sampled bilinearly (Node.smooth)
-  smooth:                     bool,
-}
-
-// FONT_TEXTURE stands for the font's glyph atlas in Batch.texture: the renderer's copy of it,
-// sampled with uvs in atlas texels (font.Glyph's), which hold as the atlas grows.
-FONT_TEXTURE :: max(u32)
 
 @(private)
 UI_State :: struct {
   // indexed by NodeHandle.index; slots says which are live
   nodes:        []Node,
-  frame:        anchor.Frame, // the reference fitted to the window
+  frame:        ui.Frame, // the reference fitted to the window
   dpi:          f32, // framebuffer pixels per window unit
   slots:        containers.Slots,
   next_order:   i32,
@@ -206,6 +201,8 @@ UI_State :: struct {
   hovered:      NodeHandle, // interactive-or-within node under the cursor
   pressed:      NodeHandle, // node pressed on, until every button releases
   clicked:      NodeHandle, // node released on this tick, the one pressed
+  click_button: input.MouseButton, // the button that clicked it
+  dropped:      [2]NodeHandle, // the node pressed and the one under the left release this tick
   focused:      NodeHandle, // focusable node last pressed
   topo:         [dynamic]u32, // node indices, parents before children
   children:     [dynamic]u32, // CSR child lists in flow order
@@ -215,10 +212,22 @@ UI_State :: struct {
   shown:        [dynamic]bool,
   depth_z:      [dynamic]i32,
   interaction:  [dynamic]Interaction,
-  // the mesh: every shown node's fill, border and glyphs, in draw order
-  vertices:     [dynamic]geometry.Vertex2D,
-  indices:      [dynamic]u32,
-  batches:      [dynamic]Batch,
+  // every shown node's fill, skin, image, border and glyphs, in draw order
+  canvas:       ui.Canvas,
+  layers:       [dynamic]i32, // the z right over each node (layer)
+  // the focused text: caret and the other end of the selection, byte offsets; a press on it to
+  // place the caret at `cursor` once laid out (extending the selection with shift)
+  caret, mark:  int,
+  text_press:   enum u8 {
+    NONE,
+    PLACE,
+    EXTEND,
+  },
+  cursor:       [2]f32,
+  dragging:     NodeHandle, // the node a drags press moves
+  changed:      NodeHandle, // edited, toggled or dragged this tick
+  submitted:    NodeHandle, // Enter in it this tick
+  copied:       string, // owned
   // what the last update saw, to tell what changed since: nodes and styles as they were, the
   // input state painted, the default font size laid out with
   dirty:        bool, // a node was created or destroyed, or its text set
@@ -226,6 +235,8 @@ UI_State :: struct {
   last_styles:  [dynamic]StyleSet,
   last_hovered: NodeHandle,
   last_pressed: NodeHandle,
+  last_focused: NodeHandle,
+  last_caret:   [2]int,
   last_font:    f32,
 }
 
@@ -237,6 +248,7 @@ init :: proc(self: ^UI, reference := [2]f32{1024, 768}, max_nodes: u32 = 4096, f
   containers.slots_init(&self.slots, max_nodes)
   self.nodes = make([]Node, max_nodes)
   style_create(self, {color = {255, 255, 255, 255}})
+  self.theme = theme_create(self)
   self.dirty = true
 }
 
@@ -268,9 +280,9 @@ shutdown :: proc(self: ^UI) {
   delete(self.depth_z)
   delete(self.interaction)
   delete(self.styles)
-  delete(self.vertices)
-  delete(self.indices)
-  delete(self.batches)
+  ui.destroy(&self.canvas)
+  delete(self.layers)
+  delete(self.copied)
   delete(self.last_nodes)
   delete(self.last_styles)
   self^ = {}
@@ -333,13 +345,16 @@ handle_of :: #force_inline proc(self: ^UI, index: u32) -> NodeHandle {
 }
 
 // set_text replaces a node's text with a copy of `text`; the same text changes nothing, so
-// setting it every tick costs no update.
+// setting it every tick costs no update. A focused text keeps its caret, within the new text.
 set_text :: proc(self: ^UI, handle: NodeHandle, text: string) {
   n, ok := node(self, handle)
   if !ok || n.text == text do return
   delete(n.text)
   n.text = strings.clone(text)
   self.dirty = true
+  if handle == self.focused {
+    self.caret, self.mark = min(self.caret, len(text)), min(self.mark, len(text))
+  }
 }
 
 // raise draws a node and its subtree above its siblings of the same z (a window clicked to the
@@ -351,21 +366,34 @@ raise :: proc(self: ^UI, handle: NodeHandle) {
   self.next_order += 1
 }
 
-// move shifts a node's offset by `delta` window pixels (input.State.mouse_delta, to drag a
-// window), stopping at the edges of its parent's rect, a root's being the window, as of the last
-// update. A node larger than that keeps its top-left inside. A zero delta pulls back a node the
-// window shrank past.
+// move shifts a node by `delta` window pixels (input.State.mouse_delta; Node.drags does it for
+// you), stopping at the edges of its parent's rect, a root's being the window, as of the last
+// update. A FLOW node's offset changes; an ABSOLUTE node or a root is re-anchored where it lands,
+// offset zero, so it keeps its place as the parent resizes and its anchor reads as how far along
+// it is (a slider knob's value). A node larger than its parent keeps its top-left inside. A zero
+// delta pulls back a node the window shrank past.
 move :: proc(self: ^UI, handle: NodeHandle, delta: [2]f32) {
   n, ok := node(self, handle)
   if !ok || !laid_out(self, handle) || self.frame.scale <= 0 do return
   r := self.rects[handle.index]
   bounds := Rect{{}, self.frame.size * self.frame.scale}
-  if p := n.parent; laid_out(self, p) do bounds = self.rects[p.index]
+  p := n.parent
+  if laid_out(self, p) do bounds = self.rects[p.index]
   target := r.pos + delta
   for axis in 0 ..< 2 {
     target[axis] = max(min(target[axis], bounds.pos[axis] + bounds.size[axis] - r.size[axis]), bounds.pos[axis])
   }
-  n.offset += (target - r.pos) / self.frame.scale
+  if n.position == .FLOW && laid_out(self, p) {
+    n.offset += (target - r.pos) / self.frame.scale
+    return
+  }
+  for axis in 0 ..< 2 {
+    // no room: the anchor places it the same anywhere; less: top-left inside
+    room := bounds.size[axis] - r.size[axis]
+    if room > 0 do n.anchor[axis] = (target[axis] - bounds.pos[axis]) / room
+    else if room < 0 do n.anchor[axis] = 0
+  }
+  n.offset = {}
 }
 
 // rect returns the laid-out rect of a live node in window pixels; zero before its first update
@@ -412,17 +440,37 @@ look :: proc(self: ^UI, handle: NodeHandle) -> Style {
   return self.styles[n.style][self.interaction[handle.index]]
 }
 
-// mesh returns what the last update painted, in window pixels snapped to framebuffer pixels: draw
-// each batch's slice of the vertices and indices, in order, with its texture inside its clip.
-mesh :: proc(self: ^UI) -> (vertices: []geometry.Vertex2D, indices: []u32, batches: []Batch) {
-  return self.vertices[:], self.indices[:], self.batches[:]
+// canvas returns what the last update painted, in window pixels snapped to framebuffer pixels,
+// at z 0 and up (layer): stage it with your own canvases (render.stage_overlay).
+canvas :: proc(self: ^UI) -> ^ui.Canvas {
+  return &self.canvas
+}
+
+// layer returns the z right over a node as of the last update: what the application draws there
+// covers the node and every node drawn before it, up to the next `overlay` node after it, which
+// draws on top (set `overlay` on the node to put all later nodes over the drawing). 0 for a
+// stale or hidden node.
+layer :: proc(self: ^UI, handle: NodeHandle) -> i32 {
+  if !laid_out(self, handle) || int(handle.index) >= len(self.layers) do return 0
+  return self.layers[handle.index]
 }
 
 // to_reference maps a window point (input.State.cursor) or movement (mouse_delta) into the
 // reference frame of the last update, the one root offsets are in.
 to_reference :: proc(self: ^UI, p: [2]f32) -> [2]f32 {
   if self.frame.scale <= 0 do return p
-  return anchor.to_reference(p, self.frame)
+  return ui.to_reference(p, self.frame)
+}
+
+// place puts a root's top-left at the window point `at` (a tooltip by the cursor, a popup by its
+// button), pulled back inside the window as of the last update.
+place :: proc(self: ^UI, handle: NodeHandle, at: [2]f32) {
+  n, ok := node(self, handle)
+  if !ok || self.frame.scale <= 0 do return
+  size := rect(self, handle).size
+  window := self.frame.size * self.frame.scale
+  p := [2]f32{max(min(at.x, window.x - size.x), 0), max(min(at.y, window.y - size.y), 0)}
+  n.anchor, n.offset = {}, p / self.frame.scale
 }
 
 // within reports whether `handle` is `h` or one of its ancestors; false for none.
