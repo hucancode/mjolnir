@@ -142,10 +142,13 @@ MeshPush :: struct {
 @(private)
 material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32, pass: MaterialPass) {
   images := &self.camera_targets[cam].images
+  filter := self.camera_targets[cam].filter
   targets := MATERIAL_PASS_TARGETS[pass]
   colors := make([]rhi.ColorTarget, len(targets), context.temp_allocator)
-  load: rhi.LoadOp = .CLEAR if pass == .GBUFFER else .LOAD
-  for a, i in targets do colors[i] = {texture = images[a][f], load = load, clear = {0, 0, 0, 1}}
+  // without a lighting pass the forward pass starts the image
+  load: rhi.LoadOp = .CLEAR if pass == .GBUFFER || !filter_deferred(filter) else .LOAD
+  clear := filter.clear if pass == .FORWARD else [4]f32{0, 0, 0, 1}
+  for a, i in targets do colors[i] = {texture = images[a][f], load = load, clear = clear}
   depth := rhi.DepthTarget{texture = images[.DEPTH][f], load = load, clear = 1, store = true}
   dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors, depth = depth})
   if pass == .FORWARD {
@@ -159,7 +162,7 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
   count := 0
   for t in types[0] ..< types[1] {
     p := self.material_pipelines[pass][int(t)]
-    if p == 0 do continue
+    if p == 0 || int(t) not_in filter.types do continue
     keys[count], pipelines[count] = u32(t), p
     count += 1
   }
@@ -169,6 +172,10 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
     p := write_table(self, .LIGHT_PLACEMENTS, LightPlacement)[self.sun - 1]
     push.sun_light, push.sun_node = u32(p.light), p.node
   }
+  if count == 0 {
+    dev.cmd_end_pass(&self.gpu, cmd)
+    return
+  }
   pipeline_bind(self, cmd, pipelines[0], .MESH, f, &push, .MATERIAL)
   when BINDLESS {
     ready, slot := camera_ready(self, cam), camera_slot(cam) + f
@@ -177,13 +184,13 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
   }
   if ready {
     mesh_buffers_bind(self, cmd)
-    draw_list_draw(self, cmd, slot, 0, keys[:count], pipelines[:count], f)
-    if pass == .FORWARD && self.sprite_blend_pipeline != 0 {
+    draw_list_draw(self, cmd, slot, 0, keys[:count], pipelines[:count], f, transmute(u32)(filter.types))
+    if pass == .FORWARD && self.sprite_blend_pipeline != 0 && int(MaterialType.SPRITE) in filter.types {
       push.sprite_blend = 1
       pipeline_bind(self, cmd, self.sprite_blend_pipeline, .MESH, f, &push, .MATERIAL)
       mesh_buffers_bind(self, cmd)
       sprite_key := []u32{u32(MaterialType.SPRITE)}
-      draw_list_draw(self, cmd, slot, 0, sprite_key, []rhi.Pipeline{self.sprite_blend_pipeline}, f)
+      draw_list_draw(self, cmd, slot, 0, sprite_key, []rhi.Pipeline{self.sprite_blend_pipeline}, f, transmute(u32)(filter.types))
     }
   }
   dev.cmd_end_pass(&self.gpu, cmd)

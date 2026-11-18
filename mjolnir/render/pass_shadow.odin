@@ -102,7 +102,7 @@ shadow_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
     mesh_buffers_bind(self, cmd)
     dev.cmd_bind_pipeline(&self.gpu, cmd, self.pipelines[.SHADOW])
     scene_bind(self, cmd, .SHADOW, f)
-    draw_list_draw(self, cmd, draw_list, 0, types[:], pipelines[:], f, false)
+    draw_list_draw(self, cmd, draw_list, 0, types[:], pipelines[:], f, GBUFFER_TYPES, false)
     dev.cmd_end_pass(&self.gpu, cmd)
     barrier(self, cmd, .SHADOW_TO_LIGHTING)
   } else {
@@ -119,7 +119,7 @@ shadow_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
       dev.cmd_set_scissor(&self.gpu, cmd, tile.x, tile.y, tile.z, tile.w)
       view_index = SHADOW_VIEW_BASE + v
       dev.cmd_push(&self.gpu, cmd, &view_index, size_of(view_index))
-      draw_list_draw(self, cmd, draw_list, v, types[:], pipelines[:], f, false)
+      draw_list_draw(self, cmd, draw_list, v, types[:], pipelines[:], f, GBUFFER_TYPES, false)
     }
     dev.cmd_end_pass(&self.gpu, cmd)
   }

@@ -17,6 +17,7 @@ TINY :: Config {
   skinned_vertices = 4,
   sprite_frames    = 4,
   vertices         = 4,
+  skinning_data    = 4,
   indices          = 4,
   overlay_vertices = 4,
   overlay_indices  = 4,

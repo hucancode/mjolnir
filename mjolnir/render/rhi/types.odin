@@ -30,6 +30,10 @@ TextureFormat :: enum {
   RGBA16F,
   RGBA32F,
   R32F,
+  // two 8-bit channels, and 11, 11 and 10-bit floats in 32 bits (HDR color without alpha): render
+  // targets only, which render keeps its G-buffer in
+  RG8_UNORM,
+  RG11B10F,
   A8,
   D32F,
   // only as a pipeline's color format: the swapchain's (the image BACKBUFFER names)

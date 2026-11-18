@@ -67,7 +67,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
 
   top_down := render.make_camera({0, 8, 0.01}, {0, 0, 0}, far = 100)
   top_down.hidden_layers = {2}
-  app.top_down_camera = render.camera_create(&app.renderer, {512, 512}, top_down)
+  app.top_down_camera = render.camera_create(&app.renderer, {512, 512}, top_down, render.FILTER_NO_POST)
   app.screen_material = render.material_create(&app.renderer, render.make_material())
   screen := render.primitive(&app.renderer, .QUAD_XY, app.screen_material, no_shadow = true)
   screen.layer = 2

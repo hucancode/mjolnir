@@ -14,7 +14,8 @@ import wgpu "vendor:wgpu"
 
 
 // A8 is stored as white RGBA with alpha = coverage (WebGPU has no swizzle), RGBA32F as
-// RGBA16F so it filters without float32-filterable.
+// RGBA16F so it filters without float32-filterable, RG11B10F as RGBA16F (it is not renderable
+// without a feature).
 @(private)
 FORMATS := [rhi.TextureFormat]wgpu.TextureFormat {
   .RGBA8_SRGB  = .RGBA8UnormSrgb,
@@ -22,6 +23,8 @@ FORMATS := [rhi.TextureFormat]wgpu.TextureFormat {
   .RGBA16F     = .RGBA16Float,
   .RGBA32F     = .RGBA16Float,
   .R32F        = .R32Float,
+  .RG8_UNORM   = .RG8Unorm,
+  .RG11B10F    = .RGBA16Float,
   .A8          = .RGBA8Unorm,
   .D32F        = .Depth32Float,
   .BACKBUFFER  = .Undefined,
@@ -35,6 +38,8 @@ TEXEL_SIZE := [rhi.TextureFormat]u32 {
   .RGBA16F     = 8,
   .RGBA32F     = 8,
   .R32F        = 4,
+  .RG8_UNORM   = 2,
+  .RG11B10F    = 8,
   .A8          = 4,
   .D32F        = 4,
   .BACKBUFFER  = 4,

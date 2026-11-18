@@ -27,9 +27,11 @@ Config :: struct {
   // vertices of every skinned mesh attached at once, each slot its own
   skinned_vertices: u32,
   sprite_frames:    u32,
-  // the mesh buffers: vertices (and skinning data) and indices of every mesh together
+  // the mesh buffers: vertices and indices of every mesh together, and the skinning data (a
+  // SkinningData per vertex) of the skinned ones
   vertices:         u32,
   indices:          u32,
+  skinning_data:    u32,
   // the overlay's vertices and indices per frame
   overlay_vertices: u32,
   overlay_indices:  u32,
@@ -58,6 +60,7 @@ DEFAULT_CONFIG :: Config {
   sprite_frames    = 1024,
   vertices         = 1 << 18,
   indices          = 1 << 20,
+  skinning_data    = 1 << 15,
   overlay_vertices = 1 << 14,
   overlay_indices  = 3 << 13,
   gpu_buffers      = 64,
@@ -397,7 +400,7 @@ init :: proc(self: ^Renderer, window: WindowHandle, config := DEFAULT_CONFIG) ->
   self.max_shadow_views = shadow_view_count(config)
   containers.ranges_init(&self.mesh_ranges[.VERTEX], config.vertices)
   containers.ranges_init(&self.mesh_ranges[.INDEX], config.indices)
-  containers.ranges_init(&self.mesh_ranges[.SKINNING], config.vertices)
+  containers.ranges_init(&self.mesh_ranges[.SKINNING], max(config.skinning_data, 1))
   dev.init(&self.gpu, window, BINDLESS_SIZES) or_return
   tables_init(self, table_reserves(config))
   measure_window(self)
@@ -429,7 +432,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
   debug_line_init(self) or_return
   overlay_init(self) or_return
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    draw_list_reserve(self, SHADOW_DRAW_SLOT_BASE + frame, shadow = true) or_return
+    draw_list_reserve(self, SHADOW_DRAW_SLOT_BASE + frame, shadow = true, shadow_views = MIN_ATLAS_LAYERS) or_return
   }
   containers.ranges_init(&self.bone_ranges, u32(table_capacity(self, .BONES)))
   containers.ranges_init(&self.sprite_frame_ranges, u32(table_capacity(self, .SPRITE_FRAMES)))

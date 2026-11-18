@@ -29,6 +29,7 @@ CONFIG :: render.Config {
   sprite_frames    = 4,
   vertices         = 1024,
   indices          = 2048,
+  skinning_data    = 64,
   overlay_vertices = 64,
   overlay_indices  = 96,
   gpu_buffers      = 2,
@@ -113,6 +114,9 @@ grow_resources :: proc(frame: int) {
   slot := render.SlotHandle(SLOTS + frame)
   sphere := render.mesh_create(r, geometry.make_sphere(u32(8 + frame % 40), u32(8 + frame % 40)))
   check(sphere != 0, "mesh %d", frame)
+  skinned := geometry.make_sphere(8, 8)
+  skinned.skinnings = make([]geometry.SkinningData, len(skinned.vertices))
+  check(render.mesh_create(r, skinned) != 0, "skinned mesh %d", frame)
   material := render.material_create(r, render.make_material(base_color_factor = {1, 1, 1, 1}))
   check(material != 0, "material %d", frame)
   pixels := make([]u8, 4 * 4 * 4, context.temp_allocator)
@@ -135,7 +139,15 @@ grow_resources :: proc(frame: int) {
   case 3: render.attach(r, slot, field)
   }
   render.place(r, slot, linalg.matrix4_translate([3]f32{f32(frame % 10) - 5, 3, -20}))
-  if frame % 30 == 0 do check(render.camera_create(r, {64, 36}, render.make_camera()) != 0, "camera %d", frame)
+  if frame % 30 == 0 {
+    filters := [?]render.CameraFilter {
+      render.FILTER_ALL,
+      render.FILTER_NO_POST,
+      {types = {1, 2, 3, 4, 5, 6, 7}, clear = {0, 0, 0.2, 1}},
+      {types = {0}, post = true},
+    }
+    check(render.camera_create(r, {64, 36}, render.make_camera(), filters[frame / 30 % len(filters)]) != 0, "camera %d", frame)
+  }
   render.debug_axes(r, {0, f32(frame) * 0.01, 0})
 }
 

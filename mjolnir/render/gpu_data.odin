@@ -62,9 +62,9 @@ CAMERA_IMAGES :: [CameraImage]TextureDesc {
   .FINAL_IMAGE        = {format = HDR_COLOR_FORMAT, usage = {.COLOR_TARGET, .SAMPLED, .STORAGE}},
   .NORMAL             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
   .ALBEDO             = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
-  .METALLIC_ROUGHNESS = {format = .RGBA8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
-  // HDR, feeds bloom
-  .EMISSIVE           = {format = .RGBA16F, usage = {.COLOR_TARGET, .SAMPLED}},
+  .METALLIC_ROUGHNESS = {format = .RG8_UNORM, usage = {.COLOR_TARGET, .SAMPLED}},
+  // HDR, added to the lit color by the lighting pass; no alpha
+  .EMISSIVE           = {format = .RG11B10F, usage = {.COLOR_TARGET, .SAMPLED}},
   // the depth pyramid build reads it
   .DEPTH              = {format = .D32F, usage = {.DEPTH_TARGET, .SAMPLED}, shared = true},
   // written by the ambient occlusion dispatch; RGBA8 is a storage format WebGPU can filter

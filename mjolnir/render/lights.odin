@@ -1,6 +1,7 @@
 package render
 
 import "../geometry"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
@@ -309,6 +310,9 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   self.shadow_view_count = assign_shadow_views(placements, lights, picked)
   for p, i in placements do if p.shadow_map != was[i] do mark_dirty(self, .LIGHT_PLACEMENTS, i)
   mark_dirty(self, .VIEWS, SHADOW_VIEW_BASE, int(self.shadow_view_count))
+  if !draw_list_reserve(self, SHADOW_DRAW_SLOT_BASE + frame_index, shadow = true, shadow_views = self.shadow_view_count) {
+    log.errorf("Cannot grow the shadow draw lists")
+  }
   for p in placements {
     if p.shadow_map == 0 do continue
     light := lights[p.light]

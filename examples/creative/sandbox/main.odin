@@ -219,7 +219,7 @@ crates :: proc(app: ^App) {
 
 portal :: proc(app: ^App) {
   r := &app.renderer
-  app.portal_camera = render.camera_create(r, {512, 512}, render.make_camera({0, 40, MID + 0.01}, {0, 0, MID}, 0.9, far = 100))
+  app.portal_camera = render.camera_create(r, {512, 512}, render.make_camera({0, 40, MID + 0.01}, {0, 0, MID}, 0.9, far = 100), render.FILTER_NO_POST)
   app.portal = render.material_create(r, render.make_material(emissive_factor = 0.2))
   frame := render.primitive(r, .CUBE, .BLACK)
   mesh(app, frame, {-21.6, 3.2, MID}, {0.1, 2.3, 2.3})

@@ -1,5 +1,5 @@
 // Vulkan: culls every node against a range of views in one dispatch: x covers nodes, y the
-// views from params.first_view. A visible node is appended to list type * view.list_stride of
+// views from params.first_view. A visible node is appended to list rank(type) * view.list_stride of
 // the bindless draw lists view.draw_list, type its material type; list l keeps its count at
 // counts[l] and its commands from l * view.list_capacity.
 // wgpu: tests node i (x) against view first_view + y and, when it is visible, counts it in its
@@ -248,7 +248,8 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 wid : SV_GroupID)
     cmd.vertex_offset = mesh.vertex_offset;
     cmd.first_instance = node_id | view.instance_tag;
 
-    uint list = type * view.list_stride;
+    // a camera keeps a list per type it sees, in type order (draw_list_index)
+    uint list = countbits(view.type_mask & ((1u << type) - 1u)) * view.list_stride;
     uint draw_index;
     draw_lists[view.draw_list].InterlockedAdd(list * 4, 1, draw_index);
     if (draw_index < view.list_capacity) {

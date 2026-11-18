@@ -90,10 +90,63 @@ DEFAULT_AMBIENT_OCCLUSION :: AmbientOcclusion {
   intensity = 1.0,
 }
 
+// CameraFilter is what a camera draws and runs, fixed when it is created (camera_create): its
+// images, depth pyramid and draw lists exist only for what it draws, so a camera that draws little
+// costs little.
+//   types: the material types it draws (MaterialType, and the types of your material shaders).
+//     With none of the deferred ones (PBR) it has no G-buffer, ambient occlusion, lighting, depth
+//     pyramid or occlusion culling: it clears to `clear` and draws the forward types over it.
+//     With none of the forward ones it skips the forward pass. A camera's draw lists are one per
+//     type it draws.
+//   post: runs Camera.effects. Without it a camera has no post-process images, and the presented
+//     one just copies its image to the window.
+CameraFilter :: struct {
+  types: bit_set[0 ..< DRAW_LISTS;u32],
+  post:  bool,
+  // the color it starts from when it has no lighting pass
+  clear: [4]f32,
+}
+
+// FILTER_ALL is what camera_create takes by default: every type, effects run.
+#assert(DRAW_LISTS == 8)
+FILTER_ALL :: CameraFilter {
+  types = {0, 1, 2, 3, 4, 5, 6, 7},
+  post  = true,
+  clear = {0, 0, 0, 1},
+}
+
+// FILTER_NO_POST is every type without post-processing: the filter of a camera drawn to a texture
+// that needs no effects.
+FILTER_NO_POST :: CameraFilter {
+  types = FILTER_ALL.types,
+  clear = FILTER_ALL.clear,
+}
+
+// Whether the camera has the deferred passes: the G-buffer, ambient occlusion and lighting.
+@(private)
+filter_deferred :: #force_inline proc "contextless" (filter: CameraFilter) -> bool {
+  return transmute(u32)(filter.types) & GBUFFER_TYPES != 0
+}
+
+// Whether the camera draws forward types over its lit image.
+@(private)
+filter_forward :: #force_inline proc "contextless" (filter: CameraFilter) -> bool {
+  return transmute(u32)(filter.types) &~ GBUFFER_TYPES != 0
+}
+
+// The images a camera makes: every one with a deferred pass, only the lit image and the depth
+// without.
+@(private)
+filter_images :: proc "contextless" (filter: CameraFilter) -> bit_set[CameraImage] {
+  if filter_deferred(filter) do return {.FINAL_IMAGE, .NORMAL, .ALBEDO, .METALLIC_ROUGHNESS, .EMISSIVE, .DEPTH, .AMBIENT_OCCLUSION}
+  return {.FINAL_IMAGE, .DEPTH}
+}
+
 // What render keeps per camera beside the Camera: the images it renders into, at extent.
 @(private)
 CameraTargets :: struct {
   extent:        [2]u32, // width, height
+  filter:          CameraFilter,
   // per frame in flight; an image not in CAMERA_IMAGES_PER_FRAME is one texture in every entry
   images:        [CameraImage][FRAMES_IN_FLIGHT]TextureHandle,
   // the effects ping-pong through FINAL_IMAGE and these, one pair in every entry
@@ -253,12 +306,17 @@ make_camera :: proc(
 
 // camera_create stores `c` (make_camera fills one) as a camera with its own render targets of
 // `size` pixels; it lives until camera_destroy or teardown. Every camera is drawn each frame;
-// the main camera is presented to the swapchain.
-camera_create :: proc(self: ^Renderer, size: [2]u32, c: Camera) -> (handle: CameraHandle, ok: bool) #optional_ok {
+// the main camera is presented to the swapchain. `filter` says what it draws and runs, and what
+// memory it takes for that (CameraFilter).
+camera_create :: proc(self: ^Renderer, size: [2]u32, c: Camera, filter := FILTER_ALL) -> (handle: CameraHandle, ok: bool) #optional_ok {
   lock(self)
+  if transmute(u32)(filter.types) == 0 {
+    log.errorf("A camera must see at least one material type")
+    return 0, false
+  }
   handle = CameraHandle(pool_alloc(self, .CAMERAS) or_return)
   self.cameras[handle] = c
-  self.camera_targets[handle] = {extent = size}
+  self.camera_targets[handle] = {extent = size, filter = filter}
   // the lists' size does not depend on the camera's extent
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
     if !draw_list_reserve(self, camera_slot(u32(handle)) + frame, shadow = false) {
@@ -290,7 +348,8 @@ free_camera :: proc(self: ^Renderer, handle: CameraHandle) {
 
 // camera_image returns one of a camera's images as the next frame renders it. The camera
 // renders FINAL_IMAGE and DEPTH into a new copy each frame, so their handles change: fetch them
-// again every frame. previous_frame returns the picture the last frame finished instead, the
+// again every frame (a camera has only the images its CameraFilter needs: false for the others).
+// previous_frame returns the picture the last frame finished instead, the
 // one to sample (render-to-texture): it never depends on the order cameras draw in. The other
 // images have one copy, rewritten every frame: previous_frame gives the same one.
 camera_image :: proc(
@@ -306,7 +365,8 @@ camera_image :: proc(
   camera(self, handle) or_return
   f := current_frame(self)
   if previous_frame do f = (f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
-  return self.camera_targets[handle].images[image][f], true
+  texture = self.camera_targets[handle].images[image][f]
+  return texture, texture != 0
 }
 
 // camera_resize gives a camera render targets of `size` pixels; a perspective projection
@@ -326,7 +386,8 @@ camera_resize :: proc(self: ^Renderer, handle: CameraHandle, size: [2]u32) -> bo
 }
 
 // A camera or a shadow map face, as the views table holds it. A drawn node goes to list
-// type * list_stride of `draw_list`: cameras keep one list per material type (stride 1);
+// rank(type) * list_stride of `draw_list`, rank the type's place among the types the view draws
+// (type_mask): cameras keep one list per type they see (stride 1);
 // shadow views share one list (stride 0) and tell draws apart by instance_tag.
 @(private)
 View :: struct {
@@ -370,7 +431,9 @@ View :: struct {
 create_targets :: proc(self: ^Renderer, index: u32) -> bool {
   targets := &self.camera_targets[index]
   images := CAMERA_IMAGES
+  wanted := filter_images(targets.filter)
   for a in CameraImage {
+    if a not_in wanted do continue
     desc := images[a]
     desc.extent = targets.extent
     for frame in 0 ..< FRAMES_IN_FLIGHT {
@@ -381,10 +444,16 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
       targets.images[a][frame] = allocate_texture(self, desc, target = true) or_return
     }
   }
-  post := images[.FINAL_IMAGE]
-  post.extent = targets.extent
-  for &p in targets.post[0] do p = allocate_texture(self, post, target = true) or_return
-  for &frame in targets.post[1:] do frame = targets.post[0]
+  if targets.filter.post {
+    post := images[.FINAL_IMAGE]
+    post.extent = targets.extent
+    for &p in targets.post[0] do p = allocate_texture(self, post, target = true) or_return
+    for &frame in targets.post[1:] do frame = targets.post[0]
+  }
+  if !filter_deferred(targets.filter) {
+    targets.ready_serial = dev.frame_serial(&self.gpu) + 1
+    return true
+  }
   half, mips := pyramid_shape(targets.extent)
   pyramid := TextureDesc {
     extent     = half,
@@ -404,10 +473,10 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
 destroy_targets :: proc(self: ^Renderer, index: u32) {
   targets := &self.camera_targets[index]
   for frames, a in targets.images {
-    for handle, frame in frames do if frame == 0 || a in CAMERA_IMAGES_PER_FRAME do texture_destroy(self, handle)
+    for handle, frame in frames do if handle != 0 && (frame == 0 || a in CAMERA_IMAGES_PER_FRAME) do texture_destroy(self, handle)
   }
-  for handle in targets.post[0] do texture_destroy(self, handle)
-  for handle in targets.pyramid do texture_destroy(self, handle)
+  for handle in targets.post[0] do if handle != 0 do texture_destroy(self, handle)
+  for handle in targets.pyramid do if handle != 0 do texture_destroy(self, handle)
   targets.images, targets.post, targets.pyramid, targets.pyramid_bound = {}, {}, {}, {}
   groups_clear(self)
 }
@@ -417,7 +486,6 @@ destroy_targets :: proc(self: ^Renderer, index: u32) {
 // next draw lists first grow to hold every node.
 @(private)
 flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
-  all_types := u32(1 << DRAW_LISTS - 1)
   for i in 0 ..< self.slots[.CAMERAS].high_water {
     // a slot without a camera keeps an empty view that draws no type
     if !containers.slots_live(&self.slots[.CAMERAS], i) {
@@ -442,9 +510,9 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       near                = cam.near,
       far                 = cam.far,
       pyramid             = u32(targets.pyramid[frame_index]),
-      occlusion_mask      = GBUFFER_TYPES if camera_ready(self, i) else 0,
+      occlusion_mask      = GBUFFER_TYPES & transmute(u32)(targets.filter.types) if camera_ready(self, i) && filter_deferred(targets.filter) else 0,
       list_stride         = 1,
-      type_mask           = all_types,
+      type_mask           = transmute(u32)(targets.filter.types),
       require_flags       = {.VISIBLE},
       draw_list           = self.draw_lists[next].binding,
       list_capacity       = self.draw_lists[next].capacity,

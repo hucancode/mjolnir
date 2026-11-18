@@ -1,6 +1,7 @@
 package render
 
 import "../containers"
+import "base:intrinsics"
 import "core:slice"
 import "rhi"
 
@@ -42,7 +43,7 @@ DRAW_BYTES :: DRAW_WORDS * size_of(u32)
 @(private)
 GpuDrawList :: struct {
   buffer:                                   rhi.Buffer,
-  capacity, batches, binding:               u32,
+  capacity, batches, binding, lists, views: u32,
   bytes:                                    int,
   draws_base, draws_stride, instances_base: u32,
 }
@@ -138,7 +139,8 @@ pyramids_bind :: proc(self: ^Renderer, f: u32) {
   c: u32
   for i in containers.slots_next(&self.slots[.CAMERAS], &c) {
     targets := &self.camera_targets[i]
-    if targets.pyramid_bound[f] do continue
+    // a camera without deferred passes has no pyramid, lit storage or occlusion image
+    if targets.pyramid_bound[f] || !filter_deferred(targets.filter) do continue
     targets.pyramid_bound[f] = true
     slot := camera_slot(i) + f
     _, mips := pyramid_shape(targets.extent)
@@ -152,26 +154,30 @@ pyramids_bind :: proc(self: ^Renderer, f: u32) {
 
 // draw_list_reserve makes draw-list slot `slot`, a camera's or the shadow views', room for every
 // node the node table holds, replacing a smaller one with a new buffer and binding: frames in
-// flight keep drawing the old until they are done. Compacted by multi-draw: a camera DRAW_LISTS
-// lists, one per material_list key, the shadow views one list of SHADOW_LIST_VIEW_CAPACITY
+// flight keep drawing the old until they are done. Compacted by multi-draw: a camera one list per
+// material type it draws (CameraFilter; draw_list_index), the shadow views one list of SHADOW_LIST_VIEW_CAPACITY
 // draws per view. Batched: one list per view (the shadow slot has a view per shadow map face),
 // each of room for every node's instance and every batch's draw. Call before the frame
 // records with the slot's lists: when the slot's next writer is recorded.
 @(private)
-draw_list_reserve :: proc(self: ^Renderer, slot: u32, shadow: bool) -> bool {
+draw_list_reserve :: proc(self: ^Renderer, slot: u32, shadow: bool, shadow_views: u32 = 0) -> bool {
   nodes := u32(table_capacity(self, .NODES))
+  // the shadow views' room doubles up to the most there can be, like the atlas
+  views := self.draw_lists[slot].views
+  if shadow && shadow_views > views do views = min(max(shadow_views, views * 2), self.max_shadow_views)
   when BINDLESS {
-    lists: u32 = 1 if shadow else DRAW_LISTS
-    capacity: u32 = SHADOW_LIST_VIEW_CAPACITY * self.max_shadow_views if shadow else nodes
+    // a camera's lists are the material types it draws, in type order
+    lists: u32 = 1 if shadow else u32(card(self.camera_targets[slot / FRAMES_IN_FLIGHT].filter.types))
+    capacity: u32 = SHADOW_LIST_VIEW_CAPACITY * views if shadow else nodes
     batches: u32 = 0
   } else {
-    lists: u32 = self.max_shadow_views if shadow else 1
+    lists: u32 = views if shadow else 1
     capacity := nodes
     batches := u32(table_capacity(self, .BATCHES))
   }
   old := &self.draw_lists[slot]
-  if old.buffer != 0 && old.capacity >= capacity && old.batches >= batches do return true
-  dl := GpuDrawList{capacity = capacity, batches = batches}
+  if old.buffer != 0 && old.capacity >= capacity && old.batches >= batches && old.lists >= lists do return true
+  dl := GpuDrawList{capacity = capacity, batches = batches, lists = lists, views = views}
   words: u32
   when BINDLESS {
     dl.draws_base, dl.draws_stride = DRAW_LIST_HEADER, capacity
@@ -289,6 +295,7 @@ pyramid_build_bindless :: proc(self: ^Renderer, cmd: rhi.CommandList, c, f: u32)
 pyramid_build_groups :: proc(self: ^Renderer, cmd: rhi.CommandList, c, f: u32) {
   slot := camera_slot(c) + f
   pyramid := self.camera_targets[c].pyramid[f]
+  if pyramid == 0 do return
   prev_depth := self.camera_targets[c].images[.DEPTH][(f + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT]
   extent, mips := pyramid_shape(self.camera_targets[c].extent)
   zero: u32
@@ -344,19 +351,28 @@ material_list :: proc(m: Material) -> u32 {
 @(private)
 NO_DRAW_LIST :: max(u32)
 
+// Where material type `type`'s draws are in a view's lists (bindless): lists are kept for the
+// types in `seen` only, in type order (cull.slang computes the same).
+@(private)
+draw_list_index :: #force_inline proc "contextless" (seen, type: u32) -> u32 {
+  return u32(intrinsics.count_ones(seen & (1 << type - 1)))
+}
+
 // Draws the draws of each draw list key in `keys` (material_list) from list `list` of slot's
-// draw lists, `pipelines[i]` for keys[i]. Inside a pass with the mesh buffers, the scene set
+// draw lists, `pipelines[i]` for keys[i]. `seen` is the types the view's lists were made for
+// (CameraFilter.types; the shadow views' are the G-buffer types). Inside a pass with the mesh buffers, the scene set
 // and the camera pushed. `materials` binds each material's textures between batches (WebGPU).
 @(private)
-draw_list_draw :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, keys: []u32, pipelines: []rhi.Pipeline, f: u32, materials := true) {
+draw_list_draw :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, keys: []u32, pipelines: []rhi.Pipeline, f: u32, seen: u32, materials := true) {
   when BINDLESS {
     dl := &self.draw_lists[slot]
     count := dev.caps(&self.gpu).multi_draw_indirect_count
     for key, i in keys {
+      index := draw_list_index(seen, key)
       dev.cmd_bind_pipeline(&self.gpu, cmd, pipelines[i])
-      offset := int(dl.draws_base + key * dl.draws_stride * DRAW_WORDS) * size_of(u32)
+      offset := int(dl.draws_base + index * dl.draws_stride * DRAW_WORDS) * size_of(u32)
       if count {
-        dev.cmd_draw_indexed_indirect_count(&self.gpu, cmd, dl.buffer, offset, dl.buffer, int(key) * size_of(u32), dl.capacity, DRAW_BYTES)
+        dev.cmd_draw_indexed_indirect_count(&self.gpu, cmd, dl.buffer, offset, dl.buffer, int(index) * size_of(u32), dl.capacity, DRAW_BYTES)
       } else {
         dev.cmd_draw_indexed_indirect(&self.gpu, cmd, dl.buffer, offset, dl.capacity, DRAW_BYTES)
       }

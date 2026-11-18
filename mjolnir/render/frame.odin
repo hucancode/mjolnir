@@ -156,31 +156,33 @@ camera_passes :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, closing: ..
   if containers.slots_count(&self.slots[.CAMERAS]) == 0 do return
   discards := make([dynamic]TextureHandle, context.temp_allocator)
   c: u32
-  for i in containers.slots_next(&self.slots[.CAMERAS], &c) do for a in CameraImage do append(&discards, self.camera_targets[i].images[a][f])
+  for i in containers.slots_next(&self.slots[.CAMERAS], &c) do for a in CameraImage {
+    if texture := self.camera_targets[i].images[a][f]; texture != 0 do append(&discards, texture)
+  }
   // render-to-texture: a material may sample last frame's lit image
   barrier_discard(self, cmd, discards[:], .CULL_TO_INDIRECT, .COLOR_TO_SAMPLE, .SAMPLE_TO_REWRITE)
   {
     scope(self, cmd, "gbuffer")
     c = 0
-    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do material_record(self, cmd, f, i, .GBUFFER)
+    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do if filter_deferred(self.camera_targets[i].filter) do material_record(self, cmd, f, i, .GBUFFER)
   }
   barrier(self, cmd, .GBUFFER_TO_LIGHTING)
   {
     scope(self, cmd, "ambient occlusion")
     c = 0
-    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do ambient_occlusion_record(self, cmd, f, i)
+    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do if filter_deferred(self.camera_targets[i].filter) do ambient_occlusion_record(self, cmd, f, i)
   }
   barrier(self, cmd, .FILL_TO_COMPUTE)
   {
     scope(self, cmd, "lighting")
     c = 0
-    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do lighting_record(self, cmd, f, i)
+    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do if filter_deferred(self.camera_targets[i].filter) do lighting_record(self, cmd, f, i)
   }
   barrier(self, cmd, .LIGHTING_TO_FORWARD)
   {
     scope(self, cmd, "forward")
     c = 0
-    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do material_record(self, cmd, f, i, .FORWARD)
+    for i in containers.slots_next(&self.slots[.CAMERAS], &c) do if filter_forward(self.camera_targets[i].filter) do material_record(self, cmd, f, i, .FORWARD)
   }
   barrier(self, cmd, ..closing)
 }
