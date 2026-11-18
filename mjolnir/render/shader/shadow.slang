@@ -1,6 +1,6 @@
 // Shadow depth: the opaque batches through one shadow view, skinned like mesh_vertex.slang.
 // Vulkan draws one node into one view's atlas layer: the cull tags each draw, first_instance =
-// node | view << 16. On wgpu one pass renders every view, each into its atlas tile's viewport,
+// node | (view - SHADOW_VIEW_BASE) << 24. On wgpu one pass renders every view, each into its atlas tile's viewport,
 // the view in the push.
 #include "common.slang"
 
@@ -12,6 +12,9 @@ SCENE_BUFFER(SkinnedVertex, skinned, 16, 3)
 #if BACKEND_WGPU
 struct ShadowPush { uint view_index; }
 PUSH_BLOCK(ShadowPush, shadow_push)
+#else
+// where the views table starts the shadow views (gpu_data.odin SHADOW_VIEW_BASE)
+static const uint SHADOW_VIEW_BASE = 512;
 #endif
 
 struct ShadowIn {
@@ -42,8 +45,8 @@ ShadowOut vs_main(ShadowIn v)
     uint node_index = v.node_index;
     View view = views[shadow_push.view_index];
 #else
-    uint node_index = v.instance & 0xFFFFu;
-    View view = views[v.instance >> 16];
+    uint node_index = v.instance & 0xFFFFFFu;
+    View view = views[SHADOW_VIEW_BASE + (v.instance >> 24)];
 #endif
     Node node = nodes[node_index];
     float4 model_position = float4(v.position, 1.0);

@@ -41,3 +41,16 @@ surface_texture_get :: proc(b: ^Backend) -> wgpu.SurfaceTexture {
   if t.texture != nil do t.status = .SuccessOptimal
   return t
 }
+
+// Asks for every limit the adapter has: the browser takes no undefined one everywhere, and the
+// adapter's are always valid. wgpu.js reads the limits 8 bytes past the pointer it is given (an
+// older header's wrapper struct), so they go 8 bytes into one.
+@(private)
+device_request :: proc(adapter: wgpu.Adapter, desc: ^wgpu.DeviceDescriptor, supported: wgpu.Limits, callback: wgpu.RequestDeviceCallbackInfo) {
+  wrapped := struct {
+    _:      u64,
+    limits: wgpu.Limits,
+  }{limits = supported}
+  desc.requiredLimits = (^wgpu.Limits)(&wrapped)
+  wgpu.AdapterRequestDevice(adapter, desc, callback)
+}

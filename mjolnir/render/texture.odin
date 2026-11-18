@@ -6,44 +6,48 @@ import "core:log"
 import "core:math"
 import stbi "vendor:stb/image"
 
-// Textures below MAX_RENDER_TARGETS (slots[.TARGETS]) are what the renderer reallocates itself
-// and teardown keeps: camera attachments, depth pyramids and the post-process ring, which follow
-// the window size, and the font atlas, which grows. The rest are slots[.TEXTURES]: the
-// renderer's own from init, then the map's.
-
-// The pool handing out handle's index.
-@(private)
-MAX_RENDER_TARGETS :: 256
-
-@(private)
-texture_pool :: proc(self: ^Renderer, handle: TextureHandle) -> ^containers.Slots {
-  return &self.slots[.TARGETS] if handle < MAX_RENDER_TARGETS else &self.slots[.TEXTURES]
-}
+// Every texture is a handle of slots[.TEXTURES], growing past Config.textures. Render targets
+// (texture_targets) are what the renderer reallocates itself and teardown keeps: camera
+// attachments, depth pyramids and the post-process ring, which follow the window size, and the
+// font atlas, which grows. The rest are the renderer's own from init, then the map's.
 
 @(private)
 calculate_mip_levels :: proc(width, height: u32) -> u32 {
   return u32(math.floor(math.log2(f32(max(width, height))))) + 1
 }
 
-// `data` fills level 0; the other levels are blitted down. `target` takes the handle from
-// the render target range.
+// `data` fills level 0; the other levels are blitted down. A `target` outlives teardown.
 @(private)
 allocate_texture :: proc(self: ^Renderer, desc: TextureDesc, data: []u8 = nil, target := false) -> (handle: TextureHandle, ok: bool) {
   lock(self)
-  pool := &self.slots[.TARGETS] if target else &self.slots[.TEXTURES]
-  h := containers.slots_alloc(pool) or_return
+  h := pool_alloc(self, .TEXTURES) or_return
   if !dev.texture_create(&self.gpu, TextureHandle(h), desc, data) {
-    containers.slots_free(pool, h)
+    containers.slots_free(&self.slots[.TEXTURES], h)
     return 0, false
   }
+  self.texture_targets[h] = target
   return TextureHandle(h), true
+}
+
+// Frees every texture but render targets and init's, at once: the GPU is idle.
+@(private)
+textures_teardown :: proc(self: ^Renderer) {
+  slots := &self.slots[.TEXTURES]
+  for r in containers.slots_flush(slots) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
+  c := slots.mark
+  for i in containers.slots_next(slots, &c) do if !self.texture_targets[i] {
+    dev.texture_destroy(&self.gpu, TextureHandle(i))
+    containers.slots_free(slots, i)
+  }
+  containers.slots_flush(slots)
+  groups_clear(self)
 }
 
 // texture_destroy frees the texture; its handle is stale at once, and frames already
 // submitted still sample it.
 texture_destroy :: proc(self: ^Renderer, handle: TextureHandle) {
   lock(self)
-  containers.slots_free(texture_pool(self, handle), u32(handle))
+  containers.slots_free(&self.slots[.TEXTURES], u32(handle))
 }
 
 // NO_TEXTURE is the TextureHandle of none, as materials, emitters and canvases hold it.
@@ -53,7 +57,7 @@ NO_TEXTURE :: 0
 // own size); zero for none.
 texture_size :: proc(self: ^Renderer, handle: TextureHandle) -> [2]u32 {
   lock(self)
-  if handle == NO_TEXTURE || !containers.slots_live(texture_pool(self, handle), u32(handle)) do return {}
+  if handle == NO_TEXTURE || !containers.slots_live(&self.slots[.TEXTURES], u32(handle)) do return {}
   return dev.texture_desc(&self.gpu, handle).extent
 }
 

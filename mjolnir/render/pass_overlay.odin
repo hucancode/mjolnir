@@ -17,8 +17,8 @@ OverlayPush :: struct {
 @(private)
 overlay_init :: proc(self: ^Renderer) -> bool {
   self.overlay_batches = make([dynamic]OverlayBatch, 0, 64)
-  self.overlay_vertices = make([dynamic]Vertex2D, 0, OVERLAY_MAX_VERTICES)
-  self.overlay_indices = make([dynamic]u32, 0, OVERLAY_MAX_INDICES)
+  self.overlay_vertices = make([dynamic]Vertex2D, 0, self.config.overlay_vertices)
+  self.overlay_indices = make([dynamic]u32, 0, self.config.overlay_indices)
   attributes := [?]rhi.VertexAttribute {
     {location = 0, format = .F32X2, offset = u32(offset_of(Vertex2D, pos))},
     {location = 1, format = .F32X2, offset = u32(offset_of(Vertex2D, uv))},
@@ -37,10 +37,18 @@ overlay_init :: proc(self: ^Renderer) -> bool {
   return true
 }
 
-// Writes the frame's 2D vertices and indices into its buffers.
+// Writes the frame's 2D vertices and indices into its buffers, doubling a buffer they outgrew.
+// Once the frame's previous submission is done.
 @(private)
 overlay_upload :: proc(self: ^Renderer, f: u32) {
   if len(self.overlay_indices) == 0 do return
+  vertices, indices := len(self.overlay_vertices) * size_of(Vertex2D), len(self.overlay_indices) * size_of(u32)
+  if have := self.buffer_sizes[.OVERLAY_VERTICES][f]; vertices > have {
+    if !buffer_replace(self, .OVERLAY_VERTICES, int(f), max(vertices, 2 * have)) do return
+  }
+  if have := self.buffer_sizes[.OVERLAY_INDICES][f]; indices > have {
+    if !buffer_replace(self, .OVERLAY_INDICES, int(f), max(indices, 2 * have)) do return
+  }
   dev.buffer_write(&self.gpu, self.buffers[.OVERLAY_VERTICES][f], 0, slice.to_bytes(self.overlay_vertices[:]))
   dev.buffer_write(&self.gpu, self.buffers[.OVERLAY_INDICES][f], 0, slice.to_bytes(self.overlay_indices[:]))
 }

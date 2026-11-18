@@ -2,7 +2,10 @@ package rhi
 
 // The vocabulary of textures and the few budgets a device sizes itself by.
 
-MAX_TEXTURES :: 1000
+// MAX_TEXTURES is the ceiling of texture handles: the declared size of the bindless texture
+// array. Devices keep per-texture storage only for the handles used; a device whose limits are
+// lower binds fewer (handles past them are not sampled through the array).
+MAX_TEXTURES :: 1 << 16
 
 // SamplerType names the samplers every device makes; shaders index them with these values as
 // literals (shader/common.slang).

@@ -288,3 +288,152 @@ test_ranges_alloc_free_merge :: proc(t: ^testing.T) {
   rest, rest_ok := ranges_alloc(&r, 40)
   testing.expect(t, rest_ok && rest == 60, "and its run merges back")
 }
+
+@(test)
+test_slots_grow_past_reserve :: proc(t: ^testing.T) {
+  s: Slots
+  slots_init(&s, 4)
+  defer slots_destroy(&s)
+  handles: [dynamic]Handle
+  defer delete(handles)
+  for _ in 0 ..< 10_000 {
+    index, ok := slots_alloc(&s)
+    if !ok {
+      slots_grow(&s, s.capacity * 2)
+      index, ok = slots_alloc(&s)
+    }
+    testing.expect(t, ok)
+    append(&handles, slots_handle(&s, index))
+  }
+  testing.expect(t, s.capacity >= 10_001)
+  for h, i in handles {
+    testing.expect_value(t, h.index, u32(i + 1))
+    testing.expect(t, slots_valid(&s, h), "handles from before every growth stay valid")
+  }
+  testing.expect_value(t, slots_count(&s), 10_000)
+  n := 0
+  cursor: u32
+  for _ in slots_next(&s, &cursor) do n += 1
+  testing.expect_value(t, n, 10_000)
+}
+
+@(test)
+test_slots_grow_keeps_generations :: proc(t: ^testing.T) {
+  s: Slots
+  slots_init(&s, 4)
+  defer slots_destroy(&s)
+  old := slots_handle(&s, slots_alloc(&s))
+  slots_free(&s, old.index)
+  reused := slots_handle(&s, slots_alloc(&s))
+  slots_grow(&s, 1000)
+  testing.expect(t, !slots_valid(&s, old), "a stale handle stays stale through growth")
+  testing.expect(t, slots_valid(&s, reused))
+  slots_grow(&s, 10)
+  testing.expect_value(t, s.capacity, 1000)
+}
+
+@(test)
+test_slots_grace_across_growth :: proc(t: ^testing.T) {
+  s: Slots
+  slots_init(&s, 4, grace = 3)
+  defer slots_destroy(&s)
+  i := slots_alloc(&s)
+  h := slots_handle(&s, i)
+  slots_free(&s, i)
+  slots_grow(&s, 64)
+  for _ in 0 ..< 2 {
+    slots_tick(&s)
+    testing.expect(t, slots_alloc(&s) != i, "index held during grace, even after growth")
+  }
+  slots_tick(&s)
+  testing.expect_value(t, slots_alloc(&s), i)
+  testing.expect(t, !slots_valid(&s, h))
+}
+
+@(test)
+test_slots_rewind_after_growth :: proc(t: ^testing.T) {
+  s: Slots
+  slots_init(&s, 4, grace = 2)
+  defer slots_destroy(&s)
+  for _ in 0 ..< 3 do slots_alloc(&s)
+  slots_mark(&s)
+  slots_grow(&s, 1024)
+  grown: [dynamic]Handle
+  defer delete(grown)
+  for _ in 0 ..< 1000 do append(&grown, slots_handle(&s, slots_alloc(&s)))
+  slots_free(&s, grown[10].index)
+  slots_rewind(&s)
+  testing.expect_value(t, s.high_water, 4)
+  testing.expect_value(t, slots_count(&s), 3)
+  for h in grown do testing.expect(t, !slots_valid(&s, h), "every index past the mark is stale")
+  testing.expect_value(t, slots_alloc(&s), 4)
+}
+
+@(test)
+test_slots_reclaim_ring :: proc(t: ^testing.T) {
+  N :: 100_000
+  s: Slots
+  slots_init(&s, N + 1, grace = 3)
+  defer slots_destroy(&s)
+  for _ in 0 ..< N do slots_alloc(&s)
+  // free 1000 per tick; reuse must come back in free order once each batch matures
+  expected: [dynamic]u32
+  defer delete(expected)
+  got: [dynamic]u32
+  defer delete(got)
+  next := u32(1)
+  for next <= N || len(s.retiring) - s.head - s.reclaimed > 0 {
+    for _ in 0 ..< 1000 do if next <= N {
+      slots_free(&s, next)
+      append(&expected, next)
+      next += 1
+    }
+    for r in slots_tick(&s) do append(&got, r.index)
+    testing.expect(t, len(s.retiring) <= 8000, "retiring stays bounded by the grace window")
+  }
+  testing.expect_value(t, len(got), N)
+  for i in 0 ..< min(len(got), len(expected)) do if got[i] != expected[i] {
+    testing.expectf(t, false, "reclaim %d: got %d, want %d", i, got[i], expected[i])
+    break
+  }
+}
+
+@(test)
+test_ranges_grow :: proc(t: ^testing.T) {
+  r: Ranges
+  ranges_init(&r, 100)
+  defer ranges_destroy(&r)
+  a := ranges_alloc(&r, 60)
+  b := ranges_alloc(&r, 30)
+  _, ok := ranges_alloc(&r, 50)
+  testing.expect(t, !ok, "only 10 left")
+  ranges_grow(&r, 200)
+  c, grown := ranges_alloc(&r, 50)
+  testing.expect(t, grown && c == 90, "the trailing free run merges with the new room")
+  testing.expect(t, ranges_size(&r, a) == 60 && ranges_size(&r, b) == 30, "live runs keep their place")
+  testing.expect_value(t, len(r.free), 1)
+  testing.expect_value(t, r.free[0], [2]u32{140, 60})
+  // growth with no trailing free run
+  full: Ranges
+  ranges_init(&full, 10)
+  defer ranges_destroy(&full)
+  ranges_alloc(&full, 10)
+  ranges_grow(&full, 20)
+  d, d_ok := ranges_alloc(&full, 10)
+  testing.expect(t, d_ok && d == 10)
+}
+
+@(test)
+test_ranges_rewind_after_growth :: proc(t: ^testing.T) {
+  r: Ranges
+  ranges_init(&r, 16)
+  defer ranges_destroy(&r)
+  kept := ranges_alloc(&r, 8)
+  ranges_mark(&r)
+  ranges_grow(&r, 64)
+  later := ranges_alloc(&r, 40)
+  ranges_rewind(&r)
+  testing.expect(t, ranges_size(&r, kept) == 8 && ranges_size(&r, later) == 0)
+  testing.expect_value(t, len(r.free), 1)
+  testing.expect_value(t, r.free[0], [2]u32{8, 56})
+}

@@ -3,17 +3,25 @@ package wgpu_backend
 
 import rhi "../rhi"
 
+import "base:builtin"
 import wgpu "vendor:wgpu"
 
 // WebGPU has no push constants: cmd_push writes into a ring of uniform entries and binds them,
 // at a dynamic offset, as the push group of the pipeline: the entry's uniforms and the
-// samplers every shader declares at @group(2) (shader/common.slang).
+// samplers every shader declares at @group(2) (shader/common.slang). The ring is blocks of
+// UNIFORM_CAPACITY bytes, each a buffer with its group; a frame that fills them chains another.
 @(private)
 UNIFORM_ALIGNMENT :: 256
 @(private)
 UNIFORM_CAPACITY :: 1 << 20
 
-// Makes the push group's layout and group, and the ring that backs it.
+@(private)
+UniformBlock :: struct {
+  buffer: wgpu.Buffer,
+  group:  wgpu.BindGroup,
+}
+
+// Makes the push group's layout and the ring's first block.
 @(private)
 frame_group_init :: proc(b: ^Backend) {
   all_stages := wgpu.ShaderStageFlags{.Vertex, .Fragment, .Compute}
@@ -24,12 +32,19 @@ frame_group_init :: proc(b: ^Backend) {
     append(&layout_entries, wgpu.BindGroupLayoutEntry{binding = 1 + u32(type), visibility = all_stages, sampler = {type = kind}})
   }
   b.frame_layout = wgpu.DeviceCreateBindGroupLayout(b.device, &{entryCount = uint(len(layout_entries)), entries = raw_data(layout_entries)})
-  b.uniform_buffer = buffer_create(b, UNIFORM_CAPACITY, {.Uniform, .CopyDst})
-  b.uniforms = make([]u8, UNIFORM_CAPACITY)
+  uniform_block_add(b)
+}
+
+// Chains a block to the uniform ring, and its room to b.uniforms.
+@(private)
+uniform_block_add :: proc(b: ^Backend) {
+  block := UniformBlock{buffer = buffer_create(b, UNIFORM_CAPACITY, {.Uniform, .CopyDst})}
   entries := make([dynamic]wgpu.BindGroupEntry, context.temp_allocator)
-  append(&entries, wgpu.BindGroupEntry{binding = 0, buffer = b.uniform_buffer, size = UNIFORM_ALIGNMENT})
+  append(&entries, wgpu.BindGroupEntry{binding = 0, buffer = block.buffer, size = UNIFORM_ALIGNMENT})
   for sampler, type in b.samplers do append(&entries, wgpu.BindGroupEntry{binding = 1 + u32(type), sampler = sampler})
-  b.frame_group = wgpu.DeviceCreateBindGroup(b.device, &{layout = b.frame_layout, entryCount = uint(len(entries)), entries = raw_data(entries)})
+  block.group = wgpu.DeviceCreateBindGroup(b.device, &{layout = b.frame_layout, entryCount = uint(len(entries)), entries = raw_data(entries)})
+  append(&b.uniform_blocks, block)
+  builtin.resize(&b.uniforms, len(b.uniform_blocks) * UNIFORM_CAPACITY)
 }
 
 @(private)

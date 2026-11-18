@@ -6,9 +6,6 @@ import "../geometry"
 // The GPU data contract: the budgets, vertex formats, material and light types, effects and
 // tables render writes and its shaders (in both backends) read.
 
-// MAX_SLOTS is how many slots (SlotHandle) a scene has.
-MAX_SLOTS :: 65536
-
 // The views table holds every camera at CAMERA_VIEW_BASE + camera, then the shadow views.
 @(private)
 CAMERA_VIEW_BASE :: 0
@@ -16,42 +13,20 @@ CAMERA_VIEW_BASE :: 0
 @(private)
 SHADOW_VIEW_BASE :: MAX_ACTIVE_CAMERAS
 
-@(private)
-MAX_VIEWS :: MAX_ACTIVE_CAMERAS + MAX_SHADOW_VIEWS
-
-// MAX_SHADOW_MAPS is how many shadow-casting point and spot lights cast shadows at once; one
-// directional light's cascades come on top.
-MAX_SHADOW_MAPS :: 16
+// MAX_SHADOW_MAPS is the most Config.shadow_maps: shadow-casting point and spot lights casting
+// shadows at once; one directional light's cascades come on top. A shadow view's index rides in
+// 8 bits of each shadow draw (pass_shadow.odin).
+MAX_SHADOW_MAPS :: 40
+#assert(MAX_SHADOW_MAPS * 6 + SHADOW_CASCADES < 1 << 8)
 
 @(private)
 SHADOW_MAP_SIZE :: 512
 
 // a cube map renders six views, and a directional light's cascades come on top
 @(private)
-MAX_SHADOW_VIEWS :: MAX_SHADOW_MAPS * 6 + SHADOW_CASCADES
-
-// MAX_PARTICLES is how many particles live at once, across every emitter.
-MAX_PARTICLES :: 65536
-
-// Debug line segments live in two rings of DEBUG_RING in the debug line table:
-// [0] depth-tested, [1] drawn over the scene.
-@(private)
-MAX_SEGMENTS :: 65536
-
-@(private)
-DEBUG_RING :: MAX_SEGMENTS / 2
-
-// OVERLAY_MAX_VERTICES and OVERLAY_MAX_INDICES are the overlay's capacity per frame.
-@(private)
-OVERLAY_MAX_VERTICES :: 65536
-
-@(private)
-OVERLAY_MAX_INDICES :: 98304
-
-// Batches (Table.BATCHES): runs of nodes sharing a mesh and material, drawn by one indirect
-// draw. Id 0 is none.
-@(private)
-MAX_BATCHES :: 4096
+shadow_view_count :: proc(config: Config) -> u32 {
+  return config.shadow_maps * 6 + SHADOW_CASCADES
+}
 
 // TABLE_REGION_BYTES is the granularity of Renderer.dirty: bit r of a table's bits is its bytes
 // [r * TABLE_REGION_BYTES, (r + 1) * TABLE_REGION_BYTES).
@@ -73,6 +48,12 @@ CameraImage :: enum {
   // how much ambient light reaches each pixel, 1 unoccluded (Camera.ambient_occlusion)
   AMBIENT_OCCLUSION  = 6,
 }
+
+// The camera images a later frame reads, kept per frame in flight: the lit image (sampled the
+// frame after, render-to-texture) and depth (the next frame's depth pyramid). The rest have one
+// copy, rewritten each frame after the previous frame's reads (Barrier.SAMPLE_TO_REWRITE).
+@(private)
+CAMERA_IMAGES_PER_FRAME :: bit_set[CameraImage]{.FINAL_IMAGE, .DEPTH}
 
 // Each camera attachment's texture; pipelines drawing into an attachment take its format.
 @(private)
@@ -287,4 +268,6 @@ ParticleSystemParams :: struct {
   emit_total:       u32,
   // ring slot of the frame's first new particle
   emit_cursor:      u32,
+  // the ring's slots (Config.particles)
+  capacity:         u32,
 }

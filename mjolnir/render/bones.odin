@@ -16,13 +16,13 @@ bones_first :: proc(self: ^Renderer, bones: BonesHandle) -> (first: u32, ok: boo
 
 // bones_create makes a palette of `count` bones (one per animated character, shared by every
 // skinned mesh of it, MeshAttachment.bones), at rest until stage_bones; it lives until
-// bones_destroy or teardown. false for no bones or past MAX_BONES bones in all.
+// bones_destroy or teardown. false for no bones.
 bones_create :: proc(self: ^Renderer, count: u32) -> (handle: BonesHandle, ok: bool) #optional_ok {
   lock(self)
   if count == 0 do return 0, false
-  first, has_room := containers.ranges_alloc(&self.bone_ranges, count)
+  first, has_room := ranges_alloc_growing(self, &self.bone_ranges, .BONES, count)
   if !has_room {
-    log.warnf("No room for a %d-bone palette past MAX_BONES (%d)", count, MAX_BONES)
+    log.warnf("No room for a %d-bone palette", count)
     return 0, false
   }
   slice.fill(write_table(self, .BONES, matrix[4, 4]f32)[first:][:count], 1)

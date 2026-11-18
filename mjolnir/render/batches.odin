@@ -28,8 +28,8 @@ batch_key :: #force_inline proc(mesh, material: u32) -> u64 {
   return u64(material) << 32 | u64(mesh)
 }
 
-// Puts the node at `slot` into the batch of (mesh, material). Past MAX_BATCHES distinct
-// batches the node is not drawn.
+// Puts the node at `slot` into the batch of (mesh, material), the batch table growing past its
+// reserve. Past the table's ceiling the node is not drawn.
 @(private)
 batch_join :: proc(self: ^Renderer, slot, mesh, material: u32) {
   when BINDLESS do return
@@ -37,9 +37,9 @@ batch_join :: proc(self: ^Renderer, slot, mesh, material: u32) {
   id, found := self.batch_ids[key]
   if !found {
     ok: bool
-    id, ok = containers.slots_alloc(&self.slots[.BATCHES])
+    id, ok = pool_alloc(self, .BATCHES)
     if !ok {
-      if !self.batch_warned do log.warnf("More than %d distinct (mesh, material) pairs; the nodes past them are not drawn", MAX_BATCHES - 1)
+      if !self.batch_warned do log.warnf("Too many distinct (mesh, material) pairs; the nodes past them are not drawn")
       self.batch_warned = true
       return
     }
@@ -76,8 +76,8 @@ batches_reset :: proc(self: ^Renderer) {
   clear(&self.batch_ids)
   containers.slots_rewind(&self.slots[.BATCHES])
   self.batch_stale = false
-  clear_entry(self, .BATCHES, 0, MAX_BATCHES)
-  clear_entry(self, .NODE_BATCH, 0, MAX_SLOTS)
+  clear_entry(self, .BATCHES, 0, u32(table_capacity(self, .BATCHES)))
+  clear_entry(self, .NODE_BATCH, 0, self.node_count)
 }
 
 // Before a frame: lays the batches' instance ranges end to end when membership changed, and
@@ -98,7 +98,7 @@ batches_flush :: proc(self: ^Renderer) {
   }
   materials := write_table(self, .MATERIALS, Material)
   clear(&self.batch_order)
-  #assert(MAX_MATERIALS <= 1 << 24 && MAX_BATCHES <= 1 << 20)
+  // the key packs a material in 24 bits and an id in 20 (TABLE_CEILINGS)
   for id in 1 ..< self.slots[.BATCHES].high_water do if entries[id].capacity > 0 {
     key := material_list(materials[entries[id].material_id])
     // a type past every shader is drawn by no one

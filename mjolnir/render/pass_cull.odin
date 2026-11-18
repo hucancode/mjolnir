@@ -36,15 +36,20 @@ DRAW_WORDS :: 5
 DRAW_BYTES :: DRAW_WORDS * size_of(u32)
 
 // A draw-list slot: one buffer. Compacted: DRAW_LIST_HEADER counts, then per list `capacity`
-// draws. Batched: per list a count (padded to 4 words), then per list MAX_BATCHES draws, then
-// per list `capacity` instance indices. Offsets are in words.
+// draws. Batched: per list a count (padded to 4 words), then per list `batches` draws, then
+// per list `capacity` instance indices. Offsets are in words. `binding` is its index in the
+// bindless storage buffers (Pool.DRAW_LISTS), which views name.
 @(private)
 GpuDrawList :: struct {
   buffer:                                   rhi.Buffer,
-  capacity:                                 u32,
+  capacity, batches, binding:               u32,
   bytes:                                    int,
   draws_base, draws_stride, instances_base: u32,
 }
+
+// Draws a shadow view may list: the shadow views share one list (bindless).
+@(private = "file")
+SHADOW_LIST_VIEW_CAPACITY :: 4096
 
 @(private)
 CullKey :: struct {
@@ -101,6 +106,7 @@ cull_init :: proc(self: ^Renderer) -> bool {
     self.pipelines[.DEPTH_REDUCE] = dev.compute_pipeline_create(&self.gpu, {shader_source("depth_reduce"), layout}) or_return
     counters := dev.buffer_create(&self.gpu, {size = MAX_PYRAMID_SLOTS * size_of(u32), usage = {.STORAGE}}) or_return
     self.buffers[.PYRAMID_COUNTERS][0] = counters
+    self.buffer_sizes[.PYRAMID_COUNTERS][0] = MAX_PYRAMID_SLOTS * size_of(u32)
     dev.buffer_write(&self.gpu, counters, 0, make([]u8, MAX_PYRAMID_SLOTS * size_of(u32), context.temp_allocator))
     dev.bindless_write(&self.gpu, .EXTRA_BUFFERS, 0, rhi.BufferRange{buffer = counters})
   } else {
@@ -144,34 +150,50 @@ pyramids_bind :: proc(self: ^Renderer, f: u32) {
   }
 }
 
-// draw_list_create makes draw-list slot `slot`, a camera's or the shadow views'. Compacted by
-// multi-draw: a camera DRAW_LISTS lists, one per material_list key, of CAMERA_LIST_CAPACITY
-// draws, the shadow views one list. Batched: one list per view (the shadow slot has a view per
-// shadow map face), each of room for every node's instance.
+// draw_list_reserve makes draw-list slot `slot`, a camera's or the shadow views', room for every
+// node the node table holds, replacing a smaller one with a new buffer and binding: frames in
+// flight keep drawing the old until they are done. Compacted by multi-draw: a camera DRAW_LISTS
+// lists, one per material_list key, the shadow views one list of SHADOW_LIST_VIEW_CAPACITY
+// draws per view. Batched: one list per view (the shadow slot has a view per shadow map face),
+// each of room for every node's instance and every batch's draw. Call before the frame
+// records with the slot's lists: when the slot's next writer is recorded.
 @(private)
-draw_list_create :: proc(self: ^Renderer, slot: u32, shadow: bool) -> bool {
+draw_list_reserve :: proc(self: ^Renderer, slot: u32, shadow: bool) -> bool {
+  nodes := u32(table_capacity(self, .NODES))
   when BINDLESS {
     lists: u32 = 1 if shadow else DRAW_LISTS
-    capacity: u32 = SHADOW_LIST_CAPACITY if shadow else CAMERA_LIST_CAPACITY
+    capacity: u32 = SHADOW_LIST_VIEW_CAPACITY * self.max_shadow_views if shadow else nodes
+    batches: u32 = 0
   } else {
-    lists: u32 = MAX_SHADOW_VIEWS if shadow else 1
-    capacity: u32 = MAX_SLOTS
+    lists: u32 = self.max_shadow_views if shadow else 1
+    capacity := nodes
+    batches := u32(table_capacity(self, .BATCHES))
   }
-  draw_list_destroy(self, slot)
-  dl := GpuDrawList{capacity = capacity}
+  old := &self.draw_lists[slot]
+  if old.buffer != 0 && old.capacity >= capacity && old.batches >= batches do return true
+  dl := GpuDrawList{capacity = capacity, batches = batches}
   words: u32
   when BINDLESS {
     dl.draws_base, dl.draws_stride = DRAW_LIST_HEADER, capacity
     words = DRAW_LIST_HEADER + lists * capacity * DRAW_WORDS
   } else {
-    dl.draws_base, dl.draws_stride = (lists + 3) &~ 3, MAX_BATCHES
-    dl.instances_base = dl.draws_base + lists * MAX_BATCHES * DRAW_WORDS
+    dl.draws_base, dl.draws_stride = (lists + 3) &~ 3, batches
+    dl.instances_base = dl.draws_base + lists * batches * DRAW_WORDS
     words = dl.instances_base + lists * capacity
   }
   dl.bytes = int(words) * size_of(u32)
   dl.buffer = dev.buffer_create(&self.gpu, {size = dl.bytes, usage = {.STORAGE, .INDIRECT, .VERTEX, .COPY_SRC, .COPY_DST}}) or_return
+  when BINDLESS {
+    binding, bound := pool_alloc(self, .DRAW_LISTS)
+    if !bound {
+      dev.buffer_retire(&self.gpu, dl.buffer)
+      return false
+    }
+    dl.binding = binding
+    dev.bindless_write(&self.gpu, .STORAGE_BUFFERS, binding, rhi.BufferRange{buffer = dl.buffer})
+  }
+  draw_list_destroy(self, slot)
   self.draw_lists[slot] = dl
-  when BINDLESS do dev.bindless_write(&self.gpu, .STORAGE_BUFFERS, slot, rhi.BufferRange{buffer = dl.buffer})
   return true
 }
 
@@ -181,6 +203,7 @@ draw_list_destroy :: proc(self: ^Renderer, slot: u32) {
   dl := &self.draw_lists[slot]
   if dl.buffer == 0 do return
   dev.buffer_retire(&self.gpu, dl.buffer)
+  when BINDLESS do containers.slots_free(&self.slots[.DRAW_LISTS], dl.binding)
   dl^ = {}
   groups_clear(self)
 }
@@ -298,7 +321,7 @@ cull_batched :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, first_view, vi
     instance_stride = dl.capacity,
     draws_base      = dl.draws_base,
     instances_base  = dl.instances_base,
-    max_batches     = MAX_BATCHES,
+    max_batches     = dl.batches,
     batch_count     = self.slots[.BATCHES].high_water,
     first_instance  = u32(dev.caps(&self.gpu).indirect_first_instance),
   }

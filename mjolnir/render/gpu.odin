@@ -79,15 +79,6 @@ PARAMS_BYTES :: PUSH_SIZE - 16
 // MAX_BINDINGS is the most resources one shader binds.
 MAX_BINDINGS :: 8
 
-// MAX_GPU_BUFFERS is how many buffers (buffer_create) exist at once.
-MAX_GPU_BUFFERS :: 1024
-
-// MAX_SHADERS is how many shaders of yours exist at once.
-MAX_SHADERS :: 256
-
-@(private = "file")
-MAX_GPU_WORK :: 1024
-
 @(private)
 GpuBuffer :: struct {
   buffer:   rhi.Buffer,
@@ -165,7 +156,7 @@ GpuLayoutKey :: struct {
 buffer_create :: proc(self: ^Renderer, data: []$T, usage: bit_set[BufferUsage] = {}) -> (handle: BufferHandle, ok: bool) #optional_ok {
   #assert(size_of(T) % 4 == 0)
   lock(self)
-  handle = BufferHandle(containers.slots_alloc(&self.slots[.GPU_BUFFERS]) or_return)
+  handle = BufferHandle(pool_alloc(self, .GPU_BUFFERS) or_return)
   defer if !ok do buffer_destroy(self, handle)
   size := len(data) * size_of(T)
   b := &self.gpu_buffers[handle]
@@ -175,6 +166,7 @@ buffer_create :: proc(self: ^Renderer, data: []$T, usage: bit_set[BufferUsage] =
   b.buffer = dev.buffer_create(&self.gpu, {size = size, usage = flags}) or_return
   if .READBACK in usage {
     b.readback = dev.buffer_create(&self.gpu, {size = size, usage = {.COPY_DST}, memory = .READBACK}) or_return
+    self.readback_count += 1
   }
   if size > 0 do dev.buffer_write(&self.gpu, b.buffer, 0, ([^]u8)(raw_data(data))[:size]) or_return
   return handle, true
@@ -207,6 +199,7 @@ buffer_destroy :: proc(self: ^Renderer, handle: BufferHandle) {
   b := gpu_buffer(self, handle) or_else nil
   if b == nil do return
   dev.buffer_retire(&self.gpu, b.buffer)
+  if b.readback != 0 do self.readback_count -= 1
   dev.buffer_retire(&self.gpu, b.readback)
   b^ = {}
   containers.slots_free(&self.slots[.GPU_BUFFERS], u32(handle))
@@ -339,8 +332,7 @@ shader_of :: proc(self: ^Renderer, handle: ShaderHandle, kind: ShaderKind) -> (s
 shader_add :: proc(self: ^Renderer, s: Shader, created: bool) -> (handle: ShaderHandle, ok: bool) {
   slot: u32
   if created {
-    slot, ok = containers.slots_alloc(&self.slots[.SHADERS])
-    if !ok do log.errorf("More than %d shaders at once", MAX_SHADERS)
+    slot, ok = pool_alloc(self, .SHADERS)
   }
   if !ok {
     for p in s.pipelines do dev.pipeline_retire(&self.gpu, p)
@@ -416,10 +408,6 @@ pack_params :: proc(params: $T) -> (bytes: [PARAMS_BYTES]u8) {
 @(private = "file")
 gpu_work_add :: proc(self: ^Renderer, work: GpuWork) {
   if _, compute := shader_of(self, work.shader, .COMPUTE); !work.clear && !compute do return
-  if len(self.gpu_work) >= MAX_GPU_WORK {
-    log.warnf("More than %d dispatches staged before a frame; dropping", MAX_GPU_WORK)
-    return
-  }
   append(&self.gpu_work, work)
 }
 
@@ -448,10 +436,8 @@ gpu_bind :: proc(self: ^Renderer, cmd: rhi.CommandList, s: ^Shader, f: u32, para
 // The staged work in order, then the readback copies, before anything draws.
 @(private)
 gpu_work_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
-  readbacks := false
+  if len(self.gpu_work) == 0 && self.readback_count == 0 do return
   buffers := self.gpu_buffers[:self.slots[.GPU_BUFFERS].high_water]
-  for b in buffers do readbacks ||= b.readback != 0
-  if len(self.gpu_work) == 0 && !readbacks do return
   barrier(self, cmd, .FRAME_TO_GPU_WORK)
   in_compute := false
   for &work, i in self.gpu_work {
@@ -529,4 +515,6 @@ gpu_shutdown :: proc(self: ^Renderer) {
   delete(self.gpu_work)
   delete(self.gpu_draws)
   delete(self.gpu_layouts)
+  delete(self.gpu_buffers)
+  delete(self.shaders)
 }

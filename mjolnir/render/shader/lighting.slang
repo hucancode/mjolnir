@@ -8,7 +8,8 @@
 #include "common.slang"
 
 static const uint TILE = 16;
-static const uint MAX_LIGHTS = 256;
+// the most lights a tile shades (the first listed); any number may be placed
+static const uint TILE_MAX_LIGHTS = 256;
 // shadowFace past the last cascade
 static const uint NO_FACE = 0xFFFFFFFF;
 
@@ -66,7 +67,7 @@ static const float SHADOW_MAP_SIZE = 512.0;
 groupshared Atomic<uint> tile_min_bits;
 groupshared Atomic<uint> tile_max_bits;
 groupshared Atomic<uint> tile_light_count;
-groupshared uint tile_lights[MAX_LIGHTS];
+groupshared uint tile_lights[TILE_MAX_LIGHTS];
 
 float scene_depth(View camera, int2 pixel)
 {
@@ -514,7 +515,8 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 group : SV_GroupID, uint local 
             if (p.light == 0 || (nodes[p.node].flags & NODE_FLAG_VISIBLE) == 0) continue;
             Light light = lights[p.light];
             if (light.light_type == LIGHT_DIRECTIONAL || sphere_meets_box(light_position(p), light.radius, lo, hi)) {
-                tile_lights[tile_light_count.add(1)] = i;
+                uint at = tile_light_count.add(1);
+                if (at < TILE_MAX_LIGHTS) tile_lights[at] = i;
             }
         }
     }
@@ -543,7 +545,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint3 group : SV_GroupID, uint local 
     float3 color = camera_image(camera, IMAGE_EMISSIVE, pixel).rgb;
     color += ambient_light(lighting_push.ibl_intensity, raw_normal, s, mr.g, ambient_visibility(camera, pixel, s));
     s.roughness = clamp(mr.g, 0.08, 1.0);
-    uint listed = tile_light_count.load();
+    uint listed = min(tile_light_count.load(), TILE_MAX_LIGHTS);
     for (uint i = 0; i < listed; i++) {
         color += direct_light(placements[tile_lights[i]], s);
     }

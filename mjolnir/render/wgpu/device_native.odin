@@ -2,6 +2,7 @@
 package wgpu_backend
 
 import "base:intrinsics"
+import "core:mem"
 import "vendor:glfw"
 import wgpu "vendor:wgpu"
 import "vendor:wgpu/glfwglue"
@@ -46,4 +47,17 @@ events_process :: proc(b: ^Backend) {
 @(private)
 surface_texture_get :: proc(b: ^Backend) -> wgpu.SurfaceTexture {
   return wgpu.SurfaceGetCurrentTexture(b.surface)
+}
+
+// Asks for the adapter's buffer limits, every other limit the default.
+@(private)
+device_request :: proc(adapter: wgpu.Adapter, desc: ^wgpu.DeviceDescriptor, supported: wgpu.Limits, callback: wgpu.RequestDeviceCallbackInfo) {
+  limits: wgpu.Limits
+  mem.set(&limits, 0xFF, size_of(limits))
+  limits.nextInChain = nil
+  limits.maxBufferSize = supported.maxBufferSize
+  limits.maxStorageBufferBindingSize = supported.maxStorageBufferBindingSize
+  limits.maxStorageBuffersPerShaderStage = supported.maxStorageBuffersPerShaderStage
+  desc.requiredLimits = &limits
+  wgpu.AdapterRequestDevice(adapter, desc, callback)
 }

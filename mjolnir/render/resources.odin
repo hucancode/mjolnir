@@ -1,5 +1,6 @@
 package render
 
+import "../containers"
 import "core:log"
 import "core:slice"
 import "rhi"
@@ -78,7 +79,12 @@ SceneBuffer :: enum {
 // The buffer of a mesh stream.
 @(private)
 mesh_buffer :: #force_inline proc(self: ^Renderer, stream: MeshStream) -> rhi.Buffer {
-  return self.buffers[SceneBuffer(int(SceneBuffer.VERTICES) + int(stream))][0]
+  return self.buffers[mesh_scene_buffer(stream)][0]
+}
+
+@(private)
+mesh_scene_buffer :: #force_inline proc(stream: MeshStream) -> SceneBuffer {
+  return SceneBuffer(int(SceneBuffer.VERTICES) + int(stream))
 }
 
 // The scene set of a bindless device: the shaders' set 0, bindings in this order, every one
@@ -185,27 +191,93 @@ TextureGroupKey :: struct {
 @(private)
 PUSH_SIZE :: 128
 
+// How render makes each buffer: usage and memory. Tables are written by the CPU every frame.
+@(private = "file")
+buffer_desc :: proc(buffer: SceneBuffer, size: int) -> rhi.BufferDesc {
+  #partial switch buffer {
+  // wireframe and random-color materials pull vertices and indices as storage (WebGPU)
+  case .VERTICES:
+    return {size = size, usage = {.VERTEX, .STORAGE, .COPY_SRC, .COPY_DST}}
+  case .INDICES:
+    return {size = size, usage = {.INDEX, .STORAGE, .COPY_SRC, .COPY_DST}}
+  case .SKINNING:
+    return {size = size, usage = {.STORAGE, .COPY_SRC, .COPY_DST}}
+  case .SKINNED_VERTICES, .PARTICLES:
+    return {size = size, usage = {.STORAGE}}
+  case .PARTICLE_ALIVE:
+    return {size = size, usage = {.STORAGE, .INDIRECT}}
+  case .OVERLAY_VERTICES:
+    return {size = size, usage = {.VERTEX}, memory = .UPLOAD}
+  case .OVERLAY_INDICES:
+    return {size = size, usage = {.INDEX}, memory = .UPLOAD}
+  }
+  return {size = size, usage = {.STORAGE}, memory = .UPLOAD}
+}
+
+// Makes copy f of buffer, `size` bytes, retiring the one it replaces.
+@(private)
+buffer_replace :: proc(self: ^Renderer, buffer: SceneBuffer, f: int, size: int) -> bool {
+  made := dev.buffer_create(&self.gpu, buffer_desc(buffer, size)) or_return
+  if old := self.buffers[buffer][f]; old != 0 do dev.buffer_retire(&self.gpu, old)
+  self.buffers[buffer][f], self.buffer_sizes[buffer][f] = made, size
+  return true
+}
+
 @(private)
 resources_init :: proc(self: ^Renderer) -> bool {
-  for t in Table {
-    size := TABLES[t].stride * TABLES[t].capacity
-    for f in 0 ..< FRAMES_IN_FLIGHT {
-      self.buffers[SceneBuffer(t)][f] = dev.buffer_create(&self.gpu, {size = size, usage = {.STORAGE}, memory = .UPLOAD}) or_return
-    }
-  }
-  // wireframe and random-color materials pull vertices and indices as storage (WebGPU)
-  stream_usage := [MeshStream]bit_set[rhi.BufferUsage]{.VERTEX = {.VERTEX, .STORAGE}, .INDEX = {.INDEX, .STORAGE}, .SKINNING = {.STORAGE}}
+  for t in Table do for f in 0 ..< FRAMES_IN_FLIGHT do buffer_replace(self, SceneBuffer(t), f, len(self.tables[t])) or_return
   for stream in MeshStream {
-    size := int(self.mesh_slabs[stream].capacity) * MESH_STREAMS[stream].elem_size
-    self.buffers[SceneBuffer(int(SceneBuffer.VERTICES) + int(stream))][0] = dev.buffer_create(&self.gpu, {size = size, usage = stream_usage[stream]}) or_return
+    size := int(self.mesh_ranges[stream].capacity) * MESH_STREAMS[stream].elem_size
+    buffer_replace(self, mesh_scene_buffer(stream), 0, size) or_return
   }
-  self.buffers[.SKINNED_VERTICES][0] = dev.buffer_create(&self.gpu, {size = MAX_SKINNED_VERTICES * size_of(SkinnedVertex), usage = {.STORAGE}}) or_return
-  self.buffers[.PARTICLE_ALIVE][0] = dev.buffer_create(&self.gpu, {size = (PARTICLE_ALIVE_HEADER + MAX_PARTICLES) * size_of(u32), usage = {.STORAGE, .INDIRECT}}) or_return
-  self.buffers[.PARTICLES][0] = dev.buffer_create(&self.gpu, {size = MAX_PARTICLES * size_of(Particle), usage = {.STORAGE}}) or_return
+  buffer_replace(self, .SKINNED_VERTICES, 0, table_capacity(self, .SKIN_OWNERS) * size_of(SkinnedVertex)) or_return
+  buffer_replace(self, .PARTICLE_ALIVE, 0, (PARTICLE_ALIVE_HEADER + int(self.config.particles)) * size_of(u32)) or_return
+  buffer_replace(self, .PARTICLES, 0, int(self.config.particles) * size_of(Particle)) or_return
   for f in 0 ..< FRAMES_IN_FLIGHT {
-    self.buffers[.OVERLAY_VERTICES][f] = dev.buffer_create(&self.gpu, {size = OVERLAY_MAX_VERTICES * size_of(Vertex2D), usage = {.VERTEX}, memory = .UPLOAD}) or_return
-    self.buffers[.OVERLAY_INDICES][f] = dev.buffer_create(&self.gpu, {size = OVERLAY_MAX_INDICES * size_of(u32), usage = {.INDEX}, memory = .UPLOAD}) or_return
+    buffer_replace(self, .OVERLAY_VERTICES, f, int(self.config.overlay_vertices) * size_of(Vertex2D)) or_return
+    buffer_replace(self, .OVERLAY_INDICES, f, int(self.config.overlay_indices) * size_of(u32)) or_return
   }
+  return true
+}
+
+// Grows frame f's copies to what render holds, once the frame's previous submission is done:
+// a table's copy that is smaller than the table is replaced and written whole, the skinned
+// vertices follow the skin owner table, and frame f's scene groups follow what was replaced.
+@(private)
+buffers_reserve :: proc(self: ^Renderer, f: u32) -> bool {
+  for t in Table {
+    if self.buffer_sizes[SceneBuffer(t)][f] >= len(self.tables[t]) do continue
+    buffer_replace(self, SceneBuffer(t), int(f), len(self.tables[t])) or_return
+    tables_stale_all(self, t, int(f))
+    self.groups_stale[f] = true
+  }
+  // rewritten whole by every frame's skinning, so nothing to copy; every frame binds the one copy
+  skinned := table_capacity(self, .SKIN_OWNERS) * size_of(SkinnedVertex)
+  if self.buffer_sizes[.SKINNED_VERTICES][0] < skinned {
+    buffer_replace(self, .SKINNED_VERTICES, 0, skinned) or_return
+    self.groups_stale = true
+  }
+  if !self.groups_stale[f] do return true
+  self.groups_stale[f] = false
+  return scene_groups_make(self, int(f))
+}
+
+// mesh_stream_reserve grows a mesh stream's buffer to hold `need` more elements than its
+// ranges hold, at least doubling: the new buffer takes the old one's contents on the GPU, in
+// order with the uploads before and after, and every frame's scene groups follow.
+@(private)
+mesh_stream_reserve :: proc(self: ^Renderer, stream: MeshStream, need: u32) -> bool {
+  ranges := &self.mesh_ranges[stream]
+  capacity := max(ranges.capacity + need, ranges.capacity * 2)
+  buffer := mesh_scene_buffer(stream)
+  old, old_size := self.buffers[buffer][0], self.buffer_sizes[buffer][0]
+  size := int(capacity) * MESH_STREAMS[stream].elem_size
+  made := dev.buffer_create(&self.gpu, buffer_desc(buffer, size)) or_return
+  dev.buffer_copy(&self.gpu, old, 0, made, 0, old_size)
+  dev.buffer_retire(&self.gpu, old)
+  self.buffers[buffer][0], self.buffer_sizes[buffer][0] = made, size
+  containers.ranges_grow(ranges, capacity)
+  self.groups_stale = true
   return true
 }
 
@@ -227,12 +299,8 @@ resources_bind :: proc(self: ^Renderer) -> bool {
       entries := make([]rhi.BindEntry, len(pass.buffers), context.temp_allocator)
       for buffer, i in pass.buffers do entries[i] = {kind = .STORAGE_BUFFER if buffer in pass.writes else .STORAGE_BUFFER_READ, stages = pass.stages}
       self.scene_layouts[p] = dev.bind_layout_create(&self.gpu, {entries = entries}) or_return
-      for f in 0 ..< FRAMES_IN_FLIGHT {
-        resources := make([]rhi.BindResource, len(pass.buffers), context.temp_allocator)
-        for buffer, i in pass.buffers do resources[i] = rhi.BufferRange{buffer = scene_buffer(self, buffer, u32(f))}
-        self.scene_groups[p][f] = dev.bind_group_create(&self.gpu, {layout = self.scene_layouts[p], resources = resources}) or_return
-      }
     }
+    for f in 0 ..< FRAMES_IN_FLIGHT do scene_groups_make(self, f) or_return
     for slots, l in TEXTURE_LAYOUTS {
       entries := make([]rhi.BindEntry, len(slots), context.temp_allocator)
       for slot, i in slots do entries[i] = {kind = TEXTURE_SLOT_KINDS[slot], stages = {.VERTEX, .FRAGMENT, .COMPUTE}}
@@ -257,6 +325,25 @@ scene_buffer :: proc(self: ^Renderer, buffer: SceneBuffer, frame: u32) -> rhi.Bu
   return self.buffers[buffer][frame if int(buffer) < len(Table) else 0]
 }
 
+// Frame f's scene groups, over the buffers as they are now: call again when one is replaced,
+// before frame f records. The old groups retire.
+@(private)
+scene_groups_make :: proc(self: ^Renderer, f: int) -> bool {
+  when BINDLESS {
+    return scene_group_make(self, f)
+  } else {
+    for pass, p in SCENE_PASSES {
+      if len(pass.buffers) == 0 do continue
+      resources := make([]rhi.BindResource, len(pass.buffers), context.temp_allocator)
+      for buffer, i in pass.buffers do resources[i] = rhi.BufferRange{buffer = scene_buffer(self, buffer, u32(f))}
+      old := self.scene_groups[p][f]
+      self.scene_groups[p][f] = dev.bind_group_create(&self.gpu, {layout = self.scene_layouts[p], resources = resources}) or_return
+      if old != 0 do dev.bind_group_retire(&self.gpu, old)
+    }
+    return true
+  }
+}
+
 // The bindless scene set of frame `f`, with the frame's shadow atlas. Call again when the
 // atlas changes, once no submitted work reads the old group.
 @(private)
@@ -279,28 +366,12 @@ scene_group_make :: proc(self: ^Renderer, f: int) -> bool {
 // stale in every copy and is written into each as its frame comes up.
 @(private)
 tables_sync :: proc(self: ^Renderer, f: u32) {
+  tables_publish(self)
   for t in Table {
-    for frame in self.table_stale[t] do for w, i in self.dirty[t] do frame[i] |= w
-    stale := self.table_stale[t][f]
-    src := self.tables[t]
-    regions := (len(src) + TABLE_REGION_BYTES - 1) / TABLE_REGION_BYTES
-    region := 0
-    for region < regions {
-      if stale[region / 64] == 0 {
-        region = (region / 64 + 1) * 64
-        continue
-      }
-      if stale[region / 64] & (1 << u64(region % 64)) == 0 {
-        region += 1
-        continue
-      }
-      first := region
-      for region < regions && stale[region / 64] & (1 << u64(region % 64)) != 0 do region += 1
-      // a run of stale regions in one write; the table's end is a 4-byte multiple
-      lo, hi := first * TABLE_REGION_BYTES, min(region * TABLE_REGION_BYTES, len(src))
-      dev.buffer_write(&self.gpu, self.buffers[SceneBuffer(t)][f], lo, src[lo:hi])
+    region: int
+    for lo, hi in tables_next_stale(self, t, int(f), &region) {
+      dev.buffer_write(&self.gpu, self.buffers[SceneBuffer(t)][f], lo, self.tables[t][lo:hi])
     }
-    slice.zero(stale)
   }
 }
 

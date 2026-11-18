@@ -20,10 +20,13 @@ StagingBlock :: struct {
   ready:  u64,
 }
 
+// `ordered`: a copy between GPU buffers (queue_buffer_copy), recorded after the staged copies
+// queued before it and before the ones queued after it
 @(private)
 PendingCopy :: struct {
   src, dst: vk.Buffer,
   region:   vk.BufferCopy,
+  ordered:  bool,
 }
 
 // mip 0 comes from `src` at `offset`; the other mips are blitted down from it
@@ -102,6 +105,13 @@ queue_buffer_write :: proc(
   return .SUCCESS
 }
 
+// queue_buffer_copy copies region of src into dst in the next recorded command buffer, in order
+// with the staged writes queued around it.
+queue_buffer_copy :: proc(gctx: ^GPUContext, src, dst: vk.Buffer, region: vk.BufferCopy) {
+  sync.mutex_guard(&gctx.uploads.mutex)
+  append(&gctx.uploads.copies, PendingCopy{src = src, dst = dst, region = region, ordered = true})
+}
+
 // queue_image_write stages size bytes of data as mip 0 of img, the rest of the chain blitted down, in the next recorded command buffer.
 queue_image_write :: proc(
   gctx: ^GPUContext,
@@ -142,19 +152,22 @@ record_uploads :: proc(gctx: ^GPUContext, cmd: vk.CommandBuffer) {
     clear(&u.inits)
   }
   if len(u.copies) == 0 && len(u.images) == 0 do return
-  slice.sort_by(u.copies[:], proc(a, b: PendingCopy) -> bool {
-    if a.src != b.src do return a.src < b.src
-    return a.dst < b.dst
-  })
-  regions := make([]vk.BufferCopy, len(u.copies), context.temp_allocator)
-  for c, i in u.copies do regions[i] = c.region
+  // staged copies between ordered ones are batched by source and destination
   for start := 0; start < len(u.copies); {
-    end := start + 1
-    for end < len(u.copies) && u.copies[end].src == u.copies[start].src && u.copies[end].dst == u.copies[start].dst {
-      end += 1
+    c := u.copies[start]
+    if c.ordered {
+      // earlier frames' and the staged writes land before the copy reads or overwrites
+      memory_barrier(cmd, {.MEMORY_WRITE}, {.TRANSFER_READ, .TRANSFER_WRITE}, {.ALL_COMMANDS}, {.TRANSFER})
+      region := c.region
+      vk.CmdCopyBuffer(cmd, c.src, c.dst, 1, &region)
+      start += 1
+      if start < len(u.copies) && !u.copies[start].ordered do memory_barrier(cmd, {.TRANSFER_WRITE}, {.TRANSFER_READ, .TRANSFER_WRITE}, {.TRANSFER}, {.TRANSFER})
+      continue
     }
-    vk.CmdCopyBuffer(cmd, u.copies[start].src, u.copies[start].dst, u32(end - start), &regions[start])
-    start = end
+    stop := start + 1
+    for stop < len(u.copies) && !u.copies[stop].ordered do stop += 1
+    record_staged_copies(cmd, u.copies[start:stop])
+    start = stop
   }
   if len(u.images) > 0 do record_image_uploads(cmd, u.images[:])
   clear(&u.copies)
@@ -198,6 +211,22 @@ submit_uploads :: proc(gctx: ^GPUContext) -> vk.Result {
   }
   vk.QueueSubmit2(gctx.graphics_queue, 1, &submit_info, 0) or_return
   return vk.QueueWaitIdle(gctx.graphics_queue)
+}
+
+@(private = "file")
+record_staged_copies :: proc(cmd: vk.CommandBuffer, copies: []PendingCopy) {
+  slice.sort_by(copies, proc(a, b: PendingCopy) -> bool {
+    if a.src != b.src do return a.src < b.src
+    return a.dst < b.dst
+  })
+  regions := make([]vk.BufferCopy, len(copies), context.temp_allocator)
+  for c, i in copies do regions[i] = c.region
+  for start := 0; start < len(copies); {
+    end := start + 1
+    for end < len(copies) && copies[end].src == copies[start].src && copies[end].dst == copies[start].dst do end += 1
+    vk.CmdCopyBuffer(cmd, copies[start].src, copies[start].dst, u32(end - start), &regions[start])
+    start = end
+  }
 }
 
 @(private = "file")

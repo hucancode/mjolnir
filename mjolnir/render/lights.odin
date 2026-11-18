@@ -157,12 +157,13 @@ shadow_score :: proc(bounds: [4]f32, intensity: f32, camera_position: [3]f32) ->
   return intensity * r2 / max(linalg.dot(offset, offset) - r2, 1e-6)
 }
 
-// `casters` is sorted by descending score; `maps` is the previous selection, rewritten.
+// `casters` is sorted by descending score; `maps` is the previous selection, rewritten, at most
+// `limit` (Config.shadow_maps).
 @(private)
-select_shadow_casters :: proc(casters: []Caster, maps: ^[MAX_SHADOW_MAPS]Caster, serial: u64) -> (count: int) {
+select_shadow_casters :: proc(casters: []Caster, maps: ^[MAX_SHADOW_MAPS]Caster, serial: u64, limit := MAX_SHADOW_MAPS) -> (count: int) {
   selected: [MAX_SHADOW_MAPS]Caster
   for c, rank in casters {
-    if count == MAX_SHADOW_MAPS do break
+    if count == min(limit, MAX_SHADOW_MAPS) do break
     c := c
     c.last_ranked = serial
     if rank >= SHADOW_RANKED_CASTERS {
@@ -260,7 +261,7 @@ assign_shadow_views :: proc(placements: []LightPlacement, lights: []Light, picke
 collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   views := write_table(self, .VIEWS, View)
   cameras := views[CAMERA_VIEW_BASE:][:self.slots[.CAMERAS].high_water]
-  casters: [MAX_LIGHTS]Caster
+  casters := make([]Caster, self.slots[.LIGHT_PLACEMENTS].high_water, context.temp_allocator)
   caster_count := 0
   _, has_eye := main_camera(self)
   eye := &views[CAMERA_VIEW_BASE + u32(self.main_camera)]
@@ -298,12 +299,15 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   self.sun = u32(sun + 1)
   slice.sort_by(casters[:caster_count], proc(a, b: Caster) -> bool {return a.score > b.score})
   maps := &self.shadow_casters
-  selected := select_shadow_casters(casters[:caster_count], maps, dev.frame_serial(&self.gpu))
-  picked: [MAX_LIGHTS]bool
+  selected := select_shadow_casters(casters[:caster_count], maps, dev.frame_serial(&self.gpu), int(self.config.shadow_maps))
+  picked := make([]bool, len(placements), context.temp_allocator)
   for c in maps[:selected] do picked[c.owner - 1] = true
   if cascaded >= 0 do picked[cascaded] = true
-  self.shadow_view_count = assign_shadow_views(placements, lights, picked[:len(placements)])
-  mark_dirty(self, .LIGHT_PLACEMENTS, 0, len(placements))
+  // only the placements whose shadow view moved are uploaded again
+  was := make([]u32, len(placements), context.temp_allocator)
+  for p, i in placements do was[i] = p.shadow_map
+  self.shadow_view_count = assign_shadow_views(placements, lights, picked)
+  for p, i in placements do if p.shadow_map != was[i] do mark_dirty(self, .LIGHT_PLACEMENTS, i)
   mark_dirty(self, .VIEWS, SHADOW_VIEW_BASE, int(self.shadow_view_count))
   for p in placements {
     if p.shadow_map == 0 do continue
@@ -329,10 +333,10 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
         planes          = planes,
         type_mask       = GBUFFER_TYPES,
         require_flags   = SHADOW_CASTER_FLAGS,
-        instance_tag    = v << 16,
+        instance_tag    = (v - SHADOW_VIEW_BASE) << 24,
         layer           = v - SHADOW_VIEW_BASE,
-        draw_list       = SHADOW_DRAW_SLOT_BASE + frame_index,
-        list_capacity   = SHADOW_LIST_CAPACITY,
+        draw_list       = self.draw_lists[SHADOW_DRAW_SLOT_BASE + frame_index].binding,
+        list_capacity   = self.draw_lists[SHADOW_DRAW_SLOT_BASE + frame_index].capacity,
         time            = f32(self.time),
       }
     }

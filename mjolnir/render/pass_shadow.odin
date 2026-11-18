@@ -3,15 +3,15 @@ package render
 import "rhi"
 
 // Shadow maps live in one depth atlas per frame in flight, a map per shadow view, grown by
-// doubling up to MAX_SHADOW_VIEWS. Where the device renders layers together (Vulkan) the atlas
+// doubling up to Renderer.max_shadow_views. Where the device renders layers together (Vulkan) the atlas
 // is an array, a layer per view: one cull dispatch tests every node against every shadow view
 // into one draw list, and one layered draw renders every view; the cull tags each draw
-// first_instance = node | view << 16. Elsewhere (WebGPU) the atlas is one 2D texture of
+// first_instance = node | (view - SHADOW_VIEW_BASE) << 24 (TABLE_CEILINGS[.NODES]). Elsewhere (WebGPU) the atlas is one 2D texture of
 // SHADOW_MAP_SIZE tiles, ATLAS_COLUMNS to a row, a tile per view (shadow_tile): one pass
 // renders every view, each into its tile's viewport from its own list. There is no depth
 // clamp in core WebGPU: a caster behind a directional cascade's near plane is clipped.
-#assert(MAX_SLOTS <= 1 << 16)
-#assert(MAX_VIEWS < 1 << 16)
+// shader/shadow.slang mirrors it
+#assert(SHADOW_VIEW_BASE == 512)
 
 @(private)
 MIN_ATLAS_LAYERS :: 2
@@ -48,12 +48,12 @@ atlas_make :: proc(self: ^Renderer, f: int, layers: u32) -> bool {
   return true
 }
 
-// Doubles up to MAX_SHADOW_VIEWS and rebinds. Call once the frame's previous submission is done.
+// Doubles up to max_shadow_views and rebinds. Call once the frame's previous submission is done.
 @(private)
 shadow_atlas_reserve :: proc(self: ^Renderer, f: u32, layers: u32) -> bool {
   have := self.atlas_layers[f]
   if layers <= have do return true
-  atlas_make(self, int(f), max(layers, min(have * 2, MAX_SHADOW_VIEWS))) or_return
+  atlas_make(self, int(f), max(layers, min(have * 2, self.max_shadow_views))) or_return
   when BINDLESS {
     return scene_group_make(self, int(f))
   } else {

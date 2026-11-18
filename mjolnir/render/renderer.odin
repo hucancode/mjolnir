@@ -8,12 +8,65 @@ import "core:sync"
 
 // direct_light packs camera indices into 16 bits
 #assert(MAX_ACTIVE_CAMERAS < 0xFFFF)
-// MAX_LIGHTS is the capacity of the light buffer.
-MAX_LIGHTS :: 256
-@(private)
-MAX_MESHES :: 65536
-@(private)
-MAX_MATERIALS :: 4096
+
+// Config is what render reserves at init: room for this many of each resource. Past a reserve
+// render grows the storage instead of failing, at the cost of a copy the frame it does: reserve
+// what a level needs to keep frames even.
+Config :: struct {
+  // scene slots (SlotHandle): the highest slot index in use + 1, usually world nodes
+  nodes:            u32,
+  meshes:           u32,
+  materials:        u32,
+  lights:           u32,
+  emitters:         u32,
+  force_fields:     u32,
+  // textures of yours and render's (render targets included)
+  textures:         u32,
+  // bone matrices of every palette together (bones_create)
+  bones:            u32,
+  // vertices of every skinned mesh attached at once, each slot its own
+  skinned_vertices: u32,
+  sprite_frames:    u32,
+  // the mesh buffers: vertices (and skinning data) and indices of every mesh together
+  vertices:         u32,
+  indices:          u32,
+  // the overlay's vertices and indices per frame
+  overlay_vertices: u32,
+  overlay_indices:  u32,
+  gpu_buffers:      u32,
+  shaders:          u32,
+  // fixed, not grown: the particle ring (the oldest particle makes way), the debug line rings
+  // (half depth-tested, half drawn over; the oldest segment makes way) and how many point and
+  // spot lights cast shadows at once (at most MAX_SHADOW_MAPS)
+  particles:        u32,
+  debug_lines:      u32,
+  shadow_maps:      u32,
+}
+
+// DEFAULT_CONFIG reserves for a typical level: a few hundred MB of GPU memory with the camera
+// images at 1080p.
+DEFAULT_CONFIG :: Config {
+  nodes            = 16384,
+  meshes           = 1024,
+  materials        = 256,
+  lights           = 64,
+  emitters         = 16,
+  force_fields     = 8,
+  textures         = 256,
+  bones            = 8192,
+  skinned_vertices = 1 << 17,
+  sprite_frames    = 1024,
+  vertices         = 1 << 18,
+  indices          = 1 << 20,
+  overlay_vertices = 1 << 14,
+  overlay_indices  = 3 << 13,
+  gpu_buffers      = 64,
+  shaders          = 16,
+  particles        = 65536,
+  debug_lines      = 1 << 14,
+  shadow_maps      = 16,
+}
+
 // Shadow casters ranked by screen coverage get a map; the rest of the maps go
 // to casters that ranked within the last SHADOW_GRACE_FRAMES frames.
 @(private)
@@ -42,8 +95,7 @@ Pool :: enum {
   EMITTER_PLACEMENTS,
   FORCE_FIELD_PLACEMENTS,
   CAMERAS,
-  // render targets below MAX_RENDER_TARGETS, every other texture above (texture.odin)
-  TARGETS,
+  // render's targets and every other texture (texture.odin)
   TEXTURES,
   // your GPU programs (gpu.odin): buffers, and shaders after render's post shaders
   GPU_BUFFERS,
@@ -51,36 +103,130 @@ Pool :: enum {
   MATERIAL_SHADERS,
   // draw batches (batches.odin), rows of Table.BATCHES
   BATCHES,
+  // the bindless storage-buffer indices of the draw lists (pass_cull.odin)
+  DRAW_LISTS,
 }
 
-// Each pool's capacity, first index and reuse grace. The pools before CAMERAS index the rows
-// of `table`.
+// Each pool's reuse grace, the most indices it grows to and, where `rows`, the table whose rows
+// it hands out (pool_alloc grows the table along).
 @(private)
 POOLS := [Pool]struct {
-  capacity: u32,
-  first:    u32,
-  grace:    u64,
-  table:    Table,
+  grace:   u64,
+  ceiling: u32,
+  table:   Table,
+  rows:    bool,
 } {
-  .MESHES                 = {MAX_MESHES, 1, RETIRE_GRACE, .MESHES},
-  .MATERIALS              = {MAX_MATERIALS, 1, RETIRE_GRACE, .MATERIALS},
-  .LIGHTS                 = {MAX_LIGHTS, 1, RETIRE_GRACE, .LIGHTS},
-  .EMITTERS               = {MAX_EMITTERS, 1, RETIRE_GRACE, .EMITTERS},
-  .FORCE_FIELDS           = {MAX_FORCE_FIELDS, 1, RETIRE_GRACE, .FORCE_FIELDS},
+  .MESHES                 = {RETIRE_GRACE, max(u32), .MESHES, true},
+  .MATERIALS              = {RETIRE_GRACE, 1 << 24, .MATERIALS, true},
+  .LIGHTS                 = {RETIRE_GRACE, max(u32), .LIGHTS, true},
+  .EMITTERS               = {RETIRE_GRACE, max(u32), .EMITTERS, true},
+  .FORCE_FIELDS           = {RETIRE_GRACE, max(u32), .FORCE_FIELDS, true},
   // placements have no handle to go stale and each frame reads its own copy of the table,
   // so no grace
-  .LIGHT_PLACEMENTS       = {MAX_LIGHTS, 1, 0, .LIGHT_PLACEMENTS},
-  .EMITTER_PLACEMENTS     = {MAX_EMITTERS, 1, 0, .EMITTER_PLACEMENTS},
-  .FORCE_FIELD_PLACEMENTS = {MAX_FORCE_FIELDS, 1, 0, .FORCE_FIELD_PLACEMENTS},
-  .CAMERAS                = {MAX_ACTIVE_CAMERAS, 1, RETIRE_GRACE, {}},
+  .LIGHT_PLACEMENTS       = {0, max(u32), .LIGHT_PLACEMENTS, true},
+  .EMITTER_PLACEMENTS     = {0, max(u32), .EMITTER_PLACEMENTS, true},
+  .FORCE_FIELD_PLACEMENTS = {0, max(u32), .FORCE_FIELD_PLACEMENTS, true},
+  .CAMERAS                = {RETIRE_GRACE, MAX_ACTIVE_CAMERAS, {}, false},
   // retired, not reclaimed: submitted frames may still sample the slot
-  .TARGETS                = {MAX_RENDER_TARGETS, 1, RETIRE_GRACE, {}},
-  .TEXTURES               = {MAX_TEXTURES, MAX_RENDER_TARGETS, RETIRE_GRACE, {}},
+  .TEXTURES               = {RETIRE_GRACE, rhi.MAX_TEXTURES, {}, false},
   // the device retires what they hold
-  .GPU_BUFFERS            = {MAX_GPU_BUFFERS, 1, 0, {}},
-  .SHADERS                = {1 + BUILTIN_SHADERS + MAX_SHADERS, 1, 0, {}},
-  .MATERIAL_SHADERS       = {MAX_MATERIAL_SHADERS + 1, 1, 0, {}},
-  .BATCHES                = {MAX_BATCHES, 1, 0, .BATCHES},
+  .GPU_BUFFERS            = {0, max(u32), {}, false},
+  .SHADERS                = {0, max(u32), {}, false},
+  .MATERIAL_SHADERS       = {0, MAX_MATERIAL_SHADERS + 1, {}, false},
+  .BATCHES                = {0, 1 << 20, .BATCHES, true},
+  // a frame in flight may still read the index of a retired list
+  .DRAW_LISTS             = {RETIRE_GRACE, DRAW_LIST_BINDINGS, {}, false},
+}
+
+// The indices each pool takes at init.
+@(private)
+pool_reserves :: proc(config: Config) -> [Pool]u32 {
+  return {
+    .MESHES                 = config.meshes,
+    .MATERIALS              = config.materials,
+    .LIGHTS                 = config.lights,
+    .EMITTERS               = config.emitters,
+    .FORCE_FIELDS           = config.force_fields,
+    .LIGHT_PLACEMENTS       = config.lights,
+    .EMITTER_PLACEMENTS     = config.emitters,
+    .FORCE_FIELD_PLACEMENTS = config.force_fields,
+    .CAMERAS                = MAX_ACTIVE_CAMERAS,
+    .TEXTURES               = config.textures,
+    .GPU_BUFFERS            = config.gpu_buffers,
+    .SHADERS                = 1 + BUILTIN_SHADERS + config.shaders,
+    .MATERIAL_SHADERS       = MAX_MATERIAL_SHADERS + 1,
+    .BATCHES                = config.meshes,
+    .DRAW_LISTS             = 64,
+  }
+}
+
+// The entries each table takes at init.
+@(private)
+table_reserves :: proc(config: Config) -> [Table]int {
+  return {
+    .VIEWS                  = MAX_ACTIVE_CAMERAS + int(shadow_view_count(config)),
+    .NODES                  = int(config.nodes),
+    .MESHES                 = int(config.meshes),
+    .MATERIALS              = int(config.materials),
+    .BONES                  = int(config.bones),
+    .EMITTERS               = int(config.emitters),
+    .FORCE_FIELDS           = int(config.force_fields),
+    .LIGHTS                 = int(config.lights),
+    .DEBUG_LINES            = int(config.debug_lines),
+    .BATCHES                = int(config.meshes),
+    .NODE_BATCH             = int(config.nodes),
+    .SKIN_OWNERS            = int(config.skinned_vertices),
+    .LIGHT_PLACEMENTS       = int(config.lights),
+    .EMITTER_PLACEMENTS     = int(config.emitters),
+    .FORCE_FIELD_PLACEMENTS = int(config.force_fields),
+    .SPRITE_FRAMES          = int(config.sprite_frames),
+  }
+}
+
+// pool_alloc hands out an index of the pool, growing the pool and its table past their
+// reserve; false at the pool's ceiling. Caller holds the render mutex.
+@(private)
+pool_alloc :: proc(self: ^Renderer, pool: Pool) -> (index: u32, ok: bool) {
+  slots := &self.slots[pool]
+  index, ok = containers.slots_alloc(slots)
+  if !ok {
+    if slots.capacity >= POOLS[pool].ceiling {
+      log.warnf("No room for more than %d %v", POOLS[pool].ceiling - 1, pool)
+      return 0, false
+    }
+    containers.slots_grow(slots, u32(min(max(u64(slots.capacity) * 2, 16), u64(POOLS[pool].ceiling))))
+    pool_grown(self, pool)
+    index = containers.slots_alloc(slots) or_return
+  }
+  if POOLS[pool].rows && !table_grow(self, POOLS[pool].table, int(index) + 1) {
+    containers.slots_free(slots, index)
+    return 0, false
+  }
+  return index, true
+}
+
+// Every pool at its reserve (Config).
+@(private)
+pools_init :: proc(self: ^Renderer) {
+  reserves := pool_reserves(self.config)
+  for &slots, p in self.slots {
+    containers.slots_init(&slots, min(max(reserves[p], 2), POOLS[p].ceiling), POOLS[p].grace)
+    pool_grown(self, p)
+  }
+}
+
+// What follows a pool's capacity besides its table.
+@(private = "file")
+pool_grown :: proc(self: ^Renderer, pool: Pool) {
+  n := int(self.slots[pool].capacity)
+  #partial switch pool {
+  case .TEXTURES:
+    resize(&self.texture_targets, n)
+  case .GPU_BUFFERS:
+    resize(&self.gpu_buffers, n)
+  case .SHADERS:
+    resize(&self.shaders, n)
+  }
 }
 
 // render's own pipelines, by what they run.
@@ -125,11 +271,10 @@ Renderer_State :: struct {
   builtin_meshes:         [Primitive]MeshHandle,
   gpu:                    Backend,
   capture:                Capture,
-  // render's tables, the one copy; bit r of dirty[t] is region r of tables[t]
-  // (TABLE_REGION_BYTES), written since the last submitted frame. tables_sync brings the GPU
-  // copies up to date.
-  tables:                 [Table][]u8,
-  dirty:                  [Table][]u64,
+  // what init reserved
+  config:                 Config,
+  // render's tables, the one copy, and what of them the GPU copies lack (tables_sync)
+  using cpu_tables:       Tables,
   // cull dispatches cover the slots below this
   node_count:             u32,
   // the skinning dispatch covers skinned vertices below this
@@ -147,7 +292,10 @@ Renderer_State :: struct {
   slots:                  [Pool]containers.Slots,
   cameras:                []Camera,
   camera_targets:         []CameraTargets,
-  mesh_slabs:             [MeshStream]containers.SlabAllocator,
+  // per texture handle: a render target, which teardown keeps
+  texture_targets:        [dynamic]bool,
+  // the mesh buffers' ranges, per stream
+  mesh_ranges:            [MeshStream]containers.Ranges,
   // the palettes' ranges of the bone table (BonesHandle is a palette's first bone + 1)
   bone_ranges:            containers.Ranges,
   // the frame sets' ranges of the sprite frame table (SpriteFramesHandle is a set's first + 1)
@@ -157,6 +305,8 @@ Renderer_State :: struct {
   // `time` as of the last submitted frame: particles are emitted and simulated up to it, an
   // emitter having emitted floor(rate * particle_time) in total
   particle_time:          f64,
+  // particles_reset was called: the next simulation clears the ring
+  particles_clear:        bool,
   // emit's queue, and the bursts the last flush placed (row != 0)
   bursts:                 [dynamic]Burst,
   // segments added since the last frame, per ring: [0] depth-tested, [1] drawn over the scene
@@ -167,13 +317,18 @@ Renderer_State :: struct {
   time:                   f64,
   debug_mutex:            sync.Mutex,
   shadow_casters:         [MAX_SHADOW_MAPS]Caster,
+  // the shadow views the views table holds after the cameras (shadow_view_count)
+  max_shadow_views:       u32,
   // the last compute submission, which the next frame's graphics waits for
   last_compute:           rhi.SyncPoint,
   // the buffers render owns on the device (resources.odin): a copy per frame in flight of
   // each table, one of the rest
   buffers:                [SceneBuffer][FRAMES_IN_FLIGHT]rhi.Buffer,
-  // per table and frame in flight: the regions render wrote that the copy lacks
-  table_stale:            [Table][FRAMES_IN_FLIGHT][]u64,
+  // their sizes in bytes; a table's copy smaller than the table is replaced as its frame comes
+  // up (tables_reserve)
+  buffer_sizes:           [SceneBuffer][FRAMES_IN_FLIGHT]int,
+  // per frame in flight: a buffer its scene groups bind was replaced
+  groups_stale:           [FRAMES_IN_FLIGHT]bool,
   // bound where a slot has none: white 2D and black cube
   white, black_cube:      TextureHandle,
   // the shadow atlas of each frame in flight (pass_shadow.odin)
@@ -199,15 +354,13 @@ Renderer_State :: struct {
   material_pipelines:     [MaterialPass][DRAW_LISTS]rhi.Pipeline,
   // the sprite shader's second draw: its semi-transparent pixels, blended, not writing depth
   sprite_blend_pipeline:  rhi.Pipeline,
-  // the 2D overlay (overlay.odin): this frame's vertices and indices, at most
-  // OVERLAY_MAX_VERTICES and OVERLAY_MAX_INDICES, in batches of one scissor and texture
+  // the 2D overlay (overlay.odin): this frame's vertices and indices, in batches of one
+  // scissor and texture; past Config.overlay_* the frame's buffers grow (overlay_upload)
   overlay_vertices:       [dynamic]Vertex2D,
   overlay_indices:        [dynamic]u32,
   overlay_batches:        [dynamic]OverlayBatch,
   // the overlay was drawn or a tick ended since it was staged: the next stage_overlay replaces it
   overlay_stale:          bool,
-  // a draw was dropped past the overlay's capacity since it was cleared (warned once)
-  overlay_full:           bool,
   // sampled by text commands: each font's uploaded atlas, the least recently used replaced
   overlay_fonts:          [OVERLAY_FONTS]OverlayFont,
   overlay_font_clock:     u64,
@@ -216,8 +369,10 @@ Renderer_State :: struct {
   mutex:                  sync.Recursive_Mutex,
   // your GPU programs (gpu.odin), by handle; work staged for the next frame; the draws frames
   // draw, stale once drawn or a tick ended
-  gpu_buffers:            [MAX_GPU_BUFFERS]GpuBuffer,
-  shaders:                [1 + BUILTIN_SHADERS + MAX_SHADERS]Shader,
+  gpu_buffers:            [dynamic]GpuBuffer,
+  // the buffers with a READBACK copy, which each frame copies back
+  readback_count:         int,
+  shaders:                [dynamic]Shader,
   gpu_work:               [dynamic]GpuWork,
   gpu_draws:              [dynamic]GpuDraw,
   gpu_draws_stale:        bool,
@@ -230,15 +385,21 @@ Renderer_State :: struct {
 // an empty scene with a main camera. Paired with shutdown. A backend whose device arrives
 // asynchronously (wgpu on the web) finishes in ready: until it returns true, nothing but ready
 // may be called. Main thread.
-init :: proc(self: ^Renderer, window: WindowHandle) -> bool {
-  for stream, s in MESH_STREAMS do containers.slab_init(&self.mesh_slabs[s], stream.slab)
-  dev.init(&self.gpu, window, BINDLESS_SIZES) or_return
-  for t, i in TABLES {
-    self.tables[i] = make([]u8, t.stride * t.capacity)
-    words := (t.stride * t.capacity + TABLE_REGION_BYTES * 64 - 1) / (TABLE_REGION_BYTES * 64)
-    self.dirty[i] = make([]u64, words)
-    for &s in self.table_stale[i] do s = make([]u64, words)
+init :: proc(self: ^Renderer, window: WindowHandle, config := DEFAULT_CONFIG) -> bool {
+  config := config
+  if config.shadow_maps > MAX_SHADOW_MAPS {
+    log.warnf("shadow_maps %d exceeds MAX_SHADOW_MAPS (%d)", config.shadow_maps, MAX_SHADOW_MAPS)
+    config.shadow_maps = MAX_SHADOW_MAPS
   }
+  config.particles = max((config.particles + COMPUTE_PARTICLE_BATCH - 1) / COMPUTE_PARTICLE_BATCH * COMPUTE_PARTICLE_BATCH, COMPUTE_PARTICLE_BATCH)
+  config.debug_lines = max(config.debug_lines &~ 1, 2)
+  self.config = config
+  self.max_shadow_views = shadow_view_count(config)
+  containers.ranges_init(&self.mesh_ranges[.VERTEX], config.vertices)
+  containers.ranges_init(&self.mesh_ranges[.INDEX], config.indices)
+  containers.ranges_init(&self.mesh_ranges[.SKINNING], config.vertices)
+  dev.init(&self.gpu, window, BINDLESS_SIZES) or_return
+  tables_init(self, table_reserves(config))
   measure_window(self)
   if dev.ready(&self.gpu) do return ready(self)
   return true
@@ -254,7 +415,7 @@ ready :: proc(self: ^Renderer) -> bool {
 
 @(private = "file")
 init_resources :: proc(self: ^Renderer) -> bool {
-  for &slots, p in self.slots do containers.slots_init(&slots, POOLS[p].capacity, POOLS[p].grace, POOLS[p].first)
+  pools_init(self)
   resources_init(self) or_return
   resources_bind(self) or_return
   cull_init(self) or_return
@@ -268,11 +429,11 @@ init_resources :: proc(self: ^Renderer) -> bool {
   debug_line_init(self) or_return
   overlay_init(self) or_return
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    draw_list_create(self, SHADOW_DRAW_SLOT_BASE + frame, shadow = true) or_return
+    draw_list_reserve(self, SHADOW_DRAW_SLOT_BASE + frame, shadow = true) or_return
   }
-  containers.ranges_init(&self.bone_ranges, MAX_BONES)
-  containers.ranges_init(&self.sprite_frame_ranges, MAX_SPRITE_FRAMES)
-  containers.ranges_init(&self.skin_ranges, MAX_SKINNED_VERTICES)
+  containers.ranges_init(&self.bone_ranges, u32(table_capacity(self, .BONES)))
+  containers.ranges_init(&self.sprite_frame_ranges, u32(table_capacity(self, .SPRITE_FRAMES)))
+  containers.ranges_init(&self.skin_ranges, u32(table_capacity(self, .SKIN_OWNERS)))
   self.cameras = make([]Camera, MAX_ACTIVE_CAMERAS)
   self.camera_targets = make([]CameraTargets, MAX_ACTIVE_CAMERAS)
   init_builtin_materials(self)
@@ -292,7 +453,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
 @(private = "file")
 mark_resources :: proc(self: ^Renderer) {
   for &slots in self.slots do containers.slots_mark(&slots)
-  for &slab in self.mesh_slabs do containers.slab_mark(&slab)
+  for &ranges in self.mesh_ranges do containers.ranges_mark(&ranges)
   containers.ranges_mark(&self.bone_ranges)
   containers.ranges_mark(&self.sprite_frame_ranges)
 }
@@ -316,12 +477,7 @@ teardown :: proc(self: ^Renderer) {
   for i in containers.slots_next(&self.slots[.CAMERAS], &c) do free_camera(self, CameraHandle(i))
   // queued uploads may be init's: they land before anything is freed
   dev.wait_idle(&self.gpu)
-  for r in containers.slots_flush(&self.slots[.TARGETS]) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
-  for i in self.slots[.TEXTURES].mark ..< self.slots[.TEXTURES].high_water {
-    dev.texture_destroy(&self.gpu, TextureHandle(i))
-  }
-  groups_clear(self)
-  containers.slots_rewind(&self.slots[.TEXTURES])
+  textures_teardown(self)
   // the staged overlay may sample what was freed
   overlay_clear(self)
   containers.slots_rewind(&self.slots[.CAMERAS])
@@ -330,7 +486,7 @@ teardown :: proc(self: ^Renderer) {
     clear_entry(self, POOLS[p].table, slots.mark, slots.high_water - slots.mark)
     containers.slots_rewind(slots)
   }
-  for &slab in self.mesh_slabs do containers.slab_rewind(&slab)
+  for &ranges in self.mesh_ranges do containers.ranges_rewind(&ranges)
   clear_entry(self, .NODES, 0, self.node_count)
   self.node_count = 0
   when !BINDLESS do batches_reset(self)
@@ -366,9 +522,7 @@ shutdown :: proc(self: ^Renderer) {
   capture_finish(self)
   delete(self.bind_groups)
   dev.shutdown(&self.gpu)
-  for table in self.tables do delete(table)
-  for bits in self.dirty do delete(bits)
-  for frames in self.table_stale do for bits in frames do delete(bits)
+  tables_destroy(self)
   delete(self.batch_ids)
   delete(self.batch_order)
   delete(self.overlay_batches)
@@ -377,13 +531,14 @@ shutdown :: proc(self: ^Renderer) {
   gpu_shutdown(self)
   for inbox in self.debug_lines do delete(inbox)
   delete(self.bursts)
-  for &slab in self.mesh_slabs do containers.slab_destroy(&slab)
+  for &ranges in self.mesh_ranges do containers.ranges_destroy(&ranges)
   containers.ranges_destroy(&self.bone_ranges)
   containers.ranges_destroy(&self.sprite_frame_ranges)
   containers.ranges_destroy(&self.skin_ranges)
   for &slots in self.slots do containers.slots_destroy(&slots)
   delete(self.cameras)
   delete(self.camera_targets)
+  delete(self.texture_targets)
 }
 
 // Cameras that matched the old extent follow the new one.
@@ -424,7 +579,7 @@ tick_resource_pools :: proc(self: ^Renderer) {
   for &slots, p in self.slots {
     for r in containers.slots_tick(&slots) {
       #partial switch p {
-      case .TARGETS, .TEXTURES:
+      case .TEXTURES:
         dev.texture_destroy(&self.gpu, TextureHandle(r.index))
         destroyed = true
       case .MESHES:
@@ -489,8 +644,6 @@ frame :: proc(self: ^Renderer) -> bool {
     gpu_frame_done(self)
     // emitted and simulated up to now
     self.particle_time = self.time
-    // the backend has every write so far
-    for bits in self.dirty do slice.zero(bits)
   }
   switch status {
   case .OK:

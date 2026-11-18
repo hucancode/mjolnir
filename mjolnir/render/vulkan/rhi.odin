@@ -30,6 +30,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   buffer_create                   = rhi_buffer_create,
   buffer_retire                   = rhi_buffer_retire,
   buffer_write                    = rhi_buffer_write,
+  buffer_copy                     = rhi_buffer_copy,
   bindless_write                  = rhi_bindless_write,
   buffer_read                     = rhi_buffer_read,
   bind_layout_create              = rhi_bind_layout_create,
@@ -73,9 +74,9 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   cmd_barrier                     = rhi_cmd_barrier,
 }
 
-// Sets for bind groups: rhi's own pool, apart from the scene pool.
+// Sets per pool of bind groups: a full pool chains another of the same size.
 @(private = "file")
-RHI_MAX_SETS :: 4096
+RHI_POOL_SETS :: 4096
 
 @(private = "file")
 PUSH_STAGES :: vk.ShaderStageFlags{.VERTEX, .FRAGMENT, .COMPUTE}
@@ -127,6 +128,8 @@ Layout :: struct {
 @(private)
 Group :: struct {
   set:   vk.DescriptorSet,
+  // the pool set came from
+  pool:  vk.DescriptorPool,
   views: [dynamic]vk.ImageView,
 }
 
@@ -204,7 +207,8 @@ rhi_shutdown :: proc(b: ^Backend) {
     for v in g.views do vk.DestroyImageView(device, v, nil)
     delete(g.views)
   }
-  if b.set_pool != 0 do vk.DestroyDescriptorPool(device, b.set_pool, nil)
+  for pool in b.set_pools do vk.DestroyDescriptorPool(device, pool, nil)
+  delete(b.set_pools)
   for &l in b.layouts.items {
     if l.set_layout != 0 do vk.DestroyDescriptorSetLayout(device, l.set_layout, nil)
     delete(l.kinds)
@@ -228,6 +232,7 @@ rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
     timestamps = timestamps_supported(&b.gctx),
     backbuffer_copy = true,
     backbuffer_bgra = b.swapchain.format.format == .B8G8R8A8_SRGB || b.swapchain.format.format == .B8G8R8A8_UNORM,
+    max_buffer_size = int(b.gctx.device_properties.limits.maxStorageBufferRange),
   }
 }
 
@@ -251,7 +256,8 @@ READBACK_SLOTS :: FRAMES_IN_FLIGHT + 1
 
 @(private)
 rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, bool) {
-  usage: vk.BufferUsageFlags
+  // any buffer may be copied from and into (buffer_copy, cmd_copy_buffer)
+  usage: vk.BufferUsageFlags = {.TRANSFER_SRC, .TRANSFER_DST}
   for u in desc.usage do usage += {BUFFER_USAGES[u]}
   size := max(desc.size, 16)
   if desc.memory == .READBACK do size *= READBACK_SLOTS
@@ -309,6 +315,10 @@ rhi_buffer_read :: proc(b: ^Backend, handle: rhi.Buffer, offset: int, dst: []u8)
 @(private)
 rhi_bindless_write :: proc(b: ^Backend, array: rhi.BindlessArray, index: u32, resource: rhi.BindResource) {
   set := b.bindless_set
+  if index >= bindless_sizes(b)[array] {
+    log.errorf("Bindless %v index %d is past the device's %d", array, index, bindless_sizes(b)[array])
+    return
+  }
   switch array {
   case .STORAGE_IMAGES:
     view_ref, ok := resource.(rhi.TextureView)
@@ -337,6 +347,15 @@ rhi_buffer_write :: proc(b: ^Backend, handle: rhi.Buffer, offset: int, data: []u
     return true
   }
   return check(queue_buffer_write(&b.gctx, buffer, data, offset), "rhi buffer write")
+}
+
+// Queued with the staged writes; render retires src after, and RETIRE_GRACE outlasts the frame
+// that records the copy.
+@(private)
+rhi_buffer_copy :: proc(b: ^Backend, src: rhi.Buffer, src_offset: int, dst: rhi.Buffer, dst_offset: int, size: int) {
+  if size <= 0 do return
+  region := vk.BufferCopy{srcOffset = vk.DeviceSize(src_offset), dstOffset = vk.DeviceSize(dst_offset), size = vk.DeviceSize(size)}
+  queue_buffer_copy(&b.gctx, b.buffers.items[src].buffer, b.buffers.items[dst].buffer, region)
 }
 
 // A view of one mip: a cube's as its six layers, else one 2D level.
@@ -400,38 +419,55 @@ rhi_bind_layout_create :: proc(b: ^Backend, desc: rhi.BindLayoutDesc) -> (rhi.Bi
 }
 
 @(private = "file")
-set_pool_get :: proc(b: ^Backend) -> bool {
-  if b.set_pool != 0 do return true
+set_pool_create :: proc(b: ^Backend) -> (pool: vk.DescriptorPool, ok: bool) {
   sizes := [?]vk.DescriptorPoolSize {
-    {.STORAGE_BUFFER, RHI_MAX_SETS * 4},
-    {.SAMPLED_IMAGE, RHI_MAX_SETS * 8},
-    {.STORAGE_IMAGE, RHI_MAX_SETS},
+    {.STORAGE_BUFFER, RHI_POOL_SETS * 4},
+    {.SAMPLED_IMAGE, RHI_POOL_SETS * 8},
+    {.STORAGE_IMAGE, RHI_POOL_SETS},
   }
   info := vk.DescriptorPoolCreateInfo {
     sType         = .DESCRIPTOR_POOL_CREATE_INFO,
     flags         = {.FREE_DESCRIPTOR_SET},
-    maxSets       = RHI_MAX_SETS,
+    maxSets       = RHI_POOL_SETS,
     poolSizeCount = len(sizes),
     pPoolSizes    = raw_data(sizes[:]),
   }
-  return check(vk.CreateDescriptorPool(b.gctx.device, &info, nil, &b.set_pool), "rhi set pool")
+  ok = check(vk.CreateDescriptorPool(b.gctx.device, &info, nil, &pool), "rhi set pool")
+  if ok do append(&b.set_pools, pool)
+  return
+}
+
+// From the newest pool, then the older ones (freed sets return to theirs), then a new pool.
+@(private = "file")
+set_allocate :: proc(b: ^Backend, layout: vk.DescriptorSetLayout) -> (set: vk.DescriptorSet, pool: vk.DescriptorPool, ok: bool) {
+  layout := layout
+  for i := len(b.set_pools) - 1; i >= -1; i -= 1 {
+    if i >= 0 do pool = b.set_pools[i]
+    else do pool = set_pool_create(b) or_return
+    info := vk.DescriptorSetAllocateInfo {
+      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool     = pool,
+      descriptorSetCount = 1,
+      pSetLayouts        = &layout,
+    }
+    res := vk.AllocateDescriptorSets(b.gctx.device, &info, &set)
+    if res == .SUCCESS do return set, pool, true
+    if (res != .ERROR_OUT_OF_POOL_MEMORY && res != .ERROR_FRAGMENTED_POOL) || i < 0 {
+      check(res, "rhi bind group")
+      return
+    }
+  }
+  return
 }
 
 @(private)
 rhi_bind_group_create :: proc(b: ^Backend, desc: rhi.BindGroupDesc) -> (rhi.BindGroup, bool) {
-  if !set_pool_get(b) do return 0, false
   layout := &b.layouts.items[desc.layout]
-  set: vk.DescriptorSet
-  info := vk.DescriptorSetAllocateInfo {
-    sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-    descriptorPool     = b.set_pool,
-    descriptorSetCount = 1,
-    pSetLayouts        = &layout.set_layout,
-  }
-  if !check(vk.AllocateDescriptorSets(b.gctx.device, &info, &set), "rhi bind group") do return 0, false
+  set, pool, ok := set_allocate(b, layout.set_layout)
+  if !ok do return 0, false
   slot := rhi.pool_take(&b.groups, {})
   group := &b.groups.items[slot]
-  group.set = set
+  group.set, group.pool = set, pool
   for r, i in desc.resources {
     type := DESCRIPTOR_TYPES[layout.kinds[i]]
     switch v in r {
@@ -459,7 +495,7 @@ rhi_bind_group_create :: proc(b: ^Backend, desc: rhi.BindGroupDesc) -> (rhi.Bind
 rhi_bind_group_retire :: proc(b: ^Backend, handle: rhi.BindGroup) {
   if handle == 0 do return
   group := &b.groups.items[handle]
-  defer_destroy(&b.gctx, RetiredSet{b.set_pool, group.set})
+  defer_destroy(&b.gctx, RetiredSet{group.pool, group.set})
   for v in group.views do defer_destroy(&b.gctx, v)
   delete(group.views)
   rhi.pool_release(&b.groups, u32(handle))

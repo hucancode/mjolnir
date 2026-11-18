@@ -30,6 +30,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   buffer_create                   = rhi_buffer_create,
   buffer_retire                   = rhi_buffer_retire,
   buffer_write                    = rhi_buffer_write,
+  buffer_copy                     = rhi_buffer_copy,
   bindless_write                  = rhi_bindless_write,
   buffer_read                     = rhi_buffer_read,
   bind_layout_create              = rhi_bind_layout_create,
@@ -99,10 +100,6 @@ ReadbackSlot :: struct {
   frame:   u64,
 }
 
-// Command lists recorded at once: the frame's, plus a precompute's.
-@(private)
-MAX_CMDS :: 8
-
 @(private)
 Group :: struct {
   group: wgpu.BindGroup,
@@ -140,13 +137,14 @@ rhi_caps :: proc(b: ^Backend) -> rhi.Caps {
     indirect_first_instance = b.indirect_first_instance,
     backbuffer_copy = b.surface_copy,
     backbuffer_bgra = b.surface_format == .BGRA8Unorm,
+    max_buffer_size = b.max_buffer_size,
   }
 }
 
 @(private)
 rhi_buffer_create :: proc(b: ^Backend, desc: rhi.BufferDesc) -> (rhi.Buffer, bool) {
-  // every buffer takes writes (buffer_write)
-  usage := wgpu.BufferUsageFlags{.CopyDst}
+  // every buffer takes writes (buffer_write) and copies from and into it (buffer_copy)
+  usage := wgpu.BufferUsageFlags{.CopyDst, .CopySrc}
   for u in desc.usage do usage += {BUFFER_USAGES[u]}
   if desc.memory == .READBACK {
     rb := Readback{data = make([]u8, (max(desc.size, 4) + 3) &~ 3)}
@@ -249,6 +247,21 @@ rhi_buffer_write :: proc(b: ^Backend, buffer: rhi.Buffer, offset: int, data: []u
   copy(padded, data)
   wgpu.QueueWriteBuffer(b.queue, b.buffers.items[buffer], u64(offset), raw_data(padded), uint(size))
   return true
+}
+
+// QueueWriteBuffer is on the queue timeline already: the copy is submitted at once in an encoder
+// of its own, after the writes before it and before the ones after. WebGPU keeps a retired src
+// alive for it.
+@(private)
+rhi_buffer_copy :: proc(b: ^Backend, src: rhi.Buffer, src_offset: int, dst: rhi.Buffer, dst_offset: int, size: int) {
+  if size <= 0 do return
+  encoder := wgpu.DeviceCreateCommandEncoder(b.device)
+  // copies take 4-byte multiples; buffers are made 4-byte rounded
+  wgpu.CommandEncoderCopyBufferToBuffer(encoder, b.buffers.items[src], u64(src_offset), b.buffers.items[dst], u64(dst_offset), u64((size + 3) &~ 3))
+  commands := wgpu.CommandEncoderFinish(encoder)
+  wgpu.QueueSubmit(b.queue, {commands})
+  wgpu.CommandBufferRelease(commands)
+  wgpu.CommandEncoderRelease(encoder)
 }
 
 @(private = "file")
@@ -528,15 +541,12 @@ rhi_frame_begin :: proc(b: ^Backend, framebuffer_size: [2]u32) -> rhi.FrameStatu
 @(private)
 rhi_submit :: proc(b: ^Backend, desc: rhi.SubmitDesc) -> rhi.SyncPoint {
   cmds, queue := desc.cmds, desc.queue
-  if b.uniform_cursor > b.flushed {
-    wgpu.QueueWriteBuffer(
-      b.queue,
-      b.uniform_buffer,
-      u64(b.flushed),
-      &b.uniforms[b.flushed],
-      uint(b.uniform_cursor - b.flushed),
-    )
-    b.flushed = b.uniform_cursor
+  // an entry never straddles blocks: one write per block touched
+  for b.uniform_cursor > b.flushed {
+    end := min(b.uniform_cursor, (b.flushed / UNIFORM_CAPACITY + 1) * UNIFORM_CAPACITY)
+    block := b.uniform_blocks[b.flushed / UNIFORM_CAPACITY].buffer
+    wgpu.QueueWriteBuffer(b.queue, block, u64(b.flushed % UNIFORM_CAPACITY), &b.uniforms[b.flushed], uint(end - b.flushed))
+    b.flushed = end
   }
   buffers := make([]wgpu.CommandBuffer, len(cmds), context.temp_allocator)
   for c, i in cmds do buffers[i] = b.cmds[c].finished
@@ -576,7 +586,8 @@ rhi_cmd_begin :: proc(b: ^Backend, queue: rhi.Queue, thread: u32) -> rhi.Command
     c.encoder = wgpu.DeviceCreateCommandEncoder(b.device)
     return rhi.CommandList(i)
   }
-  panic("more than MAX_CMDS command lists at once")
+  append(&b.cmds, Cmd{encoder = wgpu.DeviceCreateCommandEncoder(b.device)})
+  return rhi.CommandList(len(b.cmds) - 1)
 }
 
 @(private)
@@ -708,21 +719,23 @@ rhi_cmd_label_end :: proc(b: ^Backend, cmd: rhi.CommandList) {
 @(private)
 rhi_cmd_bind_bindless :: proc(b: ^Backend, cmd: rhi.CommandList) {}
 
-// Writes data to the next entry of the uniform ring and binds the push group at its offset.
+// Writes data to the next entry of the uniform ring and binds its block's push group at its
+// offset; a full ring chains a block.
 @(private)
 rhi_cmd_push :: proc(b: ^Backend, cmd: rhi.CommandList, data: rawptr, size: u32) {
   state := &b.cmds[cmd]
   assert(size <= UNIFORM_ALIGNMENT)
   offset := b.uniform_cursor
-  assert(offset + UNIFORM_ALIGNMENT <= UNIFORM_CAPACITY, "uniform ring full")
+  if offset + UNIFORM_ALIGNMENT > len(b.uniforms) do uniform_block_add(b)
   if size > 0 do mem.copy(&b.uniforms[offset], data, int(size))
   b.uniform_cursor += UNIFORM_ALIGNMENT
+  group := b.uniform_blocks[offset / UNIFORM_CAPACITY].group
   push_set := b.pipelines.items[state.pipeline].push_set
   state.groups[push_set] = 0
   if state.render != nil {
-    wgpu.RenderPassEncoderSetBindGroup(state.render, push_set, b.frame_group, {u32(offset)})
+    wgpu.RenderPassEncoderSetBindGroup(state.render, push_set, group, {u32(offset % UNIFORM_CAPACITY)})
   } else {
-    wgpu.ComputePassEncoderSetBindGroup(state.compute, push_set, b.frame_group, {u32(offset)})
+    wgpu.ComputePassEncoderSetBindGroup(state.compute, push_set, group, {u32(offset % UNIFORM_CAPACITY)})
   }
 }
 

@@ -22,8 +22,9 @@ when RENDER_BACKEND == "vulkan" {
 
 
 TextureDesc :: rhi.TextureDesc
-MAX_TEXTURES :: rhi.MAX_TEXTURES
-MAX_ACTIVE_CAMERAS :: 128
+// The most cameras at once. A camera costs memory only once created (its images and draw
+// lists); this sizes the bindless arrays, a few bytes per entry.
+MAX_ACTIVE_CAMERAS :: 512
 // mips of the prefiltered environment cube
 PREFILTER_MIPS :: 5
 // the IBL precompute's storage targets: the irradiance cube, then each prefilter mip
@@ -34,12 +35,16 @@ MAX_DEPTH_MIPS :: 16
 // per camera and frame in flight, plus a draw-list slot per frame for the shadow views.
 MAX_PYRAMID_SLOTS :: MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
 MAX_DRAW_LIST_SLOTS :: (MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
+// The bindless storage-buffer indices draw lists take (Pool.DRAW_LISTS): a replaced list takes a
+// new one while frames in flight still read the old.
+DRAW_LIST_BINDINGS :: 4096
+#assert(DRAW_LIST_BINDINGS >= 2 * MAX_DRAW_LIST_SLOTS)
 // The bindless arrays: storage images hold the pyramids' mips, then the IBL precompute targets,
 // then the cameras' lit images and their ambient occlusion images, one each per pyramid slot;
 // storage buffers the draw lists; the extra buffer the pyramid counters, one u32 per pyramid slot.
 BINDLESS_SIZES :: [rhi.BindlessArray]u32 {
   .STORAGE_IMAGES  = MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS + PRECOMPUTE_TARGETS + 2 * MAX_PYRAMID_SLOTS,
-  .STORAGE_BUFFERS = MAX_DRAW_LIST_SLOTS,
+  .STORAGE_BUFFERS = DRAW_LIST_BINDINGS,
   .EXTRA_BUFFERS   = 1,
 }
 BACKBUFFER :: rhi.BACKBUFFER

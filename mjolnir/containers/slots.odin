@@ -32,9 +32,10 @@ Slots_State :: struct {
   generation: []u32,
   free:       [dynamic]u32,
   // Freed indices in free order with the tick they mature at; ticks only
-  // grow, so the matured ones are a prefix. The first `reclaimed` entries
-  // are the ones slots_tick / slots_flush last returned.
+  // grow, so the matured ones are a prefix from `head`. The `reclaimed` entries
+  // from `head` are the ones slots_tick / slots_flush last returned.
   retiring:   [dynamic]Retiring,
+  head:       int,
   reclaimed:  int,
   grace:      u64,
   tick:       u64,
@@ -64,7 +65,22 @@ slots_destroy :: proc(self: ^Slots) {
   self^ = {}
 }
 
-// slots_alloc returns a live index; false when every index is taken.
+// slots_grow raises the capacity to `capacity`, keeping every index and handle; a smaller
+// capacity is ignored. Grow the storage the indices name along with it.
+slots_grow :: proc(self: ^Slots, capacity: u32) {
+  if capacity <= self.capacity do return
+  live := make([]u64, (capacity + 63) / 64)
+  copy(live, self.live)
+  delete(self.live)
+  self.live = live
+  generation := make([]u32, capacity)
+  copy(generation, self.generation)
+  delete(self.generation)
+  self.generation = generation
+  self.capacity = capacity
+}
+
+// slots_alloc returns a live index; false when every index is taken (slots_grow makes room).
 slots_alloc :: proc(self: ^Slots) -> (index: u32, ok: bool) #optional_ok {
   if len(self.free) > 0 {
     index = pop(&self.free)
@@ -125,14 +141,28 @@ slots_flush :: proc(self: ^Slots) -> []Retiring {
 
 @(private = "file")
 reclaim :: proc(self: ^Slots, tick: u64) -> []Retiring {
-  remove_range(&self.retiring, 0, self.reclaimed)
-  self.reclaimed = 0
-  for r in self.retiring {
+  drop_reclaimed(self)
+  for r in self.retiring[self.head:] {
     if r.ready > tick do break
     append(&self.free, r.index)
     self.reclaimed += 1
   }
-  return self.retiring[:self.reclaimed]
+  return self.retiring[self.head:][:self.reclaimed]
+}
+
+// Drops the entries the last reclaim returned: the head moves past them, and the live rest
+// moves to the front only once the dropped part outgrows it, so each entry moves O(1) times.
+@(private = "file")
+drop_reclaimed :: proc(self: ^Slots) {
+  self.head += self.reclaimed
+  self.reclaimed = 0
+  if self.head == len(self.retiring) {
+    clear(&self.retiring)
+    self.head = 0
+  } else if self.head > len(self.retiring) / 2 {
+    remove_range(&self.retiring, 0, self.head)
+    self.head = 0
+  }
 }
 
 // slots_mark keeps every index handed out so far through slots_rewind.
@@ -149,10 +179,10 @@ slots_rewind :: proc(self: ^Slots) {
     self.live[i / 64] &~= 1 << (i % 64)
     self.generation[i] += 1
   }
-  remove_range(&self.retiring, 0, self.reclaimed)
-  self.reclaimed = 0
+  drop_reclaimed(self)
   n := 0
-  for r in self.retiring do if r.index < self.mark {self.retiring[n] = r; n += 1}
+  for r in self.retiring[self.head:] do if r.index < self.mark {self.retiring[n] = r; n += 1}
+  self.head = 0
   resize(&self.retiring, n)
   n = 0
   for i in self.free do if i < self.mark {self.free[n] = i; n += 1}

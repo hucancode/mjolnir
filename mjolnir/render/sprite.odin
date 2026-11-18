@@ -4,10 +4,6 @@ import "../containers"
 import "core:log"
 import "core:math"
 
-// MAX_SPRITE_FRAMES is the frames of every sprite frame set together: 3 MB per frame in flight
-// at the default (-define:MAX_SPRITE_FRAMES=n).
-MAX_SPRITE_FRAMES :: #config(MAX_SPRITE_FRAMES, 1 << 16)
-
 // SpriteFrame is one picture of a sprite: the texture coordinates its quad's top-left,
 // top-right, bottom-right and bottom-left corners show (an atlas entry stored turned is its
 // corners turned), and the quad's centre from the node and its size, both times the node's scale
@@ -32,14 +28,13 @@ sprite_frames_first :: proc(self: ^Renderer, frames: SpriteFramesHandle) -> (fir
 
 // sprite_frames_create stores a frame set, e.g. the frames of one texture atlas page (a
 // material draws from one texture, so a many-page atlas is a set and a material per page). It
-// lives until sprite_frames_destroy or teardown. false for no frames or past MAX_SPRITE_FRAMES
-// frames in all.
+// lives until sprite_frames_destroy or teardown. false for no frames.
 sprite_frames_create :: proc(self: ^Renderer, frames: []SpriteFrame) -> (handle: SpriteFramesHandle, ok: bool) #optional_ok {
   lock(self)
   if len(frames) == 0 do return 0, false
-  first, has_room := containers.ranges_alloc(&self.sprite_frame_ranges, u32(len(frames)))
+  first, has_room := ranges_alloc_growing(self, &self.sprite_frame_ranges, .SPRITE_FRAMES, u32(len(frames)))
   if !has_room {
-    log.warnf("No room for %d sprite frames past MAX_SPRITE_FRAMES (%d)", len(frames), MAX_SPRITE_FRAMES)
+    log.warnf("No room for %d sprite frames", len(frames))
     return 0, false
   }
   copy(write_table(self, .SPRITE_FRAMES, SpriteFrame)[first:], frames)

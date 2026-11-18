@@ -136,6 +136,12 @@ modules: shader
 		odin run $$d -out:bin/$$name -define:FRAMES=$(MODULE_FRAMES) || exit 1; \
 	done
 
+# Runs the render growth check (examples/modules/render_growth) on both backends: every resource
+# past a tiny reserve, failing on a dropped draw or a stalled frame.
+test-gpu: shader
+	odin run examples/modules/render_growth -out:bin/render_growth
+	odin run examples/modules/render_growth -out:bin/render_growth-wgpu -define:RENDER_BACKEND=wgpu
+
 clean:
 	rm -rf bin/*
 
@@ -170,4 +176,4 @@ compare-physics:
 	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt
 	perf report -i perf.data --stdio --no-children -n --percent-limit 1 >perf_report_after.txt
 
-.PHONY: run debug build build-debug shader run-wgpu build-wgpu example example-wgpu web doc record modules clean long-proc long-file long-example compare-physics
+.PHONY: run debug build build-debug shader run-wgpu build-wgpu example example-wgpu web doc record modules test-gpu clean long-proc long-file long-example compare-physics

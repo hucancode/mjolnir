@@ -50,7 +50,7 @@ PLACED := [PlacedKind]struct {
 @(private = "file")
 placed_row :: proc(self: ^Renderer, kind: PlacedKind, row: u32) -> ^[2]u32 {
   t := POOLS[PLACED[kind].pool].table
-  return (^[2]u32)(&self.tables[t][int(row) * TABLES[t].stride])
+  return (^[2]u32)(&self.tables[t][int(row) * TABLE_STRIDES[t]])
 }
 
 // the shadow pass draws these; the material type must also be in GBUFFER_TYPES
@@ -96,8 +96,9 @@ MeshAttachment :: struct {
   turned:       bool,
 }
 
-// SlotHandle is a scene slot: any u32 below MAX_SLOTS you pick, e.g. a scene graph node's
-// index; the cull's cost follows the highest slot in use, so keep them dense. Procs taking a
+// SlotHandle is a scene slot: any u32 you pick, e.g. a scene graph node's index; the slot table
+// grows to hold the highest (past Config.nodes), and the cull's cost follows the highest slot in
+// use, so keep them dense. Procs taking a
 // slot take a SlotHandle or any handle with an `index` field.
 SlotHandle :: distinct u32
 
@@ -119,13 +120,14 @@ Attachment :: union {
   ForceFieldHandle,
 }
 
-// Grows the slot range to cover `slot`; slots past it are already empty (zero). nil past
-// MAX_SLOTS. Caller holds the render mutex and marks what it changes.
+// Grows the slot range to cover `slot`, and the slot tables with it; slots past it are already
+// empty (zero). nil past the node table's ceiling. Caller holds the render mutex and marks what
+// it changes.
 @(private)
 slot_node :: proc(self: ^Renderer, slot: u32) -> ^Node {
-  if slot >= MAX_SLOTS {
-    log.errorf("Slot %d exceeds MAX_SLOTS", slot)
-    return nil
+  if int(slot) >= table_capacity(self, .NODES) {
+    if !table_grow(self, .NODES, int(slot) + 1) do return nil
+    when !BINDLESS do table_grow(self, .NODE_BATCH, table_capacity(self, .NODES))
   }
   self.node_count = max(self.node_count, slot + 1)
   return &write_table(self, .NODES, Node)[slot]
@@ -196,7 +198,7 @@ unbind :: proc(self: ^Renderer, slot: u32) {
 @(private)
 resource_create :: proc(self: ^Renderer, pool: Pool, value: $T) -> (index: u32, ok: bool) {
   lock(self)
-  index = containers.slots_alloc(&self.slots[pool]) or_return
+  index = pool_alloc(self, pool) or_return
   write_table(self, POOLS[pool].table, T)[index] = value
   mark_dirty(self, POOLS[pool].table, int(index))
   return index, true
@@ -216,6 +218,16 @@ resource_destroy :: proc(self: ^Renderer, pool: Pool, index: u32) {
   lock(self)
   if !containers.slots_free(&self.slots[pool], index) do return
   clear_entry(self, POOLS[pool].table, index)
+}
+
+// Takes a run of `count` from ranges, growing them and their table past the reserve.
+@(private)
+ranges_alloc_growing :: proc(self: ^Renderer, ranges: ^containers.Ranges, t: Table, count: u32) -> (first: u32, ok: bool) {
+  first, ok = containers.ranges_alloc(ranges, count)
+  if ok do return
+  table_grow(self, t, int(ranges.capacity + count)) or_return
+  containers.ranges_grow(ranges, u32(table_capacity(self, t)))
+  return containers.ranges_alloc(ranges, count)
 }
 
 // Gives the skinned vertices of the range at `base` to `owner` (slot + 1, 0 for none), for
@@ -241,7 +253,7 @@ release_bones :: proc(self: ^Renderer, slot: u32) {
 }
 
 // attach draws attachment at slot, replacing what the slot drew before; place sets where. A
-// slot is any index below MAX_SLOTS the application picks, usually a world node's index. A
+// slot is any index the application picks, usually a world node's index. A
 // skinned mesh with a palette (MeshAttachment.bones) gets the slot's range of skinned vertices,
 // kept while later attachments still fit in it.
 attach :: proc(self: ^Renderer, slot: $H, attachment: Attachment) {
@@ -278,9 +290,9 @@ attach :: proc(self: ^Renderer, slot: $H, attachment: Attachment) {
 place_row :: proc(self: ^Renderer, slot: u32, kind: PlacedKind, resource: u32) {
   release_bones(self, slot)
   p := PLACED[kind]
-  row, ok := containers.slots_alloc(&self.slots[p.pool])
+  row, ok := pool_alloc(self, p.pool)
   if !ok {
-    log.warnf("No room for more than %d placed %ss; the %s is dropped", POOLS[p.pool].capacity - 1, p.name, p.name)
+    log.warnf("No room for another placed %s; it is dropped", p.name)
     return
   }
   clear_entry(self, POOLS[p.pool].table, row)
@@ -303,11 +315,12 @@ skin :: proc(self: ^Renderer, slot: u32, bones: BonesHandle) {
   }
   if .SKINNED not_in node.flags || containers.ranges_size(&self.skin_ranges, node.skin_vertex_base) < mesh.vertex_count {
     release_bones(self, slot)
-    base, ok := containers.ranges_alloc(&self.skin_ranges, mesh.vertex_count)
+    base, ok := ranges_alloc_growing(self, &self.skin_ranges, .SKIN_OWNERS, mesh.vertex_count)
     if !ok {
-      log.warnf("No room for %d more skinned vertices past MAX_SKINNED_VERTICES (%d); the mesh draws unskinned", mesh.vertex_count, MAX_SKINNED_VERTICES)
+      log.warnf("No room for %d more skinned vertices; the mesh draws unskinned", mesh.vertex_count)
       return
     }
+    node = &write_table(self, .NODES, Node)[slot]
     node.skin_vertex_base = base
     node.flags += {.SKINNED}
     skin_own(self, base, slot + 1)

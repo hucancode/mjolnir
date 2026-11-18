@@ -2,11 +2,7 @@ package render
 
 import "../containers"
 import "core:log"
-// Emitters spawn into the backend's particle ring of MAX_PARTICLES (flush_particles).
-@(private)
-MAX_EMITTERS :: 64
-@(private)
-MAX_FORCE_FIELDS :: 32
+// Emitters spawn into the particle ring of Config.particles (flush_particles).
 
 // Emitter spawns particles from every slot it is attached to: emission_rate per second (0
 // pauses it), each living particle_lifetime seconds and blending from the *_start values to the
@@ -174,9 +170,9 @@ place_bursts :: proc(self: ^Renderer) {
       clear_entry(self, .EMITTER_PLACEMENTS, b.row)
       continue
     }
-    row, ok := containers.slots_alloc(&self.slots[.EMITTER_PLACEMENTS])
+    row, ok := pool_alloc(self, .EMITTER_PLACEMENTS)
     if !ok {
-      log.warnf("No room for more than %d placed emitters; the burst is dropped", MAX_EMITTERS - 1)
+      log.warnf("No room for another placed emitter; the burst is dropped")
       continue
     }
     write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[row] = {emitter = b.emitter, node = b.slot, burst = b.count}
@@ -197,20 +193,22 @@ flush_particles :: proc(self: ^Renderer) {
   emitters := write_table(self, .EMITTERS, Emitter)
   placements := write_table(self, .EMITTER_PLACEMENTS, EmitterPlacement)[:self.slots[.EMITTER_PLACEMENTS].high_water]
   p := &self.particle_params
-  p.emit_cursor = (p.emit_cursor + p.emit_total) % MAX_PARTICLES
+  p.emit_cursor = (p.emit_cursor + p.emit_total) % p.capacity
   t0, t1 := self.particle_time, self.time
   p.delta_time = f32(t1 - t0)
   total: u32
-  for &pl in placements {
+  for &pl, i in placements {
     // a free row reads emitter 0, whose rate is 0
     rate := f64(max(emitters[pl.emitter].emission_rate, 0))
     emit := pl.burst if pl.burst != 0 else u32(u64(rate * t1) - u64(rate * t0))
-    pl.emit_first = total
+    if pl.emit_first != total {
+      pl.emit_first = total
+      mark_dirty(self, .EMITTER_PLACEMENTS, i)
+    }
     total += emit
   }
-  mark_dirty(self, .EMITTER_PLACEMENTS, 0, len(placements))
   // a ring slot takes at most one new particle per frame
-  p.emit_total = min(total, MAX_PARTICLES)
+  p.emit_total = min(total, p.capacity)
   p.emitter_placement_count = u32(len(placements))
   p.force_field_placement_count = self.slots[.FORCE_FIELD_PLACEMENTS].high_water
   p.frame_counter += 1

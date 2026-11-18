@@ -27,7 +27,8 @@ debug_line_init :: proc(self: ^Renderer) -> bool {
 @(private)
 debug_line_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
   // filled segments of each ring
-  counts := [2]u32{u32(min(self.debug_filled[0], DEBUG_RING)), u32(min(self.debug_filled[1], DEBUG_RING))}
+  ring := u64(debug_ring(self))
+  counts := [2]u32{u32(min(self.debug_filled[0], ring)), u32(min(self.debug_filled[1], ring))}
   if counts == {} do return
   colors := [1]rhi.ColorTarget{{texture = BACKBUFFER, load = .LOAD}}
   dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:], depth = rhi.DepthTarget{texture = self.camera_targets[cam].images[.DEPTH][f], load = .LOAD, read_only = true}})
@@ -37,7 +38,7 @@ debug_line_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u3
   for count, ring in counts {
     if count == 0 do continue
     dev.cmd_bind_pipeline(&self.gpu, cmd, self.pipelines[.DEBUG_LINE if ring == 0 else .DEBUG_LINE_OVER])
-    dev.cmd_draw(&self.gpu, cmd, 2 * count, 1, u32(ring) * 2 * DEBUG_RING, 0)
+    dev.cmd_draw(&self.gpu, cmd, 2 * count, 1, u32(ring) * 2 * u32(debug_ring(self)), 0)
   }
   dev.cmd_end_pass(&self.gpu, cmd)
 }

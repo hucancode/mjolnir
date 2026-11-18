@@ -47,10 +47,6 @@ camera_ready :: proc(self: ^Renderer, c: u32) -> bool {
 @(private)
 SHADOW_DRAW_SLOT_BASE :: MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
 #assert(SHADOW_DRAW_SLOT_BASE + FRAMES_IN_FLIGHT <= MAX_DRAW_LIST_SLOTS)
-@(private)
-CAMERA_LIST_CAPACITY :: MAX_SLOTS
-@(private)
-SHADOW_LIST_CAPACITY :: 4096 * MAX_SHADOW_VIEWS
 
 // Camera is a view into the scene: pose, projection and the lighting passes it runs. Its
 // images are camera_image's.
@@ -98,8 +94,9 @@ DEFAULT_AMBIENT_OCCLUSION :: AmbientOcclusion {
 @(private)
 CameraTargets :: struct {
   extent:        [2]u32, // width, height
+  // per frame in flight; an image not in CAMERA_IMAGES_PER_FRAME is one texture in every entry
   images:        [CameraImage][FRAMES_IN_FLIGHT]TextureHandle,
-  // the effects ping-pong through FINAL_IMAGE and these
+  // the effects ping-pong through FINAL_IMAGE and these, one pair in every entry
   post:          [FRAMES_IN_FLIGHT][2]TextureHandle,
   // the depth pyramid of each frame, and whether its storage views are in the bindless array
   pyramid:       [FRAMES_IN_FLIGHT]TextureHandle,
@@ -259,12 +256,12 @@ make_camera :: proc(
 // the main camera is presented to the swapchain.
 camera_create :: proc(self: ^Renderer, size: [2]u32, c: Camera) -> (handle: CameraHandle, ok: bool) #optional_ok {
   lock(self)
-  handle = CameraHandle(containers.slots_alloc(&self.slots[.CAMERAS]) or_return)
+  handle = CameraHandle(pool_alloc(self, .CAMERAS) or_return)
   self.cameras[handle] = c
   self.camera_targets[handle] = {extent = size}
   // the lists' size does not depend on the camera's extent
   for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    if !draw_list_create(self, camera_slot(u32(handle)) + frame, shadow = false) {
+    if !draw_list_reserve(self, camera_slot(u32(handle)) + frame, shadow = false) {
       free_camera(self, handle)
       return 0, false
     }
@@ -292,9 +289,10 @@ free_camera :: proc(self: ^Renderer, handle: CameraHandle) {
 }
 
 // camera_image returns one of a camera's images as the next frame renders it. The camera
-// renders into a new copy each frame, so the handle changes: fetch it again every frame.
-// previous_frame returns the picture the last frame finished instead, the one to sample
-// (render-to-texture): it never depends on the order cameras draw in.
+// renders FINAL_IMAGE and DEPTH into a new copy each frame, so their handles change: fetch them
+// again every frame. previous_frame returns the picture the last frame finished instead, the
+// one to sample (render-to-texture): it never depends on the order cameras draw in. The other
+// images have one copy, rewritten every frame: previous_frame gives the same one.
 camera_image :: proc(
   self: ^Renderer,
   handle: CameraHandle,
@@ -366,7 +364,8 @@ View :: struct {
 }
 #assert(size_of(View) == 464)
 
-// A camera's images and depth pyramids, one set per frame in flight (pyramid_shape).
+// A camera's images and depth pyramids: a pyramid and the images a later frame reads per frame
+// in flight, one of the rest (pyramid_shape, CAMERA_IMAGES_PER_FRAME).
 @(private)
 create_targets :: proc(self: ^Renderer, index: u32) -> bool {
   targets := &self.camera_targets[index]
@@ -375,12 +374,17 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
     desc := images[a]
     desc.extent = targets.extent
     for frame in 0 ..< FRAMES_IN_FLIGHT {
+      if frame > 0 && a not_in CAMERA_IMAGES_PER_FRAME {
+        targets.images[a][frame] = targets.images[a][0]
+        continue
+      }
       targets.images[a][frame] = allocate_texture(self, desc, target = true) or_return
     }
   }
   post := images[.FINAL_IMAGE]
   post.extent = targets.extent
-  for &frame in targets.post do for &p in frame do p = allocate_texture(self, post, target = true) or_return
+  for &p in targets.post[0] do p = allocate_texture(self, post, target = true) or_return
+  for &frame in targets.post[1:] do frame = targets.post[0]
   half, mips := pyramid_shape(targets.extent)
   pyramid := TextureDesc {
     extent     = half,
@@ -399,31 +403,35 @@ create_targets :: proc(self: ^Renderer, index: u32) -> bool {
 @(private)
 destroy_targets :: proc(self: ^Renderer, index: u32) {
   targets := &self.camera_targets[index]
-  for frames in targets.images do for handle in frames do texture_destroy(self, handle)
-  for frame in targets.post do for handle in frame do texture_destroy(self, handle)
+  for frames, a in targets.images {
+    for handle, frame in frames do if frame == 0 || a in CAMERA_IMAGES_PER_FRAME do texture_destroy(self, handle)
+  }
+  for handle in targets.post[0] do texture_destroy(self, handle)
   for handle in targets.pyramid do texture_destroy(self, handle)
   targets.images, targets.post, targets.pyramid, targets.pyramid_bound = {}, {}, {}, {}
   groups_clear(self)
 }
 
 
-// Writes the camera views, in slot order.
+// Writes the camera views, in slot order, marking only the ones that changed. Each camera's
+// next draw lists first grow to hold every node.
 @(private)
 flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
-  views := write_table(self, .VIEWS, View)
-  // a slot without a camera keeps an empty view that draws no type
-  slot_count := self.slots[.CAMERAS].high_water
-  slice.zero(views[CAMERA_VIEW_BASE:][:slot_count])
-  mark_dirty(self, .VIEWS, CAMERA_VIEW_BASE, int(slot_count))
   all_types := u32(1 << DRAW_LISTS - 1)
-  c: u32
-  for i in containers.slots_next(&self.slots[.CAMERAS], &c) {
+  for i in 0 ..< self.slots[.CAMERAS].high_water {
+    // a slot without a camera keeps an empty view that draws no type
+    if !containers.slots_live(&self.slots[.CAMERAS], i) {
+      write_entry(self, .VIEWS, int(CAMERA_VIEW_BASE + i), View{})
+      continue
+    }
+    // frame N builds pyramid N from N-1's depth and culls into N+1's lists
+    next := camera_next_slot(i, frame_index)
+    if !draw_list_reserve(self, next, shadow = false) do log.errorf("Camera %d: cannot grow its draw lists", i)
     cam, targets := &self.cameras[i], &self.camera_targets[i]
     view := camera_view_matrix(cam)
     projection := camera_projection_matrix(cam, targets.extent)
     view_projection := projection * view
-    v := &views[CAMERA_VIEW_BASE + i]
-    v^ = {
+    v := View {
       view                = view,
       projection          = projection,
       view_projection     = view_projection,
@@ -438,12 +446,12 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       list_stride         = 1,
       type_mask           = all_types,
       require_flags       = {.VISIBLE},
-      // frame N builds pyramid N from N-1's depth and culls into N+1's lists
-      draw_list           = camera_next_slot(i, frame_index),
-      list_capacity       = CAMERA_LIST_CAPACITY,
+      draw_list           = self.draw_lists[next].binding,
+      list_capacity       = self.draw_lists[next].capacity,
       time                = f32(self.time),
       hidden_layers       = cam.hidden_layers,
     }
     for a in CameraImage do v.images[a] = u32(targets.images[a][frame_index])
+    write_entry(self, .VIEWS, int(CAMERA_VIEW_BASE + i), v)
   }
 }

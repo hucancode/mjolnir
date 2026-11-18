@@ -32,7 +32,6 @@ overlay_clear :: proc(self: ^Renderer) {
   clear(&self.overlay_vertices)
   clear(&self.overlay_indices)
   clear(&self.overlay_batches)
-  self.overlay_full = false
 }
 
 // A batch takes the texture and sampler of its first draw.
@@ -65,15 +64,6 @@ end_batch :: proc(self: ^Renderer) {
   last.index_count = u32(len(self.overlay_indices)) - last.first_index
 }
 
-// Whether `vertices` and `indices` more still fit; past the capacity the draw is dropped, warned about
-// once per staging.
-@(private = "file")
-has_room :: proc(self: ^Renderer, vertices, indices: int) -> bool {
-  if len(self.overlay_vertices) + vertices <= OVERLAY_MAX_VERTICES && len(self.overlay_indices) + indices <= OVERLAY_MAX_INDICES do return true
-  if !self.overlay_full do log.warnf("The overlay is full (%d vertices, %d indices); the draws past it are dropped", OVERLAY_MAX_VERTICES, OVERLAY_MAX_INDICES)
-  self.overlay_full = true
-  return false
-}
 
 // Appends the canvases' batches by z (ascending, stable), in window units scaled to framebuffer
 // pixels; FONT_TEXTURE batches sample text_font's atlas, which draws nothing without it.
@@ -112,7 +102,6 @@ batch_canvases :: proc(self: ^Renderer, canvases: []^ui.Canvas, text_font: ^font
       texture = atlas.texture
       texels = {f32(atlas.size.x), f32(atlas.size.y)}
     }
-    if !has_room(self, int(b.vertex_count), int(b.index_count)) do continue
     use_texture(self, texture, b.smooth)
     base := u32(len(self.overlay_vertices))
     for v in vertices[b.first_vertex:][:b.vertex_count] do append(&self.overlay_vertices, Vertex2D{v.pos * scale, v.uv / texels, v.color})

@@ -2,14 +2,14 @@ package render
 
 import "rhi"
 
-// Particles live in a ring buffer of MAX_PARTICLES slots (oldest overwritten when full).
+// Particles live in a ring buffer of Config.particles slots (oldest overwritten when full).
 // Emit spawns each emitter's share at its ring cursor; simulate advances live slots in place
 // and appends them to the alive list, whose header is the indirect draw: one point per alive
 // particle (Vulkan), or a camera-facing quad of six vertices instanced per alive particle
 // (WebGPU points are one pixel).
-@(private = "file")
+// init rounds Config.particles up to a multiple
+@(private)
 COMPUTE_PARTICLE_BATCH :: 256
-#assert(MAX_PARTICLES % COMPUTE_PARTICLE_BATCH == 0)
 
 // a slot is dead when life <= 0
 @(private)
@@ -66,15 +66,17 @@ particles_init :: proc(self: ^Renderer) -> bool {
       depth = material_pass_depth(.FORWARD),
     },
   ) or_return
+  self.particle_params.capacity = self.config.particles
   return particles_reset(self)
 }
 
-// Kills every particle before the next frame.
+// Kills every particle before the next frame: its draws see none alive, and its simulation
+// clears the ring first.
 @(private)
 particles_reset :: proc(self: ^Renderer) -> bool {
   self.particle_params.emit_cursor = 0
   self.particle_params.emit_total = 0
-  dev.buffer_write(&self.gpu, self.buffers[.PARTICLES][0], 0, make([]u8, MAX_PARTICLES * size_of(Particle), context.temp_allocator)) or_return
+  self.particles_clear = true
   header := [PARTICLE_ALIVE_HEADER]u32{0, 1, 0, 0} if BINDLESS else {6, 0, 0, 0}
   return dev.buffer_write(&self.gpu, self.buffers[.PARTICLE_ALIVE][0], 0, ([^]u8)(&header)[:size_of(header)])
 }
@@ -88,6 +90,8 @@ particles_simulate :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   // the alive count: the vertex count for points, the instance count for quads
   count_word := 0 if BINDLESS else size_of(u32)
   dev.cmd_fill_buffer(&self.gpu, cmd, self.buffers[.PARTICLE_ALIVE][0], count_word, size_of(u32))
+  if self.particles_clear do dev.cmd_fill_buffer(&self.gpu, cmd, self.buffers[.PARTICLES][0], 0, self.buffer_sizes[.PARTICLES][0])
+  self.particles_clear = false
   dev.cmd_begin_compute(&self.gpu, cmd)
   defer dev.cmd_end_compute(&self.gpu, cmd)
   if params.emit_total > 0 {
@@ -96,7 +100,7 @@ particles_simulate :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   }
   barrier(self, cmd, .FILL_TO_COMPUTE)
   pipeline_bind(self, cmd, self.pipelines[.PARTICLE_SIMULATE], .PARTICLE_SIMULATE, f, params, .NONE)
-  dev.cmd_dispatch(&self.gpu, cmd, MAX_PARTICLES / COMPUTE_PARTICLE_BATCH, 1, 1)
+  dev.cmd_dispatch(&self.gpu, cmd, params.capacity / COMPUTE_PARTICLE_BATCH, 1, 1)
 }
 
 // Inside the forward pass. Where textures are bound as groups (WebGPU) particles sample the

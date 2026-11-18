@@ -17,14 +17,20 @@ DebugLineSegment :: struct {
 }
 #assert(size_of(DebugLineSegment) == 48)
 
-// Segments beyond DEBUG_RING per ring between two frames are dropped. life <= 0 shows the
+// The segments of each ring: half the debug line table each.
+@(private)
+debug_ring :: #force_inline proc(self: ^Renderer) -> int {
+  return int(self.config.debug_lines / 2)
+}
+
+// Segments beyond a ring (Config.debug_lines / 2) between two frames are dropped. life <= 0 shows the
 // segment for one frame.
 @(private)
 debug_line_add :: proc(self: ^Renderer, life: f32, bypass_depth: bool, segs: ..DebugLineSegment) {
   sync.mutex_lock(&self.debug_mutex)
   defer sync.mutex_unlock(&self.debug_mutex)
   inbox := &self.debug_lines[1 if bypass_depth else 0]
-  if len(inbox) + len(segs) > DEBUG_RING do return
+  if len(inbox) + len(segs) > debug_ring(self) do return
   // one-frame segments (life <= 0) are stamped at flush, once the clock for the frame that
   // draws them is known; update may advance it between this call and that frame
   expiry: f32 = -1
@@ -43,18 +49,19 @@ flush_debug_lines :: proc(self: ^Renderer) {
   sync.mutex_lock(&self.debug_mutex)
   defer sync.mutex_unlock(&self.debug_mutex)
   table := write_table(self, .DEBUG_LINES, DebugLineSegment)
+  ring_size := debug_ring(self)
   for &inbox, ring in self.debug_lines {
     if len(inbox) == 0 do continue
-    start := int(self.debug_filled[ring] % DEBUG_RING)
+    start := int(self.debug_filled[ring] % u64(ring_size))
     for seg, k in inbox {
       seg := seg
       if seg.expiry < 0 do seg.expiry = f32(self.time)
-      table[ring * DEBUG_RING + (start + k) % DEBUG_RING] = seg
+      table[ring * ring_size + (start + k) % ring_size] = seg
     }
     // the ring's written run, which wraps past its end at most once (inboxes hold a ring at most)
-    first := min(len(inbox), DEBUG_RING - start)
-    mark_dirty(self, .DEBUG_LINES, ring * DEBUG_RING + start, first)
-    mark_dirty(self, .DEBUG_LINES, ring * DEBUG_RING, len(inbox) - first)
+    first := min(len(inbox), ring_size - start)
+    mark_dirty(self, .DEBUG_LINES, ring * ring_size + start, first)
+    mark_dirty(self, .DEBUG_LINES, ring * ring_size, len(inbox) - first)
     self.debug_filled[ring] += u64(len(inbox))
     clear(&inbox)
   }

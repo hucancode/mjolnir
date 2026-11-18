@@ -2,7 +2,6 @@
 // after the previous one; once the ring is full new particles overwrite the oldest.
 #include "common.slang"
 
-static const uint MAX_PARTICLES = 65536;
 
 struct Particle {
     float3 position;
@@ -64,6 +63,8 @@ struct ParticleSystemParams {
     uint emit_total;
     // ring slot of the first one
     uint emit_cursor;
+    // the ring's slots (Config.particles)
+    uint capacity;
 }
 PUSH_BLOCK(ParticleSystemParams, params)
 
@@ -121,7 +122,7 @@ void main(uint3 gid : SV_DispatchThreadID)
     uint placement_index = find_placement(id);
     EmitterPlacement placed = placements[placement_index];
     Emitter emitter = emitters[placed.emitter];
-    uint idx = (params.emit_cursor + id) % MAX_PARTICLES;
+    uint idx = (params.emit_cursor + id) % params.capacity;
     // varies across frames, placements and particles: without frame_counter low-rate emitters
     // would spawn at the same point every frame
     uint seed = pcg_hash(idx

@@ -41,14 +41,15 @@ Backend :: struct {
   // the device is up and every resource made; failed: it never will be
   up, failed:                 bool,
   context_:                   runtime.Context,
-  textures:                   []Texture,
+  // by handle, grown to the highest handle made (texture_create)
+  textures:                   [dynamic]Texture,
   samplers:                   [rhi.SamplerType]wgpu.Sampler,
-  // the push group (pipeline.odin): its layout, group and the uniform ring
+  // the push group (pipeline.odin): its layout, and the blocks of the uniform ring with a group each
   frame_layout:               wgpu.BindGroupLayout,
-  frame_group:                wgpu.BindGroup,
-  uniform_buffer:             wgpu.Buffer,
-  // the ring's entries so far this frame (rhi_cmd_push), written to uniform_buffer on submission
-  uniforms:                   []u8,
+  uniform_blocks:             [dynamic]UniformBlock,
+  // the ring's entries so far this frame (rhi_cmd_push), UNIFORM_CAPACITY per block, written to
+  // the blocks on submission
+  uniforms:                   [dynamic]u8,
   uniform_cursor:             int,
   mipgen_layout:              wgpu.BindGroupLayout,
   mipgen_pipelines:           [dynamic]MipgenPipeline,
@@ -65,7 +66,9 @@ Backend :: struct {
   // READBACK buffers by handle
   readbacks:                  map[rhi.Buffer]Readback,
   // the command lists being recorded or awaiting submission; an encoder marks one taken
-  cmds:                       [MAX_CMDS]Cmd,
+  cmds:                       [dynamic]Cmd,
+  // the largest buffer a shader binds whole (rhi.Caps.max_buffer_size)
+  max_buffer_size:            int,
 }
 
 // init brings WebGPU up on window, which has no bindless arrays: instance, surface, then adapter and device, which the web
@@ -100,25 +103,22 @@ on_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Adapter
     return
   }
   b.adapter = adapter
-  // core WebGPU's default limits fit: the largest storage binding (the vertex buffer) is the
-  // default 128 MiB, and a stage binds at most the default 8 storage buffers. Indirect first
-  // instance lets batches of a material share one instance stream binding.
+  // Indirect first instance lets batches of a material share one instance stream binding.
   features: [1]wgpu.FeatureName
   feature_count := 0
   if wgpu.AdapterHasFeature(adapter, .IndirectFirstInstance) {
     features[0] = .IndirectFirstInstance
     feature_count = 1
   }
-  wgpu.AdapterRequestDevice(
-    adapter,
-    &{
-      requiredFeatureCount = uint(feature_count),
-      requiredFeatures = raw_data(features[:]),
-      uncapturedErrorCallbackInfo = {callback = on_error, userdata1 = b},
-      deviceLostCallbackInfo = {mode = .AllowProcessEvents, callback = on_lost, userdata1 = b},
-    },
-    {mode = .AllowProcessEvents, callback = on_device, userdata1 = b},
-  )
+  // the adapter's buffer limits, so render's buffers grow past the default 128 MiB binding
+  supported, _ := wgpu.AdapterGetLimits(adapter)
+  desc := wgpu.DeviceDescriptor {
+    requiredFeatureCount = uint(feature_count),
+    requiredFeatures = raw_data(features[:]),
+    uncapturedErrorCallbackInfo = {callback = on_error, userdata1 = b},
+    deviceLostCallbackInfo = {mode = .AllowProcessEvents, callback = on_lost, userdata1 = b},
+  }
+  device_request(adapter, &desc, supported, {mode = .AllowProcessEvents, callback = on_device, userdata1 = b})
 }
 
 @(private = "file")
@@ -134,6 +134,9 @@ on_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, me
   b.queue = wgpu.DeviceGetQueue(device)
   b.indirect_first_instance = bool(wgpu.DeviceHasFeature(device, .IndirectFirstInstance))
   log.infof("WebGPU indirect first instance: %v", b.indirect_first_instance)
+  limits, _ := wgpu.DeviceGetLimits(device)
+  b.max_buffer_size = int(min(limits.maxBufferSize, limits.maxStorageBufferBindingSize))
+  log.infof("WebGPU max buffer %d MiB, storage binding %d MiB", limits.maxBufferSize >> 20, limits.maxStorageBufferBindingSize >> 20)
   resources_init(b)
   b.up = true
 }
@@ -157,7 +160,8 @@ on_lost :: proc "c" (device: ^wgpu.Device, reason: wgpu.DeviceLostReason, messag
 resources_init :: proc(b: ^Backend) {
   size, _ := window_size(b)
   surface_configure(b, size)
-  b.textures = make([]Texture, rhi.MAX_TEXTURES)
+  // handle 0 (none) and the first handles without a resize
+  b.textures = make([dynamic]Texture, 256)
   samplers_init(b)
   frame_group_init(b)
 }
@@ -204,8 +208,10 @@ shutdown :: proc(b: ^Backend) {
     for &t in b.textures do texture_release(&t)
     rhi_shutdown(b)
     for p in b.mipgen_pipelines do wgpu.RenderPipelineRelease(p.pipeline)
-    wgpu.BindGroupRelease(b.frame_group)
-    wgpu.BufferRelease(b.uniform_buffer)
+    for u in b.uniform_blocks {
+      wgpu.BindGroupRelease(u.group)
+      wgpu.BufferRelease(u.buffer)
+    }
     layouts := [?]wgpu.BindGroupLayout{b.frame_layout, b.mipgen_layout}
     for l in layouts do if l != nil do wgpu.BindGroupLayoutRelease(l)
     for s in b.samplers do wgpu.SamplerRelease(s)
@@ -216,6 +222,8 @@ shutdown :: proc(b: ^Backend) {
   delete(b.textures)
   delete(b.mipgen_pipelines)
   delete(b.uniforms)
+  delete(b.uniform_blocks)
+  delete(b.cmds)
   if b.adapter != nil do wgpu.AdapterRelease(b.adapter)
   if b.surface != nil do wgpu.SurfaceRelease(b.surface)
   if b.instance != nil do wgpu.InstanceRelease(b.instance)

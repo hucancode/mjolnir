@@ -3,21 +3,17 @@ package vulkan_backend
 
 import rhi "../rhi"
 
+import "base:builtin"
+
 import "core:log"
 import vk "vendor:vulkan"
-
-
-
-
-
-
 @(private)
 SCENE_STAGES :: vk.ShaderStageFlags{.VERTEX, .FRAGMENT, .COMPUTE}
 
 // Bindings of the bindless set (set 1). Shaders repeat these numbers as
 // literals.
 @(private)
-BINDING_TEXTURES :: 0 // [MAX_TEXTURES] sampled images, 2D and cube
+BINDING_TEXTURES :: 0 // [texture_slots] sampled images, 2D and cube
 @(private)
 BINDING_SAMPLERS :: 1 // one sampler per rhi.SamplerType
 @(private)
@@ -40,11 +36,41 @@ bindless_sizes :: proc(b: ^Backend) -> (sizes: [rhi.BindlessArray]u32) {
   return
 }
 
+// Descriptors of each type left to the bind group sets of a pipeline beside the bindless set.
+@(private = "file")
+BIND_GROUP_HEADROOM :: 64
+
+// Fits the bindless arrays to the device's per-stage and per-set limits, the bind group sets'
+// headroom kept: the texture array is rhi.MAX_TEXTURES long where the device allows, and the
+// two storage buffer arrays share one limit. Before bindless_bindings.
+@(private)
+bindless_clamp :: proc(b: ^Backend) {
+  limits := &b.gctx.device_properties.limits
+  budget :: proc(per_stage, per_set: u32) -> u32 {
+    n := min(per_stage, per_set)
+    return max(n - min(BIND_GROUP_HEADROOM, n / 2), 1)
+  }
+  sizes := bindless_sizes(b)
+  b.texture_slots = min(rhi.MAX_TEXTURES, budget(limits.maxPerStageDescriptorSampledImages, limits.maxDescriptorSetSampledImages))
+  // the samplers and storage arrays count against the per-stage resources too
+  others := len(rhi.SamplerType) + sizes[.STORAGE_IMAGES] + sizes[.STORAGE_BUFFERS] + sizes[.EXTRA_BUFFERS]
+  resources := budget(limits.maxPerStageResources, limits.maxPerStageResources)
+  if others < resources do b.texture_slots = min(b.texture_slots, resources - others)
+  if b.texture_slots < rhi.MAX_TEXTURES do log.infof("Bindless textures clamped to %d of %d by the device limits", b.texture_slots, rhi.MAX_TEXTURES)
+  clamped := sizes
+  clamped[.STORAGE_IMAGES] = min(sizes[.STORAGE_IMAGES], budget(limits.maxPerStageDescriptorStorageImages, limits.maxDescriptorSetStorageImages))
+  buffers := budget(limits.maxPerStageDescriptorStorageBuffers, limits.maxDescriptorSetStorageBuffers)
+  clamped[.EXTRA_BUFFERS] = min(sizes[.EXTRA_BUFFERS], max(buffers / 2, 1))
+  clamped[.STORAGE_BUFFERS] = min(sizes[.STORAGE_BUFFERS], max(buffers - clamped[.EXTRA_BUFFERS], 1))
+  for n, a in clamped do if n < sizes[a] do log.infof("Bindless %v clamped to %d of %d by the device limits", a, n, sizes[a])
+  b.bindless_sizes = clamped
+}
+
 @(private)
 bindless_bindings :: proc(b: ^Backend) -> [5]DescriptorBinding {
   sizes := bindless_sizes(b)
   return {
-    BINDING_TEXTURES        = {.SAMPLED_IMAGE, rhi.MAX_TEXTURES, SCENE_STAGES},
+    BINDING_TEXTURES        = {.SAMPLED_IMAGE, b.texture_slots, SCENE_STAGES},
     BINDING_SAMPLERS        = {.SAMPLER, len(rhi.SamplerType), SCENE_STAGES},
     BINDING_STORAGE_IMAGES  = {.STORAGE_IMAGE, sizes[.STORAGE_IMAGES], {.COMPUTE}},
     BINDING_STORAGE_BUFFERS = {.STORAGE_BUFFER, sizes[.STORAGE_BUFFERS], {.COMPUTE}},
@@ -141,8 +167,13 @@ texture_create :: proc(b: ^Backend, handle: rhi.TextureHandle, desc: rhi.Texture
     log.errorf("Texture %d (%v %dx%d) creation failed: %v", handle, desc.format, desc.extent.x, desc.extent.y, res)
     return false
   }
+  if int(handle) >= len(b.textures) do builtin.resize(&b.textures, max(int(handle) + 1, 2 * len(b.textures), 256))
   b.textures[handle] = img
-  write_descriptor(&b.gctx, b.bindless_set, BINDING_TEXTURES, u32(handle), .SAMPLED_IMAGE, vk.DescriptorImageInfo{imageView = img.view, imageLayout = .GENERAL})
+  if u32(handle) < b.texture_slots {
+    write_descriptor(&b.gctx, b.bindless_set, BINDING_TEXTURES, u32(handle), .SAMPLED_IMAGE, vk.DescriptorImageInfo{imageView = img.view, imageLayout = .GENERAL})
+  } else {
+    log.warnf("Texture %d is past the device's %d bindless textures: not sampled through the array", handle, b.texture_slots)
+  }
   return true
 }
 
@@ -174,16 +205,17 @@ image_from_desc :: proc(b: ^Backend, desc: rhi.TextureDesc, data: []u8) -> (img:
 
 // texture_destroy destroys handle's texture at once: render retires the handle first.
 texture_destroy :: proc(b: ^Backend, handle: rhi.TextureHandle) {
-  image_destroy(&b.gctx, &b.textures[handle])
+  if int(handle) < len(b.textures) do image_destroy(&b.gctx, &b.textures[handle])
 }
 
 // texture_desc is what handle's texture was made from (mip_levels and layers at least 1).
 texture_desc :: proc(b: ^Backend, handle: rhi.TextureHandle) -> rhi.TextureDesc {
-  return b.textures[handle].desc
+  return b.textures[handle].desc if int(handle) < len(b.textures) else {}
 }
 
 @(private)
 texture_image :: proc(b: ^Backend, handle: rhi.TextureHandle) -> ^Image {
+  if int(handle) >= len(b.textures) do return nil
   img := &b.textures[handle]
   return img if img.image != 0 else nil
 }

@@ -36,7 +36,17 @@ ranges_destroy :: proc(self: ^Ranges) {
   self^ = {}
 }
 
-// ranges_alloc returns the first index of a run of `count`; false when no free run is that long.
+// ranges_grow raises the capacity to `capacity`, adding old ..< capacity as free; a smaller
+// capacity is ignored. Live runs keep their place.
+ranges_grow :: proc(self: ^Ranges, capacity: u32) {
+  if capacity <= self.capacity do return
+  old := self.capacity
+  self.capacity = capacity
+  release(self, old, capacity - old)
+}
+
+// ranges_alloc returns the first index of a run of `count`; false when no free run is that long
+// (ranges_grow makes room).
 // A run of 0 takes nothing and is always there.
 ranges_alloc :: proc(self: ^Ranges, count: u32) -> (first: u32, ok: bool) #optional_ok {
   if count == 0 do return 0, true

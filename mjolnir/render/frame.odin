@@ -17,6 +17,8 @@ Barrier :: enum {
   FILL_TO_COMPUTE,
   // colors a pass wrote are sampled by a later one (render-to-texture, post-process input)
   COLOR_TO_SAMPLE,
+  // the camera images with one copy are rewritten after the previous frame's passes read them
+  SAMPLE_TO_REWRITE,
   GBUFFER_TO_LIGHTING,
   LIGHTING_TO_FORWARD,
   FORWARD_TO_COMPUTE,
@@ -49,6 +51,10 @@ BARRIERS := [Barrier]rhi.Barrier {
   .COLOR_TO_SAMPLE = {
     src_stage = {.COLOR_ATTACHMENT_OUTPUT}, dst_stage = {.FRAGMENT_SHADER},
     src_access = {.COLOR_ATTACHMENT_WRITE}, dst_access = {.SHADER_READ},
+  },
+  .SAMPLE_TO_REWRITE = {
+    src_stage = {.FRAGMENT_SHADER, .COMPUTE_SHADER},
+    dst_stage = {.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS, .COMPUTE_SHADER},
   },
   .GBUFFER_TO_LIGHTING = {
     src_stage = {.COLOR_ATTACHMENT_OUTPUT, .LATE_FRAGMENT_TESTS},
@@ -152,7 +158,7 @@ camera_passes :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, closing: ..
   c: u32
   for i in containers.slots_next(&self.slots[.CAMERAS], &c) do for a in CameraImage do append(&discards, self.camera_targets[i].images[a][f])
   // render-to-texture: a material may sample last frame's lit image
-  barrier_discard(self, cmd, discards[:], .CULL_TO_INDIRECT, .COLOR_TO_SAMPLE)
+  barrier_discard(self, cmd, discards[:], .CULL_TO_INDIRECT, .COLOR_TO_SAMPLE, .SAMPLE_TO_REWRITE)
   {
     scope(self, cmd, "gbuffer")
     c = 0
@@ -187,6 +193,7 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
   if !dev.frame_wait(&self.gpu) do return false, .ERROR
   f := current_frame(self)
   capture_collect(self)
+  if !buffers_reserve(self, f) do return false, .ERROR
   tables_sync(self, f)
   overlay_upload(self, f)
   if !shadow_atlas_reserve(self, f, self.shadow_view_count) do return false, .ERROR

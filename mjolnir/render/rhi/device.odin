@@ -53,6 +53,8 @@ Caps :: struct {
   backbuffer_copy:           bool,
   // the backbuffer's texels are blue, green, red, alpha rather than red, green, blue, alpha
   backbuffer_bgra:           bool,
+  // bytes of the largest buffer a shader can bind whole; a buffer grown past it is not bindable
+  max_buffer_size:           int,
 }
 
 // The byte alignment of a row of the backbuffer copy.
@@ -393,6 +395,10 @@ Procs :: struct($Device: typeid, $Window: typeid) {
   // UPLOAD buffers are written at once; GPU buffers are staged and land where the caller next
   // records cmd_flush_uploads
   buffer_write:                  proc(d: ^Device, buffer: Buffer, offset: int, data: []u8) -> bool,
+  // GPU-side copy between GPU buffers, ordered with buffer_write and texture uploads: the writes
+  // queued before it land before it reads, the ones after land after it. src may be retired
+  // right after. Every buffer is a valid copy source and destination.
+  buffer_copy:                   proc(d: ^Device, src: Buffer, src_offset: int, dst: Buffer, dst_offset: int, size: int),
   // BINDLESS: the textures of texture_create are in their own array already
   bindless_write:                proc(d: ^Device, array: BindlessArray, index: u32, resource: BindResource),
   // the latest copy a finished frame left in a READBACK buffer, zeros before the first; frame

@@ -3,6 +3,7 @@ package wgpu_backend
 
 import rhi "../rhi"
 
+import "base:builtin"
 import "core:log"
 import "core:math"
 import wgpu "vendor:wgpu"
@@ -93,18 +94,19 @@ samplers_init :: proc(b: ^Backend) {
 // texture_create makes the texture of handle. `data` fills level 0; the other levels are
 // rendered down from it.
 texture_create :: proc(b: ^Backend, handle: rhi.TextureHandle, desc: rhi.TextureDesc, data: []u8) -> bool {
+  if int(handle) >= len(b.textures) do builtin.resize(&b.textures, max(int(handle) + 1, 2 * len(b.textures)))
   b.textures[handle] = texture_make(b, desc, data)
   return b.textures[handle].texture != nil
 }
 
 // texture_destroy destroys handle's texture: WebGPU keeps it alive for submitted work.
 texture_destroy :: proc(b: ^Backend, handle: rhi.TextureHandle) {
-  texture_release(&b.textures[handle])
+  if int(handle) < len(b.textures) do texture_release(&b.textures[handle])
 }
 
 // texture_desc is what handle's texture was made from.
 texture_desc :: proc(b: ^Backend, handle: rhi.TextureHandle) -> rhi.TextureDesc {
-  return b.textures[handle].desc
+  return b.textures[handle].desc if int(handle) < len(b.textures) else {}
 }
 
 @(private)

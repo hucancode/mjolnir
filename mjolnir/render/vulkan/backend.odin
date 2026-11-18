@@ -21,7 +21,8 @@ Backend :: struct {
   window:           WindowHandle,
   gctx:             GPUContext,
   swapchain:        Swapchain,
-  textures:         []Image,
+  // by handle, grown to the highest handle made (texture_create)
+  textures:         [dynamic]Image,
   samplers:         [rhi.SamplerType]vk.Sampler,
   // set 1 of every pipeline that asks: the global texture, sampler, storage image, draw list
   // and pyramid counter arrays (textures.odin)
@@ -36,9 +37,13 @@ Backend :: struct {
   pipeline_layouts: map[PipelineLayoutKey]vk.PipelineLayout,
   // the views bindless_write made for the storage image array, by index
   storage_views:    []vk.ImageView,
-  // init's sizes of the bindless arrays
+  // init's sizes of the bindless arrays, then clamped to the device (bindless_clamp)
   bindless_sizes:   [rhi.BindlessArray]u32,
-  set_pool:         vk.DescriptorPool,
+  // texture handles below it are in the bindless texture array: rhi.MAX_TEXTURES, or fewer on a
+  // device whose limits are lower
+  texture_slots:    u32,
+  // the pools of rhi's bind groups, a new one chained when the last is full
+  set_pools:        [dynamic]vk.DescriptorPool,
   // per recording thread, queue and frame slot: the lists' pool, reset whole by frame_wait
   cmd_pools:        [rhi.MAX_RECORD_THREADS][rhi.Queue][FRAMES_IN_FLIGHT]CmdPool,
   // per frame slot: its timed scopes and their timestamps
@@ -97,7 +102,7 @@ init_vulkan :: proc(b: ^Backend) -> vk.Result {
   device_init(gctx) or_return
   size, _ := window_size(b)
   swapchain_init(&b.swapchain, gctx, size) or_return
-  b.textures = make([]Image, rhi.MAX_TEXTURES)
+  bindless_clamp(b)
   // the pool of the one set the backend itself makes, the bindless arrays (a type may repeat);
   // rhi's bind groups have a pool of their own
   b.storage_views = make([]vk.ImageView, bindless_sizes(b)[.STORAGE_IMAGES])

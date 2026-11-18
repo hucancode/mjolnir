@@ -3,8 +3,6 @@
 // group; wgpu grows the instance count (word 1) the same way, the vertex count stays six.
 #include "common.slang"
 
-static const uint MAX_PARTICLES = 65536;
-static const uint MAX_FORCE_FIELDS = 32;
 static const float3 GRAVITY = float3(0.0, -9.8, 0.0);
 
 struct Particle {
@@ -55,6 +53,7 @@ struct ParticleSystemParams {
     uint frame_counter;
     uint emit_total;
     uint emit_cursor;
+    uint capacity;
 }
 PUSH_BLOCK(ParticleSystemParams, params)
 
@@ -63,7 +62,7 @@ bool simulate(uint i)
 {
     float3 p = particles[i].position;
     float3 v = particles[i].velocity;
-    uint n = min(params.force_field_placement_count, MAX_FORCE_FIELDS);
+    uint n = params.force_field_placement_count;
     for (uint f = 0; f < n; f++) {
         ForceFieldPlacement placed = placements[f];
         // free rows and destroyed force fields are zero: area_of_effect 0
@@ -106,7 +105,7 @@ void main(uint3 gid : SV_DispatchThreadID, uint local : SV_GroupIndex)
         group_alive.store(0);
     }
     GroupMemoryBarrierWithGroupSync();
-    bool live = i < MAX_PARTICLES && particles[i].life > 0.0;
+    bool live = i < params.capacity && particles[i].life > 0.0;
     uint slot = 0;
     if (live) {
         live = simulate(i);
