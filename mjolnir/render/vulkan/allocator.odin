@@ -1,6 +1,7 @@
 #+private
 package vulkan_backend
 
+import rhi "../rhi"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -110,6 +111,20 @@ allocation_mapped :: proc(gctx: ^GPUContext, a: Allocation) -> [^]u8 {
   if a.block == 0 do return nil
   mapped := gctx.allocator.blocks[a.block - 1].mapped
   return nil if mapped == nil else mapped[a.offset:]
+}
+
+// The bytes of live blocks, and of those the ranges resources hold.
+@(private)
+allocator_stats :: proc(a: ^Allocator) -> (stats: rhi.MemoryStats) {
+  stats.exact = true
+  for block in a.blocks {
+    if block.memory == 0 do continue
+    free: vk.DeviceSize
+    for r in block.free do free += r.size
+    stats.reserved += u64(block.size)
+    stats.used += u64(block.size - free)
+  }
+  return
 }
 
 // Takes the entry of a freed dedicated block, or a new one.

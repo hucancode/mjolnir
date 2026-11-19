@@ -114,6 +114,16 @@ texture_desc :: proc(b: ^Backend, handle: rhi.TextureHandle) -> rhi.TextureDesc 
   return b.textures[handle].desc if int(handle) < len(b.textures) else {}
 }
 
+// The bytes of desc's texels over every mip and layer.
+@(private)
+texture_bytes :: proc(desc: rhi.TextureDesc) -> (bytes: u64) {
+  layers := u64(6 if desc.cube else max(desc.layers, 1))
+  for m in 0 ..< max(desc.mip_levels, 1) {
+    bytes += u64(max(desc.extent.x >> m, 1)) * u64(max(desc.extent.y >> m, 1)) * layers * u64(TEXEL_SIZE[desc.format])
+  }
+  return
+}
+
 @(private)
 texture_release :: proc(t: ^Texture) {
   if t.texture == nil do return

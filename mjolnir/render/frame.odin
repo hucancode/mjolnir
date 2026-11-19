@@ -149,6 +149,14 @@ gpu_timings :: proc(self: ^Renderer) -> []Timing {
   return dev.frame_timings(&self.gpu)
 }
 
+// memory_stats is the GPU memory the renderer's buffers and textures hold now. Vulkan reports it
+// exactly (every block it took from the driver); WebGPU has no query, so it adds up the sizes
+// of the live resources (MemoryStats.exact says which).
+memory_stats :: proc(self: ^Renderer) -> MemoryStats {
+  if !dev.ready(&self.gpu) do return {}
+  return dev.memory_stats(&self.gpu)
+}
+
 // Phase by phase across cameras (G-buffer, lighting, forward) so one barrier serves every
 // camera; render scopes cannot hold barriers. `closing` ends them, as one barrier.
 @(private = "file")

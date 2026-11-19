@@ -35,3 +35,4 @@ CullMode :: rhi.CullMode
 Topology :: rhi.Topology
 // Timing is one pass's GPU time (gpu_timings).
 Timing :: rhi.Timing
+MemoryStats :: rhi.MemoryStats

@@ -24,6 +24,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   extent                          = extent,
   resize                          = resize,
   caps                            = rhi_caps,
+  memory_stats                    = rhi_memory_stats,
   texture_create                  = texture_create,
   texture_destroy                 = texture_destroy,
   texture_desc                    = texture_desc,
@@ -221,6 +222,12 @@ rhi_shutdown :: proc(b: ^Backend) {
   rhi.pool_destroy(&b.layouts)
   rhi.pool_destroy(&b.groups)
   rhi.pool_destroy(&b.pipelines)
+}
+
+// Exact: the blocks vkAllocateMemory gave the allocator, and what resources take of them.
+@(private)
+rhi_memory_stats :: proc(b: ^Backend) -> rhi.MemoryStats {
+  return allocator_stats(&b.gctx.allocator)
 }
 
 @(private)

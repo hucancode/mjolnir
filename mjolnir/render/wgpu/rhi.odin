@@ -24,6 +24,7 @@ PROCS :: rhi.Procs(Backend, WindowHandle) {
   extent                          = extent,
   resize                          = resize,
   caps                            = rhi_caps,
+  memory_stats                    = rhi_memory_stats,
   texture_create                  = texture_create,
   texture_destroy                 = texture_destroy,
   texture_desc                    = texture_desc,
@@ -130,6 +131,18 @@ Cmd :: struct {
 // sets a pipeline layout may have: scene, textures or yours, push, extra
 @(private = "file")
 MAX_GROUPS :: 4
+
+// An estimate: WebGPU cannot be asked, so this adds up the live buffers and the texels of the
+// live textures with their mips. Driver padding, internal copies and the surface are left out.
+@(private)
+rhi_memory_stats :: proc(b: ^Backend) -> rhi.MemoryStats {
+  bytes: u64
+  for buffer in b.buffers.items do if buffer != nil do bytes += wgpu.BufferGetSize(buffer)
+  for _, rb in b.readbacks do for s in rb.slots do bytes += wgpu.BufferGetSize(s.buffer)
+  for block in b.uniform_blocks do bytes += wgpu.BufferGetSize(block.buffer)
+  for t in b.textures do if t.texture != nil do bytes += texture_bytes(t.desc)
+  return {reserved = bytes, used = bytes}
+}
 
 @(private)
 rhi_caps :: proc(b: ^Backend) -> rhi.Caps {

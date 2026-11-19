@@ -381,6 +381,8 @@ Procs :: struct($Device: typeid, $Window: typeid) {
   resize:                        proc(d: ^Device, framebuffer_size: [2]u32) -> bool,
 
   caps:                          proc(d: ^Device) -> Caps,
+  // the GPU memory buffers and textures hold now (MemoryStats)
+  memory_stats:                  proc(d: ^Device) -> MemoryStats,
 
   // resources: a texture's handle is picked by the caller; on a bindless device it is the
   // texture's index in the global arrays. `data` fills level 0 (the other levels are made).

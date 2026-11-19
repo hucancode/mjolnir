@@ -61,6 +61,15 @@ TextureDesc :: struct {
   shared:     bool,
 }
 
+// MemoryStats is the GPU memory the device holds for its resources, in bytes: `reserved` is
+// what it took from the GPU, `used` the part resources occupy. `exact` is false where the
+// backend can only add up its resources' sizes (an estimate that leaves out driver overhead,
+// padding and the swapchain).
+MemoryStats :: struct {
+  reserved, used: u64,
+  exact:          bool,
+}
+
 // FrameStatus is how frame went: RESIZE asks for resize at the new framebuffer size.
 FrameStatus :: enum {
   OK,
