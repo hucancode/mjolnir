@@ -251,8 +251,8 @@ append_leaf :: proc(self: ^World, i, parent: u32) {
     return
   }
   if int(i) >= len(self.topo_first) {
-    resize(&self.topo_first, int(self.slots.high_water))
-    resize(&self.topo_end, int(self.slots.high_water))
+    resize(&self.topo_first, int(self.slots.capacity))
+    resize(&self.topo_end, int(self.slots.capacity))
   }
   append(&self.topo, i)
   self.topo_first[i], self.topo_end[i] = end, end + 1
@@ -394,7 +394,7 @@ traverse :: proc(self: ^World) {
   defer clear(&self.touched)
   // a node moved this update has moved_at == updates; index 0 never moves
   self.updates += 1
-  if len(self.moved_at) < int(self.slots.high_water) do resize(&self.moved_at, int(self.slots.high_water))
+  if len(self.moved_at) < int(self.slots.high_water) do resize(&self.moved_at, int(self.slots.capacity))
   moved := self.moved_at[:]
   // much of the tree touched: one walk beats sorting the roots
   if len(self.touched) * 32 >= len(self.topo) {

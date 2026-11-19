@@ -215,3 +215,33 @@ test_quiet_update_allocates_nothing :: proc(t: ^testing.T) {
   testing.expect_value(t, len(changes(&w)), 0)
   testing.expect_value(t, track.total_allocation_count, 0)
 }
+
+@(test)
+test_spawns_between_updates_grow_topo_by_page :: proc(t: ^testing.T) {
+  N :: 3 * PAGE_SIZE
+  w: World
+  init(&w, 2)
+  defer shutdown(&w)
+  update(&w)
+  moves := 0
+  data := raw_data(w.topo_first)
+  parent := w.root
+  handles := make([]NodeHandle, N)
+  defer delete(handles)
+  for &h, i in handles {
+    // a chain, then leaves under the root: both end the topo order
+    h = node_create(&w, position = {1, 0, 0}, parent = parent if i < N / 2 else w.root)
+    if i < N / 2 do parent = h
+    if raw_data(w.topo_first) != data {
+      moves += 1
+      data = raw_data(w.topo_first)
+    }
+  }
+  testing.expect(t, !w.tree_stale, "spawns at the end of the order need no rebuild")
+  testing.expectf(t, moves <= len(w.pages) + 1, "topo grew %d times for %d pages", moves, len(w.pages))
+  update(&w)
+  for h, i in handles {
+    x := f32(i + 1) if i < N / 2 else 1
+    if !testing.expectf(t, world_matrix(&w, h)[3].x == x, "node %d at %v", i, world_matrix(&w, h)[3].xyz) do return
+  }
+}
