@@ -99,6 +99,7 @@ FORMATS := [rhi.TextureFormat]vk.Format {
   .RGBA16F     = .R16G16B16A16_SFLOAT,
   .RGBA32F     = .R32G32B32A32_SFLOAT,
   .R32F        = .R32_SFLOAT,
+  .R8_UNORM    = .R8_UNORM,
   .RG8_UNORM   = .R8G8_UNORM,
   .RG11B10F    = .B10G11R11_UFLOAT_PACK32,
   .A8          = .R8_UNORM,

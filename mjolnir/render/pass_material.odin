@@ -51,8 +51,9 @@ material_types :: proc() -> [MaterialType]MaterialShaderDesc {
     .TRANSPARENT  = {source = shader_source("transparent"), cull = .BACK, blend = .ALPHA},
     .WIREFRAME    = {source = shader_source("wireframe"), cull = .NONE, blend = .ALPHA, wireframe = true, pulled = true},
     .RANDOM_COLOR = {source = shader_source("random_color"), cull = .BACK, blend = .ALPHA, pulled = true},
-    // opaque pixels write depth; semi-transparent ones are drawn again blended (sprite_blend_pipeline)
+    // opaque pixels write depth; semi-transparent ones are drawn again blended (sprite_blend_pipelines)
     .SPRITE       = {source = shader_source("sprite"), cull = .NONE, blend = .ALPHA, opaque = true, scene = .SPRITE},
+    .SPRITE_INDEXED = {source = shader_source("sprite_indexed"), cull = .NONE, blend = .ALPHA, opaque = true, scene = .SPRITE},
   }
 }
 
@@ -120,11 +121,17 @@ material_init :: proc(self: ^Renderer) -> bool {
       self.material_pipelines[pass][int(type)] = material_pipeline_create(self, pass, types[type]) or_return
     }
   }
-  blend := types[.SPRITE]
-  blend.opaque = false
-  self.sprite_blend_pipeline = material_pipeline_create(self, .FORWARD, blend) or_return
+  for type, i in SPRITE_TYPES {
+    blend := types[type]
+    blend.opaque = false
+    self.sprite_blend_pipelines[i] = material_pipeline_create(self, .FORWARD, blend) or_return
+  }
   return true
 }
+
+// The sprite types: each draws its opaque pixels, then (sprite_blend_pipelines) its semi-transparent ones.
+@(private = "file")
+SPRITE_TYPES :: [2]MaterialType{.SPRITE, .SPRITE_INDEXED}
 
 // Matches the push block of the mesh shaders (shader/mesh.slang).
 @(private = "file")
@@ -185,12 +192,21 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
   if ready {
     mesh_buffers_bind(self, cmd)
     draw_list_draw(self, cmd, slot, 0, keys[:count], pipelines[:count], f, transmute(u32)(filter.types))
-    if pass == .FORWARD && self.sprite_blend_pipeline != 0 && int(MaterialType.SPRITE) in filter.types {
-      push.sprite_blend = 1
-      pipeline_bind(self, cmd, self.sprite_blend_pipeline, .MESH, f, &push, .MATERIAL)
-      mesh_buffers_bind(self, cmd)
-      sprite_key := []u32{u32(MaterialType.SPRITE)}
-      draw_list_draw(self, cmd, slot, 0, sprite_key, []rhi.Pipeline{self.sprite_blend_pipeline}, f, transmute(u32)(filter.types))
+    if pass == .FORWARD {
+      blend_keys: [len(SPRITE_TYPES)]u32
+      blend_pipelines: [len(SPRITE_TYPES)]rhi.Pipeline
+      n := 0
+      for type, i in SPRITE_TYPES {
+        if self.sprite_blend_pipelines[i] == 0 || int(type) not_in filter.types do continue
+        blend_keys[n], blend_pipelines[n] = u32(type), self.sprite_blend_pipelines[i]
+        n += 1
+      }
+      if n > 0 {
+        push.sprite_blend = 1
+        pipeline_bind(self, cmd, blend_pipelines[0], .MESH, f, &push, .MATERIAL)
+        mesh_buffers_bind(self, cmd)
+        draw_list_draw(self, cmd, slot, 0, blend_keys[:n], blend_pipelines[:n], f, transmute(u32)(filter.types))
+      }
     }
   }
   dev.cmd_end_pass(&self.gpu, cmd)

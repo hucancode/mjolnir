@@ -30,6 +30,8 @@ TextureFormat :: enum {
   RGBA16F,
   RGBA32F,
   R32F,
+  // one 8-bit channel sampled as is (red, 0, 0, 1): palette indices of an indexed sprite (MaterialType.SPRITE_INDEXED)
+  R8_UNORM,
   // two 8-bit channels, and 11, 11 and 10-bit floats in 32 bits (HDR color without alpha): render
   // targets only, which render keeps its G-buffer in
   RG8_UNORM,

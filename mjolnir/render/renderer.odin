@@ -356,7 +356,7 @@ Renderer_State :: struct {
   // by MaterialType, your shaders' after the built-in ones; 0 where free
   material_pipelines:     [MaterialPass][DRAW_LISTS]rhi.Pipeline,
   // the sprite shader's second draw: its semi-transparent pixels, blended, not writing depth
-  sprite_blend_pipeline:  rhi.Pipeline,
+  sprite_blend_pipelines: [2]rhi.Pipeline, // SPRITE_TYPES' blended draws
   // the 2D overlay (overlay.odin): this frame's vertices and indices, in batches of one
   // scissor and texture; past Config.overlay_* the frame's buffers grow (overlay_upload)
   overlay_vertices:       [dynamic]Vertex2D,

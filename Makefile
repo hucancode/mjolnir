@@ -5,7 +5,7 @@ SHADER_DIR := mjolnir/render/shader
 # BACKEND_WGPU where the backends differ. The headers are only included.
 SHADER_HEADERS := common mesh mesh_vertex mesh_pulled material post gpu ibl_common sprite_frame
 SLANG_SOURCES := $(filter-out $(addprefix $(SHADER_DIR)/,$(addsuffix .slang,$(SHADER_HEADERS))) examples/creative/snake/snake_skin.slang,$(wildcard $(SHADER_DIR)/*.slang) $(wildcard examples/*/*/*.slang))
-SLANG_ENTRIES := $(shell grep -l '\[shader' $(SLANG_SOURCES) 2>/dev/null)
+SLANG_ENTRIES := $(shell grep -lE '\[shader|^\#include "sprite.slang"' $(SLANG_SOURCES) 2>/dev/null)
 SLANG_HEADERS := $(wildcard $(SHADER_DIR)/*.slang examples/*/*/*.slang)
 SLANG_FLAGS := -I $(SHADER_DIR) -matrix-layout-column-major -warnings-disable 39001
 SPV_SHADERS := $(SLANG_ENTRIES:.slang=.spv)

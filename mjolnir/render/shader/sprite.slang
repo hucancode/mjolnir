@@ -14,8 +14,13 @@ SCENE_BUFFER(Material, materials, 3, 3)
 struct MeshPush { uint camera_index; uint sun_light; uint sun_node; uint sprite_blend; }
 PUSH_BLOCK(MeshPush, mesh_push)
 
+// SPRITE_INDEXED (sprite_indexed.slang defines it): the albedo texture holds palette indices (R8) and the
+// emissive slot the palette (256 x 1); the choice is made when compiling, so a pixel never branches on it.
 #if BACKEND_WGPU
 [vk::binding(0, 1)] Texture2D albedo_texture;
+#ifdef SPRITE_INDEXED
+[vk::binding(3, 1)] Texture2D palette_texture;
+#endif
 #else
 [vk::binding(0, TEXTURES_SET)] Texture2D textures[];
 #endif
@@ -38,6 +43,9 @@ struct VertexOut {
     [vk::location(2)] float2 uv : TEXCOORD0;
 #if !BACKEND_WGPU
     [vk::location(3)] nointerpolation uint texture_index : TEXTURE_INDEX;
+#ifdef SPRITE_INDEXED
+    [vk::location(4)] nointerpolation uint palette_index : PALETTE_INDEX;
+#endif
 #endif
 }
 
@@ -78,6 +86,9 @@ VertexOut vs_main(VertexIn v)
     o.position = vertex_pos;
 #if !BACKEND_WGPU
     o.texture_index = sprite.albedo_index;
+#ifdef SPRITE_INDEXED
+    o.palette_index = sprite.emissive_index;
+#endif
 #endif
     o.clip = clip_output(mul(mul(camera.projection, camera.view), float4(vertex_pos, 1.0)));
     return o;
@@ -86,7 +97,15 @@ VertexOut vs_main(VertexIn v)
 [shader("fragment")]
 float4 fs_main(VertexOut v) : SV_Target0
 {
+#ifdef SPRITE_INDEXED
 #if BACKEND_WGPU
+    int index = int(albedo_texture.Sample(nearest_clamp, v.uv).r * 255.0 + 0.5);
+    float4 color = palette_texture.Load(int3(index, 0, 0)) * v.color;
+#else
+    int index = int(textures[NonUniformResourceIndex(v.texture_index)].Sample(samplers[SAMPLER_NEAREST_CLAMP], v.uv).r * 255.0 + 0.5);
+    float4 color = textures[NonUniformResourceIndex(v.palette_index)].Load(int3(index, 0, 0)) * v.color;
+#endif
+#elif BACKEND_WGPU
     float4 color = albedo_texture.Sample(nearest_clamp, v.uv) * v.color;
 #else
     float4 color = textures[NonUniformResourceIndex(v.texture_index)].Sample(samplers[SAMPLER_NEAREST_CLAMP], v.uv) * v.color;

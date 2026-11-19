@@ -83,6 +83,10 @@ MaterialType :: enum u32 {
   // negative scale mirrors it, pixels under half alpha are cut out and depth orders overlapping
   // sprites
   SPRITE,
+  // a SPRITE whose albedo texture is one-byte palette indices (.R8_UNORM) and whose emissive texture
+  // is the palette (256 x 1, RGBA8_SRGB): the same frames, depth and blending, a quarter of the
+  // texture memory and bandwidth. Own shader, so no per-pixel branch
+  SPRITE_INDEXED,
 }
 
 @(private)
