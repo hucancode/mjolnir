@@ -25,7 +25,7 @@ CameraProjection :: union {
   OrthographicProjection,
 }
 
-// Camera c's frame f takes pyramid and draw-list slot camera_slot(c) + f; the shadow views
+// Camera c's frame f takes pyramid slot camera_slot(c) + f and draws the list camera_draw_slot(c, f); the shadow views
 // take one draw-list slot per frame after every camera's. A camera keeps one list per
 // material type, the shadow views share one.
 @(private)
@@ -33,9 +33,9 @@ camera_slot :: #force_inline proc "contextless" (camera: u32) -> u32 {
   return camera * FRAMES_IN_FLIGHT
 }
 
-// Frame f's cull of camera c writes the lists frame f + 1 draws.
+// The lists frame f's cull of camera c writes, and frame f draws.
 @(private)
-camera_next_slot :: #force_inline proc "contextless" (camera, f: u32) -> u32 {
+camera_draw_slot :: #force_inline proc "contextless" (camera, f: u32) -> u32 {
   return camera_slot(camera) + (f + 1) % FRAMES_IN_FLIGHT
 }
 
@@ -492,8 +492,8 @@ flush_cameras :: proc(self: ^Renderer, frame_index: u32) {
       write_entry(self, .VIEWS, int(CAMERA_VIEW_BASE + i), View{})
       continue
     }
-    // frame N builds pyramid N from N-1's depth and culls into N+1's lists
-    next := camera_next_slot(i, frame_index)
+    // frame N builds pyramid N from N-1's depth, then culls into the lists it draws
+    next := camera_draw_slot(i, frame_index)
     if !draw_list_reserve(self, next, shadow = false) do log.errorf("Camera %d: cannot grow its draw lists", i)
     cam, targets := &self.cameras[i], &self.camera_targets[i]
     view := camera_view_matrix(cam)

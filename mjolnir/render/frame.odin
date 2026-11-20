@@ -3,11 +3,9 @@ package render
 import "../containers"
 import "rhi"
 
-// The frame: every pass in order, with the barriers between them. With async compute (Vulkan on
-// a device with a compute queue family) render records three command lists: the uploads, the
-// compute list (depth pyramids and the camera cull, for the next frame) and the graphics list,
-// ordered against each other and the previous frame's by timeline values. Otherwise one list
-// carries it all, the cull last, and the queue and its barriers order it.
+// The frame: every pass in order, with the barriers between them. The cull (depth pyramids and the camera
+// cull) comes first on the graphics list, so a frame draws what its own nodes say. One graphics submission
+// carries the uploads and the frame, and the queue and its barriers order it.
 
 // Every global memory dependency the frame records, by the work it orders: a barrier is
 // (writes made, reads that must see them) between two stage sets.
@@ -32,8 +30,7 @@ Barrier :: enum {
   // the previous frame's draws read the skinned vertices the skinning pass rewrites
   DRAW_TO_SKIN,
   SKIN_TO_DRAW,
-  // the cull recorded after the frame on one queue: it rewrites the lists and pyramids that
-  // draws and the previous cull read, from depth the frame wrote
+  // the cull rewrites the lists and pyramids that the previous frame's draws read, from the depth it wrote
   FRAME_TO_CULL,
   // your work (gpu.odin): after the uploads and the previous frame's draws and copies, between
   // two of its steps, and before what draws, samples or copies back its results
@@ -209,12 +206,10 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
   if !shadow_atlas_reserve(self, f, self.shadow_view_count) do return false, .ERROR
   pyramids_bind(self, f)
   if begun := dev.frame_begin(&self.gpu, framebuffer_size); begun != .OK do return false, begun
-  async := dev.caps(&self.gpu).async_compute
   main := u32(self.main_camera)
   has_main := containers.slots_live(&self.slots[.CAMERAS], main)
 
-  // The staged uploads land first, on a list of their own: their own submission, which the
-  // compute list waits for and the graphics list follows on its queue, or the head of the one.
+  // The staged uploads land first, on a list of their own, at the head of the submission.
   uploads := dev.cmd_begin(&self.gpu, .GRAPHICS, 0)
   {
     scope(self, uploads, "uploads")
@@ -222,7 +217,6 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
   }
   dev.cmd_end(&self.gpu, uploads)
   cmd := dev.cmd_begin(&self.gpu, .GRAPHICS, 0)
-  compute := dev.cmd_begin(&self.gpu, .COMPUTE, 0) if async else cmd
   {
     scope(self, cmd, "gpu work")
     gpu_work_record(self, cmd, f)
@@ -232,11 +226,14 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
     scope(self, cmd, "skinning")
     skin_record(self, cmd, f)
   }
-  // a when body is no scope of its own: the braces end the label
-  when !BINDLESS {{
+  // The cull sees this frame's nodes and draws this frame: a node that appeared, moved or was hidden since the
+  // last frame is judged by where it is now (culling after the frame for the next one drew a frame late).
+  // The previous frame's draws read the lists and pyramids it rewrites: on the one queue, a barrier orders them.
+  when BINDLESS do barrier(self, cmd, .FRAME_TO_CULL)
+  {
     scope(self, cmd, "cull")
     cull_record(self, cmd, f)
-  }}
+  }
   {
     scope(self, cmd, "shadows")
     shadow_record(self, cmd, f)
@@ -264,36 +261,9 @@ frame_run :: proc(self: ^Renderer, framebuffer_size: [2]u32) -> (submitted: bool
     scope(self, cmd, "particles")
     particles_simulate(self, cmd, f)
   }
-  when BINDLESS {{
-    if !async do barrier(self, cmd, .FRAME_TO_CULL)
-    scope(self, compute, "cull")
-    cull_record(self, compute, f)
-  }}
   capture_record(self, cmd)
   dev.cmd_end(&self.gpu, cmd)
-  if !async {
-    cmds := [2]rhi.CommandList{uploads, cmd}
-    dev.submit(&self.gpu, {queue = .GRAPHICS, cmds = cmds[:], present = true})
-    return true, dev.frame_present(&self.gpu)
-  }
-  upload_cmds := [1]rhi.CommandList{uploads}
-  uploaded := dev.submit(&self.gpu, {queue = .GRAPHICS, cmds = upload_cmds[:]})
-  dev.cmd_end(&self.gpu, compute)
-
-  // submissions chain across frames: compute n waits this frame's uploads, which follow
-  // graphics n-1 on its queue (depth, draw lists); graphics n waits compute n-1 (the lists it
-  // draws, the depth it rewrites)
-  compute_cmds := [1]rhi.CommandList{compute}
-  compute_waits := [1]rhi.SyncPoint{uploaded}
-  compute_done := dev.submit(&self.gpu, {queue = .COMPUTE, cmds = compute_cmds[:], waits = compute_waits[:]})
-  graphics_waits: [1]rhi.SyncPoint
-  count := 0
-  if self.last_compute.value != 0 {
-    graphics_waits[0] = {self.last_compute.queue, self.last_compute.value, {.DRAW_INDIRECT, .EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS}}
-    count = 1
-  }
-  graphics_cmds := [1]rhi.CommandList{cmd}
-  dev.submit(&self.gpu, {queue = .GRAPHICS, cmds = graphics_cmds[:], waits = graphics_waits[:count], present = true})
-  self.last_compute = compute_done
+  cmds := [2]rhi.CommandList{uploads, cmd}
+  dev.submit(&self.gpu, {queue = .GRAPHICS, cmds = cmds[:], present = true})
   return true, dev.frame_present(&self.gpu)
 }

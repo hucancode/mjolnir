@@ -230,14 +230,13 @@ draw_lists_clear :: proc(self: ^Renderer, cmd: rhi.CommandList, slot: u32) {
 }
 
 // The compute half of the frame: zeroes the lists, builds each ready camera's pyramid from its
-// previous depth, then culls every camera into the lists the next frame draws. Compacted:
-// ordering against the previous graphics frame is the submission's (async compute) or the
-// caller's barrier; the shadow cull is the shadow pass's. Batched: also fills the shadow lists,
-// on the one command list, which draws the frame after.
+// previous depth, then culls every camera into the lists this frame draws. Compacted:
+// ordering against the previous frame is the caller's barrier; the shadow cull is the shadow
+// pass's. Batched: also fills the shadow lists, which the shadow pass draws.
 @(private)
 cull_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   c: u32
-  for i in containers.slots_next(&self.slots[.CAMERAS], &c) do draw_lists_clear(self, cmd, camera_next_slot(i, f))
+  for i in containers.slots_next(&self.slots[.CAMERAS], &c) do draw_lists_clear(self, cmd, camera_draw_slot(i, f))
   when !BINDLESS do if self.shadow_view_count > 0 do draw_lists_clear(self, cmd, SHADOW_DRAW_SLOT_BASE + f)
   dev.cmd_begin_compute(&self.gpu, cmd)
   defer dev.cmd_end_compute(&self.gpu, cmd)
@@ -261,7 +260,7 @@ cull_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
     if self.slots[.BATCHES].high_water <= 1 do return
     c = 0
     for i in containers.slots_next(&self.slots[.CAMERAS], &c) {
-      cull_batched(self, cmd, camera_next_slot(i, f), CAMERA_VIEW_BASE + i, 1, self.camera_targets[i].pyramid[f])
+      cull_batched(self, cmd, camera_draw_slot(i, f), CAMERA_VIEW_BASE + i, 1, self.camera_targets[i].pyramid[f])
     }
     if self.shadow_view_count > 0 do cull_batched(self, cmd, SHADOW_DRAW_SLOT_BASE + f, SHADOW_VIEW_BASE, self.shadow_view_count, 0)
   }

@@ -184,11 +184,9 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
     return
   }
   pipeline_bind(self, cmd, pipelines[0], .MESH, f, &push, .MATERIAL)
-  when BINDLESS {
-    ready, slot := camera_ready(self, cam), camera_slot(cam) + f
-  } else {
-    ready, slot := true, camera_next_slot(cam, f)
-  }
+  // the lists this frame's cull just wrote
+  ready := camera_ready(self, cam) if BINDLESS else true
+  slot := camera_draw_slot(cam, f)
   if ready {
     mesh_buffers_bind(self, cmd)
     draw_list_draw(self, cmd, slot, 0, keys[:count], pipelines[:count], f, transmute(u32)(filter.types))

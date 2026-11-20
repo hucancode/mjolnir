@@ -323,7 +323,6 @@ Renderer_State :: struct {
   // the shadow views the views table holds after the cameras (shadow_view_count)
   max_shadow_views:       u32,
   // the last compute submission, which the next frame's graphics waits for
-  last_compute:           rhi.SyncPoint,
   // the buffers render owns on the device (resources.odin): a copy per frame in flight of
   // each table, one of the rest
   buffers:                [SceneBuffer][FRAMES_IN_FLIGHT]rhi.Buffer,
