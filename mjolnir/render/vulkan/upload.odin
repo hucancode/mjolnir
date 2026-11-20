@@ -8,6 +8,11 @@ import vk "vendor:vulkan"
 
 @(private = "file")
 STAGING_BLOCK_SIZE :: 8 * 1024 * 1024
+// staging blocks kept when idle; past these, a block the GPU is done with is freed, so a burst of
+// uploads (a level's textures) does not hold its peak of host memory for good. An oversized block
+// (one upload past STAGING_BLOCK_SIZE) is never kept
+@(private = "file")
+STAGING_KEEP :: 2
 // satisfies the buffer-to-image offset rule of every color format
 @(private = "file")
 STAGING_ALIGNMENT :: 16
@@ -151,6 +156,7 @@ record_uploads :: proc(gctx: ^GPUContext, cmd: vk.CommandBuffer) {
     image_discard_barrier(cmd, ..u.inits[:])
     clear(&u.inits)
   }
+  staging_trim(gctx)
   if len(u.copies) == 0 && len(u.images) == 0 do return
   // staged copies between ordered ones are batched by source and destination
   for start := 0; start < len(u.copies); {
@@ -183,6 +189,26 @@ record_uploads :: proc(gctx: ^GPUContext, cmd: vk.CommandBuffer) {
     {.TRANSFER},
     {.VERTEX_ATTRIBUTE_INPUT, .INDEX_INPUT, .DRAW_INDIRECT, .VERTEX_SHADER, .FRAGMENT_SHADER, .COMPUTE_SHADER},
   )
+}
+
+// staging_trim frees the idle staging blocks past the first STAGING_KEEP of standard size; uploads
+// mutex held.
+@(private = "file")
+staging_trim :: proc(gctx: ^GPUContext) {
+  u := &gctx.uploads
+  kept := 0
+  for i := 0; i < len(u.blocks); {
+    b := &u.blocks[i]
+    idle := b.used == 0 && b.ready <= gctx.frame_serial
+    standard := int(b.buffer.size) <= STAGING_BLOCK_SIZE
+    if !idle || (standard && kept < STAGING_KEEP) {
+      if idle do kept += 1
+      i += 1
+      continue
+    }
+    buffer_destroy(gctx, &b.buffer)
+    ordered_remove(&u.blocks, i)
+  }
 }
 
 // submit_uploads records every queued upload into a one-shot command buffer and waits for it,

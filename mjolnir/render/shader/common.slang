@@ -22,6 +22,7 @@ static const uint MATERIAL_TRANSPARENT = 1;
 static const uint MATERIAL_WIREFRAME = 2;
 static const uint MATERIAL_RANDOM_COLOR = 3;
 static const uint MATERIAL_SPRITE = 4;
+static const uint MATERIAL_SPRITE_INDEXED = 5;
 
 // LightType
 static const uint LIGHT_POINT = 0;

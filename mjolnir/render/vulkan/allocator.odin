@@ -9,7 +9,9 @@ import vk "vendor:vulkan"
 // per resource (allocations are slow and capped by maxMemoryAllocationCount, often 4096).
 // Buffers and images keep to blocks of their own, so bufferImageGranularity never applies. A
 // host-visible block is mapped once, for as long as it lives; its allocations map inside it.
-// Blocks stay until shutdown once made, except dedicated ones, freed with their resource.
+// A dedicated block is freed with its resource; a shared block once it is empty and another empty
+// block of its kind is spare (one spare a kind keeps a burst of frees and allocations from
+// reallocating).
 
 // The size of a block, or an eighth of its heap where that is smaller (a 256 MiB BAR heap).
 @(private = "file")
@@ -22,7 +24,7 @@ Allocation :: struct {
   size:   vk.DeviceSize,
 }
 
-// A block whose memory is 0 is a freed dedicated one, its entry free for the next block.
+// A block whose memory is 0 is a freed one, its entry free for the next block.
 @(private)
 MemoryBlock :: struct {
   memory:     vk.DeviceMemory,
@@ -99,6 +101,16 @@ memory_free :: proc(gctx: ^GPUContext, a: ^Allocation) {
     return
   }
   range_free(block, r)
+  if len(block.free) != 1 || block.free[0].size != block.size do return
+  for &other in gctx.allocator.blocks {
+    if &other == block || other.memory == 0 || other.dedicated do continue
+    if other.type_index != block.type_index || other.linear != block.linear do continue
+    if len(other.free) == 1 && other.free[0].size == other.size {
+      log.debugf("Memory block of %d MiB freed, type %d", block.size >> 20, block.type_index)
+      block_free(gctx, block)
+      return
+    }
+  }
 }
 
 // The memory of `a`'s block.

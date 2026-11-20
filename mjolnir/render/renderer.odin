@@ -43,6 +43,9 @@ Config :: struct {
   particles:        u32,
   debug_lines:      u32,
   shadow_maps:      u32,
+  // what the main camera draws and runs (camera_create's filter); no types = FILTER_ALL. A
+  // game drawing only forward types (sprites) skips the G-buffer, lighting and their images
+  main_filter:      CameraFilter,
 }
 
 // DEFAULT_CONFIG reserves for a typical level: a few hundred MB of GPU memory with the camera
@@ -68,6 +71,7 @@ DEFAULT_CONFIG :: Config {
   particles        = 65536,
   debug_lines      = 1 << 14,
   shadow_maps      = 16,
+  main_filter      = FILTER_ALL,
 }
 
 // Shadow casters ranked by screen coverage get a map; the rest of the maps go
@@ -443,7 +447,9 @@ init_resources :: proc(self: ^Renderer) -> bool {
   ambient_init(self) or_return
   for &inbox in self.debug_lines do inbox = make([dynamic]DebugLineSegment, 0, 1024)
   extent := dev.extent(&self.gpu)
-  cam, created := camera_create(self, extent, make_camera(MAIN_CAMERA_POSITION))
+  main_filter := self.config.main_filter
+  if transmute(u32)(main_filter.types) == 0 do main_filter = FILTER_ALL
+  cam, created := camera_create(self, extent, make_camera(MAIN_CAMERA_POSITION), main_filter)
   if !created do return false
   self.main_camera = cam
   // what init made outlives teardown

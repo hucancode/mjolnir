@@ -177,7 +177,7 @@ bool in_frustum_and_visible(View view, Node node, uint type)
     float3 world_center = world_center4.xyz / max(world_center4.w, 1e-6);
     float3x3 abs_world3 = abs(mat3_of(world));
     float3 world_extent = mul(abs_world3, local_extent);
-    if (type == MATERIAL_SPRITE) {
+    if (type == MATERIAL_SPRITE || type == MATERIAL_SPRITE_INDEXED) {
         // a billboard turns with the camera: the sphere around its frame's quad
         SpriteFrame frame = sprite_frame_of(materials[node.material_id], node);
         // the basis columns' lengths
