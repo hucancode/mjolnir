@@ -219,7 +219,7 @@ crates :: proc(app: ^App) {
 
 portal :: proc(app: ^App) {
   r := &app.renderer
-  app.portal_camera = render.camera_create(r, {512, 512}, render.make_camera({0, 40, MID + 0.01}, {0, 0, MID}, 0.9, far = 100), render.FILTER_NO_POST)
+  app.portal_camera = render.camera_create(r, {512, 512}, render.make_camera({0, 40, MID + 0.01}, {0, 0, MID}, 0.9, far = 100))
   app.portal = render.material_create(r, render.make_material(emissive_factor = 0.2))
   frame := render.primitive(r, .CUBE, .BLACK)
   mesh(app, frame, {-21.6, 3.2, MID}, {0.1, 2.3, 2.3})
@@ -249,7 +249,7 @@ hidden_city :: proc(app: ^App) {
 }
 
 set_effects :: proc(app: ^App) {
-  render.main_camera(&app.renderer).effects[0] = render.make_effect(render.BloomEffect{threshold = 1, intensity = 0.35, blur_radius = 24}) if app.bloom else {}
+  render.camera_effect(&app.renderer, render.MAIN_CAMERA, render.BloomEffect{threshold = 1, intensity = 0.35, radius = 1}, app.bloom)
 }
 
 shutdown :: proc(app: ^App) {

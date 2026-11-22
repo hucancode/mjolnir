@@ -101,7 +101,7 @@ update :: proc(app: ^App, dt: f32) {
     camera := render.camera(&app.renderer, view) or_continue
     camera.position, camera.rotation = main_camera.position, main_camera.rotation
   }
-  render.camera(&app.renderer, app.views[0]).effects[0] = render.make_effect(app.fxaa)
+  render.camera_effect(&app.renderer, app.views[0], app.fxaa)
   world.transform(&app.scene, app.turntable).rotation *= linalg.quaternion_angle_axis(dt * 0.1, linalg.VECTOR3F32_Y_AXIS)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }

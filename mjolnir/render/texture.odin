@@ -4,11 +4,12 @@ import "../containers"
 import "core:c"
 import "core:log"
 import "core:math"
+import "rhi"
 import stbi "vendor:stb/image"
 
 // Every texture is a handle of slots[.TEXTURES], growing past Config.textures. Render targets
 // (texture_targets) are what the renderer reallocates itself and teardown keeps: camera
-// attachments, depth pyramids and the post-process ring, which follow the window size, and the
+// images, depth pyramids and the frame graph's transients, which follow the window size, and the
 // font atlas, which grows. The rest are the renderer's own from init, then the map's.
 
 @(private)
@@ -26,17 +27,49 @@ allocate_texture :: proc(self: ^Renderer, desc: TextureDesc, data: []u8 = nil, t
     return 0, false
   }
   self.texture_targets[h] = target
+  self.texture_views[h] = NO_VIEWS
+  when BINDLESS {
+    if .STORAGE in desc.usage {
+      mips := max(desc.mip_levels, 1)
+      first, viewed := containers.ranges_alloc(&self.storage_views, mips)
+      if !viewed {
+        log.errorf("No room for %d more storage views (MAX_STORAGE_VIEWS)", mips)
+        dev.texture_destroy(&self.gpu, TextureHandle(h))
+        containers.slots_free(&self.slots[.TEXTURES], h)
+        return 0, false
+      }
+      self.texture_views[h] = first
+      for m in 0 ..< mips do dev.bindless_write(&self.gpu, .STORAGE_IMAGES, first + m, rhi.TextureView{TextureHandle(h), i32(m)})
+    }
+  }
   return TextureHandle(h), true
+}
+
+@(private)
+NO_VIEWS :: max(u32)
+
+// The bindless storage image of a storage texture's `mip` (allocate_texture).
+@(private)
+storage_view :: proc(self: ^Renderer, texture: TextureHandle, mip: u32 = 0) -> u32 {
+  return self.texture_views[texture] + mip
+}
+
+// Destroys a texture whose handle no frame in flight uses any more, and frees its views.
+@(private)
+texture_free :: proc(self: ^Renderer, texture: TextureHandle) {
+  if first := self.texture_views[texture]; first != NO_VIEWS do containers.ranges_free(&self.storage_views, first)
+  self.texture_views[texture] = NO_VIEWS
+  dev.texture_destroy(&self.gpu, texture)
 }
 
 // Frees every texture but render targets and init's, at once: the GPU is idle.
 @(private)
 textures_teardown :: proc(self: ^Renderer) {
   slots := &self.slots[.TEXTURES]
-  for r in containers.slots_flush(slots) do dev.texture_destroy(&self.gpu, TextureHandle(r.index))
+  for r in containers.slots_flush(slots) do texture_free(self, TextureHandle(r.index))
   c := slots.mark
   for i in containers.slots_next(slots, &c) do if !self.texture_targets[i] {
-    dev.texture_destroy(&self.gpu, TextureHandle(i))
+    texture_free(self, TextureHandle(i))
     containers.slots_free(slots, i)
   }
   containers.slots_flush(slots)

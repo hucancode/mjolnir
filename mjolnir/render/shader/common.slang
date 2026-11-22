@@ -37,13 +37,11 @@ static const uint NODE_FLAG_SKINNED = 4;
 // a sprite's quad lies in the node's XY plane (NodeFlag.TURNED)
 static const uint NODE_FLAG_TURNED = 64;
 
-// View.images indices (CameraImage)
-static const uint IMAGE_FINAL = 0;
+// The G-buffer images, by CameraImage (lighting.slang camera_image)
 static const uint IMAGE_NORMAL = 1;
 static const uint IMAGE_ALBEDO = 2;
 static const uint IMAGE_METALLIC_ROUGHNESS = 3;
 static const uint IMAGE_EMISSIVE = 4;
-static const uint IMAGE_DEPTH = 5;
 static const uint IMAGE_AMBIENT_OCCLUSION = 6;
 
 static const uint SAMPLER_NEAREST_CLAMP = 0;
@@ -65,8 +63,6 @@ struct View {
     float2 extent;
     float near;
     float far;
-    // render's texture handles, by CameraImage (bound through a group on wgpu)
-    uint images[7];
     uint pyramid;
     // bit t: material type t is tested against the pyramid
     uint occlusion_mask;
@@ -85,6 +81,9 @@ struct View {
     uint hidden_layers;
     uint _view_pad1;
     uint _view_pad2;
+    uint _view_pad3;
+    uint _view_pad4;
+    uint _view_pad5;
 }
 
 struct Node {

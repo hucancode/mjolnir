@@ -8,15 +8,11 @@ import "rhi"
 // and spot ones whose sphere meets it), so a pixel reads the G-buffer once however many lights
 // cover it. Directional lights reach every tile, so every tile lists them.
 // The image-based light is scaled by the camera's ambient occlusion image, when it has one.
-// The image is a storage image: bindless at LIT_STORAGE_BASE + the camera's pyramid slot
-// (pyramids_bind), or a group-3 bind group per image (WebGPU).
+// The image is a storage image: bindless at its storage view, or a group-3 bind group per image
+// (WebGPU).
 
 @(private = "file")
 LIGHTING_TILE :: 16
-
-// Storage image slots of the lit images, one per pyramid slot, after the IBL's (Vulkan).
-@(private)
-LIT_STORAGE_BASE :: PRECOMPUTE_STORAGE_BASE + PRECOMPUTE_TARGETS
 
 // Matches the push block of the lighting shaders (and, in WebGPU, their uniform struct).
 @(private = "file")
@@ -32,8 +28,13 @@ LightingPush :: struct {
   // rows of the light placement table
   light_count:       u32,
   ibl_intensity:     f32,
-  // 1: the camera's AMBIENT_OCCLUSION image holds this frame's occlusion
-  ambient_occlusion: u32,
+  // the G-buffer's textures; ambient occlusion 0 when the camera runs none
+  normal_index:             u32,
+  albedo_index:             u32,
+  metallic_roughness_index: u32,
+  emissive_index:           u32,
+  depth_index:              u32,
+  ambient_occlusion_index:  u32,
 }
 
 // WebGPU: group 3 of the lighting dispatch, the image it writes.
@@ -54,12 +55,16 @@ lighting_init :: proc(self: ^Renderer) -> bool {
   return true
 }
 
+// Camera g.arg's lit image: its uses are the normals, albedo, metallic-roughness, emissive,
+// depth, ambient occlusion (or none), the shadow atlas, then the image it writes.
 @(private)
-lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
-  images := &self.camera_targets[cam].images
+lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, g: GraphPass) {
+  cam := g.arg
+  gbuffer: [6]TextureHandle
+  for &t, i in gbuffer do t = pass_texture(self, g, i)
+  output := pass_texture(self, g, 7)
   group: rhi.BindGroup
   when !BINDLESS {
-    output := images[.FINAL_IMAGE][f]
     resources := [1]rhi.BindResource{rhi.TextureView{output, 0}}
     ok: bool
     group, ok = cached_group(self, output, gpu_layout(self, LIGHTING_OUTPUT_LAYOUT) or_else 0, resources[:])
@@ -73,13 +78,16 @@ lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32)
     environment       = u32(self.environment.image),
     skybox_intensity  = self.skybox_intensity,
     skybox_blur       = self.skybox_blur,
-    output_index      = LIT_STORAGE_BASE + camera_slot(cam) + f,
     light_count       = self.slots[.LIGHT_PLACEMENTS].high_water,
     ibl_intensity     = self.ibl_intensity,
-    ambient_occlusion = u32(ambient_occlusion_on(self, cam)),
+    normal_index      = u32(gbuffer[0]),
+    albedo_index      = u32(gbuffer[1]),
+    metallic_roughness_index = u32(gbuffer[2]),
+    emissive_index    = u32(gbuffer[3]),
+    depth_index       = u32(gbuffer[4]),
+    ambient_occlusion_index = u32(gbuffer[5]),
   }
-  dev.cmd_begin_compute(&self.gpu, cmd)
-  defer dev.cmd_end_compute(&self.gpu, cmd)
+  when BINDLESS do push.output_index = storage_view(self, output)
   pipeline_bind(
     self,
     cmd,
@@ -88,17 +96,17 @@ lighting_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32)
     f,
     &push,
     .LIGHTING,
-    images[.NORMAL][f],
-    images[.ALBEDO][f],
-    images[.METALLIC_ROUGHNESS][f],
-    images[.EMISSIVE][f],
-    images[.DEPTH][f],
+    gbuffer[0],
+    gbuffer[1],
+    gbuffer[2],
+    gbuffer[3],
+    gbuffer[4],
     0,
     self.environment.irradiance,
     self.environment.prefilter,
     self.brdf_lut,
     self.environment.image,
-    images[.AMBIENT_OCCLUSION][f],
+    gbuffer[5],
   )
   if group != 0 do dev.cmd_bind_group(&self.gpu, cmd, 3, group)
   groups := (self.camera_targets[cam].extent + LIGHTING_TILE - 1) / LIGHTING_TILE

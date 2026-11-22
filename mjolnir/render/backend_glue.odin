@@ -29,21 +29,21 @@ MAX_ACTIVE_CAMERAS :: 512
 PREFILTER_MIPS :: 5
 // the IBL precompute's storage targets: the irradiance cube, then each prefilter mip
 PRECOMPUTE_TARGETS :: 1 + PREFILTER_MIPS
-// mips a depth pyramid may have (shader/depth_reduce.slang MAX_MIPS)
+// mips a depth pyramid may have
 MAX_DEPTH_MIPS :: 16
-// Depth pyramids and draw lists live in slots render assigns: a pyramid and a draw-list slot
-// per camera and frame in flight, plus a draw-list slot per frame for the shadow views.
-MAX_PYRAMID_SLOTS :: MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT
-MAX_DRAW_LIST_SLOTS :: (MAX_ACTIVE_CAMERAS + 1) * FRAMES_IN_FLIGHT
+// Draw lists live in slots: camera c's is slot c, the shadow views' the one after the cameras'.
+// One copy each: only the GPU writes them, ordered by the frame graph.
+MAX_DRAW_LIST_SLOTS :: MAX_ACTIVE_CAMERAS + 1
 // The bindless storage-buffer indices draw lists take (Pool.DRAW_LISTS): a replaced list takes a
 // new one while frames in flight still read the old.
 DRAW_LIST_BINDINGS :: 4096
 #assert(DRAW_LIST_BINDINGS >= 2 * MAX_DRAW_LIST_SLOTS)
-// The bindless arrays: storage images hold the pyramids' mips, then the IBL precompute targets,
-// then the cameras' lit images and their ambient occlusion images, one each per pyramid slot;
-// storage buffers the draw lists; the extra buffer the pyramid counters, one u32 per pyramid slot.
+// The storage image views of every storage texture render holds, one per mip (texture_views).
+MAX_STORAGE_VIEWS :: 1 << 14
+// The bindless arrays: storage images the storage textures' views; storage buffers the draw
+// lists; the extra buffer the pyramid counters, one u32 per camera.
 BINDLESS_SIZES :: [rhi.BindlessArray]u32 {
-  .STORAGE_IMAGES  = MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS + PRECOMPUTE_TARGETS + 2 * MAX_PYRAMID_SLOTS,
+  .STORAGE_IMAGES  = MAX_STORAGE_VIEWS,
   .STORAGE_BUFFERS = DRAW_LIST_BINDINGS,
   .EXTRA_BUFFERS   = 1,
 }

@@ -53,9 +53,15 @@ overlay_upload :: proc(self: ^Renderer, f: u32) {
   dev.buffer_write(&self.gpu, self.buffers[.OVERLAY_INDICES][f], 0, slice.to_bytes(self.overlay_indices[:]))
 }
 
+// Over the presented image, after everything else that draws it.
+@(private)
+overlay_declare :: proc(self: ^Renderer) {
+  if len(self.overlay_indices) == 0 do return
+  declare(self, "overlay", .RASTER, .OVERLAY, 0, texture_use(BACKBUFFER, .COLOR))
+}
+
 @(private)
 overlay_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
-  if len(self.overlay_indices) == 0 do return
   colors := [1]rhi.ColorTarget{{texture = BACKBUFFER, load = .LOAD}}
   dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:]})
   dev.cmd_bind_pipeline(&self.gpu, cmd, self.pipelines[.OVERLAY])

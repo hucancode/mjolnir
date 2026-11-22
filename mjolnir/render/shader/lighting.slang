@@ -32,8 +32,14 @@ struct LightingPush {
     // rows of the placement table
     uint light_count;
     float ibl_intensity;
-    // 1: the camera's ambient occlusion image holds this frame's occlusion
-    uint ambient_occlusion;
+    // the G-buffer's texture handles (bound as a group on wgpu); ambient occlusion 0 when the
+    // camera runs none
+    uint normal_index;
+    uint albedo_index;
+    uint metallic_roughness_index;
+    uint emissive_index;
+    uint depth_index;
+    uint ambient_occlusion_index;
 }
 PUSH_BLOCK(LightingPush, lighting_push)
 
@@ -74,7 +80,7 @@ float scene_depth(View camera, int2 pixel)
 #if BACKEND_WGPU
     return depth_texture.Load(int3(pixel, 0));
 #else
-    return textures[NonUniformResourceIndex(camera.images[IMAGE_DEPTH])].Load(int3(pixel, 0)).r;
+    return textures[NonUniformResourceIndex(lighting_push.depth_index)].Load(int3(pixel, 0)).r;
 #endif
 }
 
@@ -89,7 +95,15 @@ float4 camera_image(View camera, uint a, int2 pixel)
     default: return ambient_occlusion_texture.Load(int3(pixel, 0));
     }
 #else
-    return textures[NonUniformResourceIndex(camera.images[a])].Load(int3(pixel, 0));
+    uint index;
+    switch (a) {
+    case IMAGE_NORMAL: index = lighting_push.normal_index; break;
+    case IMAGE_ALBEDO: index = lighting_push.albedo_index; break;
+    case IMAGE_METALLIC_ROUGHNESS: index = lighting_push.metallic_roughness_index; break;
+    case IMAGE_EMISSIVE: index = lighting_push.emissive_index; break;
+    default: index = lighting_push.ambient_occlusion_index; break;
+    }
+    return textures[NonUniformResourceIndex(index)].Load(int3(pixel, 0));
 #endif
 }
 
@@ -412,7 +426,7 @@ float3 sample_skybox(View camera, float2 uv)
 // repeats in (shader/ambient_occlusion.slang), of those on s's plane. 1 without the image.
 float ambient_visibility(View camera, int2 pixel, Surface s)
 {
-    if (lighting_push.ambient_occlusion == 0) return 1.0;
+    if (lighting_push.ambient_occlusion_index == 0) return 1.0;
     float tolerance = 0.02 * length(camera.position.xyz - s.position) + 1e-3;
     float sum = 0.0;
     float weight = 0.0;

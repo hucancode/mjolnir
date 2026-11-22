@@ -144,19 +144,19 @@ MeshPush :: struct {
   sprite_blend: u32,
 }
 
-// The forward pass draws particles first. A camera draws nothing until a cull has written its
-// lists (Vulkan; WebGPU culls the frame it draws).
+// Camera g.arg's pass: its uses are its color targets (MATERIAL_PASS_TARGETS) then its depth.
+// The forward pass draws particles first.
 @(private)
-material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32, pass: MaterialPass) {
-  images := &self.camera_targets[cam].images
+material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, g: GraphPass, pass: MaterialPass) {
+  cam := g.arg
   filter := self.camera_targets[cam].filter
   targets := MATERIAL_PASS_TARGETS[pass]
   colors := make([]rhi.ColorTarget, len(targets), context.temp_allocator)
   // without a lighting pass the forward pass starts the image
   load: rhi.LoadOp = .CLEAR if pass == .GBUFFER || !filter_deferred(filter) else .LOAD
   clear := filter.clear if pass == .FORWARD else [4]f32{0, 0, 0, 1}
-  for a, i in targets do colors[i] = {texture = images[a][f], load = load, clear = clear}
-  depth := rhi.DepthTarget{texture = images[.DEPTH][f], load = load, clear = 1, store = true}
+  for _, i in targets do colors[i] = {texture = pass_texture(self, g, i), load = load, clear = clear}
+  depth := rhi.DepthTarget{texture = pass_texture(self, g, len(targets)), load = load, clear = 1, store = true}
   dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors, depth = depth})
   if pass == .FORWARD {
     gpu_draws_record(self, cmd, f, cam)
@@ -184,27 +184,23 @@ material_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32,
     return
   }
   pipeline_bind(self, cmd, pipelines[0], .MESH, f, &push, .MATERIAL)
-  // the lists this frame's cull just wrote
-  ready := camera_ready(self, cam) if BINDLESS else true
-  slot := camera_draw_slot(cam, f)
-  if ready {
-    mesh_buffers_bind(self, cmd)
-    draw_list_draw(self, cmd, slot, 0, keys[:count], pipelines[:count], f, transmute(u32)(filter.types))
-    if pass == .FORWARD {
-      blend_keys: [len(SPRITE_TYPES)]u32
-      blend_pipelines: [len(SPRITE_TYPES)]rhi.Pipeline
-      n := 0
-      for type, i in SPRITE_TYPES {
-        if self.sprite_blend_pipelines[i] == 0 || int(type) not_in filter.types do continue
-        blend_keys[n], blend_pipelines[n] = u32(type), self.sprite_blend_pipelines[i]
-        n += 1
-      }
-      if n > 0 {
-        push.sprite_blend = 1
-        pipeline_bind(self, cmd, blend_pipelines[0], .MESH, f, &push, .MATERIAL)
-        mesh_buffers_bind(self, cmd)
-        draw_list_draw(self, cmd, slot, 0, blend_keys[:n], blend_pipelines[:n], f, transmute(u32)(filter.types))
-      }
+  // the lists this frame's cull just wrote: the camera's slot
+  mesh_buffers_bind(self, cmd)
+  draw_list_draw(self, cmd, cam, 0, keys[:count], pipelines[:count], f, transmute(u32)(filter.types))
+  if pass == .FORWARD {
+    blend_keys: [len(SPRITE_TYPES)]u32
+    blend_pipelines: [len(SPRITE_TYPES)]rhi.Pipeline
+    n := 0
+    for type, i in SPRITE_TYPES {
+      if self.sprite_blend_pipelines[i] == 0 || int(type) not_in filter.types do continue
+      blend_keys[n], blend_pipelines[n] = u32(type), self.sprite_blend_pipelines[i]
+      n += 1
+    }
+    if n > 0 {
+      push.sprite_blend = 1
+      pipeline_bind(self, cmd, blend_pipelines[0], .MESH, f, &push, .MATERIAL)
+      mesh_buffers_bind(self, cmd)
+      draw_list_draw(self, cmd, cam, 0, blend_keys[:n], blend_pipelines[:n], f, transmute(u32)(filter.types))
     }
   }
   dev.cmd_end_pass(&self.gpu, cmd)

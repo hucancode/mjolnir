@@ -265,7 +265,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   casters := make([]Caster, self.slots[.LIGHT_PLACEMENTS].high_water, context.temp_allocator)
   caster_count := 0
   _, has_eye := main_camera(self)
-  eye := &views[CAMERA_VIEW_BASE + u32(self.main_camera)]
+  eye := &views[CAMERA_VIEW_BASE + u32(MAIN_CAMERA)]
   nodes := write_table(self, .NODES, Node)
   lights := write_table(self, .LIGHTS, Light)
   placements := write_table(self, .LIGHT_PLACEMENTS, LightPlacement)[:self.slots[.LIGHT_PLACEMENTS].high_water]
@@ -310,7 +310,7 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
   self.shadow_view_count = assign_shadow_views(placements, lights, picked)
   for p, i in placements do if p.shadow_map != was[i] do mark_dirty(self, .LIGHT_PLACEMENTS, i)
   mark_dirty(self, .VIEWS, SHADOW_VIEW_BASE, int(self.shadow_view_count))
-  if !draw_list_reserve(self, SHADOW_DRAW_SLOT_BASE + frame_index, shadow = true, shadow_views = self.shadow_view_count) {
+  if !draw_list_reserve(self, SHADOW_DRAW_SLOT, shadow = true, shadow_views = self.shadow_view_count) {
     log.errorf("Cannot grow the shadow draw lists")
   }
   for p in placements {
@@ -339,8 +339,8 @@ collect_lights :: proc(self: ^Renderer, frame_index: u32) {
         require_flags   = SHADOW_CASTER_FLAGS,
         instance_tag    = (v - SHADOW_VIEW_BASE) << 24,
         layer           = v - SHADOW_VIEW_BASE,
-        draw_list       = self.draw_lists[SHADOW_DRAW_SLOT_BASE + frame_index].binding,
-        list_capacity   = self.draw_lists[SHADOW_DRAW_SLOT_BASE + frame_index].capacity,
+        draw_list       = self.draw_lists[SHADOW_DRAW_SLOT].binding,
+        list_capacity   = self.draw_lists[SHADOW_DRAW_SLOT].capacity,
         time            = f32(self.time),
       }
     }

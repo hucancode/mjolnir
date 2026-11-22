@@ -2,7 +2,7 @@ package render
 
 import "rhi"
 
-// Shadow maps live in one depth atlas per frame in flight, a map per shadow view, grown by
+// Shadow maps live in one depth atlas, a map per shadow view, grown by
 // doubling up to Renderer.max_shadow_views. Where the device renders layers together (Vulkan) the atlas
 // is an array, a layer per view: one cull dispatch tests every node against every shadow view
 // into one draw list, and one layered draw renders every view; the cull tags each draw
@@ -30,7 +30,7 @@ shadow_tile :: proc(layer, layers: u32) -> [4]u32 {
 }
 
 @(private)
-atlas_make :: proc(self: ^Renderer, f: int, layers: u32) -> bool {
+atlas_make :: proc(self: ^Renderer, layers: u32) -> bool {
   desc := TextureDesc {
     extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
     format = .D32F,
@@ -43,18 +43,21 @@ atlas_make :: proc(self: ^Renderer, f: int, layers: u32) -> bool {
     desc.layers = 1
   }
   atlas := allocate_texture(self, desc, target = true) or_return
-  if old := self.atlas[f]; old != 0 do texture_destroy(self, old)
-  self.atlas[f], self.atlas_layers[f] = atlas, layers
+  if old := self.atlas; old != 0 do texture_destroy(self, old)
+  self.atlas, self.atlas_layers = atlas, layers
   return true
 }
 
-// Doubles up to max_shadow_views and rebinds. Call once the frame's previous submission is done.
+// Doubles up to max_shadow_views and rebinds: frame f's scene group now, the other frames' as
+// they come round (the old atlas lives until no frame in flight binds it).
 @(private)
 shadow_atlas_reserve :: proc(self: ^Renderer, f: u32, layers: u32) -> bool {
-  have := self.atlas_layers[f]
+  have := self.atlas_layers
   if layers <= have do return true
-  atlas_make(self, int(f), max(layers, min(have * 2, self.max_shadow_views))) or_return
+  atlas_make(self, max(layers, min(have * 2, self.max_shadow_views))) or_return
   when BINDLESS {
+    self.groups_stale = true
+    self.groups_stale[f] = false
     return scene_group_make(self, int(f))
   } else {
     groups_clear(self)
@@ -77,44 +80,46 @@ shadow_init :: proc(self: ^Renderer) -> bool {
   return true
 }
 
-// The atlas of frame `f` is lit from whole, so every layer leaves UNDEFINED even when nothing
-// renders. Culls (Vulkan) and renders the shadow views into it.
+// The shadow views of frame f render into its atlas. Compacted, they cull first, into their one
+// list; batched, the frame's cull fills their lists.
+@(private)
+shadow_declare :: proc(self: ^Renderer) {
+  if self.shadow_view_count == 0 do return
+  list := buffer_use(self.draw_lists[SHADOW_DRAW_SLOT].buffer, .INDIRECT)
+  when BINDLESS {
+    declare(self, "shadow lists clear", .TRANSFER, .SHADOW_LISTS_CLEAR, 0, as(list, .COPY_DST))
+    declare(self, "shadow cull", .COMPUTE, .SHADOW_CULL, 0, as(list, .WRITE))
+  }
+  declare(self, "shadows", .RASTER, .SHADOW, 0, texture_use(self.atlas, .DEPTH), list, as(list, .READ), skinned_use(self))
+}
+
+@(private)
+shadow_cull_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
+  cull_compacted(self, cmd, f, SHADOW_VIEW_BASE, self.shadow_view_count)
+}
+
 @(private)
 shadow_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
-  atlas := self.atlas[f]
-  textures := [1]TextureHandle{atlas}
+  atlas := self.atlas
   views := self.shadow_view_count
-  draw_list := SHADOW_DRAW_SLOT_BASE + f
+  draw_list := u32(SHADOW_DRAW_SLOT)
   types := [1]u32{u32(MaterialType.PBR)}
   pipelines := [1]rhi.Pipeline{self.pipelines[.SHADOW]}
   when BINDLESS {
-    // with the clear of the shadow lists, last frame's draws done with them
-    if views == 0 {
-      barrier_discard(self, cmd, textures[:])
-      return
-    }
-    barrier_discard(self, cmd, textures[:], .INDIRECT_TO_FILL)
-    draw_lists_clear(self, cmd, draw_list)
-    barrier(self, cmd, .FILL_TO_CULL)
-    cull_compacted(self, cmd, f, SHADOW_VIEW_BASE, views)
-    barrier(self, cmd, .CULL_TO_INDIRECT)
     dev.cmd_begin_pass(&self.gpu, cmd, {depth = rhi.DepthTarget{texture = atlas, load = .CLEAR, clear = 1, store = true}, layer_count = views})
     mesh_buffers_bind(self, cmd)
     dev.cmd_bind_pipeline(&self.gpu, cmd, self.pipelines[.SHADOW])
     scene_bind(self, cmd, .SHADOW, f)
     draw_list_draw(self, cmd, draw_list, 0, types[:], pipelines[:], f, GBUFFER_TYPES, false)
     dev.cmd_end_pass(&self.gpu, cmd)
-    barrier(self, cmd, .SHADOW_TO_LIGHTING)
   } else {
-    barrier_discard(self, cmd, textures[:])
-    if views == 0 do return
     dev.cmd_begin_pass(&self.gpu, cmd, {depth = rhi.DepthTarget{texture = atlas, load = .CLEAR, clear = 1, store = true}})
     // the shadow view a batched draw renders (the bindless path reads it per draw)
     view_index: u32 = SHADOW_VIEW_BASE
     pipeline_bind(self, cmd, self.pipelines[.SHADOW], .SHADOW, f, &view_index, .NONE)
     mesh_buffers_bind(self, cmd)
     for v in 0 ..< views {
-      tile := shadow_tile(v, self.atlas_layers[f])
+      tile := shadow_tile(v, self.atlas_layers)
       dev.cmd_set_viewport(&self.gpu, cmd, tile.x, tile.y, tile.z, tile.w)
       dev.cmd_set_scissor(&self.gpu, cmd, tile.x, tile.y, tile.z, tile.w)
       view_index = SHADOW_VIEW_BASE + v

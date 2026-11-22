@@ -17,6 +17,9 @@ struct AmbientOcclusionPush {
     uint output_index;
     float radius;
     float intensity;
+    // the G-buffer's texture handles (bound as a group on wgpu)
+    uint depth_index;
+    uint normal_index;
 }
 PUSH_BLOCK(AmbientOcclusionPush, ao_push)
 
@@ -34,7 +37,7 @@ float scene_depth(View camera, int2 pixel)
 #if BACKEND_WGPU
     return depth_texture.Load(int3(pixel, 0));
 #else
-    return textures[NonUniformResourceIndex(camera.images[IMAGE_DEPTH])].Load(int3(pixel, 0)).r;
+    return textures[NonUniformResourceIndex(ao_push.depth_index)].Load(int3(pixel, 0)).r;
 #endif
 }
 
@@ -43,7 +46,7 @@ float3 scene_normal(View camera, int2 pixel)
 #if BACKEND_WGPU
     float3 n = normal_texture.Load(int3(pixel, 0)).xyz;
 #else
-    float3 n = textures[NonUniformResourceIndex(camera.images[IMAGE_NORMAL])].Load(int3(pixel, 0)).xyz;
+    float3 n = textures[NonUniformResourceIndex(ao_push.normal_index)].Load(int3(pixel, 0)).xyz;
 #endif
     return normalize(n * 2.0 - 1.0);
 }

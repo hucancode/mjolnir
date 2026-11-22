@@ -124,20 +124,18 @@ update :: proc(app: ^App, dt: f32) {
   debug_ui(app)
   mjolnir.orbit_drag(&app.orbit, render.main_camera(&app.renderer), &app.input)
   if input.key_pressed(&app.input, .F12) do render.screenshot(&app.renderer, "post_process.png")
-  effects := &render.main_camera(&app.renderer).effects
-  effects^ = {}
-  if outline_on    do effects[0] = render.make_effect(render.OutlineEffect{thickness = outline_thickness})
-  if fog_on        do effects[1] = render.make_effect(render.FogEffect{color = {0.55, 0.6, 0.7}, start = fog_start, end = fog_end, height = fog_height, height_falloff = fog_height_falloff})
-  if dof_on        do effects[2] = render.make_effect(render.DoFEffect{focus_distance = dof_focus, focus_range = dof_range, blur_strength = dof_blur, bokeh_intensity = 0.5})
-  if bloom_on      do effects[3] = render.make_effect(render.BloomEffect{threshold = bloom_threshold, intensity = bloom_intensity, blur_radius = 32.0})
-  if blur_on       do effects[4] = render.make_effect(render.BlurEffect{radius = blur_radius, weight_falloff = 1.0})
-  if crosshatch_on do effects[5] = render.make_effect(render.CrossHatchEffect{hatch_offset_y = 5.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
-  if grayscale_on  do effects[6] = render.make_effect(render.GrayscaleEffect{strength = grayscale_strength})
-  if tonemap_on    do effects[7] = render.make_effect(render.ToneMapEffect{exposure = tonemap_exposure, gamma = tonemap_gamma})
-  if vignette_on && app.vignette != 0 {
-    params := VignetteParams{color = {0.02, 0.0, 0.05}, radius = vignette_radius, softness = vignette_softness, strength = vignette_strength}
-    effects[8] = render.make_effect(app.vignette, params)
-  }
+  r, cam := &app.renderer, render.MAIN_CAMERA
+  render.camera_effect(r, cam, render.OutlineEffect{thickness = outline_thickness}, outline_on)
+  render.camera_effect(r, cam, render.FogEffect{color = {0.55, 0.6, 0.7}, start = fog_start, end = fog_end, height = fog_height, height_falloff = fog_height_falloff}, fog_on)
+  render.camera_effect(r, cam, render.DoFEffect{focus_distance = dof_focus, focus_range = dof_range, blur_strength = dof_blur, bokeh_intensity = 0.5}, dof_on)
+  render.camera_effect(r, cam, render.BloomEffect{threshold = bloom_threshold, intensity = bloom_intensity, radius = 1}, bloom_on)
+  render.camera_effect(r, cam, render.BlurEffect{radius = blur_radius, weight_falloff = 1.0}, blur_on)
+  render.camera_effect(r, cam, render.CrossHatchEffect{hatch_offset_y = 5.0, lum_thresholds = {0.6, 0.3, 0.15, 0.07}}, crosshatch_on)
+  render.camera_effect(r, cam, render.GrayscaleEffect{strength = grayscale_strength}, grayscale_on)
+  render.camera_effect(r, cam, render.ToneMapEffect{exposure = tonemap_exposure, gamma = tonemap_gamma}, tonemap_on)
+  vignette := VignetteParams{color = {0.02, 0.0, 0.05}, radius = vignette_radius, softness = vignette_softness, strength = vignette_strength}
+  if vignette_on && app.vignette != 0 do render.camera_post_shaders(r, cam, render.make_effect(app.vignette, vignette))
+  else do render.camera_post_shaders(r, cam)
   mjolnir.update(&app.scene, &app.renderer, dt)
 }
 

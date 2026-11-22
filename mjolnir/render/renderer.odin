@@ -160,7 +160,7 @@ pool_reserves :: proc(config: Config) -> [Pool]u32 {
     .CAMERAS                = MAX_ACTIVE_CAMERAS,
     .TEXTURES               = config.textures,
     .GPU_BUFFERS            = config.gpu_buffers,
-    .SHADERS                = 1 + BUILTIN_SHADERS + config.shaders,
+    .SHADERS                = 1 + config.shaders,
     .MATERIAL_SHADERS       = MAX_MATERIAL_SHADERS + 1,
     .BATCHES                = config.meshes,
     .DRAW_LISTS             = 64,
@@ -229,6 +229,7 @@ pool_grown :: proc(self: ^Renderer, pool: Pool) {
   #partial switch pool {
   case .TEXTURES:
     resize(&self.texture_targets, n)
+    resize(&self.texture_views, n)
   case .GPU_BUFFERS:
     resize(&self.gpu_buffers, n)
   case .SHADERS:
@@ -255,6 +256,21 @@ BuiltinPipeline :: enum {
   DEBUG_LINE,
   DEBUG_LINE_OVER,
   OVERLAY,
+  // the camera effects (pass_post.odin); bloom's up steps add into their target
+  POST_OUTLINE,
+  POST_FOG,
+  POST_DOF,
+  POST_BLOOM,
+  POST_BLOOM_ADD,
+  POST_FXAA,
+  POST_BLUR,
+  POST_CROSS_HATCH,
+  POST_GRAYSCALE,
+  POST_TONE_MAP,
+  // a post shader gone since: its input passes through
+  POST_COPY,
+  // the presented camera's image to the window
+  PRESENT,
 }
 
 // Renderer is the whole renderer; its fields are the settings an application edits.
@@ -271,8 +287,6 @@ Renderer :: struct {
 
 @(private)
 Renderer_State :: struct {
-  // presented to the swapchain (main_camera)
-  main_camera:            CameraHandle,
   // what primitive hands out
   builtin_materials:      [Color]MaterialHandle,
   builtin_meshes:         [Primitive]MeshHandle,
@@ -301,6 +315,10 @@ Renderer_State :: struct {
   camera_targets:         []CameraTargets,
   // per texture handle: a render target, which teardown keeps
   texture_targets:        [dynamic]bool,
+  // per texture handle: the first of a storage texture's views in the bindless storage images
+  // (BINDLESS), a mip each, taken from storage_views
+  texture_views:          [dynamic]u32,
+  storage_views:          containers.Ranges,
   // the mesh buffers' ranges, per stream
   mesh_ranges:            [MeshStream]containers.Ranges,
   // the palettes' ranges of the bone table (BonesHandle is a palette's first bone + 1)
@@ -337,9 +355,11 @@ Renderer_State :: struct {
   groups_stale:           [FRAMES_IN_FLIGHT]bool,
   // bound where a slot has none: white 2D and black cube
   white, black_cube:      TextureHandle,
-  // the shadow atlas of each frame in flight (pass_shadow.odin)
-  atlas:                  [FRAMES_IN_FLIGHT]TextureHandle,
-  atlas_layers:           [FRAMES_IN_FLIGHT]u32,
+  // bound where a depth slot has none (WebGPU's groups)
+  default_depth:          TextureHandle,
+  // the shadow atlas and its layers (pass_shadow.odin)
+  atlas:                  TextureHandle,
+  atlas_layers:           u32,
   // a bindless device has one layout and group per frame, at .NONE, which every pass binds
   scene_layouts:          [ScenePass]rhi.BindLayout,
   scene_groups:           [ScenePass][FRAMES_IN_FLIGHT]rhi.BindGroup,
@@ -376,13 +396,15 @@ Renderer_State :: struct {
   // your GPU programs (gpu.odin), by handle; work staged for the next frame; the draws frames
   // draw, stale once drawn or a tick ended
   gpu_buffers:            [dynamic]GpuBuffer,
-  // the buffers with a READBACK copy, which each frame copies back
-  readback_count:         int,
   shaders:                [dynamic]Shader,
   gpu_work:               [dynamic]GpuWork,
   gpu_draws:              [dynamic]GpuDraw,
   gpu_draws_stale:        bool,
   gpu_layouts:            map[GpuLayoutKey]rhi.BindLayout,
+  // this frame's passes (frame.odin), declared and compiled each frame
+  frame_graph:            FrameGraph,
+  // the textures the frame graph placed its transients in, by physical index
+  transients:             [dynamic]TextureHandle,
   // ready ran init_resources
   initialized:            bool,
 }
@@ -404,6 +426,7 @@ init :: proc(self: ^Renderer, window: WindowHandle, config := DEFAULT_CONFIG) ->
   containers.ranges_init(&self.mesh_ranges[.VERTEX], config.vertices)
   containers.ranges_init(&self.mesh_ranges[.INDEX], config.indices)
   containers.ranges_init(&self.mesh_ranges[.SKINNING], max(config.skinning_data, 1))
+  containers.ranges_init(&self.storage_views, MAX_STORAGE_VIEWS)
   dev.init(&self.gpu, window, BINDLESS_SIZES) or_return
   tables_init(self, table_reserves(config))
   measure_window(self)
@@ -434,9 +457,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
   skin_init(self) or_return
   debug_line_init(self) or_return
   overlay_init(self) or_return
-  for frame in 0 ..< u32(FRAMES_IN_FLIGHT) {
-    draw_list_reserve(self, SHADOW_DRAW_SLOT_BASE + frame, shadow = true, shadow_views = MIN_ATLAS_LAYERS) or_return
-  }
+  draw_list_reserve(self, SHADOW_DRAW_SLOT, shadow = true, shadow_views = MIN_ATLAS_LAYERS) or_return
   containers.ranges_init(&self.bone_ranges, u32(table_capacity(self, .BONES)))
   containers.ranges_init(&self.sprite_frame_ranges, u32(table_capacity(self, .SPRITE_FRAMES)))
   containers.ranges_init(&self.skin_ranges, u32(table_capacity(self, .SKIN_OWNERS)))
@@ -451,7 +472,7 @@ init_resources :: proc(self: ^Renderer) -> bool {
   if transmute(u32)(main_filter.types) == 0 do main_filter = FILTER_ALL
   cam, created := camera_create(self, extent, make_camera(MAIN_CAMERA_POSITION), main_filter)
   if !created do return false
-  self.main_camera = cam
+  assert(cam == MAIN_CAMERA)
   // what init made outlives teardown
   mark_resources(self)
   return true
@@ -508,7 +529,8 @@ teardown :: proc(self: ^Renderer) {
   gpu_reset(self)
   if !particles_reset(self) do log.error("teardown: cannot clear the particles")
   ambient_reset(self)
-  self.cameras[self.main_camera] = make_camera(MAIN_CAMERA_POSITION)
+  self.cameras[MAIN_CAMERA] = make_camera(MAIN_CAMERA_POSITION)
+  camera_effects_default(self, u32(MAIN_CAMERA))
 }
 
 // environment_map_load replaces the environment map with the equirectangular HDR image encoded
@@ -537,6 +559,8 @@ shutdown :: proc(self: ^Renderer) {
   delete(self.overlay_vertices)
   delete(self.overlay_indices)
   gpu_shutdown(self)
+  graph_destroy(&self.frame_graph)
+  delete(self.transients)
   for inbox in self.debug_lines do delete(inbox)
   delete(self.bursts)
   for &ranges in self.mesh_ranges do containers.ranges_destroy(&ranges)
@@ -547,6 +571,8 @@ shutdown :: proc(self: ^Renderer) {
   delete(self.cameras)
   delete(self.camera_targets)
   delete(self.texture_targets)
+  delete(self.texture_views)
+  containers.ranges_destroy(&self.storage_views)
 }
 
 // Cameras that matched the old extent follow the new one.
@@ -588,7 +614,7 @@ tick_resource_pools :: proc(self: ^Renderer) {
     for r in containers.slots_tick(&slots) {
       #partial switch p {
       case .TEXTURES:
-        dev.texture_destroy(&self.gpu, TextureHandle(r.index))
+        texture_free(self, TextureHandle(r.index))
         destroyed = true
       case .MESHES:
         free_mesh(self, write_table(self, .MESHES, MeshData)[r.index])
@@ -616,7 +642,7 @@ update :: proc(self: ^Renderer, delta_time: f32) {
 @(private)
 flush :: proc(self: ^Renderer, frame_index: u32) {
   // before the lights: shadow casters are ranked by the camera views
-  flush_cameras(self, frame_index)
+  flush_cameras(self)
   flush_particles(self)
   collect_lights(self, frame_index)
   flush_debug_lines(self)

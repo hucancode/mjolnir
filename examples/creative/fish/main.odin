@@ -118,7 +118,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   }
   copy(fish[MAX_FISH:], fish[:MAX_FISH])
   app.fish = render.buffer_create(r, fish)
-  app.counters = render.buffer_create(r, []Counters{{}}, {.INDIRECT, .READBACK})
+  app.counters = render.buffer_create(r, []Counters{{}})
   ok: bool
   app.school, ok = render.compute_shader_create(r, #load("school." + render.SHADER_EXT), app.fish, app.counters)
   if !ok do return .FAIL
@@ -137,7 +137,7 @@ setup :: proc(app: ^App) -> mjolnir.Setup {
   sun := render.light_create(r, render.make_directional_light(SUN_COLOR, SUN_INTENSITY))
   mjolnir.spawn(&app.scene, r, sun, rotation = linalg.quaternion_from_forward_and_up(SUN_FORWARD, [3]f32{0, 1, 0}))
   r.skybox_intensity = 0
-  render.main_camera(r).effects[0] = render.make_effect(render.FogEffect{color = {0.05, 0.25, 0.35}, start = 2, end = 45})
+  render.camera_effect(r, render.MAIN_CAMERA, render.FogEffect{color = {0.05, 0.25, 0.35}, start = 2, end = 45})
   return .READY
 }
 
@@ -194,6 +194,7 @@ simulate :: proc(app: ^App, dt: f32, shark: [3]f32) {
   sun_radiance.rgb = SUN_COLOR * SUN_INTENSITY
   render.stage_clear(&app.renderer, app.counters)
   render.stage_dispatch(&app.renderer, app.school, {(count + 63) / 64, 1, 1}, params)
+  render.stage_readback(&app.renderer, app.counters)
   render.stage_draw(&app.renderer, app.draw, FISH_VERTICES, app.counters, 0, FishParams{first = (1 - src) * MAX_FISH, toward_sun = toward_sun, sun_radiance = sun_radiance})
 }
 

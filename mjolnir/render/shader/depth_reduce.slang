@@ -2,8 +2,8 @@
 // depth image's size; each texel holds the farthest depth of the 2x2 texels
 // below it. A group reduces a 32x32 tile of mip 0 down to mip 5 in shared
 // memory; the last group to finish, found with a global counter, reduces the
-// remaining mips from mip 5. Pyramid slot params.slot owns storage images
-// [slot * MAX_MIPS, slot * MAX_MIPS + mip_count) and counter slot.
+// remaining mips from mip 5. Mip m is storage image params.first_view + m; the pyramid's
+// counter is params.counter.
 // wgpu: one level of a max-depth pyramid: each texel holds the farthest depth of the 2x2 source
 // texels below it (source: the depth image for mip 0, read as unfilterable float, half its
 // size, the mip above otherwise). Clamping repeats the last row and column of an odd-sized
@@ -38,7 +38,6 @@ void main(uint3 gid : SV_DispatchThreadID)
     destination.Store(int2(gid.xy), value);
 }
 #else
-static const uint MAX_MIPS = 16;
 // mip 0 texels per tile side
 static const uint TILE = 32;
 // mips 0..5 come from the tile
@@ -49,14 +48,15 @@ struct DepthReducePush {
     uint depth_index;
     uint mip_count;
     uint group_count;
-    uint slot;
+    uint first_view;
+    uint counter;
 }
 PUSH_BLOCK(DepthReducePush, params)
 
 [vk::binding(0, 1)] Texture2D textures[];
 
 [vk::binding(2, 1)] [vk::image_format("r32f")] globallycoherent RWTexture2D<float> storage_images[];
-// groups done this dispatch, per pyramid slot; the last group resets it
+// groups done this dispatch, per camera; the last group resets it
 [vk::binding(4, 1)] globallycoherent RWStructuredBuffer<uint> finished_groups;
 
 groupshared float tile[TILE / 2][TILE / 2];
@@ -64,7 +64,7 @@ groupshared bool is_last_group;
 
 RWTexture2D<float> mips(uint mip)
 {
-    return storage_images[params.slot * MAX_MIPS + mip];
+    return storage_images[params.first_view + mip];
 }
 
 int2 mip_size(uint mip)
@@ -141,7 +141,7 @@ void main(uint tid : SV_GroupIndex, uint3 wid : SV_GroupID)
     DeviceMemoryBarrierWithGroupSync();
     if (tid == 0) {
         uint finished;
-        InterlockedAdd(finished_groups[params.slot], 1, finished);
+        InterlockedAdd(finished_groups[params.counter], 1, finished);
         is_last_group = finished == params.group_count - 1;
     }
     GroupMemoryBarrierWithGroupSync();
@@ -163,6 +163,6 @@ void main(uint tid : SV_GroupIndex, uint3 wid : SV_GroupID)
         }
         DeviceMemoryBarrierWithGroupSync();
     }
-    if (tid == 0) finished_groups[params.slot] = 0;
+    if (tid == 0) finished_groups[params.counter] = 0;
 }
 #endif

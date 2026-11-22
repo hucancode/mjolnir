@@ -24,14 +24,22 @@ debug_line_init :: proc(self: ^Renderer) -> bool {
   return true
 }
 
+// Over the presented image, tested against camera cam's depth.
 @(private)
-debug_line_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, cam: u32) {
+debug_line_declare :: proc(self: ^Renderer, cam: u32) {
+  declare(self, "debug lines", .RASTER, .DEBUG_LINES, cam, texture_use(BACKBUFFER, .COLOR), texture_use(self.camera_targets[cam].depth, .DEPTH_READ))
+}
+
+// Its uses are the backbuffer and the camera's depth.
+@(private)
+debug_line_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, g: GraphPass) {
+  cam := g.arg
   // filled segments of each ring
   ring := u64(debug_ring(self))
   counts := [2]u32{u32(min(self.debug_filled[0], ring)), u32(min(self.debug_filled[1], ring))}
   if counts == {} do return
   colors := [1]rhi.ColorTarget{{texture = BACKBUFFER, load = .LOAD}}
-  dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:], depth = rhi.DepthTarget{texture = self.camera_targets[cam].images[.DEPTH][f], load = .LOAD, read_only = true}})
+  dev.cmd_begin_pass(&self.gpu, cmd, {colors = colors[:], depth = rhi.DepthTarget{texture = pass_texture(self, g, 1), load = .LOAD, read_only = true}})
   // the shader skips segments past their expiry
   camera_index := cam
   pipeline_bind(self, cmd, self.pipelines[.DEBUG_LINE], .DEBUG_LINE, f, &camera_index, .NONE)

@@ -4,28 +4,23 @@ import "../geometry"
 
 import "../containers"
 import "core:log"
+import "core:slice"
 import "rhi"
 
-// Your own GPU programs: buffers, and shaders of three kinds sharing one handle and one params
-// scheme: compute and draw shaders written against shader/gpu.slang, post shaders against
-// shader/post.slang (pass_post.odin). A compute or draw shader names what it binds once, at
-// creation: binding i of set 1 is bindings[i]. Each tick, stage_clear and stage_dispatch queue
-// work that the next frame runs once, in order, before it draws the scene; stage_draw sets what
-// every camera's forward pass draws, until the next tick's draws replace it; a camera's effects
-// run its post shaders. render places the barriers between them. Every dispatch, draw and effect
-// takes params: any struct of at most PARAMS_BYTES, which the shader reads as its own struct.
+// Your own GPU programs: buffers, and shaders of three kinds: compute and draw shaders written
+// against shader/gpu.slang, post shaders against shader/post.slang (pass_post.odin). A compute or
+// draw shader names what it binds once, at creation: binding i of set 1 is bindings[i]. Each
+// tick, stage_clear, stage_dispatch and stage_readback queue work that the next frame runs once,
+// before it draws the scene, in order wherever two steps use the same resource (a dispatch writes
+// the buffers and images it binds); stage_draw sets what every camera's forward pass draws, until
+// the next tick's draws replace it; camera_post_shaders sets a camera's post shaders. render
+// places the barriers between them. Every dispatch and draw takes params: any struct of at most
+// PARAMS_BYTES (a post shader's, POST_PARAMS_BYTES), which the shader reads as its own struct.
 // Buffers and shaders live until buffer_destroy or shader_destroy, teardown or shutdown; destroy
 // a shader before what it binds.
 
 // BufferHandle is a GPU buffer of yours (buffer_create); 0 is none.
 BufferHandle :: distinct u32
-
-// BufferUsage is what a buffer is besides storage: INDIRECT holds dispatch or draw arguments,
-// READBACK is copied back each frame for buffer_read.
-BufferUsage :: enum {
-  INDIRECT,
-  READBACK,
-}
 
 // StorageImage binds a texture made with texture_create(storage = true) for a compute shader to
 // write; a plain TextureHandle binds it to sample.
@@ -73,7 +68,7 @@ DrawSource :: union {
   VertexCount,
 }
 
-// PARAMS_BYTES is the most a dispatch's, draw's or effect's params take.
+// PARAMS_BYTES is the most a dispatch's or draw's params take (an effect's: POST_PARAMS_BYTES).
 PARAMS_BYTES :: PUSH_SIZE - 16
 
 // MAX_BINDINGS is the most resources one shader binds.
@@ -83,7 +78,8 @@ MAX_BINDINGS :: 8
 GpuBuffer :: struct {
   buffer:   rhi.Buffer,
   size:     int,
-  // READBACK: where each frame copies it (the backend keeps the copies of frames in flight)
+  // where stage_readback copies it, made by the first (the backend keeps the copies of frames
+  // in flight)
   readback: rhi.Buffer,
 }
 
@@ -97,35 +93,38 @@ ShaderKind :: enum u8 {
 
 @(private)
 Shader :: struct {
-  // [writes the backbuffer] for a post shader (the last pass of the presented camera's chain);
-  // compute and draw shaders have [0]
-  pipelines:     [2]rhi.Pipeline,
+  pipeline:      rhi.Pipeline,
   group:         rhi.BindGroup,
   kind:          ShaderKind,
   mesh_vertices: bool,
-  // the fullscreen passes a post shader runs per effect
-  passes:        u32,
+  // a post shader that reads the G-buffer normals
+  normals:       bool,
+  // what a compute or draw shader binds, which group holds
+  bindings:      [MAX_BINDINGS]Binding,
 }
 
-// What every shader pushes: the camera it runs for, a post pass's images and pass, then the
-// params.
+// What a compute or draw shader pushes: the camera it runs for, then the params (gpu.slang).
 @(private)
 ShaderPush :: struct {
-  camera_index:         u32,
-  // a post pass's: the previous pass's output and input, and which pass of its shader it is
-  input_image_index:    u32,
-  original_image_index: u32,
-  pass:                 u32,
-  params:               [PARAMS_BYTES]u8,
+  camera_index: u32,
+  _:            [3]u32,
+  params:       [PARAMS_BYTES]u8,
 }
 #assert(size_of(ShaderPush) == PUSH_SIZE)
 
+// What a staged step does: dispatch `shader`, zero `buffer`, or copy `buffer` back.
+@(private)
+GpuWorkKind :: enum u8 {
+  DISPATCH,
+  CLEAR,
+  READBACK,
+}
+
 @(private)
 GpuWork :: struct {
-  // zeroes `buffer` instead of dispatching
-  clear:  bool,
+  kind:   GpuWorkKind,
   shader: ShaderHandle,
-  // a clear's buffer, or a dispatch_indirect's arguments
+  // a clear's or readback's buffer, or a dispatch_indirect's arguments
   buffer: BufferHandle,
   offset: int,
   groups: [3]u32,
@@ -152,8 +151,9 @@ GpuLayoutKey :: struct {
 }
 
 // buffer_create makes a GPU buffer holding data (len(data) elements of T, zeroed when you
-// pass make([]T, n)); false when it cannot be made.
-buffer_create :: proc(self: ^Renderer, data: []$T, usage: bit_set[BufferUsage] = {}) -> (handle: BufferHandle, ok: bool) #optional_ok {
+// pass make([]T, n)); false when it cannot be made. Shaders bind it, and indirect dispatches and
+// draws read their arguments from it.
+buffer_create :: proc(self: ^Renderer, data: []$T) -> (handle: BufferHandle, ok: bool) #optional_ok {
   #assert(size_of(T) % 4 == 0)
   lock(self)
   handle = BufferHandle(pool_alloc(self, .GPU_BUFFERS) or_return)
@@ -161,13 +161,7 @@ buffer_create :: proc(self: ^Renderer, data: []$T, usage: bit_set[BufferUsage] =
   size := len(data) * size_of(T)
   b := &self.gpu_buffers[handle]
   b^ = {size = size}
-  flags := bit_set[rhi.BufferUsage]{.STORAGE, .COPY_SRC, .COPY_DST}
-  if .INDIRECT in usage do flags += {.INDIRECT}
-  b.buffer = dev.buffer_create(&self.gpu, {size = size, usage = flags}) or_return
-  if .READBACK in usage {
-    b.readback = dev.buffer_create(&self.gpu, {size = size, usage = {.COPY_DST}, memory = .READBACK}) or_return
-    self.readback_count += 1
-  }
+  b.buffer = dev.buffer_create(&self.gpu, {size = size, usage = {.STORAGE, .INDIRECT, .COPY_SRC, .COPY_DST}}) or_return
   if size > 0 do dev.buffer_write(&self.gpu, b.buffer, 0, ([^]u8)(raw_data(data))[:size]) or_return
   return handle, true
 }
@@ -182,8 +176,9 @@ buffer_write :: proc(self: ^Renderer, handle: BufferHandle, data: []$T, first :=
   return dev.buffer_write(&self.gpu, b.buffer, offset, ([^]u8)(raw_data(data))[:size])
 }
 
-// buffer_read fills dst from element `first` of a READBACK buffer as the latest finished frame
-// left it, a frame or two behind; zeros before any frame copied it back.
+// buffer_read fills dst from element `first` of the buffer as the latest finished frame's
+// stage_readback left it, a frame or two behind; zeros before any frame copied it back, false
+// before any stage_readback.
 buffer_read :: proc(self: ^Renderer, handle: BufferHandle, dst: []$T, first := 0) -> bool {
   lock(self)
   b := gpu_buffer(self, handle) or_return
@@ -199,7 +194,6 @@ buffer_destroy :: proc(self: ^Renderer, handle: BufferHandle) {
   b := gpu_buffer(self, handle) or_else nil
   if b == nil do return
   dev.buffer_retire(&self.gpu, b.buffer)
-  if b.readback != 0 do self.readback_count -= 1
   dev.buffer_retire(&self.gpu, b.readback)
   b^ = {}
   containers.slots_free(&self.slots[.GPU_BUFFERS], u32(handle))
@@ -211,7 +205,9 @@ compute_shader_create :: proc(self: ^Renderer, source: []u8, bindings: ..Binding
   lock(self)
   layout, group := gpu_bindings(self, bindings, compute = true) or_return
   pipeline, created := dev.compute_pipeline_create(&self.gpu, {source, pipeline_layout(self, .USER, user = layout)})
-  return shader_add(self, {pipelines = {pipeline, 0}, group = group, kind = .COMPUTE}, created)
+  s := Shader{pipeline = pipeline, group = group, kind = .COMPUTE}
+  copy(s.bindings[:], bindings)
+  return shader_add(self, s, created)
 }
 
 // draw_shader_create makes a draw shader (entry points vs_main and fs_main of one compiled
@@ -238,7 +234,9 @@ draw_shader_create :: proc(
   }
   if state.mesh_vertices do desc.vertex = mesh_vertex_streams()[:1]
   pipeline, created := dev.graphics_pipeline_create(&self.gpu, desc)
-  return shader_add(self, {pipelines = {pipeline, 0}, group = group, kind = .DRAW, mesh_vertices = state.mesh_vertices}, created)
+  s := Shader{pipeline = pipeline, group = group, kind = .DRAW, mesh_vertices = state.mesh_vertices}
+  copy(s.bindings[:], bindings)
+  return shader_add(self, s, created)
 }
 
 // shader_destroy frees a shader: its staged work and draws are dropped, and effects running it
@@ -247,7 +245,7 @@ shader_destroy :: proc(self: ^Renderer, handle: ShaderHandle) {
   lock(self)
   s := shader(self, handle) or_else nil
   if s == nil do return
-  for p in s.pipelines do dev.pipeline_retire(&self.gpu, p)
+  dev.pipeline_retire(&self.gpu, s.pipeline)
   dev.bind_group_retire(&self.gpu, s.group)
   s^ = {}
   containers.slots_free(&self.slots[.SHADERS], u32(handle))
@@ -256,14 +254,27 @@ shader_destroy :: proc(self: ^Renderer, handle: ShaderHandle) {
 // stage_clear queues zeroing the buffer, ordered with the dispatches around it.
 stage_clear :: proc(self: ^Renderer, buffer: BufferHandle) {
   lock(self)
-  if _, live := gpu_buffer(self, buffer); live do gpu_work_add(self, {clear = true, buffer = buffer})
+  if _, live := gpu_buffer(self, buffer); live do gpu_work_add(self, {kind = .CLEAR, buffer = buffer})
+}
+
+// stage_readback queues copying the buffer back for buffer_read, after the dispatches staged
+// before it; only the frames that run one copy anything. False when it is not live or its copy
+// cannot be made.
+stage_readback :: proc(self: ^Renderer, buffer: BufferHandle) -> bool {
+  lock(self)
+  b := gpu_buffer(self, buffer) or_return
+  if b.readback == 0 {
+    b.readback = dev.buffer_create(&self.gpu, {size = b.size, usage = {.COPY_DST}, memory = .READBACK}) or_return
+  }
+  gpu_work_add(self, {kind = .READBACK, buffer = buffer})
+  return true
 }
 
 // stage_dispatch queues a compute shader with `params` (the shaders' `params`, laid out as
 // Params; at most PARAMS_BYTES) over:
 //   stage_dispatch(r, shader, groups: [3]u32, params): that many workgroups
 //   stage_dispatch(r, shader, args: BufferHandle, offset: int, params): the workgroup counts
-//   that three u32 at byte `offset` of an INDIRECT buffer hold when it runs
+//   that three u32 at byte `offset` of a buffer hold when it runs
 stage_dispatch :: proc {
   stage_dispatch_groups,
   stage_dispatch_indirect,
@@ -272,20 +283,20 @@ stage_dispatch :: proc {
 @(private = "file")
 stage_dispatch_groups :: proc(self: ^Renderer, shader: ShaderHandle, groups: [3]u32, params: $T) {
   lock(self)
-  gpu_work_add(self, {shader = shader, groups = groups, params = pack_params(params)})
+  gpu_work_add(self, {shader = shader, groups = groups, params = pack_params(params, PARAMS_BYTES)})
 }
 
 @(private = "file")
 stage_dispatch_indirect :: proc(self: ^Renderer, shader: ShaderHandle, args: BufferHandle, offset: int, params: $T) {
   lock(self)
-  gpu_work_add(self, {shader = shader, buffer = args, offset = offset, params = pack_params(params)})
+  gpu_work_add(self, {shader = shader, buffer = args, offset = offset, params = pack_params(params, PARAMS_BYTES)})
 }
 
 // stage_draw draws source with a draw shader in every camera's forward pass, over the lit scene
 // and depth-tested against it:
 //   stage_draw(r, shader, source, instances: u32, params): that many instances
 //   stage_draw(r, shader, source, args: BufferHandle, offset: int, params): with the arguments
-//   at byte `offset` of an INDIRECT buffer when it draws: {vertex_count, instance_count,
+//   at byte `offset` of a buffer when it draws: {vertex_count, instance_count,
 //   first_vertex, first_instance} for a vertex count; {index_count, instance_count, first_index,
 //   vertex_offset, first_instance} for a mesh, its indices and vertices counted from the mesh's
 //   first
@@ -297,13 +308,13 @@ stage_draw :: proc {
 @(private = "file")
 stage_draw_instances :: proc(self: ^Renderer, shader: ShaderHandle, source: DrawSource, instances: u32, params: $T) {
   lock(self)
-  gpu_draw_add(self, {shader = shader, source = source, instances = instances, params = pack_params(params)})
+  gpu_draw_add(self, {shader = shader, source = source, instances = instances, params = pack_params(params, PARAMS_BYTES)})
 }
 
 @(private = "file")
 stage_draw_indirect :: proc(self: ^Renderer, shader: ShaderHandle, source: DrawSource, args: BufferHandle, offset: int, params: $T) {
   lock(self)
-  gpu_draw_add(self, {shader = shader, source = source, args = args, offset = offset, params = pack_params(params)})
+  gpu_draw_add(self, {shader = shader, source = source, args = args, offset = offset, params = pack_params(params, PARAMS_BYTES)})
 }
 
 @(private = "file")
@@ -335,7 +346,7 @@ shader_add :: proc(self: ^Renderer, s: Shader, created: bool) -> (handle: Shader
     slot, ok = pool_alloc(self, .SHADERS)
   }
   if !ok {
-    for p in s.pipelines do dev.pipeline_retire(&self.gpu, p)
+    dev.pipeline_retire(&self.gpu, s.pipeline)
     dev.bind_group_retire(&self.gpu, s.group)
     return
   }
@@ -398,8 +409,8 @@ gpu_layout :: proc(self: ^Renderer, key: GpuLayoutKey) -> (layout: rhi.BindLayou
 
 // params' bytes, as a shader reads them.
 @(private)
-pack_params :: proc(params: $T) -> (bytes: [PARAMS_BYTES]u8) {
-  #assert(size_of(T) <= PARAMS_BYTES, "params take more than PARAMS_BYTES")
+pack_params :: proc(params: $T, $N: int) -> (bytes: [N]u8) {
+  #assert(size_of(T) <= N, "params take more than the shader's params bytes (PARAMS_BYTES, POST_PARAMS_BYTES)")
   params := params
   copy(bytes[:], ([^]u8)(&params)[:size_of(T)])
   return
@@ -407,7 +418,7 @@ pack_params :: proc(params: $T) -> (bytes: [PARAMS_BYTES]u8) {
 
 @(private = "file")
 gpu_work_add :: proc(self: ^Renderer, work: GpuWork) {
-  if _, compute := shader_of(self, work.shader, .COMPUTE); !work.clear && !compute do return
+  if _, compute := shader_of(self, work.shader, .COMPUTE); work.kind == .DISPATCH && !compute do return
   append(&self.gpu_work, work)
 }
 
@@ -427,44 +438,87 @@ gpu_draw_add :: proc(self: ^Renderer, draw: GpuDraw) {
 @(private = "file")
 gpu_bind :: proc(self: ^Renderer, cmd: rhi.CommandList, s: ^Shader, f: u32, params: [PARAMS_BYTES]u8, camera: u32) {
   push := ShaderPush{camera_index = camera, params = params}
-  dev.cmd_bind_pipeline(&self.gpu, cmd, s.pipelines[0])
+  dev.cmd_bind_pipeline(&self.gpu, cmd, s.pipeline)
   scene_bind(self, cmd, .USER, f)
   dev.cmd_bind_group(&self.gpu, cmd, 1, s.group)
   dev.cmd_push(&self.gpu, cmd, &push, size_of(push))
 }
 
-// The staged work in order, then the readback copies, before anything draws.
+// The staged work, a pass each, before anything draws. A dispatch writes the buffers and images
+// it binds, reads the textures, and its arguments.
 @(private)
-gpu_work_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
-  if len(self.gpu_work) == 0 && self.readback_count == 0 do return
-  buffers := self.gpu_buffers[:self.slots[.GPU_BUFFERS].high_water]
-  barrier(self, cmd, .FRAME_TO_GPU_WORK)
-  in_compute := false
+gpu_work_declare :: proc(self: ^Renderer) {
   for &work, i in self.gpu_work {
-    if i > 0 do barrier(self, cmd, .GPU_WORK)
-    if work.clear {
-      if in_compute do dev.cmd_end_compute(&self.gpu, cmd)
-      in_compute = false
-      if b, live := gpu_buffer(self, work.buffer); live && b.size > 0 do dev.cmd_fill_buffer(&self.gpu, cmd, b.buffer, 0, (b.size + 3) &~ 3)
-      continue
-    }
-    s := shader_of(self, work.shader, .COMPUTE) or_continue
-    if !in_compute do dev.cmd_begin_compute(&self.gpu, cmd)
-    in_compute = true
-    gpu_bind(self, cmd, s, f, work.params, u32(self.main_camera))
-    if work.buffer != 0 {
-      args := gpu_buffer(self, work.buffer) or_continue
-      dev.cmd_dispatch_indirect(&self.gpu, cmd, args.buffer, work.offset)
-    } else {
-      dev.cmd_dispatch(&self.gpu, cmd, work.groups.x, work.groups.y, work.groups.z)
+    b, live := gpu_buffer(self, work.buffer)
+    switch work.kind {
+    case .DISPATCH:
+      s := shader_of(self, work.shader, .COMPUTE) or_continue
+      uses := uses_make()
+      bindings_use(self, &uses, s, .WRITE)
+      if live do append(&uses, buffer_use(b.buffer, .INDIRECT))
+      declare(self, "gpu dispatch", .COMPUTE, .GPU_DISPATCH, u32(i), ..uses[:])
+    case .CLEAR:
+      if live && b.size > 0 do declare(self, "gpu clear", .TRANSFER, .GPU_CLEAR, u32(i), buffer_use(b.buffer, .COPY_DST))
+    case .READBACK:
+      if live && b.size > 0 do declare(self, "readback", .TRANSFER, .READBACK, u32(i), buffer_use(b.buffer, .COPY_SRC), buffer_use(b.readback, .COPY_DST))
     }
   }
-  if in_compute do dev.cmd_end_compute(&self.gpu, cmd)
-  barrier(self, cmd, .GPU_WORK_TO_DRAW)
-  for b in buffers {
-    if b.readback == 0 do continue
-    dev.cmd_copy_buffer(&self.gpu, cmd, b.buffer, 0, b.readback, 0, b.size)
+}
+
+// What every staged draw reads: what its shader binds (once per shader) and its arguments.
+@(private)
+gpu_draws_use :: proc(self: ^Renderer, uses: ^[dynamic]GraphUse) {
+  seen := make([dynamic]ShaderHandle, context.temp_allocator)
+  for &draw in self.gpu_draws {
+    s := shader_of(self, draw.shader, .DRAW) or_continue
+    if !slice.contains(seen[:], draw.shader) {
+      append(&seen, draw.shader)
+      bindings_use(self, uses, s, .READ)
+    }
+    if args, live := gpu_buffer(self, draw.args); live do append(uses, buffer_use(args.buffer, .INDIRECT))
   }
+}
+
+// What s binds: buffers by `buffers`, textures read, images written.
+@(private = "file")
+bindings_use :: proc(self: ^Renderer, uses: ^[dynamic]GraphUse, s: ^Shader, buffers: Access) {
+  for binding in s.bindings {
+    switch v in binding {
+    case BufferHandle:
+      if b, live := gpu_buffer(self, v); live do append(uses, buffer_use(b.buffer, buffers))
+    case TextureHandle:
+      append(uses, texture_use(v, .READ))
+    case StorageImage:
+      append(uses, texture_use(TextureHandle(v), .WRITE))
+    }
+  }
+}
+
+@(private)
+gpu_clear_record :: proc(self: ^Renderer, cmd: rhi.CommandList, i: u32) {
+  b := gpu_buffer(self, self.gpu_work[i].buffer) or_else nil
+  if b != nil do dev.cmd_fill_buffer(&self.gpu, cmd, b.buffer, 0, (b.size + 3) &~ 3)
+}
+
+@(private)
+gpu_dispatch_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32, i: u32) {
+  work := &self.gpu_work[i]
+  s := shader_of(self, work.shader, .COMPUTE) or_else nil
+  if s == nil do return
+  gpu_bind(self, cmd, s, f, work.params, u32(MAIN_CAMERA))
+  if work.buffer != 0 {
+    args := gpu_buffer(self, work.buffer) or_else nil
+    if args != nil do dev.cmd_dispatch_indirect(&self.gpu, cmd, args.buffer, work.offset)
+  } else {
+    dev.cmd_dispatch(&self.gpu, cmd, work.groups.x, work.groups.y, work.groups.z)
+  }
+}
+
+// Staged readback i: the buffer into its copy.
+@(private)
+readback_record :: proc(self: ^Renderer, cmd: rhi.CommandList, i: u32) {
+  b := gpu_buffer(self, self.gpu_work[i].buffer) or_else nil
+  if b != nil do dev.cmd_copy_buffer(&self.gpu, cmd, b.buffer, 0, b.readback, 0, b.size)
 }
 
 // Inside camera cam's forward pass.

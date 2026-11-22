@@ -434,9 +434,8 @@ load_assets :: proc(app: ^App) -> bool {
   for data, power in POWER_MODELS do app.powers[power] = gltf.model_create(&app.renderer, data) or_return
   for data, i in DECOR do app.decor[i] = gltf.model_create(&app.renderer, data) or_return
   app.arrow = gltf.model_create(&app.renderer, ARROW_MODEL) or_return
-  effects := &render.main_camera(&app.renderer).effects
-  effects[0] = render.make_effect(render.OutlineEffect{thickness = 1.5})
-  effects[1] = render.make_effect(render.CrossHatchEffect{hatch_offset_y = 5, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
+  render.camera_effect(&app.renderer, render.MAIN_CAMERA, render.OutlineEffect{thickness = 1.5})
+  render.camera_effect(&app.renderer, render.MAIN_CAMERA, render.CrossHatchEffect{hatch_offset_y = 5, lum_thresholds = {0.6, 0.3, 0.15, 0.07}})
   return true
 }
 

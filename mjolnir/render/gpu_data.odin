@@ -45,15 +45,9 @@ CameraImage :: enum {
   METALLIC_ROUGHNESS = 3,
   EMISSIVE           = 4,
   DEPTH              = 5,
-  // how much ambient light reaches each pixel, 1 unoccluded (Camera.ambient_occlusion)
+  // how much ambient light reaches each pixel, 1 unoccluded (AmbientOcclusion)
   AMBIENT_OCCLUSION  = 6,
 }
-
-// The camera images a later frame reads, kept per frame in flight: the lit image (sampled the
-// frame after, render-to-texture) and depth (the next frame's depth pyramid). The rest have one
-// copy, rewritten each frame after the previous frame's reads (Barrier.SAMPLE_TO_REWRITE).
-@(private)
-CAMERA_IMAGES_PER_FRAME :: bit_set[CameraImage]{.FINAL_IMAGE, .DEPTH}
 
 // Each camera attachment's texture; pipelines drawing into an attachment take its format.
 @(private)
@@ -197,11 +191,15 @@ BlurEffect :: struct {
   weight_falloff: f32, // 0.0 = box blur, 1.0 = gaussian blur
 }
 
-// BloomEffect adds a blurred copy of the pixels above threshold.
+// BloomEffect adds a glow around the pixels brighter than threshold: their light spread over a
+// chain of ever smaller images, added back up and over the image, `intensity` of it, tinted.
 BloomEffect :: struct {
-  threshold:   f32,
-  intensity:   f32,
-  blur_radius: f32,
+  // the glow's color; zero is white
+  tint:      [3]f32,
+  threshold: f32,
+  intensity: f32,
+  // how far each level spreads into the next, in its texels: 1 is the usual glow, more is wider
+  radius:    f32,
 }
 
 // OutlineEffect draws edges found in the normal and depth images.

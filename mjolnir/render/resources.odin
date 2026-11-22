@@ -159,7 +159,7 @@ TextureLayout :: enum {
   LIGHTING,
   // normal, depth
   AMBIENT_OCCLUSION,
-  // input, original, normal, depth
+  // input, second, normal, depth
   POST,
   SINGLE,
   PARTICLES,
@@ -285,10 +285,11 @@ mesh_stream_reserve :: proc(self: ^Renderer, stream: MeshStream, need: u32) -> b
 @(private)
 resources_bind :: proc(self: ^Renderer) -> bool {
   white := TextureDesc{extent = {1, 1}, format = .RGBA8_UNORM, usage = {.SAMPLED}}
-  for f in 0 ..< FRAMES_IN_FLIGHT do atlas_make(self, f, MIN_ATLAS_LAYERS) or_return
+  atlas_make(self, MIN_ATLAS_LAYERS) or_return
   self.white = allocate_texture(self, white, {255, 255, 255, 255}) or_return
   cube := TextureDesc{extent = {1, 1}, format = .RGBA16F, usage = {.SAMPLED}, cube = true}
   self.black_cube = allocate_texture(self, cube, make([]u8, 6 * 8, context.temp_allocator)) or_return
+  self.default_depth = allocate_texture(self, {extent = {1, 1}, format = .D32F, usage = {.DEPTH_TARGET, .SAMPLED}}) or_return
   when BINDLESS {
     entries: [len(SCENE_SET)]rhi.BindEntry
     for e, i in SCENE_SET do entries[i] = {kind = .TEXTURE_DEPTH_ARRAY if e == .SHADOW_MAPS else .STORAGE_BUFFER, stages = {.VERTEX, .FRAGMENT, .COMPUTE}}
@@ -352,7 +353,7 @@ scene_group_make :: proc(self: ^Renderer, f: int) -> bool {
   resources: [len(SCENE_SET)]rhi.BindResource
   for e, i in SCENE_SET {
     if e == .SHADOW_MAPS {
-      resources[i] = rhi.TextureView{texture = self.atlas[f], mip = -1}
+      resources[i] = rhi.TextureView{texture = self.atlas, mip = -1}
     } else {
       resources[i] = rhi.BufferRange{buffer = scene_buffer(self, e, u32(f))}
     }
@@ -387,9 +388,6 @@ scene_bind :: proc(self: ^Renderer, cmd: rhi.CommandList, pass: ScenePass, f: u3
   }
 }
 
-// the cached groups name one shadow atlas: atlas[0]
-#assert(BINDLESS || FRAMES_IN_FLIGHT == 1)
-
 // The set of texture slots a WebGPU pass binds as set 1; textures reach a bindless shader
 // by index instead. Slot 0 takes the default of its kind.
 @(private)
@@ -402,12 +400,14 @@ texture_bind :: proc(self: ^Renderer, cmd: rhi.CommandList, layout: TextureLayou
   for slot, i in slots {
     texture := key.textures[i]
     switch slot {
-    case .FLOAT, .DEPTH:
+    case .FLOAT:
       if texture == 0 do texture = self.white
+    case .DEPTH:
+      if texture == 0 do texture = self.default_depth
     case .CUBE:
       if texture == 0 do texture = self.black_cube
     case .SHADOW_ATLAS:
-      texture = self.atlas[0]
+      texture = self.atlas
     }
     resources[i] = rhi.TextureView{texture = texture, mip = -1}
   }

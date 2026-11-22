@@ -81,24 +81,42 @@ particles_reset :: proc(self: ^Renderer) -> bool {
   return dev.buffer_write(&self.gpu, self.buffers[.PARTICLE_ALIVE][0], 0, ([^]u8)(&header)[:size_of(header)])
 }
 
-// After drawing: the next frame draws what this simulates.
+// After drawing: the next frame draws what this simulates. The alive count restarts (and the
+// ring after particles_reset), emitters spawn, then every live particle moves and is listed.
 @(private)
-particles_simulate :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
-  params := &self.particle_params
-  // the previous simulation and this frame's draws use what gets rewritten
-  barrier(self, cmd, .PARTICLES_TO_FILL)
+particles_declare :: proc(self: ^Renderer) {
+  particles := buffer_use(self.buffers[.PARTICLES][0], .WRITE)
+  alive := buffer_use(self.buffers[.PARTICLE_ALIVE][0], .WRITE)
+  declare(self, "particles clear", .TRANSFER, .PARTICLES_CLEAR, 0, as(alive, .COPY_DST), as(particles, .COPY_DST) if self.particles_clear else NO_USE)
+  if self.particle_params.emit_total > 0 do declare(self, "particles emit", .COMPUTE, .PARTICLES_EMIT, 0, particles)
+  declare(self, "particles simulate", .COMPUTE, .PARTICLES_SIMULATE, 0, particles, alive)
+}
+
+// What a draw of the particles reads.
+@(private)
+particles_use :: proc(self: ^Renderer, uses: ^[dynamic]GraphUse) {
+  append(uses, buffer_use(self.buffers[.PARTICLES][0], .READ), buffer_use(self.buffers[.PARTICLE_ALIVE][0], .READ), buffer_use(self.buffers[.PARTICLE_ALIVE][0], .INDIRECT))
+}
+
+@(private)
+particles_clear_record :: proc(self: ^Renderer, cmd: rhi.CommandList) {
   // the alive count: the vertex count for points, the instance count for quads
   count_word := 0 if BINDLESS else size_of(u32)
   dev.cmd_fill_buffer(&self.gpu, cmd, self.buffers[.PARTICLE_ALIVE][0], count_word, size_of(u32))
   if self.particles_clear do dev.cmd_fill_buffer(&self.gpu, cmd, self.buffers[.PARTICLES][0], 0, self.buffer_sizes[.PARTICLES][0])
   self.particles_clear = false
-  dev.cmd_begin_compute(&self.gpu, cmd)
-  defer dev.cmd_end_compute(&self.gpu, cmd)
-  if params.emit_total > 0 {
-    pipeline_bind(self, cmd, self.pipelines[.PARTICLE_EMIT], .PARTICLE_EMIT, f, params, .NONE)
-    dev.cmd_dispatch(&self.gpu, cmd, (params.emit_total + 63) / 64, 1, 1)
-  }
-  barrier(self, cmd, .FILL_TO_COMPUTE)
+}
+
+@(private)
+particles_emit_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
+  params := &self.particle_params
+  pipeline_bind(self, cmd, self.pipelines[.PARTICLE_EMIT], .PARTICLE_EMIT, f, params, .NONE)
+  dev.cmd_dispatch(&self.gpu, cmd, (params.emit_total + 63) / 64, 1, 1)
+}
+
+@(private)
+particles_simulate_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
+  params := &self.particle_params
   pipeline_bind(self, cmd, self.pipelines[.PARTICLE_SIMULATE], .PARTICLE_SIMULATE, f, params, .NONE)
   dev.cmd_dispatch(&self.gpu, cmd, params.capacity / COMPUTE_PARTICLE_BATCH, 1, 1)
 }

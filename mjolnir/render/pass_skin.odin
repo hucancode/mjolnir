@@ -21,14 +21,20 @@ skin_init :: proc(self: ^Renderer) -> bool {
 
 // Before the frame's draws, which read what it writes.
 @(private)
+skin_declare :: proc(self: ^Renderer) {
+  if self.skinned_vertex_count == 0 do return
+  declare(self, "skinning", .COMPUTE, .SKIN, 0, as(skinned_use(self), .WRITE))
+}
+
+@(private)
 skin_record :: proc(self: ^Renderer, cmd: rhi.CommandList, f: u32) {
   count := self.skinned_vertex_count
-  if count == 0 do return
-  barrier(self, cmd, .DRAW_TO_SKIN)
-  dev.cmd_begin_compute(&self.gpu, cmd)
-  vertex_count := count
-  pipeline_bind(self, cmd, self.pipelines[.SKIN], .SKIN, f, &vertex_count, .NONE)
+  pipeline_bind(self, cmd, self.pipelines[.SKIN], .SKIN, f, &count, .NONE)
   dev.cmd_dispatch(&self.gpu, cmd, (count + SKIN_GROUP_SIZE - 1) / SKIN_GROUP_SIZE, 1, 1)
-  dev.cmd_end_compute(&self.gpu, cmd)
-  barrier(self, cmd, .SKIN_TO_DRAW)
+}
+
+// What every mesh draw reads that the frame writes: the skinned vertices, none without skinning.
+@(private)
+skinned_use :: proc(self: ^Renderer) -> GraphUse {
+  return buffer_use(self.buffers[.SKINNED_VERTICES][0] if self.skinned_vertex_count > 0 else 0, .READ)
 }

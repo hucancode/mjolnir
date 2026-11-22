@@ -1,5 +1,6 @@
 // The interface of a post shader (render.post_shader_create): the fullscreen vertex stage, the
-// previous passes' images and the push block. Declare struct Effect, the fields of the params
+// camera's image so far, its depth (and normals, for a shader made with normals) and the push
+// block. Declare struct Effect, the fields of the params
 // render.make_effect packs, before including this (std430: prefer float4 and scalars, a float3
 // takes 16 bytes unless a float follows it), in the order of the Odin struct. post_camera() is
 // the camera's View (its matrices, clip planes, and render's clock as .time) and
@@ -17,10 +18,15 @@ struct PostPush {
     uint camera_index;
     // texture handles; Vulkan indexes with them, wgpu binds them as a group
     uint input_image_index;
-    uint original_image_index;
-    // this pass of the effect, 0 .. passes - 1
+    // a second image render's own effects read (bloom's glow); the input elsewhere
+    uint second_image_index;
+    uint normal_image_index;
+    uint depth_image_index;
+    // which step of a render effect this is
     uint pass_index;
-    // offset 16: the effect's params
+    uint _post_pad0;
+    uint _post_pad1;
+    // offset 32: the effect's params
     Effect effect;
 }
 PUSH_BLOCK(PostPush, post_push)
@@ -33,8 +39,7 @@ struct PostIn {
 
 #if BACKEND_WGPU
 [vk::binding(0, 1)] Texture2D input_texture;
-// the previous pass's input
-[vk::binding(1, 1)] Texture2D original_texture;
+[vk::binding(1, 1)] Texture2D second_texture;
 [vk::binding(2, 1)] Texture2D normal_texture;
 [vk::binding(3, 1)] DepthTexture2D depth_texture;
 #else
@@ -80,24 +85,24 @@ float4 post_input(float2 uv)
 #endif
 }
 
-// The previous pass's input at uv.
-float4 post_original(float2 uv)
+// The second image at uv (render's effects).
+float4 post_second(float2 uv)
 {
 #if BACKEND_WGPU
-    return original_texture.Sample(linear_clamp, uv);
+    return second_texture.Sample(linear_clamp, uv);
 #else
-    return textures[NonUniformResourceIndex(post_push.original_image_index)].Sample(samplers[SAMPLER_LINEAR_CLAMP], uv);
+    return textures[NonUniformResourceIndex(post_push.second_image_index)].Sample(samplers[SAMPLER_LINEAR_CLAMP], uv);
 #endif
 }
 
-// The G-buffer normal at uv, as the G-buffer stores it. Lod 0 (it has one), so branches may
+// The G-buffer normal at uv, as the G-buffer stores it (a shader made with normals). Lod 0 (it has one), so branches may
 // call it.
 float3 post_normal(float2 uv)
 {
 #if BACKEND_WGPU
     return normal_texture.SampleLevel(nearest_clamp, uv, 0.0).xyz;
 #else
-    return textures[NonUniformResourceIndex(post_camera().images[IMAGE_NORMAL])].SampleLevel(samplers[SAMPLER_NEAREST_CLAMP], uv, 0.0).xyz;
+    return textures[NonUniformResourceIndex(post_push.normal_image_index)].SampleLevel(samplers[SAMPLER_NEAREST_CLAMP], uv, 0.0).xyz;
 #endif
 }
 
@@ -110,7 +115,7 @@ float post_depth(float2 uv)
     int2 size = int2(w, h);
     return depth_texture.Load(int3(clamp(int2(uv * float2(size)), int2(0), size - 1), 0));
 #else
-    return textures[NonUniformResourceIndex(post_camera().images[IMAGE_DEPTH])].Sample(samplers[SAMPLER_NEAREST_CLAMP], uv).r;
+    return textures[NonUniformResourceIndex(post_push.depth_image_index)].Sample(samplers[SAMPLER_NEAREST_CLAMP], uv).r;
 #endif
 }
 
@@ -136,12 +141,4 @@ float4 post_input_level(float2 uv)
 #endif
 }
 
-// post_original at lod 0.
-float4 post_original_level(float2 uv)
-{
-#if BACKEND_WGPU
-    return original_texture.SampleLevel(linear_clamp, uv, 0.0);
-#else
-    return textures[NonUniformResourceIndex(post_push.original_image_index)].SampleLevel(samplers[SAMPLER_LINEAR_CLAMP], uv, 0.0);
-#endif
-}
+

@@ -38,11 +38,17 @@ screenshot :: proc(self: ^Renderer, path: string) -> bool {
   return true
 }
 
-// Copies the finished backbuffer, last in `cmd`, when a screenshot or FRAME_DUMP wants it.
+// Copies the finished backbuffer, last in the frame, when a screenshot or FRAME_DUMP wants it.
+@(private)
+capture_declare :: proc(self: ^Renderer) {
+  c := &self.capture
+  if c.failed || (FRAME_DUMP == "" && (c.path == "" || c.frame != 0)) do return
+  declare(self, "capture", .TRANSFER, .CAPTURE, 0, texture_use(BACKBUFFER, .COPY_SRC))
+}
+
 @(private)
 capture_record :: proc(self: ^Renderer, cmd: rhi.CommandList) {
   c := &self.capture
-  if c.failed || (FRAME_DUMP == "" && (c.path == "" || c.frame != 0)) do return
   if !dev.caps(&self.gpu).backbuffer_copy {
     log.warnf("FRAME_DUMP: this backend cannot copy the backbuffer")
     c.failed = true

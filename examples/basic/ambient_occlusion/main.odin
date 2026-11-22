@@ -86,10 +86,12 @@ draw :: proc(app: ^App) -> bool {
 debug_ui :: proc(app: ^App) {
   ctx := debugui.begin(&app.debug, &app.input, &app.renderer)
   defer debugui.end(&app.debug, &app.renderer)
-  ao := &render.main_camera(&app.renderer).ambient_occlusion
+  @(static) ao := render.DEFAULT_AMBIENT_OCCLUSION
+  @(static) ao_on := true
+  defer render.camera_effect(&app.renderer, render.MAIN_CAMERA, ao, ao_on)
   if debugui.window(&app.debug, "Ambient Occlusion", {20, 20, 220, 320}) {
     mu.layout_row(ctx, {-1}, 0)
-    mu.checkbox(ctx, "Enabled", &ao.enabled)
+    mu.checkbox(ctx, "Enabled", &ao_on)
     mu.label(ctx, "Radius")
     mu.slider(ctx, &ao.radius, 0.05, 3.0)
     mu.label(ctx, "Intensity")
@@ -98,6 +100,6 @@ debug_ui :: proc(app: ^App) {
     mu.slider(ctx, &app.renderer.ibl_intensity, 0.0, 2.0)
     mu.label(ctx, "Sun intensity")
     mu.slider(ctx, &render.light(&app.renderer, app.sun).intensity, 0.0, 5.0)
-    if .SUBMIT in mu.button(ctx, "Reset") do ao^ = render.DEFAULT_AMBIENT_OCCLUSION
+    if .SUBMIT in mu.button(ctx, "Reset") do ao = render.DEFAULT_AMBIENT_OCCLUSION
   }
 }

@@ -14,11 +14,6 @@ PREFILTER_SAMPLES :: 1024
 @(private = "file")
 IRRADIANCE_SAMPLE_DELTA :: f32(0.025)
 
-// dispatch i writes the cube level bound at PRECOMPUTE_STORAGE_BASE + i of the storage image
-// array (Vulkan), after the depth pyramids' slots
-@(private)
-PRECOMPUTE_STORAGE_BASE :: MAX_PYRAMID_SLOTS * MAX_DEPTH_MIPS
-
 // `src` is the equirect map; `value` is the irradiance sample delta
 // or the prefilter roughness.
 @(private = "file")
@@ -68,9 +63,7 @@ precompute_ibl :: proc(self: ^Renderer, equirect, irradiance_cube, prefilter_cub
     when !BINDLESS do layout = pipeline_layout(self, .NONE, .NONE, group_layout)
     pipelines[shader] = dev.compute_pipeline_create(&self.gpu, {sources[shader], layout}) or_return
   }
-  when BINDLESS {
-    for d, i in dispatches do dev.bindless_write(&self.gpu, .STORAGE_IMAGES, PRECOMPUTE_STORAGE_BASE + u32(i), rhi.TextureView{d.dst, i32(d.mip)})
-  } else {
+  when !BINDLESS {
     for d, i in dispatches {
       resources := [2]rhi.BindResource{rhi.TextureView{d.src, -1}, rhi.TextureView{d.dst, i32(d.mip)}}
       groups[i] = dev.bind_group_create(&self.gpu, {layout = group_layout, resources = resources[:]}) or_return
@@ -85,7 +78,7 @@ precompute_ibl :: proc(self: ^Renderer, equirect, irradiance_cube, prefilter_cub
   dev.cmd_begin_compute(&self.gpu, cmd)
   for d, i in dispatches {
     size := max(d.size >> d.mip, 1)
-    push := PrecomputePush{u32(d.src), PRECOMPUTE_STORAGE_BASE + u32(i), size, d.value, d.count}
+    push := PrecomputePush{u32(d.src), storage_view(self, d.dst, d.mip) if BINDLESS else 0, size, d.value, d.count}
     pipeline_bind(self, cmd, pipelines[d.shader], .NONE, 0, &push, .NONE)
     when !BINDLESS do dev.cmd_bind_group(&self.gpu, cmd, 3, groups[i])
     dev.cmd_dispatch(&self.gpu, cmd, (size + 7) / 8, (size + 7) / 8, 6)

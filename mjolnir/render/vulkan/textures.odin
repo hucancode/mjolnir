@@ -195,9 +195,9 @@ image_from_desc :: proc(b: ^Backend, desc: rhi.TextureDesc, data: []u8) -> (img:
       return
     }
   }
-  // storage images are written by compute before anything else touches them
-  if .STORAGE in desc.usage && data == nil {
-    queue_image_init(gctx, {img.image, {.COLOR}, {.SHADER_READ, .SHADER_WRITE}, {.COMPUTE_SHADER}})
+  // a color image without data is first written by a pass, as a target or a storage image
+  if .DEPTH_TARGET not_in desc.usage && data == nil {
+    queue_image_init(gctx, {img.image, {.COLOR}, {.COLOR_ATTACHMENT_WRITE, .SHADER_READ, .SHADER_WRITE}, {.COLOR_ATTACHMENT_OUTPUT, .COMPUTE_SHADER}})
   }
   // depth leaves UNDEFINED next frame; compute of the frame after is the first reader
   if .DEPTH_TARGET in desc.usage {

@@ -142,11 +142,13 @@ grow_resources :: proc(frame: int) {
   if frame % 30 == 0 {
     filters := [?]render.CameraFilter {
       render.FILTER_ALL,
-      render.FILTER_NO_POST,
+      {types = {int(render.MaterialType.SPRITE)}},
       {types = {1, 2, 3, 4, 5, 6, 7}, clear = {0, 0, 0.2, 1}},
-      {types = {0}, post = true},
+      {types = {0}},
     }
-    check(render.camera_create(r, {64, 36}, render.make_camera(), filters[frame / 30 % len(filters)]) != 0, "camera %d", frame)
+    cam := render.camera_create(r, {64, 36}, render.make_camera(), filters[frame / 30 % len(filters)])
+    check(cam != 0, "camera %d", frame)
+    check(render.camera_effect(r, cam, render.BloomEffect{threshold = 1, intensity = 0.5, radius = 1}), "bloom on camera %d", frame)
   }
   render.debug_axes(r, {0, f32(frame) * 0.01, 0})
 }

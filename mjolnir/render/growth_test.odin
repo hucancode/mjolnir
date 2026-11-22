@@ -48,6 +48,7 @@ cpu_renderer_destroy :: proc(r: ^Renderer) {
   containers.ranges_destroy(&r.sprite_frame_ranges)
   containers.ranges_destroy(&r.skin_ranges)
   delete(r.texture_targets)
+  delete(r.texture_views)
   delete(r.gpu_buffers)
   delete(r.shaders)
   free(r)
