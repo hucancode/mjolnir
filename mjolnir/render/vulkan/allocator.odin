@@ -9,7 +9,8 @@ import vk "vendor:vulkan"
 // per resource (allocations are slow and capped by maxMemoryAllocationCount, often 4096).
 // Buffers and images keep to blocks of their own, so bufferImageGranularity never applies. A
 // host-visible block is mapped once, for as long as it lives; its allocations map inside it.
-// A dedicated block is freed with its resource; a shared block once it is empty and another empty
+// A resource of at least half a block, or one asking for it (staging, freed soon), takes a
+// dedicated block, freed with it; a shared block is freed once it is empty and another empty
 // block of its kind is spare (one spare a kind keeps a burst of frees and allocations from
 // reallocating).
 
@@ -33,7 +34,7 @@ MemoryBlock :: struct {
   type_index: u32,
   // holds buffers (linear) or images (optimal)
   linear:     bool,
-  // one resource at least half a block: freed with it
+  // one resource of its own: freed with it
   dedicated:  bool,
   // free ranges by offset, neighbours merged
   free:       [dynamic]MemoryRange,
@@ -63,12 +64,14 @@ allocator_destroy :: proc(gctx: ^GPUContext) {
 }
 
 // memory_alloc takes memory of `properties` meeting reqs, from a block of buffers (linear) or
-// images.
+// images; `dedicated` gives it a block of its own, so a short-lived resource leaves no long-lived
+// one pinning a shared block.
 memory_alloc :: proc(
   gctx: ^GPUContext,
   reqs: vk.MemoryRequirements,
   properties: vk.MemoryPropertyFlags,
   linear: bool,
+  dedicated := false,
 ) -> (
   a: Allocation,
   ret: vk.Result,
@@ -78,7 +81,7 @@ memory_alloc :: proc(
   s := &gctx.allocator
   heap := s.properties.memoryHeaps[s.properties.memoryTypes[type_index].heapIndex].size
   block_size := min(BLOCK_SIZE, heap / 8)
-  if reqs.size >= block_size / 2 {
+  if dedicated || reqs.size >= block_size / 2 {
     index := block_make(gctx, reqs.size, type_index, linear, dedicated = true) or_return
     return range_alloc(s, index, reqs.size, reqs.alignment).?, .SUCCESS
   }

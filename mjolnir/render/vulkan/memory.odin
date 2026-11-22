@@ -22,6 +22,7 @@ buffer_create :: proc(
   host_visible := true,
   host_cached := false,
   prefer_device_local := false,
+  dedicated := false,
 ) -> (
   buffer: Buffer,
   ret: vk.Result,
@@ -46,9 +47,9 @@ buffer_create :: proc(
   }
   if host_visible && prefer_device_local {
     // the mappable device heap may be small (256 MiB without resizable BAR): fall back
-    if memory, res := memory_alloc(gctx, mem_reqs, properties + {.DEVICE_LOCAL}, linear = true); res == .SUCCESS do buffer.memory = memory
+    if memory, res := memory_alloc(gctx, mem_reqs, properties + {.DEVICE_LOCAL}, linear = true, dedicated = dedicated); res == .SUCCESS do buffer.memory = memory
   }
-  if buffer.memory.block == 0 do buffer.memory = memory_alloc(gctx, mem_reqs, properties, linear = true) or_return
+  if buffer.memory.block == 0 do buffer.memory = memory_alloc(gctx, mem_reqs, properties, linear = true, dedicated = dedicated) or_return
   vk.BindBufferMemory(gctx.device, buffer.buffer, allocation_memory(gctx, buffer.memory), buffer.memory.offset) or_return
   return buffer, .SUCCESS
 }

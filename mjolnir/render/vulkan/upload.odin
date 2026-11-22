@@ -10,7 +10,8 @@ import vk "vendor:vulkan"
 STAGING_BLOCK_SIZE :: 8 * 1024 * 1024
 // staging blocks kept when idle; past these, a block the GPU is done with is freed, so a burst of
 // uploads (a level's textures) does not hold its peak of host memory for good. An oversized block
-// (one upload past STAGING_BLOCK_SIZE) is never kept
+// (one upload past STAGING_BLOCK_SIZE) is never kept. Each block is a memory allocation of its own,
+// so freeing it returns its memory instead of leaving it among long-lived buffers
 @(private = "file")
 STAGING_KEEP :: 2
 // satisfies the buffer-to-image offset rule of every color format
@@ -76,7 +77,7 @@ staging_alloc :: proc(
     return b.buffer.buffer, at, &allocation_mapped(gctx, b.buffer.memory)[at], .SUCCESS
   }
   block := StagingBlock {
-    buffer = buffer_create(gctx, vk.DeviceSize(max(size, STAGING_BLOCK_SIZE)), {.TRANSFER_SRC}) or_return,
+    buffer = buffer_create(gctx, vk.DeviceSize(max(size, STAGING_BLOCK_SIZE)), {.TRANSFER_SRC}, dedicated = true) or_return,
     used   = size,
   }
   append(&u.blocks, block)

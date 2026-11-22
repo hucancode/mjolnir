@@ -348,24 +348,36 @@ draw_list_index :: #force_inline proc "contextless" (seen, type: u32) -> u32 {
 // draw lists, `pipelines[i]` for keys[i]. `seen` is the types the view's lists were made for
 // (CameraFilter.types; the shadow views' are the G-buffer types). Inside a pass with the mesh buffers, the scene set
 // and the camera pushed. `materials` binds each material's textures between batches (WebGPU).
+// A list has room for the node table's capacity, but each draw is bounded by what this frame's
+// cull can append (draw_list_bound): drivers that emulate the draw count reserve per bound draw.
 @(private)
 draw_list_draw :: proc(self: ^Renderer, cmd: rhi.CommandList, slot, list: u32, keys: []u32, pipelines: []rhi.Pipeline, f: u32, seen: u32, materials := true) {
   when BINDLESS {
     dl := &self.draw_lists[slot]
     count := dev.caps(&self.gpu).multi_draw_indirect_count
+    bound := draw_list_bound(self, slot)
     for key, i in keys {
       index := draw_list_index(seen, key)
       dev.cmd_bind_pipeline(&self.gpu, cmd, pipelines[i])
       offset := int(dl.draws_base + index * dl.draws_stride * DRAW_WORDS) * size_of(u32)
       if count {
-        dev.cmd_draw_indexed_indirect_count(&self.gpu, cmd, dl.buffer, offset, dl.buffer, int(index) * size_of(u32), dl.capacity, DRAW_BYTES)
+        dev.cmd_draw_indexed_indirect_count(&self.gpu, cmd, dl.buffer, offset, dl.buffer, int(index) * size_of(u32), bound, DRAW_BYTES)
       } else {
-        dev.cmd_draw_indexed_indirect(&self.gpu, cmd, dl.buffer, offset, dl.capacity, DRAW_BYTES)
+        dev.cmd_draw_indexed_indirect(&self.gpu, cmd, dl.buffer, offset, bound, DRAW_BYTES)
       }
     }
   } else {
     draw_batches(self, cmd, slot, list, keys, pipelines, materials, f)
   }
+}
+
+// The most draws one list of slot's can hold this frame: the cull appends each node once per view
+// it culls against (a camera's lists one view, the shadow list every shadow view this frame),
+// within the list's room.
+@(private)
+draw_list_bound :: proc(self: ^Renderer, slot: u32) -> u32 {
+  views: u64 = u64(self.shadow_view_count) if slot == SHADOW_DRAW_SLOT else 1
+  return u32(min(u64(self.draw_lists[slot].capacity), views * u64(self.node_count)))
 }
 
 // The batched draw loop: an indirect draw per batch, its nodes the instance stream at the
