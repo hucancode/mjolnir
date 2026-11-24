@@ -65,8 +65,13 @@ Node :: struct {
   parent:      NodeHandle,
   size:        [2]Size,
   padding:     [4]f32, // left, top, right, bottom
-  gap:         f32, // between flow children
+  gap:         f32, // between flow children (and between a grid's columns and rows)
   direction:   Direction,
+  // more than 0 makes the node a grid: its flow children fill rows of this many columns, left to right then down.
+  // A column is as wide as its widest child (a GROW child makes its column share what the grid leaves, by
+  // weight), a row as high as its highest; `align` places a smaller child in its cell. Children of one column
+  // line up whatever their rows hold: a form is a grid of two columns, labels then fields.
+  columns:     u16,
   // where the flow children (and text lines) sit in the content box, per axis
   align:       [2]Align,
   position:    Position,

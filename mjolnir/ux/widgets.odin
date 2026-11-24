@@ -50,6 +50,12 @@ theme_create :: proc(self: ^UI) -> Theme {
   }
 }
 
+// grid adds a container laying its children out in `columns` columns with `gap` between cells (see Node.columns),
+// its cells aligned `align` ({.START, .CENTER}: left, and centred on the row). Add the children in row order.
+grid :: proc(self: ^UI, parent: NodeHandle, columns: int, gap: f32 = 8, align := [2]Align{.START, .CENTER}, size: [2]Size = {}) -> NodeHandle {
+  return node_create(self, {parent = parent, columns = u16(columns), gap = gap, align = align, size = size})
+}
+
 // label adds a line of text, `size` big (0: UI.font_size), in `style` (0: the theme's text).
 label :: proc(self: ^UI, parent: NodeHandle, text: string, size: f32 = 0, style: StyleHandle = 0) -> NodeHandle {
   return node_create(self, {parent = parent, text = text, font_size = size, style = style if style != 0 else self.theme.text})

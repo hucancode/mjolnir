@@ -220,6 +220,12 @@ fit_axis :: proc(self: ^UI, f: ^font.Font, axis: int) {
       count += 1
     }
     if main && count > 1 do content += nd.gap * f32(count - 1)
+    if nd.columns > 0 {
+      tracks, _ := grid_tracks(self, i, axis)
+      content = 0
+      for t in tracks do content += t
+      content += nd.gap * f32(max(len(tracks) - 1, 0))
+    }
     if len(nd.text) > 0 || nd.editable {
       size := text_size(self, nd)
       if axis == 0 {
@@ -275,6 +281,10 @@ size_axis :: proc(self: ^UI, axis: int) {
     space := self.rects[i].size[axis] - padding(nd, axis)
     kids := children_of(self, i)
     for c in kids do self.rects[c].size[axis] = resolve(self, c, axis, space)
+    if nd.columns > 0 {
+      size_grid(self, i, axis, space)
+      continue
+    }
     if flow_axis(nd) != axis do continue
     free := space
     weights: f32
@@ -298,6 +308,81 @@ size_axis :: proc(self: ^UI, axis: int) {
       self.rects[c].size[axis] += free * w / weights
     }
   }
+}
+
+// A grid's natural tracks along `axis`: the width of each column (axis 0) or the height of each row (axis 1), the
+// largest of its children's (a PERCENT child counts nothing), and per track the weight of its GROW children (0: none).
+@(private = "file")
+grid_tracks :: proc(self: ^UI, i: u32, axis: int) -> (tracks, weights: []f32) {
+  nd := &self.nodes[i]
+  cols := max(int(nd.columns), 1)
+  count := 0
+  for c in children_of(self, i) do if flows(&self.nodes[c]) do count += 1
+  n := cols if axis == 0 else (count + cols - 1) / cols
+  tracks, weights = make([]f32, n, context.temp_allocator), make([]f32, n, context.temp_allocator)
+  cell := 0
+  for c in children_of(self, i) {
+    cn := &self.nodes[c]
+    if !flows(cn) do continue
+    t := cell % cols if axis == 0 else cell / cols
+    cell += 1
+    s := least(self, c, axis)
+    #partial switch cn.size[axis].kind {
+    case .FIXED:
+      s = cn.size[axis].value
+    case .PERCENT:
+      s = 0
+    case .GROW:
+      weights[t] = max(weights[t], cn.size[axis].value if cn.size[axis].value > 0 else 1)
+    }
+    tracks[t] = max(tracks[t], s)
+  }
+  return
+}
+
+// Sizes a grid's children along `axis`: the tracks, the grid's free space shared by the GROW tracks, each child its
+// track (GROW), a fraction of it (PERCENT) or its own size.
+@(private = "file")
+size_grid :: proc(self: ^UI, i: u32, axis: int, space: f32) {
+  nd := &self.nodes[i]
+  tracks, weights := grid_tracks(self, i, axis)
+  free := space - nd.gap * f32(max(len(tracks) - 1, 0))
+  total: f32
+  for t in tracks do free -= t
+  for w in weights do total += w
+  if total > 0 && free > 0 do for &t, k in tracks do if weights[k] > 0 do t += free * weights[k] / total
+  cols := max(int(nd.columns), 1)
+  cell := 0
+  for c in children_of(self, i) {
+    cn := &self.nodes[c]
+    if !flows(cn) do continue
+    t := cell % cols if axis == 0 else cell / cols
+    cell += 1
+    #partial switch cn.size[axis].kind {
+    case .GROW:
+      self.rects[c].size[axis] = tracks[t]
+    case .PERCENT:
+      self.rects[c].size[axis] = cn.size[axis].value * tracks[t]
+    }
+  }
+}
+
+// A grid's tracks as its children ended up sized: the width of each column and the height of each row.
+@(private = "file")
+grid_cells :: proc(self: ^UI, i: u32) -> (col_w, row_h: []f32) {
+  nd := &self.nodes[i]
+  cols := max(int(nd.columns), 1)
+  count := 0
+  for c in children_of(self, i) do if flows(&self.nodes[c]) do count += 1
+  col_w, row_h = make([]f32, cols, context.temp_allocator), make([]f32, (count + cols - 1) / cols, context.temp_allocator)
+  cell := 0
+  for c in children_of(self, i) {
+    if !flows(&self.nodes[c]) do continue
+    col_w[cell % cols] = max(col_w[cell % cols], self.rects[c].size.x)
+    row_h[cell / cols] = max(row_h[cell / cols], self.rects[c].size.y)
+    cell += 1
+  }
+  return
 }
 
 // Break every text node into lines: at newlines, and when `wrap`, before
@@ -390,6 +475,16 @@ place :: proc(self: ^UI, f: ^font.Font) {
     total += nd.gap * f32(max(count - 1, 0))
     cursor := (content_size[m] - total) * ALIGN_FACTOR[nd.align[m]]
     origin := content_pos - nd.scroll
+    // a grid's cells: the tracks from the children's sizes, each at its own offset
+    cols := max(int(nd.columns), 1)
+    col_w, row_h, col_x, row_y: []f32
+    if nd.columns > 0 {
+      col_w, row_h = grid_cells(self, i)
+      col_x, row_y = make([]f32, len(col_w), context.temp_allocator), make([]f32, len(row_h), context.temp_allocator)
+      for w, t in col_w do col_x[t] = (col_x[t - 1] + col_w[t - 1] + nd.gap) if t > 0 else 0
+      for h, t in row_h do row_y[t] = (row_y[t - 1] + row_h[t - 1] + nd.gap) if t > 0 else 0
+    }
+    cell := 0
     for c in kids {
       cn := &self.nodes[c]
       cr := &self.rects[c]
@@ -402,6 +497,13 @@ place :: proc(self: ^UI, f: ^font.Font) {
       }
       cr.pos = origin
       if !flows(cn) do continue
+      if nd.columns > 0 {
+        col, row := cell % cols, cell / cols
+        cell += 1
+        cr.pos += {col_x[col] + (col_w[col] - cr.size.x) * ALIGN_FACTOR[nd.align[0]], row_y[row] + (row_h[row] - cr.size.y) * ALIGN_FACTOR[nd.align[1]]}
+        cr.pos += cn.offset
+        continue
+      }
       cross := 1 - m
       cr.pos[m] += cursor
       cr.pos[cross] += (content_size[cross] - cr.size[cross]) * ALIGN_FACTOR[nd.align[cross]]

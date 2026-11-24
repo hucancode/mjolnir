@@ -876,3 +876,41 @@ test_dropped_from_one_node_onto_another :: proc(t: ^testing.T) {
 	click_at(&f, {10, 10})
 	testing.expect(t, !dropped(&f.ui, a, a) && !dropped(&f.ui, icon, b) && clicked(&f.ui, a), "a click is no drop")
 }
+
+@(test)
+test_grid_aligns_columns_across_rows :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	g := node_create(&f.ui, {columns = 2, gap = 10, padding = {5, 5, 5, 5}, align = {.START, .CENTER}})
+	a := node_create(&f.ui, {parent = g, size = fixed(40, 20)})
+	b := node_create(&f.ui, {parent = g, size = fixed(100, 30)})
+	c := node_create(&f.ui, {parent = g, size = fixed(70, 20)})
+	d := node_create(&f.ui, {parent = g, size = fixed(60, 20)})
+	update(&f.ui, VIEWPORT, &f.font)
+	ra, rb, rc, rd := rect(&f.ui, a), rect(&f.ui, b), rect(&f.ui, c), rect(&f.ui, d)
+	// the first column is as wide as its widest (70), so both second-column cells start at the same x
+	testing.expect_value(t, rb.pos.x, ra.pos.x + 70 + 10)
+	testing.expect_value(t, rd.pos.x, rb.pos.x)
+	testing.expect_value(t, rc.pos.x, ra.pos.x)
+	// the second row sits under the first (30 high) after a gap, and a smaller cell is centred on its row
+	testing.expect_value(t, rc.pos.y - rb.pos.y, 30 + 10)
+	testing.expect_value(t, ra.pos.y - rb.pos.y, 5)
+	// the grid fits its tracks: 70 + 10 + 100 wide, 30 + 10 + 20 high, with the padding
+	rg := rect(&f.ui, g)
+	testing.expect_value(t, rg.size.x, 70 + 10 + 100 + 10)
+	testing.expect_value(t, rg.size.y, 30 + 10 + 20 + 10)
+}
+
+@(test)
+test_grid_grow_column_takes_the_free_space :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	g := node_create(&f.ui, {size = fixed(400, 100), columns = 2, gap = 10})
+	a := node_create(&f.ui, {parent = g, size = fixed(50, 20)})
+	b := node_create(&f.ui, {parent = g, size = {grow(), {.FIXED, 20}}})
+	update(&f.ui, VIEWPORT, &f.font)
+	testing.expect_value(t, rect(&f.ui, a).size.x, 50)
+	testing.expect_value(t, rect(&f.ui, b).size.x, 400 - 50 - 10)
+}
